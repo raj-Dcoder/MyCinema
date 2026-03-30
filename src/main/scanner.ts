@@ -1,14 +1,25 @@
 import fs from 'fs'
 import path from 'path'
-import { addVideo, getVideos } from './db'
+import { addVideo, getVideos, updateVideoMetadata, deleteVideo } from './db'
 import { fetchMetadata } from './omdb'
 import ffmpeg from 'fluent-ffmpeg'
 import ffmpegStatic from 'ffmpeg-static'
 import ffprobeStatic from 'ffprobe-static'
 
+import { app } from 'electron'
+
 // Set ffmpeg/ffprobe paths
-if (ffmpegStatic) ffmpeg.setFfmpegPath(ffmpegStatic)
-ffmpeg.setFfprobePath(ffprobeStatic.path)
+const isDev = !app.isPackaged
+const ffmpegPath = isDev 
+  ? path.join(app.getAppPath(), 'node_modules', 'ffmpeg-static', 'ffmpeg.exe') 
+  : path.join(process.resourcesPath, 'app.asar.unpacked', 'node_modules', 'ffmpeg-static', 'ffmpeg.exe')
+  
+const ffprobePath = isDev 
+  ? path.join(app.getAppPath(), 'node_modules', 'ffprobe-static', 'bin', 'win32', 'x64', 'ffprobe.exe')
+  : path.join(process.resourcesPath, 'app.asar.unpacked', 'node_modules', 'ffprobe-static', 'bin', 'win32', 'x64', 'ffprobe.exe')
+
+ffmpeg.setFfprobePath(ffprobePath)
+ffmpeg.setFfmpegPath(ffmpegPath)
 
 const VIDEO_EXTENSIONS = ['.mp4', '.mkv', '.avi', '.mov', '.webm']
 
@@ -70,7 +81,57 @@ async function findLocalPoster(videoPath: string): Promise<string | null> {
   return null
 }
 
+export async function extractOfflineThumbnail(videoPath: string, videoId: number): Promise<string | null> {
+  const posterDir = path.join(app.getPath('userData'), 'posters')
+  if (!fs.existsSync(posterDir)) {
+    fs.mkdirSync(posterDir, { recursive: true })
+  }
+  return new Promise((resolve) => {
+    const ext = '.jpg'
+    const fileName = `${videoId}-snap${ext}`
+    const localPath = path.join(posterDir, fileName)
+    
+    if (fs.existsSync(localPath)) {
+      resolve(localPath)
+      return
+    }
+
+    ffmpeg(videoPath)
+      .screenshots({
+        timestamps: ['10%'],
+        filename: fileName,
+        folder: posterDir,
+        size: '1280x720'
+      })
+      .on('end', () => {
+        console.log(`[FFMPEG] Extracted frame to ${localPath}`)
+        resolve(localPath)
+      })
+      .on('error', (err) => {
+        console.error('[FFMPEG] Thumbnail extraction failed:', err)
+        resolve(null)
+      })
+  })
+}
+
 export async function scanFolder(rootPath: string) {
+  const allInitialVideos = getVideos()
+
+  // 1. Purge globally deleted files from the database before adding new ones
+  for (const dbVideo of allInitialVideos as any[]) {
+    if (!fs.existsSync(dbVideo.file_path)) {
+      console.log(`[Scanner] Purging physically deleted file from DB: ${dbVideo.file_path}`)
+      deleteVideo(dbVideo.id)
+      
+      // Reclaim disk space if it was a dynamically generated extraction
+      if (dbVideo.poster_path && dbVideo.poster_path.includes('-snap.jpg')) {
+        if (fs.existsSync(dbVideo.poster_path)) {
+          fs.unlinkSync(dbVideo.poster_path)
+        }
+      }
+    }
+  }
+
   const videoFiles = await getAllFiles(rootPath)
 
   for (const filePath of videoFiles) {
@@ -85,13 +146,84 @@ export async function scanFolder(rootPath: string) {
       poster_path: localPoster
     })
 
-    // Fetch metadata if it was newly added AND we don't have a local poster
-    if (result.changes > 0 && !localPoster) {
-      const videoId = Number(result.lastInsertRowid)
-      const searchTitle = metadata.series_name || metadata.title
-      fetchMetadata(videoId, searchTitle, metadata.type)
+    const allVideos = getVideos()
+    let videoId = 0
+    if (result.changes > 0) {
+      videoId = Number(result.lastInsertRowid)
+    } else {
+      const existing = allVideos.find((v: any) => v.file_path === filePath)
+      if (existing) videoId = existing.id
+    }
+
+    if (videoId > 0) {
+      const currentVideoNode = allVideos.find((v: any) => v.id === videoId);
+      const isSnap = currentVideoNode && currentVideoNode.poster_path && currentVideoNode.poster_path.includes('-snap.jpg');
+      const isMissingPoster = !localPoster && (!currentVideoNode || !currentVideoNode.poster_path || currentVideoNode.poster_path === 'N/A' || isSnap);
+      
+      if (isMissingPoster) {
+        const searchTitle = metadata.series_name || metadata.title
+        console.log(`[Scanner] Requesting OMDB API for video ${videoId} with title: "${searchTitle}"`)
+        const omdbMetadata = await fetchMetadata(videoId, searchTitle, metadata.type)
+        if (!omdbMetadata || !omdbMetadata.poster_path || omdbMetadata.poster_path === 'N/A') {
+           if (isSnap && currentVideoNode) {
+             console.log(`[Scanner] OMDB failed, maintaining existing -snap.jpg thumbnail for ${videoId}`)
+             continue; // Don't snap again if we already have it!
+           }
+           console.log(`[Scanner] OMDB failed or N/A, falling back to FFmpeg screenshot for ${videoId}`)
+           const snapPath = await extractOfflineThumbnail(filePath, videoId)
+           if (snapPath) {
+             console.log(`[Scanner] Saving FFmpeg thumbnail to DB for video ${videoId}`)
+             const existingMeta = currentVideoNode ? { overview: currentVideoNode.overview, tmdb_id: currentVideoNode.tmdb_id } : { overview: null, tmdb_id: null }
+             updateVideoMetadata(videoId, { poster_path: snapPath, overview: existingMeta.overview, tmdb_id: existingMeta.tmdb_id })
+           } else {
+             console.log(`[Scanner] FFmpeg snapshot completely failed for ${videoId}`)
+           }
+        } else {
+           console.log(`[Scanner] Retrieved official OMDB Poster!`)
+        }
+      }
     }
   }
+}
+
+export async function getEmbeddedSubtitles(filePath: string): Promise<any[]> {
+  return new Promise((resolve) => {
+    ffmpeg.ffprobe(filePath, (err, metadata) => {
+      if (err || !metadata || !metadata.streams) {
+        console.error('Error probing file for subtitles:', err)
+        resolve([])
+        return
+      }
+      const subs = metadata.streams.filter(s => s.codec_type === 'subtitle')
+      const formatted = subs.map(s => ({
+        index: s.index,
+        language: s.tags?.language || 'Unknown',
+        title: s.tags?.title || ''
+      }))
+      resolve(formatted)
+    })
+  })
+}
+
+export async function getEmbeddedAudio(filePath: string): Promise<any[]> {
+  return new Promise((resolve) => {
+    ffmpeg.ffprobe(filePath, (err, metadata) => {
+      if (err || !metadata || !metadata.streams) {
+        console.error('Error probing file for audio:', err)
+        resolve([])
+        return
+      }
+      const audios = metadata.streams.filter(s => s.codec_type === 'audio')
+      const formatted = audios.map(s => ({
+        index: s.index,
+        language: s.tags?.language || 'Unknown',
+        title: s.tags?.title || '',
+        codec: s.codec_name || 'unknown',
+        channels: s.channels || 2
+      }))
+      resolve(formatted)
+    })
+  })
 }
 
 function parseFilename(filePath: string): VideoMetadata {
@@ -99,14 +231,20 @@ function parseFilename(filePath: string): VideoMetadata {
   const parentDir = path.basename(path.dirname(filePath))
   const grandParentDir = path.basename(path.dirname(path.dirname(filePath)))
 
+  // Strip year and everything after it for scene releases
+  let cleanName = fileName
+  const yearMatch = fileName.match(/[._\s(](19|20)\d{2}([._\s)]|$)/)
+  if (yearMatch) {
+    cleanName = fileName.substring(0, yearMatch.index).trim()
+  }
+
   // Heavy cleaning for pirated site noise
   const noise = [
-    /\d{3,4}p/gi, /WEBRip/gi, /BluRay/gi, /x264/gi, /x265/gi, /h264/gi, /h265/gi,
-    /HDR/gi, /DVDRip/gi, /BDRip/gi, /AAC/gi, /DTS/gi, /DD5\.1/gi, /10bit/gi,
-    /\[.*?\]/g, /\(.*?\)/g, /www\..*?\.[a-z]{2,3}/gi
+    /\b\d{3,4}p\b/gi, /\bWEBRip\b/gi, /\bBluRay\b/gi, /\bx264\b/gi, /\bx265\b/gi, /\bh264\b/gi, /\bh265\b/gi,
+    /\bHDR\b/gi, /\bDVDRip\b/gi, /\bBDRip\b/gi, /\bAAC\b/gi, /\bDTS\b/gi, /\bDD5\.1\b/gi, /\b10bit\b/gi, /\bWEB-DL\b/gi,
+    /\[.*?\]/g, /\(.*?\)/g, /www\..*?\.[a-z]{2,3}/gi, /\bHDHub4u\b/gi, /\bHindi\b/gi, /\bEnglish\b/gi, /\bDual Audio\b/gi, /\bESub\b/gi, /\bHD\b/gi
   ]
   
-  let cleanName = fileName
   noise.forEach(pattern => { cleanName = cleanName.replace(pattern, '') })
   cleanName = cleanName.replace(/[._-]/g, ' ').replace(/\s+/g, ' ').trim()
 

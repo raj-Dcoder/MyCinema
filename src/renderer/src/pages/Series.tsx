@@ -45,7 +45,7 @@ const Series: React.FC<SeriesProps> = ({ onPlay }) => {
   return (
     <div>
       <h2 className="text-3xl font-bold mb-8">TV Shows</h2>
-      <div className="flex overflow-x-auto gap-4 pb-6 scrollbar-hide">
+      <div className="flex flex-wrap gap-6 pb-6">
         {seriesList.length === 0 && (
           <p className="text-muted text-center py-12 w-full">No TV shows found.</p>
         )}

@@ -7,7 +7,7 @@ import { createWriteStream } from 'fs'
 import { pipeline } from 'stream/promises'
 
 const OMDb_API_KEY = process.env.OMDB_API_KEY || '12ef5151'
-const BASE_URL = 'http://www.omdbapi.com/'
+const BASE_URL = 'https://www.omdbapi.com/'
 
 const posterDir = path.join(app.getPath('userData'), 'posters')
 if (!fs.existsSync(posterDir)) {
@@ -37,6 +37,7 @@ async function downloadPoster(url: string, videoId: number): Promise<string | nu
 
 export async function fetchMetadata(videoId: number, title: string, type: 'movie' | 'series') {
   try {
+    console.log(`[OMDB API] Firing request for: "${title}", type: "${type}"`)
     const response = await axios.get(BASE_URL, {
       params: {
         apikey: OMDb_API_KEY,
@@ -45,14 +46,17 @@ export async function fetchMetadata(videoId: number, title: string, type: 'movie
       }
     })
 
+    console.log(`[OMDB API] Response logic for "${title}":`, response.data?.Response, '| Poster:', response.data?.Poster)
+
     if (response.data && response.data.Response === 'True') {
       const result = response.data
       
       // Download poster for offline use
       const localPosterPath = await downloadPoster(result.Poster, videoId)
+      const validPoster = result.Poster && result.Poster !== 'N/A' ? result.Poster : null
 
       const metadata = {
-        poster_path: localPosterPath || result.Poster,
+        poster_path: localPosterPath || validPoster,
         overview: result.Plot,
         tmdb_id: result.imdbID // Store IMDb ID as fallback
       }

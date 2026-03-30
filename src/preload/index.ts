@@ -13,6 +13,8 @@ const api = {
   playVideo: (videoId: number) => ipcRenderer.invoke('play-video', videoId),
   getSeriesInfo: (seriesName: string) => ipcRenderer.invoke('get-series-info', seriesName),
   getSubtitlePath: (filePath: string) => ipcRenderer.invoke('get-subtitles', filePath),
+  getEmbeddedSubtitles: (filePath: string) => ipcRenderer.invoke('get-embedded-subtitles', filePath),
+  getEmbeddedAudio: (filePath: string) => ipcRenderer.invoke('get-embedded-audio', filePath),
 }
 
 // Use `contextBridge` APIs to expose Electron APIs to

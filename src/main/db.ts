@@ -10,6 +10,7 @@ const db = new Database(dbPath)
 
 // Initialize database
 export function initDb() {
+  db.pragma('foreign_keys = ON')
   db.exec(`
     CREATE TABLE IF NOT EXISTS videos (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -39,8 +40,8 @@ export function initDb() {
 export function addVideo(video: any) {
   const stmt = db.prepare(`
     INSERT INTO videos (
-      title, file_path, type, series_name, season, episode, duration
-    ) VALUES (?, ?, ?, ?, ?, ?, ?)
+      title, file_path, type, series_name, season, episode, duration, poster_path
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(file_path) DO UPDATE SET
       duration = excluded.duration
     WHERE duration = 0 OR duration IS NULL
@@ -52,12 +53,18 @@ export function addVideo(video: any) {
     video.series_name || null,
     video.season || null,
     video.episode || null,
-    video.duration || 0
+    video.duration || 0,
+    video.poster_path || null
   )
 }
 
 export function getVideos() {
   return db.prepare('SELECT * FROM videos ORDER BY added_at DESC').all()
+}
+
+export function deleteVideo(id: number) {
+  const stmt = db.prepare('DELETE FROM videos WHERE id = ?')
+  return stmt.run(id)
 }
 
 export function updateProgress(videoId: number, time: number, completed: boolean) {

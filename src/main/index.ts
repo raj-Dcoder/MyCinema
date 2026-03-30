@@ -2,9 +2,25 @@ import { app, shell, BrowserWindow, ipcMain, dialog, protocol, net } from 'elect
 import { join } from 'path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import * as db from './db'
-import { scanFolder } from './scanner'
+import { scanFolder, getEmbeddedSubtitles, getEmbeddedAudio } from './scanner'
 import fs from 'fs'
+import ffmpeg from 'fluent-ffmpeg'
+import ffmpegStatic from 'ffmpeg-static'
+import { PassThrough } from 'stream'
+
 import path from 'path'
+
+const isDev = !app.isPackaged
+const ffmpegExecPath = isDev 
+  ? path.join(app.getAppPath(), 'node_modules', 'ffmpeg-static', 'ffmpeg.exe') 
+  : path.join(process.resourcesPath, 'app.asar.unpacked', 'node_modules', 'ffmpeg-static', 'ffmpeg.exe')
+  
+const ffprobeExecPath = isDev 
+  ? path.join(app.getAppPath(), 'node_modules', 'ffprobe-static', 'bin', 'win32', 'x64', 'ffprobe.exe')
+  : path.join(process.resourcesPath, 'app.asar.unpacked', 'node_modules', 'ffprobe-static', 'bin', 'win32', 'x64', 'ffprobe.exe')
+
+ffmpeg.setFfmpegPath(ffmpegExecPath)
+ffmpeg.setFfprobePath(ffprobeExecPath)
 import { pathToFileURL } from 'url'
 
 // Register custom protocol as privileged
@@ -12,6 +28,30 @@ import { pathToFileURL } from 'url'
 protocol.registerSchemesAsPrivileged([
   {
     scheme: 'media',
+    privileges: {
+      standard: true,
+      secure: true,
+      bypassCSP: true,
+      allowServiceWorkers: true,
+      supportFetchAPI: true,
+      corsEnabled: true,
+      stream: true
+    }
+  },
+  {
+    scheme: 'subtitle',
+    privileges: {
+      standard: true,
+      secure: true,
+      bypassCSP: true,
+      allowServiceWorkers: true,
+      supportFetchAPI: true,
+      corsEnabled: true,
+      stream: true
+    }
+  },
+  {
+    scheme: 'audio',
     privileges: {
       standard: true,
       secure: true,
@@ -75,6 +115,15 @@ function registerMediaProtocol(): void {
       const fileSize = stat.size
       const range = request.headers.get('range')
 
+      let contentType = 'video/mp4'
+      const ext = path.extname(normalizedPath).toLowerCase()
+      if (ext === '.jpg' || ext === '.jpeg') contentType = 'image/jpeg'
+      else if (ext === '.png') contentType = 'image/png'
+      else if (ext === '.webp') contentType = 'image/webp'
+      else if (ext === '.mkv') contentType = 'video/x-matroska'
+      else if (ext === '.webm') contentType = 'video/webm'
+      else if (ext === '.avi') contentType = 'video/x-msvideo'
+
       if (range) {
         const parts = range.replace(/bytes=/, "").split("-")
         const start = parseInt(parts[0], 10)
@@ -90,7 +139,7 @@ function registerMediaProtocol(): void {
             'Content-Range': `bytes ${start}-${end}/${fileSize}`,
             'Accept-Ranges': 'bytes',
             'Content-Length': chunksize.toString(),
-            'Content-Type': 'video/mp4', // Most common, browser will sniff if different
+            'Content-Type': contentType,
           }
         })
       } else {
@@ -99,7 +148,7 @@ function registerMediaProtocol(): void {
           headers: {
             'Content-Length': fileSize.toString(),
             'Accept-Ranges': 'bytes',
-            'Content-Type': 'video/mp4',
+            'Content-Type': contentType,
           }
         })
       }
@@ -110,9 +159,104 @@ function registerMediaProtocol(): void {
   })
 }
 
+function registerSubtitleProtocol(): void {
+  protocol.handle('subtitle', (request) => {
+    try {
+      const url = new URL(request.url)
+      const prefix = 'subtitle://file/'
+      const encodedPath = request.url.startsWith(prefix) ? request.url.slice(prefix.length).split('?')[0] : url.pathname
+      let normalizedPath = decodeURIComponent(encodedPath)
+      if (normalizedPath.startsWith('/') && normalizedPath.includes(':')) {
+        normalizedPath = normalizedPath.slice(1)
+      }
+
+      if (!fs.existsSync(normalizedPath)) {
+        return new Response('Not Found', { status: 404 })
+      }
+
+      const trackIndex = url.searchParams.get('track') || '0'
+      const pass = new PassThrough()
+
+      ffmpeg(normalizedPath)
+        .outputOptions([`-map 0:${trackIndex}`, '-c:s webvtt', '-f webvtt'])
+        .on('error', (err) => console.error('FFmpeg subtitle extr error:', err.message))
+        .pipe(pass)
+
+      return new Response(pass as any, {
+        headers: {
+          'Content-Type': 'text/vtt',
+          'Access-Control-Allow-Origin': '*'
+        }
+      })
+    } catch (error) {
+      console.error('Failed to fetch subtitle stream:', error)
+      return new Response('Error', { status: 500 })
+    }
+  })
+}
+
+function registerAudioProtocol(): void {
+  protocol.handle('audio', (request) => {
+    try {
+      const url = new URL(request.url)
+      const prefix = 'audio://file/'
+      const encodedPath = request.url.startsWith(prefix) ? request.url.slice(prefix.length).split('?')[0] : url.pathname
+      let normalizedPath = decodeURIComponent(encodedPath)
+      if (normalizedPath.startsWith('/') && normalizedPath.includes(':')) {
+        normalizedPath = normalizedPath.slice(1)
+      }
+
+      if (!fs.existsSync(normalizedPath)) {
+        return new Response('Not Found', { status: 404 })
+      }
+
+      const trackIndex = url.searchParams.get('track') || '1'
+      const start = parseFloat(url.searchParams.get('time') || '0')
+      
+      const pass = new PassThrough()
+
+      const cmd = ffmpeg(normalizedPath)
+        .setStartTime(start)
+        .outputOptions([
+          `-map 0:${trackIndex}`,
+          '-c:a libmp3lame',
+          '-b:a 192k',
+          '-f mp3'
+        ])
+        .on('error', (err) => {
+          if (!err.message.includes('Output stream closed') && !err.message.includes('SIGKILL') && !err.message.includes('The operation was aborted')) {
+            console.error('FFmpeg audio extr error:', err.message)
+          }
+        })
+        
+      cmd.pipe(pass)
+      
+      request.signal.addEventListener('abort', () => {
+        cmd.kill('SIGKILL')
+      })
+
+      return new Response(pass as any, {
+        headers: {
+          'Content-Type': 'audio/mpeg',
+          'Access-Control-Allow-Origin': '*',
+          'Accept-Ranges': 'none',
+          'Cache-Control': 'no-cache'
+        }
+      })
+    } catch (error) {
+      console.error('Failed to fetch audio stream:', error)
+      return new Response('Error', { status: 500 })
+    }
+  })
+}
+
+app.commandLine.appendSwitch('enable-blink-features', 'AudioVideoTracks')
+
 app.whenReady().then(() => {
   // Register media protocol
   registerMediaProtocol()
+  registerSubtitleProtocol()
+  registerAudioProtocol()
   
   db.initDb()
   electronApp.setAppUserModelId('com.electron')
@@ -144,7 +288,24 @@ ipcMain.handle('select-folder', async () => {
 })
 
 ipcMain.handle('get-videos', () => {
-  return db.getVideos()
+  const allVideos = db.getVideos();
+  const validVideos: any[] = [];
+  
+  for (const video of allVideos as any[]) {
+    if (fs.existsSync(video.file_path)) {
+      validVideos.push(video);
+    } else {
+      console.log(`[Auto-Prune] Intercepted missing file: ${video.file_path}`);
+      db.deleteVideo(video.id);
+      
+      if (video.poster_path && video.poster_path.includes('-snap.jpg')) {
+        if (fs.existsSync(video.poster_path)) {
+          try { fs.unlinkSync(video.poster_path); } catch (e) {}
+        }
+      }
+    }
+  }
+  return validVideos;
 })
 
 ipcMain.handle('get-video-progress', (_, videoId) => {
@@ -156,7 +317,18 @@ ipcMain.on('update-video-progress', (_, videoId, time, completed) => {
 })
 
 ipcMain.handle('get-continue-watching', () => {
-  return db.getContinueWatching()
+  const cwVideos = db.getContinueWatching();
+  const validCw: any[] = [];
+  
+  for (const video of cwVideos as any[]) {
+    if (fs.existsSync(video.file_path)) {
+      validCw.push(video);
+    } else {
+      // Auto-pruner handles DB deletion cleanly through other views too
+      db.deleteVideo(video.id);
+    }
+  }
+  return validCw;
 })
 
 ipcMain.handle('get-series-info', (_, seriesName) => {
@@ -165,6 +337,14 @@ ipcMain.handle('get-series-info', (_, seriesName) => {
 
 ipcMain.handle('scan-folder', async (_, path) => {
   return await scanFolder(path)
+})
+
+ipcMain.handle('get-embedded-subtitles', async (_, filePath) => {
+  return await getEmbeddedSubtitles(filePath)
+})
+
+ipcMain.handle('get-embedded-audio', async (_, filePath) => {
+  return await getEmbeddedAudio(filePath)
 })
 
 ipcMain.handle('get-subtitles', async (_, filePath) => {

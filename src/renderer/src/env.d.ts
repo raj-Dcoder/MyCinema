@@ -10,6 +10,8 @@ interface Api {
   playVideo: (videoId: number) => Promise<void>
   getSeriesInfo: (seriesName: string) => Promise<any[]>
   getSubtitlePath: (filePath: string) => Promise<string | null>
+  getEmbeddedSubtitles: (filePath: string) => Promise<any[]>
+  getEmbeddedAudio: (filePath: string) => Promise<any[]>
 }
 
 declare global {

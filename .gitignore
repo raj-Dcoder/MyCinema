@@ -99,3 +99,8 @@ dist/
 out/
 .vite-inspect
 .vite-plugin-checker-cache
+
+# Custom MyCinema Ignored Files
+*.exe
+*.db
+test-*.js

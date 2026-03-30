@@ -23,7 +23,7 @@ const Movies: React.FC<MoviesProps> = ({ onPlay }) => {
   return (
     <div>
       <h2 className="text-3xl font-bold mb-8">Movies</h2>
-      <div className="flex overflow-x-auto gap-4 pb-6 scrollbar-hide">
+      <div className="flex flex-wrap gap-6 pb-6">
         {movies.map(video => (
           <div key={video.id} className="w-36 md:w-44 lg:w-52 flex-shrink-0">
             <VideoCard video={video} onPlay={onPlay} />

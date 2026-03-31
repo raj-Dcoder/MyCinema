@@ -6,8 +6,8 @@ const api = {
   selectFolder: () => ipcRenderer.invoke('select-folder'),
   getVideos: () => ipcRenderer.invoke('get-videos'),
   getVideoProgress: (videoId: number) => ipcRenderer.invoke('get-video-progress', videoId),
-  updateVideoProgress: (videoId: number, time: number, completed: boolean) => 
-    ipcRenderer.send('update-video-progress', videoId, time, completed),
+  updateVideoProgress: (videoId: number, time: number, completed: boolean, isClosing?: boolean) => 
+    ipcRenderer.send('update-video-progress', videoId, time, completed, isClosing),
   scanFolder: (path: string) => ipcRenderer.invoke('scan-folder', path),
   getContinueWatching: () => ipcRenderer.invoke('get-continue-watching'),
   playVideo: (videoId: number) => ipcRenderer.invoke('play-video', videoId),
@@ -15,6 +15,8 @@ const api = {
   getSubtitlePath: (filePath: string) => ipcRenderer.invoke('get-subtitles', filePath),
   getEmbeddedSubtitles: (filePath: string) => ipcRenderer.invoke('get-embedded-subtitles', filePath),
   getEmbeddedAudio: (filePath: string) => ipcRenderer.invoke('get-embedded-audio', filePath),
+  onLibraryUpdated: (callback: () => void) => ipcRenderer.on('library-updated', (_event) => callback()),
+  removeAllLibraryUpdateListeners: () => ipcRenderer.removeAllListeners('library-updated'),
 }
 
 // Use `contextBridge` APIs to expose Electron APIs to

@@ -9,6 +9,7 @@ import VideoPlayer from './components/VideoPlayer'
 const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState<'home' | 'movies' | 'series'>('home')
   const [playingVideo, setPlayingVideo] = useState<Video | null>(null)
+  const [homeRefreshKey, setHomeRefreshKey] = useState(0)
 
   const handleSelectFolder = async () => {
     const path = await window.api.selectFolder()
@@ -67,7 +68,7 @@ const App: React.FC = () => {
       {/* Main Content */}
       <main className="flex-1 overflow-y-auto bg-background">
         <div className="p-8">
-          {activeTab === 'home' && <Home onPlay={setPlayingVideo} />}
+          {activeTab === 'home' && <Home onPlay={setPlayingVideo} refreshKey={homeRefreshKey} />}
           {activeTab === 'movies' && <Movies onPlay={setPlayingVideo} />}
           {activeTab === 'series' && <Series onPlay={setPlayingVideo} />}
         </div>
@@ -79,6 +80,7 @@ const App: React.FC = () => {
           video={playingVideo} 
           onClose={() => {
             setPlayingVideo(null)
+            setHomeRefreshKey(k => k + 1)
           }} 
         />
       )}

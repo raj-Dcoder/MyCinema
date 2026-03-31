@@ -312,8 +312,11 @@ ipcMain.handle('get-video-progress', (_, videoId) => {
   return db.getProgress(videoId)
 })
 
-ipcMain.on('update-video-progress', (_, videoId, time, completed) => {
+ipcMain.on('update-video-progress', (_, videoId, time, completed, isClosing) => {
   db.updateProgress(videoId, time, completed)
+  if (isClosing) {
+    BrowserWindow.getAllWindows().forEach(w => w.webContents.send('library-updated'))
+  }
 })
 
 ipcMain.handle('get-continue-watching', () => {

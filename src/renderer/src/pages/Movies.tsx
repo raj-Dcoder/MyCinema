@@ -16,8 +16,9 @@ const Movies: React.FC<MoviesProps> = ({ onPlay }) => {
 
   useEffect(() => {
     fetchMovies()
-    const interval = setInterval(fetchMovies, 10000)
-    return () => clearInterval(interval)
+    
+    window.api.onLibraryUpdated(fetchMovies)
+    return () => window.api.removeAllLibraryUpdateListeners()
   }, [])
 
   return (

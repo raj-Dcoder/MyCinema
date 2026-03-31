@@ -67,16 +67,61 @@ export function deleteVideo(id: number) {
   return stmt.run(id)
 }
 
+/**
+ * When an episode is completed, find the very next episode in the series
+ * and insert a fresh 0:00, completed=0 progress row for it.
+ * This makes it appear in "Continue Watching" on the home screen.
+ */
+function queueNextEpisode(videoId: number) {
+  try {
+    const currentVideo = db.prepare('SELECT * FROM videos WHERE id = ?').get(videoId) as any
+    if (!currentVideo || currentVideo.type !== 'series' || !currentVideo.series_name) return
+
+    const episodes = db.prepare(`
+      SELECT * FROM videos 
+      WHERE series_name = ? 
+      ORDER BY season ASC, episode ASC
+    `).all(currentVideo.series_name) as any[]
+
+    const currentIndex = episodes.findIndex((e: any) => e.id === videoId)
+    if (currentIndex === -1 || currentIndex >= episodes.length - 1) return
+
+    const nextEpisode = episodes[currentIndex + 1]
+    console.log(`[DB] Queuing next episode: ${nextEpisode.title} (id=${nextEpisode.id})`)
+
+    // Always reset the next episode to 0:00, completed=false
+    db.prepare(`
+      INSERT INTO progress (video_id, last_watched_time, completed, updated_at)
+      VALUES (?, 0, 0, CURRENT_TIMESTAMP)
+      ON CONFLICT(video_id) DO UPDATE SET
+        last_watched_time = 0,
+        completed = 0,
+        updated_at = CURRENT_TIMESTAMP
+    `).run(nextEpisode.id)
+
+    console.log(`[DB] Successfully queued next episode id=${nextEpisode.id}`)
+  } catch (err) {
+    console.error('[DB] queueNextEpisode error:', err)
+  }
+}
+
 export function updateProgress(videoId: number, time: number, completed: boolean) {
-  const stmt = db.prepare(`
-    INSERT INTO progress (video_id, last_watched_time, completed, updated_at)
-    VALUES (?, ?, ?, CURRENT_TIMESTAMP)
-    ON CONFLICT(video_id) DO UPDATE SET
-      last_watched_time = excluded.last_watched_time,
-      completed = excluded.completed,
-      updated_at = CURRENT_TIMESTAMP
-  `)
-  return stmt.run(videoId, time, completed ? 1 : 0)
+  try {
+    db.prepare(`
+      INSERT INTO progress (video_id, last_watched_time, completed, updated_at)
+      VALUES (?, ?, ?, CURRENT_TIMESTAMP)
+      ON CONFLICT(video_id) DO UPDATE SET
+        last_watched_time = excluded.last_watched_time,
+        completed = excluded.completed,
+        updated_at = CURRENT_TIMESTAMP
+    `).run(videoId, time, completed ? 1 : 0)
+
+    if (completed) {
+      queueNextEpisode(videoId)
+    }
+  } catch (err) {
+    console.error('[DB] updateProgress error:', err)
+  }
 }
 
 export function getProgress(videoId: number) {

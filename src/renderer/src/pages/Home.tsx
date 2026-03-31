@@ -5,9 +5,10 @@ import SeriesModal from '../components/SeriesModal'
 
 interface HomeProps {
   onPlay: (video: Video) => void
+  refreshKey?: number
 }
 
-const Home: React.FC<HomeProps> = ({ onPlay }) => {
+const Home: React.FC<HomeProps> = ({ onPlay, refreshKey }) => {
   const [continueWatching, setContinueWatching] = useState<Video[]>([])
   const [recentMovies, setRecentMovies] = useState<Video[]>([])
   const [recentSeries, setRecentSeries] = useState<Video[]>([])
@@ -50,10 +51,10 @@ const Home: React.FC<HomeProps> = ({ onPlay }) => {
   useEffect(() => {
     fetchData()
     
-    // Refresh data every 10 seconds to keep progress updated
-    const interval = setInterval(fetchData, 10000)
-    return () => clearInterval(interval)
-  }, [])
+    // Refresh data using IPC events
+    window.api.onLibraryUpdated(fetchData)
+    return () => window.api.removeAllLibraryUpdateListeners()
+  }, [refreshKey])
 
   return (
     <div className="space-y-12">

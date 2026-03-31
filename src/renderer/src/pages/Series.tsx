@@ -38,8 +38,9 @@ const Series: React.FC<SeriesProps> = ({ onPlay }) => {
 
   useEffect(() => {
     fetchSeries()
-    const interval = setInterval(fetchSeries, 10000)
-    return () => clearInterval(interval)
+    
+    window.api.onLibraryUpdated(fetchSeries)
+    return () => window.api.removeAllLibraryUpdateListeners()
   }, [])
 
   return (

@@ -12,6 +12,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
   const [isPlaying, setIsPlaying] = useState(false)
   const [currentTime, setCurrentTime] = useState(0)
   const [duration, setDuration] = useState(0)
+  const [forceRestart, setForceRestart] = useState(false)
   const [showControls, setShowControls] = useState(true)
   const [subtitlePath, setSubtitlePath] = useState<string | null>(null)
   const [volume, setVolume] = useState(1)
@@ -32,6 +33,8 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
   const audioRef = useRef<HTMLAudioElement>(null)
   const [hasNextEpisode, setHasNextEpisode] = useState(false)
   const clickTimeoutRef = useRef<NodeJS.Timeout | null>(null)
+  const timeRef = useRef(0)
+  const durationRef = useRef(1)
 
   const checkNextEpisode = async (video: Video) => {
     if (video.type === 'series' && video.series_name) {
@@ -97,9 +100,31 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
   useEffect(() => {
     const fetchProgress = async () => {
       const progress = await window.api.getVideoProgress(currentVideo.id)
-      if (progress && videoRef.current) {
-        videoRef.current.currentTime = progress.last_watched_time
-        setCurrentTime(progress.last_watched_time)
+      let targetTime = progress?.last_watched_time || 0
+      
+      if (progress?.completed) {
+        targetTime = 0
+      }
+      
+      if (forceRestart) {
+        targetTime = 0
+        setForceRestart(false)
+      }
+
+      if (videoRef.current && targetTime > 0) {
+        if (videoRef.current.readyState >= 1) {
+          videoRef.current.currentTime = targetTime
+          setCurrentTime(targetTime)
+          timeRef.current = targetTime
+        } else {
+          videoRef.current.addEventListener('loadedmetadata', () => {
+            if (videoRef.current) {
+              videoRef.current.currentTime = targetTime
+              setCurrentTime(targetTime)
+              timeRef.current = targetTime
+            }
+          }, { once: true })
+        }
       }
     }
 
@@ -150,13 +175,23 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
     const interval = setInterval(() => {
       if (videoRef.current && !videoRef.current.paused) {
         const time = videoRef.current.currentTime
-        const total = videoRef.current.duration
-        const completed = time / total > 0.9
-        window.api.updateVideoProgress(currentVideo.id, time, completed)
+        const total = videoRef.current.duration || 1
+        const completed = time / total > 0.95
+        
+        timeRef.current = time
+        durationRef.current = total
+        
+        window.api.updateVideoProgress(currentVideo.id, time, completed, false)
       }
     }, 5000)
 
-    return () => clearInterval(interval)
+    return () => {
+      clearInterval(interval)
+      const time = timeRef.current
+      const total = durationRef.current || 1
+      const completed = time / total > 0.95
+      window.api.updateVideoProgress(currentVideo.id, time, completed, true)
+    }
   }, [currentVideo.id])
 
   useEffect(() => {
@@ -183,6 +218,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
       const episodes: Video[] = await window.api.getSeriesInfo(currentVideo.series_name)
       const currentIndex = episodes.findIndex(e => e.id === currentVideo.id)
       if (currentIndex !== -1 && currentIndex < episodes.length - 1) {
+        setForceRestart(true)
         setCurrentVideo(episodes[currentIndex + 1])
       } else {
         onClose()
@@ -302,6 +338,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
     if (videoRef.current) {
       const time = videoRef.current.currentTime + seconds
       videoRef.current.currentTime = time
+      timeRef.current = time
       handleCustomAudioSeekSync(time)
       setSeekPopup(prev => ({ show: true, text: seconds > 0 ? `+${seconds}s` : `${seconds}s`, id: prev.id + 1 }))
     }
@@ -310,6 +347,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
   const handleSeekChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const time = parseFloat(e.target.value)
     setCurrentTime(time)
+    timeRef.current = time
   }
 
   const handleSeekMouseUp = (e: React.MouseEvent<HTMLInputElement> | React.TouchEvent<HTMLInputElement>) => {
@@ -317,6 +355,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
     const time = parseFloat((e.target as HTMLInputElement).value)
     if (videoRef.current) {
       videoRef.current.currentTime = time
+      timeRef.current = time
       handleCustomAudioSeekSync(time)
     }
   }
@@ -380,11 +419,17 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
         src={`media://file/${encodeURIComponent(currentVideo.file_path)}`}
         className="max-h-full w-full outline-none"
         onTimeUpdate={() => {
-          if (!isSeeking) {
-            setCurrentTime(videoRef.current?.currentTime || 0)
+          if (!isSeeking && videoRef.current) {
+            setCurrentTime(videoRef.current.currentTime)
+            timeRef.current = videoRef.current.currentTime
           }
         }}
-        onDurationChange={() => setDuration(videoRef.current?.duration || 0)}
+        onDurationChange={() => {
+          if (videoRef.current) {
+            setDuration(videoRef.current.duration)
+            durationRef.current = videoRef.current.duration || 1
+          }
+        }}
         onPlay={() => { 
           setIsPlaying(true); 
           const trackObj = availableAudio.find(a => a.id === selectedAudioId);

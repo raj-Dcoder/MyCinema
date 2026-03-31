@@ -6,7 +6,7 @@ import ffmpeg from 'fluent-ffmpeg'
 import ffmpegStatic from 'ffmpeg-static'
 import ffprobeStatic from 'ffprobe-static'
 
-import { app } from 'electron'
+import { app, BrowserWindow } from 'electron'
 
 // Set ffmpeg/ffprobe paths
 const isDev = !app.isPackaged
@@ -129,6 +129,7 @@ export async function scanFolder(rootPath: string) {
           fs.unlinkSync(dbVideo.poster_path)
         }
       }
+      BrowserWindow.getAllWindows().forEach(w => w.webContents.send('library-updated'))
     }
   }
 
@@ -183,7 +184,13 @@ export async function scanFolder(rootPath: string) {
         }
       }
     }
+    
+    // Broadcast update after each file is processed (smooth UI updates during full scan)
+    BrowserWindow.getAllWindows().forEach(w => w.webContents.send('library-updated'))
   }
+  
+  // Final broadcast just in case
+  BrowserWindow.getAllWindows().forEach(w => w.webContents.send('library-updated'))
 }
 
 export async function getEmbeddedSubtitles(filePath: string): Promise<any[]> {

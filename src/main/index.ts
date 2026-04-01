@@ -4,6 +4,7 @@ import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import * as db from './db'
 import { scanFolder, getEmbeddedSubtitles, getEmbeddedAudio } from './scanner'
 import fs from 'fs'
+import crypto from 'crypto'
 import ffmpeg from 'fluent-ffmpeg'
 import ffmpegStatic from 'ffmpeg-static'
 import { PassThrough } from 'stream'
@@ -141,10 +142,38 @@ protocol.registerSchemesAsPrivileged([
   }
 ])
 
+// ─── Window State Management ─────────────────────────────────────────────────
+function loadWindowState() {
+  try {
+    const raw = fs.readFileSync(join(app.getPath('userData'), 'window-state.json'), 'utf8')
+    return JSON.parse(raw)
+  } catch {
+    return { width: 1200, height: 800, isMaximized: false }
+  }
+}
+
+function saveWindowState(win: BrowserWindow) {
+  try {
+    const isMaximized = win.isMaximized()
+    // getBounds() returns inaccurate values if window is minimized/maximized sometimes,
+    // so we get normal bounds if we can, but saving bounds when maximized might save the max bounds.
+    // getNormalBounds handles this correctly in Electron.
+    const bounds = win.getNormalBounds ? win.getNormalBounds() : win.getBounds()
+    const state = { width: bounds.width, height: bounds.height, x: bounds.x, y: bounds.y, isMaximized }
+    fs.writeFileSync(join(app.getPath('userData'), 'window-state.json'), JSON.stringify(state))
+  } catch (err) {
+    console.error('Failed to save window state:', err)
+  }
+}
+
 function createWindow(): void {
+  const state = loadWindowState()
+
   const mainWindow = new BrowserWindow({
-    width: 1200,
-    height: 800,
+    width: state.width || 1200,
+    height: state.height || 800,
+    x: state.x,
+    y: state.y,
     show: false,
     autoHideMenuBar: true,
     webPreferences: {
@@ -153,6 +182,23 @@ function createWindow(): void {
       webSecurity: false // Allow local video playback
     }
   })
+
+  // Apply maximized state after creation
+  if (state.isMaximized) {
+    mainWindow.maximize()
+  }
+
+  // Hook resize/move events to auto-save bounds
+  let saveDebounceTimer: ReturnType<typeof setTimeout>
+  const scheduleSave = () => {
+    clearTimeout(saveDebounceTimer)
+    saveDebounceTimer = setTimeout(() => saveWindowState(mainWindow), 500)
+  }
+
+  mainWindow.on('resize', scheduleSave)
+  mainWindow.on('move', scheduleSave)
+  mainWindow.on('maximize', scheduleSave)
+  mainWindow.on('unmaximize', scheduleSave)
 
   mainWindow.on('ready-to-show', () => {
     mainWindow.show()
@@ -210,7 +256,12 @@ function registerMediaProtocol(): void {
         const end = parts[1] ? parseInt(parts[1], 10) : fileSize - 1
         const chunksize = (end - start) + 1
         
-        const fileStream = fs.createReadStream(normalizedPath, { start, end })
+        // Use 5MB chunks to prevent Node->Web streams fragmentation and I/O starvation (fixes random glitches)
+        const fileStream = fs.createReadStream(normalizedPath, { 
+          start, 
+          end,
+          highWaterMark: 5 * 1024 * 1024 
+        })
         
         return new Response(fileStream as any, {
           status: 206,
@@ -223,7 +274,7 @@ function registerMediaProtocol(): void {
           }
         })
       } else {
-        const fileStream = fs.createReadStream(normalizedPath)
+        const fileStream = fs.createReadStream(normalizedPath, { highWaterMark: 5 * 1024 * 1024 })
         return new Response(fileStream as any, {
           headers: {
             'Content-Length': fileSize.toString(),
@@ -339,6 +390,8 @@ function registerAudioProtocol(): void {
 }
 
 app.commandLine.appendSwitch('enable-blink-features', 'AudioVideoTracks')
+// Prevent Chromium's hardware decoder from artifacting (producing grey glitchy soup) on specific high-bitrate MKV frames
+app.commandLine.appendSwitch('disable-features', 'D3D11VideoDecoder') 
 
 app.whenReady().then(() => {
   // Register media protocol
@@ -493,6 +546,56 @@ ipcMain.handle('get-subtitles', async (_, filePath) => {
     return null
   }
 })
+
+// Pre-convert subtitle track to static WebVTT file to avoid live FFmpeg streaming glitches during playback
+ipcMain.handle('pre-convert-subtitle', async (_, filePath: string, trackIndex: number, isExternal: boolean) => {
+  try {
+    const subsDir = path.join(app.getPath('userData'), 'subtitles')
+    if (!fs.existsSync(subsDir)) fs.mkdirSync(subsDir, { recursive: true })
+    
+    // Create a short, fixed-length cache key (16-char hex) so the output path
+    // never hits Windows' 260-char MAX_PATH limit, even for very long filenames.
+    const hash = crypto.createHash('sha1').update(`${filePath}-${trackIndex}`).digest('hex').slice(0, 16)
+    const outPath = path.join(subsDir, `${hash}.vtt`)
+    
+    // Return cached file if it already exists
+    if (fs.existsSync(outPath)) {
+      console.log(`[Subtitle] Serving cached WebVTT: ${outPath}`)
+      return outPath
+    }
+    
+    console.log(`[Subtitle] Pre-converting track ${trackIndex} from "${filePath}" to WebVTT...`)
+    
+    return new Promise<string | null>((resolve) => {
+      const inputArgs = isExternal 
+        ? [filePath]           // external SRT: just input the SRT file directly
+        : [filePath]           // embedded: input the video file
+      
+      const mapTrack = isExternal ? '0:0' : `0:${trackIndex}`
+      
+      const cmd = ffmpeg(inputArgs[0])
+        .outputOptions([`-map ${mapTrack}`, '-c:s webvtt', '-f webvtt'])
+        .output(outPath)
+        .on('end', () => {
+          console.log(`[Subtitle] Pre-conversion done: ${outPath}`)
+          resolve(outPath)
+        })
+        .on('error', (err) => {
+          console.error(`[Subtitle] Pre-conversion failed:`, err.message)
+          // Clean up partial file
+          if (fs.existsSync(outPath)) try { fs.unlinkSync(outPath) } catch {}
+          resolve(null)
+        })
+      
+      cmd.run()
+    })
+  } catch (err) {
+    console.error('[Subtitle] pre-convert-subtitle error:', err)
+    return null
+  }
+})
+
+
 
 // ─── Auto Updater Setup ──────────────────────────────────────────────────────
 

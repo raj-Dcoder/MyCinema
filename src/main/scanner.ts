@@ -101,7 +101,7 @@ export async function extractOfflineThumbnail(videoPath: string, videoId: number
         timestamps: ['10%'],
         filename: fileName,
         folder: posterDir,
-        size: '1280x720'
+        size: '?x720'
       })
       .on('end', () => {
         console.log(`[FFMPEG] Extracted frame to ${localPath}`)

@@ -12,6 +12,7 @@ interface Api {
   getSubtitlePath: (filePath: string) => Promise<string | null>
   getEmbeddedSubtitles: (filePath: string) => Promise<any[]>
   getEmbeddedAudio: (filePath: string) => Promise<any[]>
+  preConvertSubtitle: (filePath: string, trackIndex: number, isExternal: boolean) => Promise<string | null>
   onLibraryUpdated: (callback: () => void) => void
   removeAllLibraryUpdateListeners: () => void
   getFolders: () => Promise<any[]>

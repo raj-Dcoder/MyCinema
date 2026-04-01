@@ -15,6 +15,7 @@ const api = {
   getSubtitlePath: (filePath: string) => ipcRenderer.invoke('get-subtitles', filePath),
   getEmbeddedSubtitles: (filePath: string) => ipcRenderer.invoke('get-embedded-subtitles', filePath),
   getEmbeddedAudio: (filePath: string) => ipcRenderer.invoke('get-embedded-audio', filePath),
+  preConvertSubtitle: (filePath: string, trackIndex: number, isExternal: boolean) => ipcRenderer.invoke('pre-convert-subtitle', filePath, trackIndex, isExternal),
   onLibraryUpdated: (callback: () => void) => ipcRenderer.on('library-updated', (_event) => callback()),
   removeAllLibraryUpdateListeners: () => ipcRenderer.removeAllListeners('library-updated'),
   getFolders: () => ipcRenderer.invoke('get-folders'),

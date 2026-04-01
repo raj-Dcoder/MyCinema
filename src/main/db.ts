@@ -90,7 +90,20 @@ function queueNextEpisode(videoId: number) {
     `).all(currentVideo.series_name) as any[]
 
     const currentIndex = episodes.findIndex((e: any) => e.id === videoId)
-    if (currentIndex === -1 || currentIndex >= episodes.length - 1) return
+    if (currentIndex === -1) return
+
+    // If this is the final episode in the series, mark ALL previous episodes as completed
+    if (currentIndex >= episodes.length - 1) {
+      db.prepare(`
+        UPDATE progress 
+        SET completed = 1 
+        WHERE video_id IN (
+          SELECT id FROM videos WHERE series_name = ?
+        )
+      `).run(currentVideo.series_name)
+      console.log(`[DB] Series ${currentVideo.series_name} completed. Cleared from Continue Watching.`)
+      return
+    }
 
     const nextEpisode = episodes[currentIndex + 1]
     console.log(`[DB] Queuing next episode: ${nextEpisode.title} (id=${nextEpisode.id})`)

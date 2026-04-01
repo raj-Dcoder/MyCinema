@@ -1,6 +1,35 @@
 import React, { useEffect, useRef, useState } from 'react'
-import { Play, Pause, Rewind, FastForward, X, Maximize, Minimize, Volume2, VolumeX, Subtitles, Music, SkipForward as SkipNext, ArrowLeft, MessageSquareText, AlertTriangle, Check } from 'lucide-react'
+import { Play, Pause, Rewind, FastForward, X, Maximize, Minimize, Volume2, VolumeX, Subtitles, Music, SkipForward as SkipNext, ArrowLeft, MessageSquareText, AlertTriangle, Check, Monitor, RectangleHorizontal, Crop } from 'lucide-react'
 import { Video } from '../types'
+
+// ── VTT Parser (runs once per track selection, no React state) ──────────────
+interface SubCue { start: number; end: number; text: string }
+function parseVTTTime(s: string): number {
+  const clean = s.split(' ')[0]
+  const parts = clean.split(':').map(Number)
+  if (parts.length === 3) return parts[0] * 3600 + parts[1] * 60 + parts[2]
+  return parts[0] * 60 + (parts[1] || 0)
+}
+function parseVTT(content: string): SubCue[] {
+  const cues: SubCue[] = []
+  // Normalize Windows CRLF line endings that FFmpeg produces on Windows
+  const normalized = content.replace(/\r\n/g, '\n').replace(/\r/g, '\n')
+  const blocks = normalized.split(/\n\s*\n/)
+  for (const block of blocks) {
+    const lines = block.trim().split('\n')
+    const arrowLine = lines.find(l => l.includes('-->'))
+    if (!arrowLine) continue
+    const [startStr, endStr] = arrowLine.split('-->').map(s => s.trim())
+    const start = parseVTTTime(startStr)
+    const end = parseVTTTime(endStr)
+    const textLines = lines.slice(lines.indexOf(arrowLine) + 1).filter(l => l.trim() !== '' && !l.trim().match(/^\d+$/))
+    if (textLines.length === 0) continue
+    // Strip VTT tags like <c>, <i>, position cues etc.
+    const text = textLines.join('\n').replace(/<[^>]+>/g, '').trim()
+    if (text) cues.push({ start, end, text })
+  }
+  return cues
+}
 
 interface VideoPlayerProps {
   video: Video
@@ -29,11 +58,14 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
   const [seekPopup, setSeekPopup] = useState<{ show: boolean, text: string, id: number }>({ show: false, text: '', id: 0 })
   const [volumePopup, setVolumePopup] = useState<{ show: boolean, volume: number, isMuted: boolean, id: number }>({ show: false, volume: 1, isMuted: false, id: 0 })
   const [speedPopup, setSpeedPopup] = useState<{ show: boolean, rate: number, id: number }>({ show: false, rate: 1, id: 0 })
-  const [trackPopup, setTrackPopup] = useState<{ show: boolean, type: 'audio' | 'subtitle', text: string, id: number }>({ show: false, type: 'subtitle', text: '', id: 0 })
+  const ASPECT_MODES: ('contain' | 'cover' | 'fill')[] = ['contain', 'cover', 'fill'];
+  const [aspectMode, setAspectMode] = useState<('contain' | 'cover' | 'fill')>('contain');
+  const [trackPopup, setTrackPopup] = useState<{ show: boolean, type: 'audio' | 'subtitle' | 'aspect', text: string, id: number }>({ show: false, type: 'subtitle', text: '', id: 0 })
   const [seekPreview, setSeekPreview] = useState<number | null>(null)
   const seekPreviewRef = useRef<number>(0)
   const [embeddedSubs, setEmbeddedSubs] = useState<any[]>([])
   const [embeddedAudio, setEmbeddedAudio] = useState<any[]>([])
+  const [convertedSubPaths, setConvertedSubPaths] = useState<Map<string, string>>(new Map())
   const [lastSeekTime, setLastSeekTime] = useState(0)
   const audioRef = useRef<HTMLAudioElement>(null)
   const [hasNextEpisode, setHasNextEpisode] = useState(false)
@@ -51,8 +83,15 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
   const wasPlayingBeforeRevRef = useRef<boolean>(false)
   const lastReverseStepRef = useRef<number>(0)
   const spaceHoldTimerRef = useRef<NodeJS.Timeout | null>(null)
+  const speedToastRef = useRef<HTMLDivElement | null>(null)
   const mediaMenuTimeoutRef = useRef<NodeJS.Timeout | null>(null)
   const lastTimeUpdateRef = useRef(0)
+  // Custom subtitle renderer refs — never triggers React re-renders
+  const subtitleDivRef = useRef<HTMLDivElement | null>(null)
+  const subtitleCuesRef = useRef<SubCue[]>([])
+  const activeSubKeyRef = useRef<string | null>(null)
+  const [activeSubKey, setActiveSubKey] = useState<string | null>(null)
+  const [subtitleLoading, setSubtitleLoading] = useState(false)
   
   const previewVideoRef = useRef<HTMLVideoElement>(null)
   const [hoverTime, setHoverTime] = useState<number | null>(null)
@@ -96,10 +135,10 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
   const availableSubtitles: any[] = []
   let trackIdx = 0
   if (subtitlePath) {
-    availableSubtitles.push({ idx: trackIdx++, label: 'External SRT' })
+    availableSubtitles.push({ idx: trackIdx++, id: 'external-0', label: 'External SRT' })
   }
   embeddedSubs.forEach((sub) => {
-    availableSubtitles.push({ idx: trackIdx++, label: formatTrackLabel(sub, sub.index) })
+    availableSubtitles.push({ idx: trackIdx++, id: `embedded-${sub.index}`, label: formatTrackLabel(sub, sub.index) })
   })
 
   const availableAudio = React.useMemo(() => {
@@ -187,6 +226,36 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
         ])
         setEmbeddedSubs(embeddedS || [])
         setEmbeddedAudio(embeddedA || [])
+
+        // Pre-convert ALL subtitle tracks to static WebVTT files in the background
+        // This eliminates live FFmpeg streaming during playback which causes glitches
+        const newPaths = new Map<string, string>()
+        const conversionJobs: Promise<void>[] = []
+
+        if (srt) {
+          conversionJobs.push(
+            window.api.preConvertSubtitle(srt, 0, true).then((vttPath: string | null) => {
+              if (vttPath) newPaths.set('external-0', vttPath)
+            })
+          )
+        }
+
+        for (const sub of (embeddedS || [])) {
+          const key = `embedded-${sub.index}`
+          conversionJobs.push(
+            window.api.preConvertSubtitle(currentVideo.file_path, sub.index, false).then((vttPath: string | null) => {
+              if (vttPath) newPaths.set(key, vttPath)
+            })
+          )
+        }
+
+        await Promise.all(conversionJobs)
+        setConvertedSubPaths(newPaths)
+        console.log('[VideoPlayer] Pre-converted', newPaths.size, 'subtitle track(s)')
+        // Reset active subtitle on new video load
+        subtitleCuesRef.current = []
+        activeSubKeyRef.current = null
+        setActiveSubKey(null)
       } catch (err) {
         console.error('Failed to get embedded tracks:', err)
       }
@@ -210,6 +279,98 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
     }
   }, [currentVideo.id])
 
+  // ─────────────────────────────────────────────────────────────────────────────
+  // ── Imperative subtitle overlay (matches the working 2x Speed Toast pattern) ──
+  // ─────────────────────────────────────────────────────────────────────────────
+  const subtitleContainerRef = useRef<HTMLDivElement | null>(null)
+
+  useEffect(() => {
+    // Clean up existing container if it exists
+    if (subtitleContainerRef.current) {
+      subtitleContainerRef.current.remove()
+      subtitleContainerRef.current = null
+      subtitleDivRef.current = null
+    }
+
+    if (activeSubKey !== null && videoRef.current?.parentElement) {
+      const parent = videoRef.current.parentElement
+
+      // Use fixed positioning with max z-index to stay above the hardware video plane
+      const container = document.createElement('div')
+      container.style.cssText = [
+        'position:fixed',
+        'bottom:20px',
+        'left:0',
+        'right:0',
+        'display:flex',
+        'justify-content:center',
+        'pointer-events:none',
+        'z-index:2147483647',
+        'will-change:transform',
+        'transition:bottom 0.3s ease',
+        showControls ? 'bottom:112px' : 'bottom:20px',
+      ].join(';')
+
+      if (subtitleLoading) {
+        const loadingSpan = document.createElement('span')
+        loadingSpan.style.cssText = [
+          "font-family:'Inter',system-ui,sans-serif",
+          'font-size:14px',
+          'color:rgba(255,255,255,0.5)',
+          'background:rgba(0,0,0,0.5)',
+          'padding:4px 12px',
+          'border-radius:999px',
+        ].join(';')
+        loadingSpan.textContent = '⏳ Loading subtitles…'
+        container.appendChild(loadingSpan)
+      } else {
+        const textDiv = document.createElement('div')
+        textDiv.style.cssText = [
+          "font-family:'Inter',system-ui,sans-serif",
+          'font-size:26px',
+          'font-weight:600',
+          'color:white',
+          'background-color:rgba(0, 0, 0, 0.65)',
+          'padding:6px 22px',
+          'border-radius:12px',
+          'backdrop-filter:blur(8px)',
+          'border:1px solid rgba(255, 255, 255, 0.1)',
+          'text-shadow:0px 2px 4px rgba(0,0,0,0.5)',
+          'text-align:center',
+          'max-width:85%',
+          'line-height:1.4',
+          'white-space:pre-line',
+          'display:none',
+        ].join(';')
+        container.appendChild(textDiv)
+        subtitleDivRef.current = textDiv
+      }
+
+      parent.appendChild(container)
+      subtitleContainerRef.current = container
+
+      return () => {
+        container.remove()
+        if (subtitleContainerRef.current === container) {
+          subtitleContainerRef.current = null
+          subtitleDivRef.current = null
+        }
+      }
+    }
+  }, [activeSubKey, subtitleLoading]) // Re-run when track changes or loading status changes
+
+  // Update subtitle position when controls show/hide
+  useEffect(() => {
+    if (subtitleContainerRef.current) {
+      subtitleContainerRef.current.style.bottom = showControls ? '112px' : '20px'
+    }
+  }, [showControls])
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // ── Subtitle track state ──
+  // ─────────────────────────────────────────────────────────────────────────────
+
+
   const showVolumeToast = (vol: number, muted: boolean) => {
     setVolumePopup({ show: true, volume: vol, isMuted: muted, id: Date.now() })
     setTimeout(() => {
@@ -225,12 +386,30 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
     }, 1000)
   }
 
-  const showTrackToast = (type: 'audio' | 'subtitle', text: string) => {
+  const showTrackToast = (type: 'audio' | 'subtitle' | 'aspect', text: string) => {
     const id = Date.now()
     setTrackPopup({ show: true, type, text, id })
     setTimeout(() => {
       setTrackPopup(prev => prev.id === id ? { ...prev, show: false } : prev)
     }, 1500)
+  }
+
+  const cycleAspectRatio = () => {
+    if (videoRef.current?.parentElement && !document.fullscreenElement) {
+      videoRef.current.parentElement.requestFullscreen().catch((err) => console.log(err))
+    }
+    
+    setAspectMode(prev => {
+      const nextIdx = (ASPECT_MODES.indexOf(prev) + 1) % ASPECT_MODES.length;
+      const mode = ASPECT_MODES[nextIdx];
+      
+      let label = 'Fit'
+      if (mode === 'cover') label = 'Zoom'
+      if (mode === 'fill') label = 'Stretch'
+      
+      showTrackToast('aspect', label)
+      return mode;
+    });
   }
 
   // Dedicated Keyboard Shortcuts Effect
@@ -250,6 +429,71 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
             videoRef.current.playbackRate = 2
             if (audioRef.current) audioRef.current.playbackRate = 2
             spaceHoldTimerRef.current = null
+            // Imperatively inject toast into the fullscreen container so it is
+            // always visible regardless of React stacking context or showControls.
+            if (!speedToastRef.current) {
+              // Inject keyframe animation once
+              const styleId = '__speed_toast_style__'
+              if (!document.getElementById(styleId)) {
+                const s = document.createElement('style')
+                s.id = styleId
+                s.textContent = `
+                  @keyframes _speedToastIn {
+                    from { opacity:0; transform:translateY(-6px); }
+                    to   { opacity:1; transform:translateY(0); }
+                  }
+                  .__speed_toast {
+                    animation: _speedToastIn 0.18s ease-out forwards;
+                  }
+                `
+                document.head.appendChild(s)
+              }
+
+              // Outer wrapper: full-width row, flex-centered — guarantees pixel-perfect centering
+              const wrapper = document.createElement('div')
+              wrapper.style.cssText = [
+                'position:fixed',
+                'top:40px',
+                'left:0',
+                'right:0',
+                'display:flex',
+                'justify-content:center',
+                'z-index:2147483647',
+                'pointer-events:none',
+              ].join(';')
+
+              const toast = document.createElement('div')
+              toast.className = '__speed_toast'
+              toast.style.cssText = [
+                'background:rgba(0,0,0,0.5)',
+                'backdrop-filter:blur(16px)',
+                '-webkit-backdrop-filter:blur(16px)',
+                'border:1px solid rgba(255,255,255,0.08)',
+                'color:rgba(255,255,255,0.95)',
+                'font-size:13px',
+                'font-family:Inter,system-ui,sans-serif',
+                'font-weight:700',
+                'letter-spacing:0.04em',
+                'padding:7px 16px',
+                'border-radius:8px',
+                'display:flex',
+                'align-items:center',
+                'gap:8px',
+                'pointer-events:none',
+                'box-shadow:0 8px 32px rgba(0,0,0,0.45)',
+                'white-space:nowrap',
+              ].join(';')
+              toast.innerHTML = `
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="opacity:0.85">
+                  <polygon points="13 19 22 12 13 5 13 19"></polygon>
+                  <polygon points="2 19 11 12 2 5 2 19"></polygon>
+                </svg>
+                <span>2× Speed</span>
+              `
+              wrapper.appendChild(toast)
+              ;(videoRef.current.parentElement || document.body).appendChild(wrapper)
+              speedToastRef.current = wrapper
+            }
           }
         }, 350)
       }
@@ -322,15 +566,18 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
           break
         }
         case 'KeyF': toggleFullscreen(); break
+        case 'KeyR': cycleAspectRatio(); break
         case 'KeyN': if (currentVideo.type === 'series' && hasNextEpisode) playNextEpisode(); break
         case 'KeyS':
           if (availableSubtitles.length > 0) {
-            const options = [null, ...availableSubtitles.map(s => s.idx)]
-            const currentIndex = options.indexOf(currentSubtitle)
-            const nextIdx = options[(currentIndex + 1) % options.length]
-            selectSubtitleTrack(nextIdx)
-            const label = nextIdx === null ? 'Off' : availableSubtitles.find(s => s.idx === nextIdx)?.label || 'On'
-            showTrackToast('subtitle', label)
+            const subOptions = [
+              { id: null, label: 'Off' },
+              ...availableSubtitles.map(s => ({ id: s.id, label: s.label }))
+            ]
+            const currentIndex = subOptions.findIndex(o => o.id === activeSubKey)
+            const next = subOptions[(currentIndex + 1) % subOptions.length]
+            selectSubtitleTrack(next.id)
+            showTrackToast('subtitle', next.label)
           } else {
             showTrackToast('subtitle', 'None Available')
           }
@@ -384,6 +631,11 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
           setIsHolding2x(false)
           if (videoRef.current) videoRef.current.playbackRate = playbackRate
           if (audioRef.current) audioRef.current.playbackRate = playbackRate
+        }
+        // Always remove the imperative toast on space release
+        if (speedToastRef.current) {
+          speedToastRef.current.remove()
+          speedToastRef.current = null
         }
       }
 
@@ -593,16 +845,53 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
     setShowSpeedMenu(false)
   }
 
-  const selectSubtitleTrack = (index: number | null) => {
-    if (videoRef.current?.textTracks) {
-      const tTracks = videoRef.current.textTracks
-      for (let i = 0; i < tTracks.length; i++) {
-        tTracks[i].mode = i === index ? 'showing' : 'hidden'
-      }
-      setCurrentSubtitle(index)
+  const selectSubtitleTrack = async (key: string | null) => {
+    if (key === null) {
+      activeSubKeyRef.current = null
+      setActiveSubKey(null)
+      setCurrentSubtitle(null)
+      setSubtitleLoading(false)
+      subtitleCuesRef.current = []
+      if (subtitleDivRef.current) subtitleDivRef.current.textContent = ''
       setShowMediaMenu(false)
+      return
+    }
+
+    setActiveSubKey(key)
+    setCurrentSubtitle(0)
+    setSubtitleLoading(true)
+    setShowMediaMenu(false)
+    activeSubKeyRef.current = key
+    if (subtitleDivRef.current) subtitleDivRef.current.textContent = ''
+
+    try {
+      let vttPath = convertedSubPaths.get(key) || null
+      if (!vttPath) {
+        const isExternal = key === 'external-0'
+        const trackIndex = isExternal ? 0 : parseInt(key.replace('embedded-', ''), 10)
+        const sourceFile = isExternal ? (subtitlePath || currentVideo.file_path) : currentVideo.file_path
+        vttPath = await window.api.preConvertSubtitle(sourceFile, trackIndex, isExternal)
+        if (vttPath) setConvertedSubPaths(prev => new Map(prev).set(key, vttPath!))
+      }
+
+      if (!vttPath) { setSubtitleLoading(false); return }
+
+      // Fetch and parse VTT into memory once for high-speed DOM rendering
+      const res = await fetch(`media://file/${encodeURIComponent(vttPath)}`)
+      const text = await res.text()
+      
+      // Guard: ignore stale response if user switched tracks during conversion
+      if (activeSubKeyRef.current !== key) return
+      
+      subtitleCuesRef.current = parseVTT(text)
+      console.log('[Subtitle] Loaded', subtitleCuesRef.current.length, 'cues for', key)
+    } catch (err) {
+      console.error('[Subtitle] Failed to load cues:', err)
+    } finally {
+      if (activeSubKeyRef.current === key) setSubtitleLoading(false)
     }
   }
+
 
   const handleCustomAudioSeekSync = (time: number) => {
     const trackObj = availableAudio.find(a => a.id === selectedAudioId)
@@ -706,7 +995,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
 
   return (
     <div 
-      className="fixed inset-0 z-50 bg-black flex flex-col items-center justify-center group overflow-hidden"
+      className={`fixed inset-0 z-50 bg-black flex flex-col items-center justify-center group overflow-hidden ${!showControls ? 'cursor-none' : ''}`}
       onMouseMove={(e) => {
         setShowControls(true)
         clearTimeout(window.controlsTimeout)
@@ -727,17 +1016,28 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
       <video
         ref={videoRef}
         src={`media://file/${encodeURIComponent(currentVideo.file_path)}`}
-        className="max-h-full w-full outline-none"
+        className={`w-full h-full outline-none ${showControls ? 'subs-up' : 'subs-down'}`}
+        style={{ objectFit: aspectMode, clipPath: 'inset(0px)' }}
         onTimeUpdate={() => {
           if (!isSeeking && videoRef.current) {
-            // Aggressively throttle the incredibly heavy state update to maximum 4 times a second 
-            // rather than firing up to 60 times a second and completely stalling the Chromium GPU pipeline with massive Garbage Collection
+            // Throttle React state to 4×/sec to reduce GC pressure on Chromium GPU pipeline
             const now = Date.now()
             if (now - lastTimeUpdateRef.current >= 250) {
               setCurrentTime(videoRef.current.currentTime)
               lastTimeUpdateRef.current = now
             }
             timeRef.current = videoRef.current.currentTime
+
+            // Custom subtitle overlay — direct DOM mutation, zero React re-render
+            if (subtitleDivRef.current && activeSubKeyRef.current !== null) {
+              const t = videoRef.current.currentTime
+              const cue = subtitleCuesRef.current.find(c => t >= c.start && t <= c.end)
+              const newText = cue ? cue.text : ''
+              if (subtitleDivRef.current.textContent !== newText) {
+                subtitleDivRef.current.textContent = newText
+                subtitleDivRef.current.style.display = newText ? 'block' : 'none'
+              }
+            }
           }
         }}
         onDurationChange={() => {
@@ -782,28 +1082,8 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
           const error = (e.target as HTMLVideoElement).error
           console.error('Video Error Details:', error?.message, error?.code)
         }}
-        crossOrigin="anonymous"
         autoPlay
       >
-        {subtitlePath && (
-          <track 
-            label="External SRT" 
-            kind="subtitles" 
-            srcLang="en" 
-            src={`subtitle://file/${encodeURIComponent(subtitlePath)}?track=0`} 
-            default={embeddedSubs.length === 0}
-          />
-        )}
-        {embeddedSubs.map((sub) => (
-          <track
-            key={`embedded-${sub.index}`}
-            label={sub.title || sub.language || `Track ${sub.index}`}
-            kind="subtitles"
-            srcLang={sub.language !== 'Unknown' ? sub.language : undefined}
-            src={`subtitle://file/${encodeURIComponent(currentVideo.file_path)}?track=${sub.index}`}
-            default={false}
-          />
-        ))}
       </video>
 
       <style>{`
@@ -813,25 +1093,10 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
           70% { opacity: 1; transform: scale(1.1); }
           100% { opacity: 0; transform: scale(1.15); }
         }
-        .animate-seek {
-          animation: seekAnim 1.2s ease-in-out forwards;
-        }
-
-        /* Dynamic Subtitle Positioning on Chromium Native Element */
-        video::-webkit-media-text-track-container {
-          transform: translateY(${showControls ? '-95px' : '-20px'}) !important;
-          transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1) !important;
-        }
-        /* Override default browser subtitle formatting */
-        video::cue {
-          font-family: 'Inter', system-ui, sans-serif !important;
-          font-size: 28px !important;
-          font-weight: 600 !important;
-          text-shadow: 0px 2px 4px rgba(0,0,0,0.9), 0px 4px 12px rgba(0,0,0,0.7) !important;
-          background-color: transparent !important;
-          background: transparent !important;
-        }
+        .animate-seek { animation: seekAnim 1.2s ease-in-out forwards; }
       `}</style>
+
+      {/* Subtitle overlay is now injected imperatively via useEffect below — not rendered as JSX */}
 
       {/* Seek Popup Overlay */}
       {seekPopup.show && (
@@ -876,32 +1141,22 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
       {trackPopup.show && (
         <div 
           key={`track-${trackPopup.id}`}
-          className="absolute inset-0 flex items-center justify-center pointer-events-none z-50"
+          className="absolute pointer-events-none z-50 bottom-32 left-1/2 -translate-x-1/2"
         >
-          <div className="bg-black/60 text-white font-bold px-8 py-5 rounded-3xl backdrop-blur-md flex flex-col justify-center items-center animate-seek shadow-2xl border border-white/10 space-y-2">
-            {trackPopup.type === 'audio' ? <Music size={32} className="text-primary mb-1" /> : <Subtitles size={32} className="text-primary mb-1" />}
-            <span className="text-[17px] font-bold tracking-wide text-center" style={{ maxWidth: '280px' }}>
-              {trackPopup.type === 'audio' ? 'Audio' : 'Subtitle'}: {trackPopup.text}
+          <div className="bg-black/60 text-white font-bold backdrop-blur-md items-center animate-seek shadow-2xl border border-white/10 flex flex-row space-x-2 px-5 py-2.5 rounded-full">
+            {trackPopup.type === 'audio' ? <Music size={20} className="text-primary" /> 
+             : trackPopup.type === 'subtitle' ? <Subtitles size={20} className="text-primary" />
+             : trackPopup.type === 'aspect' && aspectMode === 'cover' ? <Crop size={20} className="text-primary" />
+             : trackPopup.type === 'aspect' && aspectMode === 'fill' ? <RectangleHorizontal size={20} className="text-primary" />
+             : <Monitor size={20} className="text-primary" />}
+            <span className="text-sm font-bold tracking-wide text-center" style={{ maxWidth: '280px' }}>
+              {trackPopup.type === 'audio' ? 'Audio' : trackPopup.type === 'subtitle' ? 'Subtitle' : 'Aspect'}: {trackPopup.text}
             </span>
           </div>
         </div>
       )}
 
-      {/* 2x Hold Indicator */}
-      {isHolding2x && (
-        <div className="absolute top-10 left-1/2 -translate-x-1/2 bg-black/50 backdrop-blur-md text-white/90 text-sm font-bold tracking-wide px-4 py-1.5 rounded-full flex items-center space-x-2 z-50 pointer-events-none animate-in slide-in-from-top-2 fade-in duration-200">
-          <span>Playing at 2x speed</span>
-          <FastForward size={16} />
-        </div>
-      )}
-
-      {/* 2x Reverse Hold Indicator */}
-      {isHoldingRev2x && (
-        <div className="absolute top-10 left-1/2 -translate-x-1/2 bg-black/50 backdrop-blur-md text-white/90 text-sm font-bold tracking-wide px-4 py-1.5 rounded-full flex items-center space-x-2 z-50 pointer-events-none animate-in slide-in-from-top-2 fade-in duration-200">
-          <Rewind size={16} />
-          <span>Rewinding at 2x speed</span>
-        </div>
-      )}
+      {/* 2x / Rev2x indicators are now injected imperatively via speedToastRef — no JSX needed here */}
 
       {/* Buffering Indicator */}
       {isBuffering && (
@@ -1002,20 +1257,23 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
                               Off
                             </span>
                           </button>
-                          {availableSubtitles.map((track) => (
-                            <button
-                              key={track.idx}
-                              onClick={(e) => { e.stopPropagation(); selectSubtitleTrack(track.idx); }}
-                              className="w-full flex items-center space-x-3 py-2 text-left group"
-                            >
-                              <div className="w-4 flex justify-center">
-                                                {currentSubtitle === track.idx && <Check size={16} strokeWidth={3} className="text-primary" />}
-                              </div>
-                              <span className={`text-[15px] transition-colors ${currentSubtitle === track.idx ? 'text-white font-medium drop-shadow' : 'text-gray-400 group-hover:text-white'}`}>
-                                {track.label}
-                              </span>
-                            </button>
-                          ))}
+                          {availableSubtitles.map((track) => {
+                              const isActive = activeSubKey !== null && activeSubKey === track.id
+                              return (
+                              <button
+                                key={track.idx}
+                                onClick={(e) => { e.stopPropagation(); selectSubtitleTrack(track.id); }}
+                                className="w-full flex items-center space-x-3 py-2 text-left group"
+                              >
+                                <div className="w-4 flex justify-center">
+                                  {isActive && <Check size={16} strokeWidth={3} className="text-primary" />}
+                                </div>
+                                <span className={`text-[15px] transition-colors ${isActive ? 'text-white font-medium drop-shadow' : 'text-gray-400 group-hover:text-white'}`}>
+                                  {track.label}
+                                </span>
+                              </button>
+                              )
+                            })}
                         </div>
                       </div>
                     )}
@@ -1155,6 +1413,15 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
           </div>
 
           <div className="flex items-center space-x-6">
+            <button 
+              onClick={(e) => { e.stopPropagation(); cycleAspectRatio(); }}
+              className="text-white hover:text-primary transition-colors flex items-center"
+              title="Aspect Ratio (R)"
+            >
+              {aspectMode === 'cover' ? <Crop size={22} className="opacity-90 hover:opacity-100" />
+               : aspectMode === 'fill' ? <RectangleHorizontal size={22} className="opacity-90 hover:opacity-100" />
+               : <Monitor size={22} className="opacity-90 hover:opacity-100" />}
+            </button>
             <div className="relative flex items-center">
               {showSpeedMenu && (
                 <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-6 bg-gray-900 rounded-lg shadow-xl border border-gray-700 overflow-hidden min-w-[120px] z-50">

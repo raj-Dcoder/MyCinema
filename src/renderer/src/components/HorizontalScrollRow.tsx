@@ -1,4 +1,4 @@
-import React, { useRef, useState, useEffect } from 'react'
+import React, { useRef, useState, useEffect, useCallback } from 'react'
 import { ChevronLeft, ChevronRight } from 'lucide-react'
 
 interface HorizontalScrollRowProps {
@@ -9,58 +9,79 @@ const HorizontalScrollRow: React.FC<HorizontalScrollRowProps> = ({ children }) =
   const scrollRef = useRef<HTMLDivElement>(null)
   const [showLeft, setShowLeft] = useState(false)
   const [showRight, setShowRight] = useState(false)
+  const [isHovered, setIsHovered] = useState(false)
 
-  const checkScroll = () => {
+  const checkScroll = useCallback(() => {
     if (!scrollRef.current) return
     const { scrollLeft, scrollWidth, clientWidth } = scrollRef.current
     setShowLeft(scrollLeft > 2)
     setShowRight(scrollLeft < scrollWidth - clientWidth - 2)
-  }
+  }, [])
 
   useEffect(() => {
     checkScroll()
+    const el = scrollRef.current
+    if (el) el.addEventListener('scroll', checkScroll, { passive: true })
     window.addEventListener('resize', checkScroll)
-    return () => window.removeEventListener('resize', checkScroll)
-  }, [children])
+    return () => {
+      if (el) el.removeEventListener('scroll', checkScroll)
+      window.removeEventListener('resize', checkScroll)
+    }
+  }, [children, checkScroll])
 
   const scroll = (direction: 'left' | 'right') => {
-    if (scrollRef.current) {
-      const scrollAmount = scrollRef.current.clientWidth * 0.75
-      scrollRef.current.scrollBy({
-        left: direction === 'left' ? -scrollAmount : scrollAmount,
-        behavior: 'smooth'
-      })
-      setTimeout(checkScroll, 300)
-    }
+    if (!scrollRef.current) return
+    const scrollAmount = scrollRef.current.clientWidth * 0.75
+    scrollRef.current.scrollBy({
+      left: direction === 'left' ? -scrollAmount : scrollAmount,
+      behavior: 'smooth'
+    })
+    setTimeout(checkScroll, 350)
   }
 
   return (
-    <div className="relative group/row -mx-8 px-8">
-      {showLeft && (
-        <button 
-          onClick={() => scroll('left')}
-          className="absolute left-0 top-0 bottom-6 z-10 w-24 bg-gradient-to-r from-background via-background/90 to-transparent opacity-0 group-hover/row:opacity-100 transition-opacity flex items-center justify-start pl-2 text-white hover:text-primary cursor-pointer"
-        >
-          <ChevronLeft size={48} className="stroke-[3px] drop-shadow-[0_0_8px_rgba(0,0,0,0.8)] hover:scale-110 transition-transform" />
-        </button>
-      )}
-      
-      <div 
-        ref={scrollRef} 
-        onScroll={checkScroll}
+    <div
+      className="relative -mx-8 px-8"
+      onMouseEnter={() => setIsHovered(true)}
+      onMouseLeave={() => setIsHovered(false)}
+    >
+      {/* Left scroll button */}
+      <button
+        onClick={() => scroll('left')}
+        aria-label="Scroll left"
+        style={{
+          opacity: showLeft ? (isHovered ? 1 : 0.45) : 0,
+          pointerEvents: showLeft ? 'auto' : 'none',
+          transition: 'opacity 0.25s ease, transform 0.15s ease',
+        }}
+        className="scroll-nav-btn scroll-nav-btn--left"
+      >
+        <span className="scroll-nav-btn__track" />
+        <ChevronLeft size={28} strokeWidth={2.5} className="scroll-nav-btn__icon" />
+      </button>
+
+      {/* Scrollable row */}
+      <div
+        ref={scrollRef}
         className="flex overflow-x-auto gap-4 pb-6 scrollbar-hide scroll-smooth"
       >
         {children}
       </div>
 
-      {showRight && (
-        <button 
-          onClick={() => scroll('right')}
-          className="absolute right-0 top-0 bottom-6 z-10 w-24 bg-gradient-to-l from-background via-background/90 to-transparent opacity-0 group-hover/row:opacity-100 transition-opacity flex items-center justify-end pr-2 text-white hover:text-primary cursor-pointer"
-        >
-          <ChevronRight size={48} className="stroke-[3px] drop-shadow-[0_0_8px_rgba(0,0,0,0.8)] hover:scale-110 transition-transform" />
-        </button>
-      )}
+      {/* Right scroll button */}
+      <button
+        onClick={() => scroll('right')}
+        aria-label="Scroll right"
+        style={{
+          opacity: showRight ? (isHovered ? 1 : 0.45) : 0,
+          pointerEvents: showRight ? 'auto' : 'none',
+          transition: 'opacity 0.25s ease, transform 0.15s ease',
+        }}
+        className="scroll-nav-btn scroll-nav-btn--right"
+      >
+        <span className="scroll-nav-btn__track" />
+        <ChevronRight size={28} strokeWidth={2.5} className="scroll-nav-btn__icon" />
+      </button>
     </div>
   )
 }

@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react'
 import { Video } from '../types'
 import VideoCard from '../components/VideoCard'
 import SeriesModal from '../components/SeriesModal'
+import HorizontalScrollRow from '../components/HorizontalScrollRow'
 
 interface HomeProps {
   onPlay: (video: Video) => void
@@ -33,8 +34,10 @@ const Home: React.FC<HomeProps> = ({ onPlay, refreshKey }) => {
       }
     }
     
-    setContinueWatching(uniqueCW)
-    setRecentMovies(allVideos.filter(v => v.type === 'movie').slice(0, 10))
+    // Exclude short clips (< 1 hour) — they live in the Videos tab
+    const isFullLength = (v: Video) => v.type === 'movie' && (!v.duration || v.duration >= 3600)
+    setContinueWatching(uniqueCW.filter(v => v.type === 'series' || isFullLength(v)))
+    setRecentMovies(allVideos.filter(isFullLength).slice(0, 10))
     
     // Also unique series for "Recently Added TV Shows"
     const recentS: Video[] = []
@@ -64,19 +67,19 @@ const Home: React.FC<HomeProps> = ({ onPlay, refreshKey }) => {
             Continue Watching
             <span className="ml-2 w-2 h-2 rounded-full bg-primary" />
           </h2>
-          <div className="flex overflow-x-auto gap-4 pb-6 scrollbar-hide">
+          <HorizontalScrollRow>
             {continueWatching.map(video => (
               <div key={video.id} className="w-36 md:w-44 lg:w-52 flex-shrink-0">
                 <VideoCard video={video} onPlay={onPlay} />
               </div>
             ))}
-          </div>
+          </HorizontalScrollRow>
         </section>
       )}
 
       <section>
         <h2 className="text-2xl font-bold mb-6">Recently Added Movies</h2>
-        <div className="flex overflow-x-auto gap-4 pb-6 scrollbar-hide">
+        <HorizontalScrollRow>
           {recentMovies.map(video => (
             <div key={video.id} className="w-36 md:w-44 lg:w-52 flex-shrink-0">
               <VideoCard video={video} onPlay={onPlay} />
@@ -87,12 +90,12 @@ const Home: React.FC<HomeProps> = ({ onPlay, refreshKey }) => {
               No movies found. Add a folder to start scanning.
             </p>
           )}
-        </div>
+        </HorizontalScrollRow>
       </section>
 
       <section>
         <h2 className="text-2xl font-bold mb-6">Recently Added TV Shows</h2>
-        <div className="flex overflow-x-auto gap-4 pb-6 scrollbar-hide">
+        <HorizontalScrollRow>
           {recentSeries.map(video => (
             <div key={video.id} className="w-36 md:w-44 lg:w-52 flex-shrink-0">
               <VideoCard 
@@ -109,7 +112,7 @@ const Home: React.FC<HomeProps> = ({ onPlay, refreshKey }) => {
               No TV shows found. Add a folder to start scanning.
             </p>
           )}
-        </div>
+        </HorizontalScrollRow>
       </section>
 
       {selectedSeries && (

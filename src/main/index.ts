@@ -7,8 +7,86 @@ import fs from 'fs'
 import ffmpeg from 'fluent-ffmpeg'
 import ffmpegStatic from 'ffmpeg-static'
 import { PassThrough } from 'stream'
-
+import { autoUpdater } from 'electron-updater'
 import path from 'path'
+import { pathToFileURL } from 'url'
+
+// ─── File-system Watcher Registry ────────────────────────────────────────────
+const VIDEO_EXTS = new Set(['.mp4', '.mkv', '.avi', '.mov', '.webm'])
+const folderWatchers = new Map<string, fs.FSWatcher>()
+
+/**
+ * Debounce helper — collapses rapid fire events (e.g. file still being copied)
+ * into a single scan kick-off after `delay` ms of silence.
+ */
+function debounce<T extends (...args: any[]) => void>(fn: T, delay: number): T {
+  let timer: ReturnType<typeof setTimeout>
+  return ((...args: any[]) => {
+    clearTimeout(timer)
+    timer = setTimeout(() => fn(...args), delay)
+  }) as T
+}
+
+function attachFolderWatcher(folderPath: string): void {
+  if (folderWatchers.has(folderPath)) return // already watching
+  if (!fs.existsSync(folderPath)) return
+
+  const triggerRescan = debounce(async () => {
+    console.log(`[Watcher] Change detected in "${folderPath}" — rescanning…`)
+    try {
+      await scanFolder(folderPath)
+      BrowserWindow.getAllWindows().forEach(w => w.webContents.send('library-updated'))
+    } catch (err) {
+      console.error('[Watcher] Rescan error:', err)
+    }
+  }, 3000) // 3 s quiet period before scanning
+
+  try {
+    const watcher = fs.watch(folderPath, { recursive: true }, (_event, filename) => {
+      if (!filename) return
+      const ext = path.extname(filename).toLowerCase()
+      if (VIDEO_EXTS.has(ext)) {
+        console.log(`[Watcher] Video file event: ${filename}`)
+        triggerRescan()
+      }
+    })
+    watcher.on('error', (err) => {
+      console.warn(`[Watcher] Error watching "${folderPath}": ${err.message} — removing watcher`)
+      folderWatchers.delete(folderPath)
+    })
+    folderWatchers.set(folderPath, watcher)
+    console.log(`[Watcher] Now watching: ${folderPath}`)
+  } catch (err) {
+    console.warn(`[Watcher] Could not watch "${folderPath}": ${(err as Error).message}`)
+  }
+}
+
+function detachFolderWatcher(folderPath: string): void {
+  const watcher = folderWatchers.get(folderPath)
+  if (watcher) {
+    watcher.close()
+    folderWatchers.delete(folderPath)
+    console.log(`[Watcher] Stopped watching: ${folderPath}`)
+  }
+}
+
+/**
+ * Startup scan: silently rescan every saved folder in the background.
+ * Runs after the window is visible so it doesn't slow down first-paint.
+ */
+async function runStartupScan(): Promise<void> {
+  const folders = db.getFolders() as any[]
+  if (folders.length === 0) return
+  console.log(`[Startup] Auto-scanning ${folders.length} saved folder(s)…`)
+  for (const folder of folders) {
+    try {
+      await scanFolder(folder.path)
+    } catch (err) {
+      console.error(`[Startup] Scan failed for "${folder.path}":`, err)
+    }
+  }
+  console.log('[Startup] Auto-scan complete.')
+}
 
 const isDev = !app.isPackaged
 const ffmpegExecPath = isDev 
@@ -21,7 +99,6 @@ const ffprobeExecPath = isDev
 
 ffmpeg.setFfmpegPath(ffmpegExecPath)
 ffmpeg.setFfprobePath(ffprobeExecPath)
-import { pathToFileURL } from 'url'
 
 // Register custom protocol as privileged
 // This MUST be called before app is ready
@@ -79,6 +156,9 @@ function createWindow(): void {
 
   mainWindow.on('ready-to-show', () => {
     mainWindow.show()
+    setupAutoUpdater(mainWindow)
+    // Kick off startup scan after window is visible (non-blocking)
+    setImmediate(() => runStartupScan().catch(err => console.error('[Startup] Scan error:', err)))
   })
 
   mainWindow.webContents.setWindowOpenHandler((details) => {
@@ -217,6 +297,10 @@ function registerAudioProtocol(): void {
 
       const cmd = ffmpeg(normalizedPath)
         .setStartTime(start)
+        .inputOptions([
+          '-hwaccel', 'd3d11va',     // Use GPU for video decoding
+          '-hwaccel_output_format', 'nv12' // Keep decoded frames in GPU memory
+        ])
         .outputOptions([
           `-map 0:${trackIndex}`,
           '-c:a libmp3lame',
@@ -225,7 +309,11 @@ function registerAudioProtocol(): void {
         ])
         .on('error', (err) => {
           if (!err.message.includes('Output stream closed') && !err.message.includes('SIGKILL') && !err.message.includes('The operation was aborted')) {
-            console.error('FFmpeg audio extr error:', err.message)
+            // Gracefully fall back — d3d11va may not be supported on all machines
+            // so we silently swallow init errors and let the stream naturally fall back
+            if (!err.message.includes('Cannot load d3d11') && !err.message.includes('No device available')) {
+              console.error('FFmpeg audio extr error:', err.message)
+            }
           }
         })
         
@@ -261,6 +349,10 @@ app.whenReady().then(() => {
   db.initDb()
   electronApp.setAppUserModelId('com.electron')
 
+  // Attach file-system watchers for all already-saved folders
+  const savedFolders = db.getFolders() as any[]
+  savedFolders.forEach(f => attachFolderWatcher(f.path))
+
   app.on('browser-window-created', (_, window) => {
     optimizer.watchWindowShortcuts(window)
   })
@@ -270,6 +362,11 @@ app.whenReady().then(() => {
   app.on('activate', function () {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()
   })
+})
+
+app.on('before-quit', () => {
+  folderWatchers.forEach(w => w.close())
+  folderWatchers.clear()
 })
 
 app.on('window-all-closed', () => {
@@ -338,8 +435,21 @@ ipcMain.handle('get-series-info', (_, seriesName) => {
   return db.getSeriesInfo(seriesName)
 })
 
-ipcMain.handle('scan-folder', async (_, path) => {
-  return await scanFolder(path)
+ipcMain.handle('get-folders', () => {
+  return db.getFolders()
+})
+
+ipcMain.handle('remove-folder', (_, folderPath: string) => {
+  detachFolderWatcher(folderPath) // stop watching before removing
+  db.removeFolder(folderPath)
+  BrowserWindow.getAllWindows().forEach(w => w.webContents.send('library-updated'))
+  return true
+})
+
+ipcMain.handle('scan-folder', async (_, folderPath) => {
+  db.addFolder(folderPath)
+  attachFolderWatcher(folderPath) // start watching immediately after adding
+  return await scanFolder(folderPath)
 })
 
 ipcMain.handle('get-embedded-subtitles', async (_, filePath) => {
@@ -383,3 +493,37 @@ ipcMain.handle('get-subtitles', async (_, filePath) => {
     return null
   }
 })
+
+// ─── Auto Updater Setup ──────────────────────────────────────────────────────
+
+ipcMain.on('install-update', () => {
+  autoUpdater.quitAndInstall()
+})
+
+function setupAutoUpdater(win: BrowserWindow): void {
+  // Only run auto-update in packaged (production) builds
+  if (!app.isPackaged) return
+
+  autoUpdater.autoDownload = true
+  autoUpdater.autoInstallOnAppQuit = true
+
+  autoUpdater.on('update-available', (info) => {
+    win.webContents.send('update-available', { version: info.version })
+  })
+
+  autoUpdater.on('download-progress', (progress) => {
+    win.webContents.send('update-progress', { percent: Math.round(progress.percent) })
+  })
+
+  autoUpdater.on('update-downloaded', () => {
+    win.webContents.send('update-downloaded')
+  })
+
+  autoUpdater.on('error', (err) => {
+    console.error('Auto updater error:', err.message)
+  })
+
+  // Check now and every 2 hours afterwards
+  autoUpdater.checkForUpdates().catch(err => console.error('Update check failed:', err))
+  setInterval(() => autoUpdater.checkForUpdates().catch(() => {}), 2 * 60 * 60 * 1000)
+}

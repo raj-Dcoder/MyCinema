@@ -201,7 +201,12 @@ export async function getEmbeddedSubtitles(filePath: string): Promise<any[]> {
         resolve([])
         return
       }
-      const subs = metadata.streams.filter(s => s.codec_type === 'subtitle')
+      const subs = metadata.streams.filter(s => 
+        s.codec_type === 'subtitle' && 
+        s.codec_name !== 'hdmv_pgs_subtitle' && 
+        s.codec_name !== 'dvd_subtitle' &&
+        s.codec_name !== 'dvbsub'
+      )
       const formatted = subs.map(s => ({
         index: s.index,
         language: s.tags?.language || 'Unknown',

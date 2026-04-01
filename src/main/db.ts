@@ -34,6 +34,12 @@ export function initDb() {
       updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY (video_id) REFERENCES videos(id) ON DELETE CASCADE
     );
+
+    CREATE TABLE IF NOT EXISTS watched_folders (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      path TEXT UNIQUE NOT NULL,
+      added_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
   `)
 }
 
@@ -153,6 +159,24 @@ export function getSeriesInfo(seriesName: string) {
     WHERE series_name = ? 
     ORDER BY season ASC, episode ASC
   `).all(seriesName)
+}
+
+export function getFolders() {
+  return db.prepare('SELECT * FROM watched_folders ORDER BY added_at ASC').all()
+}
+
+export function addFolder(folderPath: string) {
+  return db.prepare(`
+    INSERT INTO watched_folders (path) VALUES (?)
+    ON CONFLICT(path) DO NOTHING
+  `).run(folderPath)
+}
+
+export function removeFolder(folderPath: string) {
+  // Delete all videos under this folder path
+  db.prepare(`DELETE FROM videos WHERE file_path LIKE ?`).run(`${folderPath}%`)
+  // Delete the folder record itself
+  db.prepare(`DELETE FROM watched_folders WHERE path = ?`).run(folderPath)
 }
 
 export default db

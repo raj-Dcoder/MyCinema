@@ -16,3 +16,8 @@ win:
 nsis:
   oneClick: false
   allowToChangeInstallationDirectory: true
+publish:
+  provider: github
+  owner: raj-Dcoder
+  repo: MyCinema
+  releaseType: release

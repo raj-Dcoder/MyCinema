@@ -11,7 +11,9 @@ const Movies: React.FC<MoviesProps> = ({ onPlay }) => {
 
   const fetchMovies = async () => {
     const allVideos: Video[] = await window.api.getVideos()
-    setMovies(allVideos.filter(v => v.type === 'movie'))
+    // Exclude short clips (< 1 hour) — those live under the Videos tab
+    // Videos with 0 / null duration haven't been probed yet, keep them here for now
+    setMovies(allVideos.filter(v => v.type === 'movie' && (v.duration === 0 || !v.duration || v.duration >= 3600)))
   }
 
   useEffect(() => {

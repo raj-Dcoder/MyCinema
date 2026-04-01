@@ -14,6 +14,12 @@ interface Api {
   getEmbeddedAudio: (filePath: string) => Promise<any[]>
   onLibraryUpdated: (callback: () => void) => void
   removeAllLibraryUpdateListeners: () => void
+  getFolders: () => Promise<any[]>
+  removeFolder: (folderPath: string) => Promise<boolean>
+  onUpdateAvailable: (callback: (info: { version: string }) => void) => void
+  onUpdateProgress: (callback: (info: { percent: number }) => void) => void
+  onUpdateDownloaded: (callback: () => void) => void
+  installUpdate: () => void
 }
 
 declare global {

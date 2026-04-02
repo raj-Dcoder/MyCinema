@@ -41,7 +41,7 @@ const HorizontalScrollRow: React.FC<HorizontalScrollRowProps> = ({ children }) =
 
   return (
     <div
-      className="relative -mx-8 px-8"
+      className="relative -mx-8 -mt-4"
       onMouseEnter={() => setIsHovered(true)}
       onMouseLeave={() => setIsHovered(false)}
     >
@@ -63,7 +63,7 @@ const HorizontalScrollRow: React.FC<HorizontalScrollRowProps> = ({ children }) =
       {/* Scrollable row */}
       <div
         ref={scrollRef}
-        className="flex overflow-x-auto gap-4 pb-6 scrollbar-hide scroll-smooth"
+        className="flex overflow-x-auto gap-4 px-8 pt-4 pb-6 scrollbar-hide scroll-smooth"
       >
         {children}
       </div>

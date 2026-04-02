@@ -46,9 +46,9 @@ const VideoCard: React.FC<VideoCardProps> = ({ video, onPlay }) => {
         </div>
 
         {progressPercent > 0 && (
-          <div className="absolute bottom-0 left-0 right-0 h-1 bg-gray-600">
+          <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-gray-600/40">
             <div 
-              className="h-full bg-primary transition-all" 
+              className="h-full bg-primary transition-all shadow-[0_0_8px_rgba(229,9,20,0.4)]" 
               style={{ width: `${progressPercent}%` }}
             />
           </div>
@@ -56,10 +56,10 @@ const VideoCard: React.FC<VideoCardProps> = ({ video, onPlay }) => {
       </div>
       
       <div className="px-1">
-        <h3 className="font-semibold text-sm line-clamp-1">
+        <h3 className="font-semibold text-sm line-clamp-1 tracking-tight">
           {video.type === 'series' && video.series_name ? video.series_name : video.title}
         </h3>
-        <p className="text-xs text-muted">
+        <p className="text-[0.75rem] text-muted font-medium tracking-wide uppercase opacity-80">
           {video.type === 'series' 
             ? `S${video.season?.toString().padStart(2, '0')} E${video.episode?.toString().padStart(2, '0')}` 
             : 'Movie'}

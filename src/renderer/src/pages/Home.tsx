@@ -63,10 +63,13 @@ const Home: React.FC<HomeProps> = ({ onPlay, refreshKey }) => {
     <div className="space-y-12">
       {continueWatching.length > 0 && (
         <section>
-          <h2 className="text-2xl font-bold mb-6 flex items-center">
-            Continue Watching
-            <span className="ml-2 w-2 h-2 rounded-full bg-primary" />
-          </h2>
+          <div className="mb-6">
+            <h2 className="text-2xl font-bold flex items-center group cursor-default">
+              <span className="bg-clip-text text-transparent bg-gradient-to-r from-white to-white/70 group-hover:to-white transition-all">
+                Continue Watching
+              </span>
+            </h2>
+          </div>
           <HorizontalScrollRow>
             {continueWatching.map(video => (
               <div key={video.id} className="w-36 md:w-44 lg:w-52 flex-shrink-0">

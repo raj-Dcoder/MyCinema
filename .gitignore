@@ -104,3 +104,4 @@ out/
 *.exe
 *.db
 test-*.js
+RELEASE_GUIDE.md

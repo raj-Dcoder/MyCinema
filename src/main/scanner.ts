@@ -1,7 +1,7 @@
 import fs from 'fs'
 import path from 'path'
 import { addVideo, getVideos, updateVideoMetadata, deleteVideo } from './db'
-import { fetchMetadata } from './omdb'
+import { fetchTmdbMetadata } from './tmdb'
 import ffmpeg from 'fluent-ffmpeg'
 import ffmpegStatic from 'ffmpeg-static'
 import ffprobeStatic from 'ffprobe-static'
@@ -43,6 +43,7 @@ interface VideoMetadata {
   series_name?: string
   season?: number
   episode?: number
+  year?: number
 }
 
 async function getAllFiles(dirPath: string, fileList: string[] = []): Promise<string[]> {
@@ -163,24 +164,46 @@ export async function scanFolder(rootPath: string) {
       
       if (isMissingPoster) {
         const searchTitle = metadata.series_name || metadata.title
-        console.log(`[Scanner] Requesting OMDB API for video ${videoId} with title: "${searchTitle}"`)
-        const omdbMetadata = await fetchMetadata(videoId, searchTitle, metadata.type)
-        if (!omdbMetadata || !omdbMetadata.poster_path || omdbMetadata.poster_path === 'N/A') {
+        
+        // Junk title filter: skip GUIDs, hashes, and extremely long descriptive titles
+        const isGuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(searchTitle) || /^[0-9a-f]{32,40}$/i.test(searchTitle.replace(/\s/g, ''));
+        const spaceCount = (searchTitle.match(/ /g) || []).length;
+        const isTooLong = searchTitle.length > 80 && spaceCount > 6;
+        
+        if (isGuid || isTooLong || (spaceCount > 6 && !metadata.series_name)) {
+          console.log(`[Scanner] Skipping TMDB for "${searchTitle}" (likely junk/personal file)`)
+          continue;
+        }
+
+        console.log(`[Scanner] Requesting TMDB API for video ${videoId} with title: "${searchTitle}" ${metadata.year ? `(${metadata.year})` : ''}`)
+        
+        // Anti-rate-limit throttle: 500ms between requests
+        await new Promise(resolve => setTimeout(resolve, 500))
+        
+        const tmdbMetadata = await fetchTmdbMetadata(videoId, searchTitle, metadata.type, metadata.year)
+        if (!tmdbMetadata || !tmdbMetadata.poster_path) {
+           console.log(`[Scanner] TMDB search for ${videoId} ("${searchTitle}") yielded no poster or failed.`)
            if (isSnap && currentVideoNode) {
-             console.log(`[Scanner] OMDB failed, maintaining existing -snap.jpg thumbnail for ${videoId}`)
+             // Already have a snap, but let's see if we should try snapping again ONLY if snap is missing from disk
+             if (!fs.existsSync(currentVideoNode.poster_path)) {
+                console.log(`[Scanner] Snap file missing for ${videoId}, re-extracting…`)
+                const snapPath = await extractOfflineThumbnail(filePath, videoId)
+                if (snapPath) {
+                  updateVideoMetadata(videoId, { poster_path: snapPath, overview: null, tmdb_id: null })
+                }
+             }
              continue; // Don't snap again if we already have it!
            }
-           console.log(`[Scanner] OMDB failed or N/A, falling back to FFmpeg screenshot for ${videoId}`)
+           console.log(`[Scanner] Falling back to FFmpeg screenshot for ${videoId}`)
            const snapPath = await extractOfflineThumbnail(filePath, videoId)
            if (snapPath) {
              console.log(`[Scanner] Saving FFmpeg thumbnail to DB for video ${videoId}`)
              const existingMeta = currentVideoNode ? { overview: currentVideoNode.overview, tmdb_id: currentVideoNode.tmdb_id } : { overview: null, tmdb_id: null }
              updateVideoMetadata(videoId, { poster_path: snapPath, overview: existingMeta.overview, tmdb_id: existingMeta.tmdb_id })
-           } else {
-             console.log(`[Scanner] FFmpeg snapshot completely failed for ${videoId}`)
            }
         } else {
-           console.log(`[Scanner] Retrieved official OMDB Poster!`)
+           console.log(`[Scanner] Retrieved official TMDB poster for video ${videoId}!`)
+           updateVideoMetadata(videoId, { poster_path: tmdbMetadata.poster_path, overview: tmdbMetadata.overview, tmdb_id: tmdbMetadata.tmdb_id })
         }
       }
     }
@@ -245,20 +268,31 @@ function parseFilename(filePath: string): VideoMetadata {
 
   // Strip year and everything after it for scene releases
   let cleanName = fileName
+  let year: number | undefined
   const yearMatch = fileName.match(/[._\s(](19|20)\d{2}([._\s)]|$)/)
   if (yearMatch) {
+    year = parseInt(yearMatch[0].replace(/[^0-9]/g, ''))
     cleanName = fileName.substring(0, yearMatch.index).trim()
   }
 
   // Heavy cleaning for pirated site noise
   const noise = [
     /\b\d{3,4}p\b/gi, /\bWEBRip\b/gi, /\bBluRay\b/gi, /\bx264\b/gi, /\bx265\b/gi, /\bh264\b/gi, /\bh265\b/gi,
-    /\bHDR\b/gi, /\bDVDRip\b/gi, /\bBDRip\b/gi, /\bAAC\b/gi, /\bDTS\b/gi, /\bDD5\.1\b/gi, /\b10bit\b/gi, /\bWEB-DL\b/gi,
+    /\bHDR\b/gi, /\bDVDRip\b/gi, /\bBDRip\b/gi, /\bHDRip\b/gi, /\bAAC\b/gi, /\bDTS\b/gi, /\bDD5\.1\b/gi, /\b10bit\b/gi, /\bWEB-DL\b/gi,
+    /\bDirectors?\.Cut\b/gi, /\bRemastered\b/gi, /\bExtended\b/gi, /\bUncut\b/gi, /\bRepack\b/gi, /\bProper\b/gi,
     /\[.*?\]/g, /\(.*?\)/g, /www\..*?\.[a-z]{2,3}/gi, /\bHDHub4u\b/gi, /\bHindi\b/gi, /\bEnglish\b/gi, /\bDual Audio\b/gi, /\bESub\b/gi, /\bHD\b/gi
   ]
   
   noise.forEach(pattern => { cleanName = cleanName.replace(pattern, '') })
   cleanName = cleanName.replace(/[._-]/g, ' ').replace(/\s+/g, ' ').trim()
+
+  // Suffixes that break searches
+  if (cleanName.toLowerCase().endsWith(' the movie')) {
+    cleanName = cleanName.substring(0, cleanName.length - 10).trim()
+  }
+
+  // If title is way too long after cleaning, it's probably a junk file
+  if (cleanName.length > 100) cleanName = cleanName.substring(0, 100).trim()
 
   // Robust Series patterns
   const seriesPatterns = [
@@ -311,6 +345,7 @@ function parseFilename(filePath: string): VideoMetadata {
   return {
     title: cleanName,
     type: 'movie',
-    file_path: filePath
+    file_path: filePath,
+    year
   }
 }

@@ -23,10 +23,28 @@ export function initDb() {
       duration REAL,
       poster_path TEXT,
       overview TEXT,
+      tagline TEXT,
+      genres TEXT,
       tmdb_id INTEGER,
       added_at DATETIME DEFAULT CURRENT_TIMESTAMP
     );
 
+    -- Migration: add tagline and genres if they don't exist
+    PRAGMA table_info(videos);
+  `)
+
+  // Check and add columns if they don't exist
+  const columns = db.prepare("PRAGMA table_info(videos)").all()
+  const columnNames = columns.map((c: any) => c.name)
+
+  if (!columnNames.includes('tagline')) {
+    db.exec("ALTER TABLE videos ADD COLUMN tagline TEXT")
+  }
+  if (!columnNames.includes('genres')) {
+    db.exec("ALTER TABLE videos ADD COLUMN genres TEXT")
+  }
+
+  db.exec(`
     CREATE TABLE IF NOT EXISTS progress (
       video_id INTEGER PRIMARY KEY,
       last_watched_time REAL DEFAULT 0,
@@ -160,10 +178,17 @@ export function getContinueWatching() {
 export function updateVideoMetadata(id: number, metadata: any) {
   const stmt = db.prepare(`
     UPDATE videos
-    SET poster_path = ?, overview = ?, tmdb_id = ?
+    SET poster_path = ?, overview = ?, tagline = ?, genres = ?, tmdb_id = ?
     WHERE id = ?
   `)
-  return stmt.run(metadata.poster_path, metadata.overview, metadata.tmdb_id, id)
+  return stmt.run(
+    metadata.poster_path, 
+    metadata.overview, 
+    metadata.tagline || null, 
+    metadata.genres || null, 
+    metadata.tmdb_id, 
+    id
+  )
 }
 
 export function getSeriesInfo(seriesName: string) {

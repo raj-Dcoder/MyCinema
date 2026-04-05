@@ -1,4 +1,4 @@
-import { app, shell, BrowserWindow, ipcMain, dialog, protocol, net } from 'electron'
+import { app, shell, BrowserWindow, ipcMain, dialog, protocol, net, session } from 'electron'
 import { join } from 'path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import * as db from './db'
@@ -596,6 +596,66 @@ ipcMain.handle('pre-convert-subtitle', async (_, filePath: string, trackIndex: n
 })
 
 
+
+ipcMain.handle('clear-all-data', async () => {
+  try {
+    const { response } = await dialog.showMessageBox({
+      type: 'warning',
+      buttons: ['Cancel', 'Clear Everything'],
+      defaultId: 0,
+      title: 'Clear All Data',
+      message: 'Are you absolutely sure?',
+      detail: 'This will delete your entire library, all watch progress, and reset all settings. This action cannot be undone.',
+      noLink: true
+    })
+
+    if (response === 0) return false
+
+    console.log('[Main] Starting full data wipe...')
+
+    // 1. Close database
+    db.default.close()
+
+    // 2. Clear Electron session (localStorage, cookies, IndexedDB, etc)
+    await session.defaultSession.clearStorageData()
+
+    // 3. Define paths to delete
+    const userData = app.getPath('userData')
+    const toDelete = [
+      join(userData, 'mycinema.db'),
+      join(userData, 'poster_cache'),
+      join(userData, 'posters'),
+      join(userData, 'subtitles'),
+      join(userData, 'window-state.json'),
+      join(userData, 'Local Storage'),
+      join(userData, 'Session Storage'),
+      join(userData, 'Cache'),
+      join(userData, 'Network')
+    ]
+
+    // 4. Delete files/folders
+    for (const p of toDelete) {
+      if (fs.existsSync(p)) {
+        try {
+          fs.rmSync(p, { recursive: true, force: true })
+          console.log(`[Main] Deleted: ${p}`)
+        } catch (e: any) {
+          console.warn(`[Main] Could not delete ${p}: ${e.message}`)
+        }
+      }
+    }
+
+    // 5. Relaunch
+    console.log('[Main] Wipe complete. Relaunching...')
+    app.relaunch()
+    app.exit(0)
+    
+    return true
+  } catch (err) {
+    console.error('[Main] Clear all data failed:', err)
+    return false
+  }
+})
 
 // ─── Auto Updater Setup ──────────────────────────────────────────────────────
 

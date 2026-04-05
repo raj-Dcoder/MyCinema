@@ -7,10 +7,12 @@ import Movies from './pages/Movies'
 import Series from './pages/Series'
 import Settings from './pages/Settings'
 import VideoPlayer from './components/VideoPlayer'
+import DetailScreen from './components/DetailScreen'
 
 const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState<'home' | 'videos' | 'movies' | 'series' | 'settings'>('home')
   const [playingVideo, setPlayingVideo] = useState<Video | null>(null)
+  const [selectedVideo, setSelectedVideo] = useState<Video | null>(null)
   const [homeRefreshKey, setHomeRefreshKey] = useState(0)
   const [updateState, setUpdateState] = useState<{
     status: 'idle' | 'available' | 'downloading' | 'ready'
@@ -37,8 +39,13 @@ const App: React.FC = () => {
     { id: 'home' as const,   label: 'Home',     icon: <HomeIcon size={20} /> },
     { id: 'videos' as const, label: 'Videos',   icon: <VideoIcon size={20} /> },
     { id: 'movies' as const, label: 'Movies',   icon: <Film size={20} /> },
-    { id: 'series' as const, label: 'TV Shows', icon: <Tv size={20} /> },
+    { id: 'series' as const, label: 'Web Series', icon: <Tv size={20} /> },
   ]
+
+  const handlePlayVideo = (video: Video) => {
+    setPlayingVideo(video)
+    setSelectedVideo(null)
+  }
 
   return (
     <div className="flex h-screen bg-background text-text">
@@ -106,13 +113,22 @@ const App: React.FC = () => {
       {/* Main Content */}
       <main className="flex-1 overflow-y-auto bg-background">
         <div className="p-8">
-          {activeTab === 'home'    && <Home onPlay={setPlayingVideo} refreshKey={homeRefreshKey} />}
-          {activeTab === 'videos'  && <Videos onPlay={setPlayingVideo} />}
-          {activeTab === 'movies'  && <Movies onPlay={setPlayingVideo} />}
-          {activeTab === 'series'  && <Series onPlay={setPlayingVideo} />}
+          {activeTab === 'home'    && <Home onPlay={handlePlayVideo} onShowDetail={setSelectedVideo} refreshKey={homeRefreshKey} />}
+          {activeTab === 'videos'  && <Videos onPlay={handlePlayVideo} onShowDetail={setSelectedVideo} />}
+          {activeTab === 'movies'  && <Movies onPlay={handlePlayVideo} onShowDetail={setSelectedVideo} />}
+          {activeTab === 'series'  && <Series onPlay={handlePlayVideo} onShowDetail={setSelectedVideo} />}
           {activeTab === 'settings' && <Settings />}
         </div>
       </main>
+
+      {/* Detail Screen Overlay */}
+      {selectedVideo && (
+        <DetailScreen 
+          video={selectedVideo} 
+          onClose={() => setSelectedVideo(null)} 
+          onPlay={handlePlayVideo}
+        />
+      )}
 
       {/* Video Player Overlay */}
       {playingVideo && (
@@ -127,5 +143,6 @@ const App: React.FC = () => {
     </div>
   )
 }
+
 
 export default App

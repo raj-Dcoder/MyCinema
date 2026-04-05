@@ -84,7 +84,6 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
   const lastReverseStepRef = useRef<number>(0)
   const spaceHoldTimerRef = useRef<NodeJS.Timeout | null>(null)
   const speedToastRef = useRef<HTMLDivElement | null>(null)
-  const mediaMenuTimeoutRef = useRef<NodeJS.Timeout | null>(null)
   const lastTimeUpdateRef = useRef(0)
   // Custom subtitle renderer refs — never triggers React re-renders
   const subtitleDivRef = useRef<HTMLDivElement | null>(null)
@@ -582,7 +581,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
             showTrackToast('subtitle', 'None Available')
           }
           break
-        case 'KeyA':
+        case 'KeyL':
           if (availableAudio.length > 1) {
             const currentIndex = availableAudio.findIndex(a => a.id === selectedAudioId)
             const nextIdx = (currentIndex + 1) % availableAudio.length
@@ -598,18 +597,14 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
         case 'Escape': onClose(); break
         case 'Equal':
         case 'NumpadAdd': {
-          const speeds = [1, 1.25, 1.5, 1.75, 2]
-          const currentIndex = speeds.indexOf(playbackRate)
-          const nextRate = currentIndex < speeds.length - 1 ? speeds[currentIndex + 1] : speeds[speeds.length - 1]
+          const nextRate = Math.min(5, Math.round((playbackRate + 0.1) * 10) / 10)
           changeSpeed(nextRate)
           showSpeedToast(nextRate)
           break
         }
         case 'Minus':
         case 'NumpadSubtract': {
-          const speeds = [1, 1.25, 1.5, 1.75, 2]
-          const currentIndex = speeds.indexOf(playbackRate)
-          const nextRate = currentIndex > 0 ? speeds[currentIndex - 1] : speeds[0]
+          const nextRate = Math.max(0.1, Math.round((playbackRate - 0.1) * 10) / 10)
           changeSpeed(nextRate)
           showSpeedToast(nextRate)
           break
@@ -659,11 +654,20 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
       }
     }
 
+    const handleGlobalMouseDown = (e: MouseEvent) => {
+      // Mouse button 3 is the standard "Back" button on most mice
+      if (e.button === 3) {
+        onClose()
+      }
+    }
+
     window.addEventListener('keydown', handleGlobalKeyDown)
     window.addEventListener('keyup', handleGlobalKeyUp)
+    window.addEventListener('mousedown', handleGlobalMouseDown)
     return () => {
       window.removeEventListener('keydown', handleGlobalKeyDown)
       window.removeEventListener('keyup', handleGlobalKeyUp)
+      window.removeEventListener('mousedown', handleGlobalMouseDown)
     }
   }, [currentVideo, hasNextEpisode, availableSubtitles, playbackRate, isHolding2x, isHoldingRev2x, volume, seekPreview])
 
@@ -1017,7 +1021,14 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
         ref={videoRef}
         src={`media://file/${encodeURIComponent(currentVideo.file_path)}`}
         className={`w-full h-full outline-none ${showControls ? 'subs-up' : 'subs-down'}`}
-        style={{ objectFit: aspectMode, clipPath: 'inset(0px)' }}
+        style={{ 
+          objectFit: aspectMode as any, 
+          clipPath: 'inset(0px)',
+          width: '100vw',
+          height: '100vh',
+          minWidth: '100%',
+          minHeight: '100%'
+        }}
         onTimeUpdate={() => {
           if (!isSeeking && videoRef.current) {
             // Throttle React state to 4×/sec to reduce GC pressure on Chromium GPU pipeline
@@ -1191,19 +1202,13 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
         {/* Top Right Actions */}
         <div className="flex items-center space-x-4">
           {(availableAudio.length > 0 || availableSubtitles.length > 0) && (
-            <div 
-              className="relative"
-              onMouseEnter={() => { 
-                if (mediaMenuTimeoutRef.current) clearTimeout(mediaMenuTimeoutRef.current)
-                setShowSpeedMenu(false)
-                setShowMediaMenu(true)
-              }}
-              onMouseLeave={() => {
-                mediaMenuTimeoutRef.current = setTimeout(() => setShowMediaMenu(false), 300)
-              }}
-            >
+            <div className="relative">
               <button 
-                onClick={(e) => e.stopPropagation()}
+                onClick={(e) => { 
+                  e.stopPropagation()
+                  setShowSpeedMenu(false)
+                  setShowMediaMenu(!showMediaMenu)
+                }}
                 className={`flex items-center space-x-2 px-4 py-2 rounded-lg bg-black/50 transition-colors backdrop-blur-md border border-white/5 ${showMediaMenu ? 'text-white bg-black/80' : 'text-white hover:bg-black/80'}`}
               >
                 <MessageSquareText size={20} className={showMediaMenu ? "text-primary" : ""} />
@@ -1213,26 +1218,28 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
               {/* The Unified Popup Menu */}
               {showMediaMenu && (
                 <div 
-                  className="absolute top-full right-0 mt-3 bg-[#181818]/95 backdrop-blur-3xl rounded-xl shadow-2xl border border-gray-700/50 overflow-hidden z-50 animate-in fade-in slide-in-from-top-2 duration-200"
-                  style={{ width: '420px' }}
+                  className="absolute top-full right-0 mt-3 bg-[#111111]/90 backdrop-blur-2xl rounded-2xl shadow-[0_20px_50px_rgba(0,0,0,0.6)] border border-white/10 overflow-hidden z-50 animate-in fade-in slide-in-from-top-2 duration-300"
+                  style={{ width: '400px' }}
                   onClick={(e) => e.stopPropagation()}
                 >
-                  <div className="flex p-6">
+                  <div className="flex p-2">
                     {/* Audio Column */}
                     {availableAudio.length > 0 && (
-                      <div className="flex-1 pr-6">
-                        <h3 className="text-[11px] font-bold text-gray-400 tracking-[0.2em] mb-4">AUDIO</h3>
-                        <div className="space-y-1 max-h-56 overflow-y-auto custom-scrollbar pr-2">
+                      <div className="flex-1 min-w-0">
+                        <div className="px-4 py-3 border-b border-white/5 mb-1">
+                          <h3 className="text-[10px] font-black text-white/40 tracking-[0.15em] uppercase">Audio Tracks</h3>
+                        </div>
+                        <div className="px-1.5 pb-2 max-h-[320px] overflow-y-auto custom-scrollbar">
                           {availableAudio.map((track) => (
                             <button
                               key={track.id}
                               onClick={(e) => { e.stopPropagation(); selectAudioTrack(track.id); }}
-                              className="w-full flex items-center space-x-3 py-2 text-left group"
+                              className={`w-full flex items-center space-x-3 px-3 py-2.5 rounded-xl text-left transition-all duration-200 group ${selectedAudioId === track.id ? 'bg-primary/15 text-primary' : 'text-white/60 hover:bg-white/5 hover:text-white'}`}
                             >
-                              <div className="w-4 flex justify-center">
-                                                {selectedAudioId === track.id && <Check size={16} strokeWidth={3} className="text-primary" />}
+                              <div className={`flex-shrink-0 w-5 h-5 rounded-full border-2 flex items-center justify-center transition-colors ${selectedAudioId === track.id ? 'border-primary bg-primary' : 'border-white/20 group-hover:border-white/40'}`}>
+                                {selectedAudioId === track.id && <Check size={12} strokeWidth={4} className="text-white" />}
                               </div>
-                              <span className={`text-[15px] transition-colors ${selectedAudioId === track.id ? 'text-white font-medium drop-shadow' : 'text-gray-400 group-hover:text-white'}`}>
+                              <span className="text-[14px] font-semibold truncate tracking-tight">
                                 {track.label}
                               </span>
                             </button>
@@ -1243,17 +1250,19 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
                     
                     {/* Subtitles Column */}
                     {availableSubtitles.length > 0 && (
-                      <div className={`flex-1 ${availableAudio.length > 0 ? 'pl-6 border-l border-white/10' : ''}`}>
-                        <h3 className="text-[11px] font-bold text-gray-400 tracking-[0.2em] mb-4">SUBTITLES</h3>
-                        <div className="space-y-1 max-h-56 overflow-y-auto custom-scrollbar pr-2">
+                      <div className={`flex-1 min-w-0 ${availableAudio.length > 0 ? 'border-l border-white/5' : ''}`}>
+                        <div className="px-4 py-3 border-b border-white/5 mb-1">
+                          <h3 className="text-[10px] font-black text-white/40 tracking-[0.15em] uppercase">Subtitles</h3>
+                        </div>
+                        <div className="px-1.5 pb-2 max-h-[320px] overflow-y-auto custom-scrollbar">
                           <button
                             onClick={(e) => { e.stopPropagation(); selectSubtitleTrack(null); }}
-                            className="w-full flex items-center space-x-3 py-2 text-left group"
+                            className={`w-full flex items-center space-x-3 px-3 py-2.5 rounded-xl text-left transition-all duration-200 group ${currentSubtitle === null ? 'bg-primary/15 text-primary' : 'text-white/60 hover:bg-white/5 hover:text-white'}`}
                           >
-                            <div className="w-4 flex justify-center">
-                              {currentSubtitle === null && <Check size={16} strokeWidth={3} className="text-primary" />}
+                            <div className={`flex-shrink-0 w-5 h-5 rounded-full border-2 flex items-center justify-center transition-colors ${currentSubtitle === null ? 'border-primary bg-primary' : 'border-white/20 group-hover:border-white/40'}`}>
+                              {currentSubtitle === null && <Check size={12} strokeWidth={4} className="text-white" />}
                             </div>
-                            <span className={`text-[15px] transition-colors ${currentSubtitle === null ? 'text-white font-medium drop-shadow' : 'text-gray-400 group-hover:text-white'}`}>
+                            <span className="text-[14px] font-semibold truncate tracking-tight">
                               Off
                             </span>
                           </button>
@@ -1263,12 +1272,12 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
                               <button
                                 key={track.idx}
                                 onClick={(e) => { e.stopPropagation(); selectSubtitleTrack(track.id); }}
-                                className="w-full flex items-center space-x-3 py-2 text-left group"
+                                className={`w-full flex items-center space-x-3 px-3 py-2.5 rounded-xl text-left transition-all duration-200 group ${isActive ? 'bg-primary/15 text-primary' : 'text-white/60 hover:bg-white/5 hover:text-white'}`}
                               >
-                                <div className="w-4 flex justify-center">
-                                  {isActive && <Check size={16} strokeWidth={3} className="text-primary" />}
+                                <div className={`flex-shrink-0 w-5 h-5 rounded-full border-2 flex items-center justify-center transition-colors ${isActive ? 'border-primary bg-primary' : 'border-white/20 group-hover:border-white/40'}`}>
+                                  {isActive && <Check size={12} strokeWidth={4} className="text-white" />}
                                 </div>
-                                <span className={`text-[15px] transition-colors ${isActive ? 'text-white font-medium drop-shadow' : 'text-gray-400 group-hover:text-white'}`}>
+                                <span className="text-[14px] font-semibold truncate tracking-tight">
                                   {track.label}
                                 </span>
                               </button>
@@ -1280,12 +1289,15 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
                   </div>
                   
                   {/* Footer */}
-                  <div className="bg-[#111111]/80 hover:bg-[#1f1f1f]/80 transition-colors p-4 border-t border-white/10 flex justify-center items-center cursor-pointer">
-                    <button className="flex items-center justify-center w-full space-x-2 text-gray-400 hover:text-white transition-colors text-xs font-semibold tracking-wide" onClick={(e) => e.stopPropagation()}>
-                      <AlertTriangle size={14} />
-                      <span>Report an Issue</span>
-                    </button>
-                  </div>
+                  <button 
+                    onClick={(e) => e.stopPropagation()}
+                    className="w-full bg-white/[0.03] hover:bg-white/[0.08] transition-colors p-3 flex justify-center items-center group/footer border-t border-white/5"
+                  >
+                    <div className="flex items-center space-x-2 text-white/30 group-hover/footer:text-white/60 transition-colors">
+                      <AlertTriangle size={12} />
+                      <span className="text-[10px] font-bold uppercase tracking-widest">Report an Issue</span>
+                    </div>
+                  </button>
                 </div>
               )}
             </div>
@@ -1427,7 +1439,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
                 <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-6 bg-gray-900 rounded-lg shadow-xl border border-gray-700 overflow-hidden min-w-[120px] z-50">
                   <div className="px-3 py-2 bg-gray-800 text-[10px] font-bold text-gray-400 uppercase tracking-wider border-b border-gray-700">Speed</div>
                   <div className="max-h-56 overflow-y-auto custom-scrollbar flex flex-col">
-                    {[1, 1.25, 1.5, 1.75, 2].map((rate) => (
+                    {[0.5, 0.75, 1, 1.25, 1.5, 1.75, 2, 2.25, 2.5, 3, 3.5, 4, 4.5, 5].map((rate) => (
                       <button
                         key={rate}
                         onClick={(e) => { e.stopPropagation(); changeSpeed(rate); }}

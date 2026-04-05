@@ -9,6 +9,9 @@ export interface Video {
   duration?: number
   poster_path?: string
   overview?: string
+  tagline?: string
+  genres?: string
   last_watched_time?: number
   completed?: boolean
+  episode_count?: number
 }

@@ -5,6 +5,7 @@ import HorizontalScrollRow from '../components/HorizontalScrollRow'
 
 interface VideosProps {
   onPlay: (video: Video) => void
+  onShowDetail: (video: Video) => void
 }
 
 const ONE_HOUR = 3600 // seconds
@@ -21,7 +22,12 @@ function formatDuration(seconds: number): string {
   return `${m}m ${s.toString().padStart(2, '0')}s`
 }
 
-const VideoClipCard: React.FC<{ video: Video; onPlay: (v: Video) => void }> = ({ video, onPlay }) => {
+const VideoClipCard: React.FC<{ 
+  video: Video; 
+  onPlay: (v: Video) => void;
+  onShowDetail?: (v: Video) => void;
+  isContinueWatching?: boolean;
+}> = ({ video, onPlay, onShowDetail, isContinueWatching }) => {
   const posterUrl = video.poster_path
     ? (video.poster_path.startsWith('http')
         ? video.poster_path
@@ -32,10 +38,20 @@ const VideoClipCard: React.FC<{ video: Video; onPlay: (v: Video) => void }> = ({
     ? (video.last_watched_time / video.duration) * 100
     : 0
 
+  const handleClick = () => {
+    if (isContinueWatching) {
+      onPlay(video)
+    } else if (onShowDetail) {
+      onShowDetail(video)
+    } else {
+      onPlay(video)
+    }
+  }
+
   return (
     <div
       className="group relative flex flex-col space-y-2 cursor-pointer"
-      onClick={() => onPlay(video)}
+      onClick={handleClick}
     >
       {/* Landscape thumbnail */}
       <div className="relative aspect-video w-full overflow-hidden rounded-xl bg-secondary shadow-lg transition-transform duration-300 group-hover:scale-[1.03] group-hover:shadow-2xl">
@@ -87,7 +103,7 @@ const VideoClipCard: React.FC<{ video: Video; onPlay: (v: Video) => void }> = ({
   )
 }
 
-const Videos: React.FC<VideosProps> = ({ onPlay }) => {
+const Videos: React.FC<VideosProps> = ({ onPlay, onShowDetail }) => {
   const [clips, setClips] = useState<Video[]>([])
   const [continueWatching, setContinueWatching] = useState<Video[]>([])
 
@@ -137,7 +153,7 @@ const Videos: React.FC<VideosProps> = ({ onPlay }) => {
           <HorizontalScrollRow>
             {continueWatching.map(video => (
               <div key={video.id} className="w-56 md:w-64 lg:w-72 flex-shrink-0">
-                <VideoClipCard video={video} onPlay={onPlay} />
+                <VideoClipCard video={video} onPlay={onPlay} onShowDetail={onShowDetail} isContinueWatching={true} />
               </div>
             ))}
           </HorizontalScrollRow>
@@ -152,7 +168,7 @@ const Videos: React.FC<VideosProps> = ({ onPlay }) => {
           </div>
           <p className="text-muted text-lg font-medium">No short videos found</p>
           <p className="text-muted/60 text-sm mt-2 max-w-sm">
-            Videos shorter than 1 hour that aren't TV episodes will appear here. Add a folder from Library settings.
+            Videos shorter than 1 hour that aren't Web Series episodes will appear here. Add a folder from Library settings.
           </p>
         </div>
       ) : (
@@ -162,7 +178,7 @@ const Videos: React.FC<VideosProps> = ({ onPlay }) => {
           )}
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-5 pb-8">
             {clips.map(video => (
-              <VideoClipCard key={video.id} video={video} onPlay={onPlay} />
+              <VideoClipCard key={video.id} video={video} onPlay={onPlay} onShowDetail={onShowDetail} />
             ))}
           </div>
         </section>
@@ -170,5 +186,6 @@ const Videos: React.FC<VideosProps> = ({ onPlay }) => {
     </div>
   )
 }
+
 
 export default Videos

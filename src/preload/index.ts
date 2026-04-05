@@ -20,6 +20,7 @@ const api = {
   removeAllLibraryUpdateListeners: () => ipcRenderer.removeAllListeners('library-updated'),
   getFolders: () => ipcRenderer.invoke('get-folders'),
   removeFolder: (folderPath: string) => ipcRenderer.invoke('remove-folder', folderPath),
+  clearAllData: () => ipcRenderer.invoke('clear-all-data'),
   // Auto-update
   onUpdateAvailable: (callback: (info: { version: string }) => void) => ipcRenderer.on('update-available', (_e, info) => callback(info)),
   onUpdateProgress: (callback: (info: { percent: number }) => void) => ipcRenderer.on('update-progress', (_e, info) => callback(info)),

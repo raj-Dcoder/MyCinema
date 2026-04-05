@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react'
-import { FolderOpen, Trash2, Plus, HardDrive } from 'lucide-react'
+import { FolderOpen, Trash2, Plus, HardDrive, AlertTriangle } from 'lucide-react'
 
 const Settings: React.FC = () => {
   const [folders, setFolders] = useState<any[]>([])
@@ -28,6 +28,11 @@ const Settings: React.FC = () => {
     if (!confirmed) return
     await window.api.removeFolder(folderPath)
     await fetchFolders()
+  }
+
+  const handleClearAllData = async () => {
+    // Note: The main process also shows a native dialog for safety
+    await window.api.clearAllData()
   }
 
   return (
@@ -78,6 +83,29 @@ const Settings: React.FC = () => {
         <Plus size={18} />
         <span>{scanning ? 'Scanning…' : 'Add Folder'}</span>
       </button>
+
+      {/* Danger Zone */}
+      <div className="pt-10 border-t border-secondary/50">
+        <div className="flex items-center space-x-2 text-red-500 mb-4">
+          <AlertTriangle size={18} />
+          <h2 className="text-lg font-semibold text-text">Danger Zone</h2>
+        </div>
+        <div className="bg-red-500/5 border border-red-500/20 rounded-2xl p-6 flex flex-col md:flex-row md:items-center justify-between gap-4">
+          <div className="space-y-1">
+            <p className="font-medium text-text">Clear All Application Data</p>
+            <p className="text-sm text-muted leading-relaxed max-w-md">
+              Completely reset MyCinema. This will delete your library, watch progress, and settings.
+              This action is irreversible.
+            </p>
+          </div>
+          <button
+            onClick={handleClearAllData}
+            className="flex-shrink-0 px-6 py-2.5 bg-red-500/10 hover:bg-red-500 text-red-500 hover:text-white border border-red-500/20 rounded-xl font-medium transition-all duration-300"
+          >
+            Clear All Data
+          </button>
+        </div>
+      </div>
     </div>
   )
 }

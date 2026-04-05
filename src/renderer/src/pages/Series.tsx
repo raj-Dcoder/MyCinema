@@ -1,15 +1,14 @@
 import React, { useEffect, useState } from 'react'
 import { Video } from '../types'
 import VideoCard from '../components/VideoCard'
-import SeriesModal from '../components/SeriesModal'
 
 interface SeriesProps {
   onPlay: (video: Video) => void
+  onShowDetail: (video: Video) => void
 }
 
-const Series: React.FC<SeriesProps> = ({ onPlay }) => {
+const Series: React.FC<SeriesProps> = ({ onPlay, onShowDetail }) => {
   const [seriesList, setSeriesList] = useState<Video[]>([])
-  const [selectedSeries, setSelectedSeries] = useState<string | null>(null)
 
   const fetchSeries = async () => {
     const allVideos: Video[] = await window.api.getVideos()
@@ -30,7 +29,7 @@ const Series: React.FC<SeriesProps> = ({ onPlay }) => {
         if (a.season !== b.season) return (a.season || 0) - (b.season || 0)
         return (a.episode || 0) - (b.episode || 0)
       })
-      uniqueSeries.push(grouped[name][0])
+      uniqueSeries.push({ ...grouped[name][0], episode_count: grouped[name].length })
     })
 
     setSeriesList(uniqueSeries)
@@ -45,36 +44,24 @@ const Series: React.FC<SeriesProps> = ({ onPlay }) => {
 
   return (
     <div>
-      <h2 className="text-3xl font-bold mb-8">TV Shows</h2>
+      <h2 className="text-3xl font-bold mb-8">Web Series</h2>
       <div className="flex flex-wrap gap-6 pb-6">
         {seriesList.length === 0 && (
-          <p className="text-muted text-center py-12 w-full">No TV shows found.</p>
+          <p className="text-muted text-center py-12 w-full">No Web Series found.</p>
         )}
         {seriesList.map(video => (
           <div key={video.id} className="w-36 md:w-44 lg:w-52 flex-shrink-0">
             <VideoCard 
               video={video} 
-              onPlay={(v) => {
-                if (v.series_name) setSelectedSeries(v.series_name)
-                else onPlay(v)
-              }} 
+              onPlay={onPlay}
+              onShowDetail={onShowDetail}
             />
           </div>
         ))}
       </div>
-
-      {selectedSeries && (
-        <SeriesModal 
-          seriesName={selectedSeries} 
-          onClose={() => setSelectedSeries(null)} 
-          onPlay={(v) => {
-            setSelectedSeries(null)
-            onPlay(v)
-          }}
-        />
-      )}
     </div>
   )
 }
+
 
 export default Series

@@ -17,6 +17,7 @@ interface Api {
   removeAllLibraryUpdateListeners: () => void
   getFolders: () => Promise<any[]>
   removeFolder: (folderPath: string) => Promise<boolean>
+  clearAllData: () => Promise<boolean>
   onUpdateAvailable: (callback: (info: { version: string }) => void) => void
   onUpdateProgress: (callback: (info: { percent: number }) => void) => void
   onUpdateDownloaded: (callback: () => void) => void

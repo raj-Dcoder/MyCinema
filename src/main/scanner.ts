@@ -161,8 +161,11 @@ export async function scanFolder(rootPath: string) {
       const currentVideoNode = allVideos.find((v: any) => v.id === videoId);
       const isSnap = currentVideoNode && currentVideoNode.poster_path && currentVideoNode.poster_path.includes('-snap.jpg');
       const isMissingPoster = !localPoster && (!currentVideoNode || !currentVideoNode.poster_path || currentVideoNode.poster_path === 'N/A' || isSnap);
+      const isMissingMetadata = currentVideoNode && (!currentVideoNode.tagline && !currentVideoNode.genres);
       
-      if (isMissingPoster) {
+      // If we are missing metadata, we should ALSO check if we have a TMDB ID.
+      // If we have a TMDB ID but no metadata, we can fetch it directly.
+      if (isMissingPoster || isMissingMetadata) {
         const searchTitle = metadata.series_name || metadata.title
         
         // Junk title filter: skip GUIDs, hashes, and extremely long descriptive titles
@@ -180,7 +183,14 @@ export async function scanFolder(rootPath: string) {
         // Anti-rate-limit throttle: 500ms between requests
         await new Promise(resolve => setTimeout(resolve, 500))
         
-        const tmdbMetadata = await fetchTmdbMetadata(videoId, searchTitle, metadata.type, metadata.year)
+        // Pass tmdb_id if we already have it to avoid searching
+        const tmdbMetadata = await fetchTmdbMetadata(
+          videoId, 
+          searchTitle, 
+          metadata.type, 
+          metadata.year, 
+          currentVideoNode?.tmdb_id
+        )
         if (!tmdbMetadata || !tmdbMetadata.poster_path) {
            console.log(`[Scanner] TMDB search for ${videoId} ("${searchTitle}") yielded no poster or failed.`)
            if (isSnap && currentVideoNode) {
@@ -189,7 +199,13 @@ export async function scanFolder(rootPath: string) {
                 console.log(`[Scanner] Snap file missing for ${videoId}, re-extracting…`)
                 const snapPath = await extractOfflineThumbnail(filePath, videoId)
                 if (snapPath) {
-                  updateVideoMetadata(videoId, { poster_path: snapPath, overview: null, tmdb_id: null })
+                  updateVideoMetadata(videoId, { 
+                    poster_path: snapPath, 
+                    overview: null, 
+                    tagline: null, 
+                    genres: null, 
+                    tmdb_id: null 
+                  })
                 }
              }
              continue; // Don't snap again if we already have it!
@@ -198,12 +214,31 @@ export async function scanFolder(rootPath: string) {
            const snapPath = await extractOfflineThumbnail(filePath, videoId)
            if (snapPath) {
              console.log(`[Scanner] Saving FFmpeg thumbnail to DB for video ${videoId}`)
-             const existingMeta = currentVideoNode ? { overview: currentVideoNode.overview, tmdb_id: currentVideoNode.tmdb_id } : { overview: null, tmdb_id: null }
-             updateVideoMetadata(videoId, { poster_path: snapPath, overview: existingMeta.overview, tmdb_id: existingMeta.tmdb_id })
+             const existingMeta = currentVideoNode 
+              ? { 
+                  overview: currentVideoNode.overview, 
+                  tagline: currentVideoNode.tagline,
+                  genres: currentVideoNode.genres,
+                  tmdb_id: currentVideoNode.tmdb_id 
+                } 
+              : { overview: null, tagline: null, genres: null, tmdb_id: null }
+             updateVideoMetadata(videoId, { 
+               poster_path: snapPath, 
+               overview: existingMeta.overview, 
+               tagline: existingMeta.tagline,
+               genres: existingMeta.genres,
+               tmdb_id: existingMeta.tmdb_id 
+             })
            }
         } else {
            console.log(`[Scanner] Retrieved official TMDB poster for video ${videoId}!`)
-           updateVideoMetadata(videoId, { poster_path: tmdbMetadata.poster_path, overview: tmdbMetadata.overview, tmdb_id: tmdbMetadata.tmdb_id })
+           updateVideoMetadata(videoId, { 
+             poster_path: tmdbMetadata.poster_path, 
+             overview: tmdbMetadata.overview, 
+             tagline: tmdbMetadata.tagline,
+             genres: tmdbMetadata.genres,
+             tmdb_id: tmdbMetadata.tmdb_id 
+           })
         }
       }
     }
@@ -296,21 +331,44 @@ function parseFilename(filePath: string): VideoMetadata {
 
   // Robust Series patterns
   const seriesPatterns = [
-    /(.+?)[. ]s(\d+)e(\d+)/i,
-    /(.+?)[. ](\d+)x(\d+)/i,
-    /(.+?)[. ]season[. ](\d+)[. ]episode[. ](\d+)/i,
-    /(.+?)[. ]s(\d+)[. ]e(\d+)/i
+    /(.+?)[. ]s(\d+)e(\d+)(.*)/i,
+    /(.+?)[. ](\d+)x(\d+)(.*)/i,
+    /(.+?)[. ]season[. ](\d+)[. ]episode[. ](\d+)(.*)/i,
+    /(.+?)[. ]s(\d+)[. ]e(\d+)(.*)/i,
+    // Add simpler episode numbering
+    /(.+?)[. ]episode[. ](\d+)(.*)/i,
+    /(.+?)[. ]ep[. ]?(\d+)(.*)/i,
+    /(.+?)[. -](\d{1,3})(.*)$/i
   ]
 
-  for (const pattern of seriesPatterns) {
+  for (let i = 0; i < seriesPatterns.length; i++) {
+    const pattern = seriesPatterns[i]
     const match = cleanName.match(pattern)
+    
     if (match) {
+      // Logic: if we found a year (e.g. 2025) and this is an aggressive pattern (just a number),
+      // favor identifying it as a movie sequel instead of an episode.
+      const isAggressivePattern = i === seriesPatterns.length - 1
+      if (isAggressivePattern && year) continue;
+
       const seriesName = match[1].trim()
-      const season = parseInt(match[2])
-      const episode = parseInt(match[3])
+      // If the match only has 2 groups (seriesName and episode), assume season 1
+      const isShortMatch = !match[4]
+      const season = isShortMatch ? 1 : parseInt(match[2])
+      const episode = isShortMatch ? parseInt(match[2]) : parseInt(match[3])
+      const extra = (match[4] || match[3] || '').replace(/^[. -]+/, '').trim()
       
+      // Filter out common years from being misidentified as episodes
+      if (isShortMatch && (episode > 1900 && episode < 2100)) continue;
+
+      // Special case: "The.Bad.Guys.2" after year "2025" is stripped.
+      // If it's a single digit episode at the end of the name and we have a year, it's a movie.
+      if (isAggressivePattern && episode < 10 && !extra) continue;
+
+      const episodeTitle = extra ? extra : `S${season.toString().padStart(2, '0')}E${episode.toString().padStart(2, '0')}`
+
       return {
-        title: `${seriesName} - S${season.toString().padStart(2, '0')}E${episode.toString().padStart(2, '0')}`,
+        title: `${seriesName} - ${episodeTitle}`,
         type: 'series',
         series_name: seriesName,
         season,

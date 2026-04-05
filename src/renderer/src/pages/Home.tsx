@@ -1,19 +1,18 @@
 import React, { useEffect, useState } from 'react'
 import { Video } from '../types'
 import VideoCard from '../components/VideoCard'
-import SeriesModal from '../components/SeriesModal'
 import HorizontalScrollRow from '../components/HorizontalScrollRow'
 
 interface HomeProps {
   onPlay: (video: Video) => void
+  onShowDetail: (video: Video) => void
   refreshKey?: number
 }
 
-const Home: React.FC<HomeProps> = ({ onPlay, refreshKey }) => {
+const Home: React.FC<HomeProps> = ({ onPlay, onShowDetail, refreshKey }) => {
   const [continueWatching, setContinueWatching] = useState<Video[]>([])
   const [recentMovies, setRecentMovies] = useState<Video[]>([])
   const [recentSeries, setRecentSeries] = useState<Video[]>([])
-  const [selectedSeries, setSelectedSeries] = useState<string | null>(null)
 
   const fetchData = async () => {
     const allVideos: Video[] = await window.api.getVideos()
@@ -39,12 +38,22 @@ const Home: React.FC<HomeProps> = ({ onPlay, refreshKey }) => {
     setContinueWatching(uniqueCW.filter(v => v.type === 'series' || isFullLength(v)))
     setRecentMovies(allVideos.filter(isFullLength).slice(0, 10))
     
-    // Also unique series for "Recently Added TV Shows"
+    // Also unique series for "Recently Added Web Series"
     const recentS: Video[] = []
     const seenRecentSeries = new Set<string>()
-    for (const video of allVideos.filter(v => v.type === 'series')) {
+    const seriesEpisodes = allVideos.filter(v => v.type === 'series')
+    
+    // Count episodes for each series
+    const counts: Record<string, number> = {}
+    seriesEpisodes.forEach(v => {
+      if (v.series_name) {
+        counts[v.series_name] = (counts[v.series_name] || 0) + 1
+      }
+    })
+
+    for (const video of seriesEpisodes) {
       if (video.series_name && !seenRecentSeries.has(video.series_name)) {
-        recentS.push(video)
+        recentS.push({ ...video, episode_count: counts[video.series_name] })
         seenRecentSeries.add(video.series_name)
       }
     }
@@ -73,7 +82,7 @@ const Home: React.FC<HomeProps> = ({ onPlay, refreshKey }) => {
           <HorizontalScrollRow>
             {continueWatching.map(video => (
               <div key={video.id} className="w-36 md:w-44 lg:w-52 flex-shrink-0">
-                <VideoCard video={video} onPlay={onPlay} />
+                <VideoCard video={video} onPlay={onPlay} onShowDetail={onShowDetail} isContinueWatching={true} />
               </div>
             ))}
           </HorizontalScrollRow>
@@ -85,7 +94,7 @@ const Home: React.FC<HomeProps> = ({ onPlay, refreshKey }) => {
         <HorizontalScrollRow>
           {recentMovies.map(video => (
             <div key={video.id} className="w-36 md:w-44 lg:w-52 flex-shrink-0">
-              <VideoCard video={video} onPlay={onPlay} />
+              <VideoCard video={video} onPlay={onPlay} onShowDetail={onShowDetail} />
             </div>
           ))}
           {recentMovies.length === 0 && (
@@ -97,39 +106,27 @@ const Home: React.FC<HomeProps> = ({ onPlay, refreshKey }) => {
       </section>
 
       <section>
-        <h2 className="text-2xl font-bold mb-6">Recently Added TV Shows</h2>
+        <h2 className="text-2xl font-bold mb-6">Recently Added Web Series</h2>
         <HorizontalScrollRow>
           {recentSeries.map(video => (
             <div key={video.id} className="w-36 md:w-44 lg:w-52 flex-shrink-0">
               <VideoCard 
                 video={video} 
-                onPlay={(v) => {
-                  if (v.series_name) setSelectedSeries(v.series_name)
-                  else onPlay(v)
-                }} 
+                onPlay={onPlay}
+                onShowDetail={onShowDetail}
               />
             </div>
           ))}
           {recentSeries.length === 0 && (
             <p className="text-muted w-full py-12 text-center border-2 border-dashed border-secondary rounded-xl">
-              No TV shows found. Add a folder to start scanning.
+              No Web Series found. Add a folder to start scanning.
             </p>
           )}
         </HorizontalScrollRow>
       </section>
-
-      {selectedSeries && (
-        <SeriesModal 
-          seriesName={selectedSeries} 
-          onClose={() => setSelectedSeries(null)} 
-          onPlay={(v) => {
-            setSelectedSeries(null)
-            onPlay(v)
-          }}
-        />
-      )}
     </div>
   )
 }
+
 
 export default Home

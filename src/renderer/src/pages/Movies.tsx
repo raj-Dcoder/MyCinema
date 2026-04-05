@@ -4,9 +4,10 @@ import VideoCard from '../components/VideoCard'
 
 interface MoviesProps {
   onPlay: (video: Video) => void
+  onShowDetail: (video: Video) => void
 }
 
-const Movies: React.FC<MoviesProps> = ({ onPlay }) => {
+const Movies: React.FC<MoviesProps> = ({ onPlay, onShowDetail }) => {
   const [movies, setMovies] = useState<Video[]>([])
 
   const fetchMovies = async () => {
@@ -29,7 +30,7 @@ const Movies: React.FC<MoviesProps> = ({ onPlay }) => {
       <div className="flex flex-wrap gap-6 pb-6">
         {movies.map(video => (
           <div key={video.id} className="w-36 md:w-44 lg:w-52 flex-shrink-0">
-            <VideoCard video={video} onPlay={onPlay} />
+            <VideoCard video={video} onPlay={onPlay} onShowDetail={onShowDetail} />
           </div>
         ))}
         {movies.length === 0 && (
@@ -39,5 +40,6 @@ const Movies: React.FC<MoviesProps> = ({ onPlay }) => {
     </div>
   )
 }
+
 
 export default Movies

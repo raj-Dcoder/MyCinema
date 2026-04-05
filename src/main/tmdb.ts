@@ -70,6 +70,8 @@ const TMDB_IMG     = 'https://image.tmdb.org/t/p/w500'
 export interface TmdbResult {
   poster_path: string | null
   overview:    string | null
+  tagline:     string | null
+  genres:      string | null
   tmdb_id:     number | null
 }
 
@@ -91,9 +93,10 @@ export async function fetchTmdbMetadata(
   videoId: number,
   title: string,
   type: 'movie' | 'series',
-  year?: number
+  year?: number,
+  existingTmdbId?: number
 ): Promise<TmdbResult> {
-  const empty: TmdbResult = { poster_path: null, overview: null, tmdb_id: null }
+  const empty: TmdbResult = { poster_path: null, overview: null, tagline: null, genres: null, tmdb_id: null }
   const apiKey = getTmdbApiKey()
 
   if (!apiKey) {
@@ -112,14 +115,33 @@ export async function fetchTmdbMetadata(
     try {
       const sidecar = JSON.parse(fs.readFileSync(sidecarPath, 'utf8'))
       
-      // Case A: Poster exists on disk
-      if (fs.existsSync(cachePath)) {
-        return { poster_path: cachePath, overview: sidecar.overview, tmdb_id: sidecar.tmdb_id }
+      // Migration: if the sidecar exists but doesn't have tagline/genres, 
+      // we ignore the cache hit to force a fresh fetch with full details.
+      if (sidecar.tagline === undefined && sidecar.genres === undefined) {
+        console.log(`[TMDB] Old cache entry missing tagline/genres — forcing re-fetch for "${title}"`)
+        // Fall through to fetch section
+      } else {
+        // Case A: Poster exists on disk
+        if (fs.existsSync(cachePath)) {
+          return { 
+            poster_path: cachePath, 
+            overview: sidecar.overview, 
+            tagline: sidecar.tagline || null,
+            genres: sidecar.genres || null,
+            tmdb_id: sidecar.tmdb_id 
+          }
+        }
+        
+        // Case B: We already searched and found NO results or NO poster
+        // (Verified by the lack of a .jpg file but existence of a .json)
+        return { 
+          poster_path: null, 
+          overview: sidecar.overview, 
+          tagline: sidecar.tagline || null,
+          genres: sidecar.genres || null,
+          tmdb_id: sidecar.tmdb_id 
+        }
       }
-      
-      // Case B: We already searched and found NO results or NO poster
-      // (Verified by the lack of a .jpg file but existence of a .json)
-      return { poster_path: null, overview: sidecar.overview, tmdb_id: sidecar.tmdb_id }
     } catch {
       // JSON corrupt? Fall through to fetch
     }
@@ -135,52 +157,74 @@ export async function fetchTmdbMetadata(
       await resolveDnsDoH('api.themoviedb.org')
     }
 
-    // Add year to search if available for pinpoint accuracy
-    let url = `${TMDB_BASE}/search/${endpoint}?api_key=${apiKey}&query=${query}&language=en-US&page=1`
-    if (year) {
-      url += type === 'series' ? `&first_air_date_year=${year}` : `&year=${year}`
+    let tmdb_id = existingTmdbId
+
+    if (!tmdb_id) {
+      // Add year to search if available for pinpoint accuracy
+      let url = `${TMDB_BASE}/search/${endpoint}?api_key=${apiKey}&query=${query}&language=en-US&page=1`
+      if (year) {
+        url += type === 'series' ? `&first_air_date_year=${year}` : `&year=${year}`
+      }
+
+      console.log(`[TMDB] Fetching search results for "${title}" ${year ? `(${year})` : ''}…`)
+      
+      const controller = new AbortController()
+      const timeoutId = setTimeout(() => controller.abort(), 30000)
+      
+      const response = await fetch(url, { 
+        signal: controller.signal,
+        dispatcher: tmdbDispatcher,
+        headers: {
+          'User-Agent': 'MyCinema/1.3.0 (Electron/29; Windows)',
+          'Accept': 'application/json'
+        }
+      })
+      clearTimeout(timeoutId)
+
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status} for ${url}`)
+      }
+
+      const data = await response.json() as any
+
+      if (!data.results || data.results.length === 0) {
+        console.log(`[TMDB] No results for "${title}" ${year ? `(${year})` : ''}`)
+        fs.writeFileSync(sidecarPath, JSON.stringify({ overview: null, tmdb_id: null, tagline: null, genres: null }))
+        return empty
+      }
+
+      const searchHit = data.results[0]
+      tmdb_id = searchHit.id
     }
 
-    console.log(`[TMDB] Fetching metadata for "${title}" ${year ? `(${year})` : ''}…`)
+    // Now fetch full details to get tagline and genres
+    console.log(`[TMDB] Fetching full details for TMDB ID ${tmdb_id}…`)
+    const detailsUrl = `${TMDB_BASE}/${endpoint}/${tmdb_id}?api_key=${apiKey}&language=en-US`
     
-    // Using a longer timeout for stability
-    const controller = new AbortController()
-    const timeoutId = setTimeout(() => controller.abort(), 30000)
-    
-    const response = await fetch(url, { 
-      signal: controller.signal,
-      dispatcher: tmdbDispatcher, // Use our custom DNS-bypassing agent
+    const detailsResponse = await fetch(detailsUrl, {
+      dispatcher: tmdbDispatcher,
       headers: {
-        'User-Agent': 'MyCinema/1.3.0 (Electron/29; Windows)',
+        'User-Agent': 'MyCinema/1.3.0',
         'Accept': 'application/json'
       }
     })
-    clearTimeout(timeoutId)
-
-    if (!response.ok) {
-      throw new Error(`HTTP ${response.status} for ${url}`)
+    
+    if (!detailsResponse.ok) {
+      throw new Error(`HTTP ${detailsResponse.status} for ${detailsUrl}`)
     }
-
-    const data = await response.json() as any
-
-    if (!data.results || data.results.length === 0) {
-      console.log(`[TMDB] No results for "${title}" ${year ? `(${year})` : ''}`)
-      // Save "negative result" to cache to avoid re-searching junk files
-      fs.writeFileSync(sidecarPath, JSON.stringify({ overview: null, tmdb_id: null }))
-      return empty
-    }
-
-    const hit = data.results[0]
+    
+    const hit = await detailsResponse.json() as any
     const remotePosterPath = hit.poster_path
     const overview = hit.overview || null
-    const tmdb_id = hit.id || null
+    const tagline = hit.tagline || null
+    const genres = hit.genres ? hit.genres.map((g: any) => g.name).join(', ') : null
 
     // Save sidecar
-    fs.writeFileSync(sidecarPath, JSON.stringify({ overview, tmdb_id }))
+    fs.writeFileSync(sidecarPath, JSON.stringify({ overview, tmdb_id, tagline, genres }))
 
     if (!remotePosterPath) {
       console.log(`[TMDB] Result found for "${title}" but no poster available`)
-      return { poster_path: null, overview, tmdb_id }
+      return { poster_path: null, overview, tagline, genres, tmdb_id }
     }
 
     // 3. Download poster
@@ -188,7 +232,7 @@ export async function fetchTmdbMetadata(
     console.log(`[TMDB] Downloading poster for "${title}" from ${remotePosterPath}…`)
     
     const imgResponse = await fetch(posterUrl, {
-      dispatcher: tmdbDispatcher, // Also use custom agent for image CDN
+      dispatcher: tmdbDispatcher,
       headers: { 'User-Agent': 'MyCinema/1.3.0' }
     })
     if (!imgResponse.ok) throw new Error(`Poster HTTP ${imgResponse.status}`)
@@ -197,13 +241,10 @@ export async function fetchTmdbMetadata(
     fs.writeFileSync(cachePath, Buffer.from(arrayBuffer))
     
     console.log(`[TMDB] Success! Poster cached for "${title}"`)
-    return { poster_path: cachePath, overview, tmdb_id }
+    return { poster_path: cachePath, overview, tagline, genres, tmdb_id }
 
   } catch (err: any) {
     console.error(`[TMDB] Error for "${title}" ${year ? `(${year})` : ''}:`, err.message)
-    if (err.stack && err.message.includes('fetch failed')) {
-      console.error(err.stack)
-    }
     return empty
   }
 }

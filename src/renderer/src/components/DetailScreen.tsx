@@ -22,6 +22,18 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, onClose, onPlay }) =
     }
   }, [video])
 
+  useEffect(() => {
+    const handleGlobalMouseDown = (e: MouseEvent) => {
+      // Mouse button 3 is the standard "Back" button, 4 is "Forward"
+      if (e.button === 3 || e.button === 4) {
+        onClose()
+      }
+    }
+    window.addEventListener('mousedown', handleGlobalMouseDown)
+    return () => window.removeEventListener('mousedown', handleGlobalMouseDown)
+  }, [onClose])
+
+
   const posterUrl = video.poster_path 
     ? (video.poster_path.startsWith('http') 
         ? video.poster_path 

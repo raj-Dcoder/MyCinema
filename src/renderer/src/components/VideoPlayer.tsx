@@ -672,6 +672,33 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
   }, [currentVideo, hasNextEpisode, availableSubtitles, playbackRate, isHolding2x, isHoldingRev2x, volume, seekPreview])
 
   useEffect(() => {
+    if ('mediaSession' in navigator) {
+      navigator.mediaSession.setActionHandler('play', () => {
+        if (videoRef.current && videoRef.current.paused) {
+          videoRef.current.play()
+          setIsPlaying(true)
+        }
+      })
+      navigator.mediaSession.setActionHandler('pause', () => {
+        if (videoRef.current && !videoRef.current.paused) {
+          videoRef.current.pause()
+          setIsPlaying(false)
+        }
+      })
+    }
+    return () => {
+      if ('mediaSession' in navigator) {
+        try {
+          navigator.mediaSession.setActionHandler('play', null)
+          navigator.mediaSession.setActionHandler('pause', null)
+        } catch (e) {
+          // ignore
+        }
+      }
+    }
+  }, [])
+
+  useEffect(() => {
     const interval = setInterval(() => {
       if (videoRef.current && !videoRef.current.paused) {
         const time = videoRef.current.currentTime
@@ -920,6 +947,9 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
     const time = parseFloat(e.target.value)
     setCurrentTime(time)
     timeRef.current = time
+    if (videoRef.current) {
+      videoRef.current.currentTime = time
+    }
   }
 
   const handleSeekMouseUp = (e: React.MouseEvent<HTMLInputElement> | React.TouchEvent<HTMLInputElement>) => {
@@ -1358,7 +1388,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
           
           <div className="absolute left-0 right-0 top-1/2 -translate-y-1/2 h-1 bg-gray-600 rounded-full" />
           <div 
-            className="absolute left-0 top-1/2 -translate-y-1/2 h-1 bg-primary rounded-full transition-all group-hover/progress:h-1.5 duration-100" 
+            className="absolute left-0 top-1/2 -translate-y-1/2 h-1 bg-primary rounded-full transition-[height] group-hover/progress:h-1.5 duration-100" 
             style={{ width: `${((seekPreview ?? currentTime) / duration) * 100}%` }}
           />
           {/* Seek Preview Ghost Indicator */}

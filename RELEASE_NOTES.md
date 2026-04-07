@@ -1,3 +1,16 @@
+# MyCinema v1.5.0 🚀
+
+A refinement update focusing on enhanced player controls and usability.
+
+### 🌟 Features
+- **Headphone Control**: Full integration with the MediaSession API to support play/pause from bluetooth headsets and keyboard media buttons.
+- **Detail Screen Navigation**: Quick exit from the Detail Screen utilizing standard mouse back/forward buttons.
+
+### 🛠️ Improvements & Fixes
+- **Real-Time Video Scrubbing**: Removed CSS translation lag, delivering instant 1:1 timeline scrubbing while dragging the seekbar.
+
+***
+
 # MyCinema v1.4.0 🚀
 
 A major update bringing a cinematic experience to your desktop.

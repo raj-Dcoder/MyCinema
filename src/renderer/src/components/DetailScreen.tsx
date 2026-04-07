@@ -89,14 +89,18 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, onClose, onPlay }) =
 
             {/* Meta Info Row */}
             <div className="flex flex-wrap items-center gap-5 text-[10px] font-black text-muted uppercase tracking-[0.15em]">
-              <div className="flex items-center gap-1.5 bg-white/5 px-3 py-1.5 rounded-full border border-white/10 text-white">
-                <Star size={12} className="text-yellow-500 fill-yellow-500" />
-                <span>8.5</span>
-              </div>
-              <div className="flex items-center gap-1.5">
-                <Calendar size={14} className="opacity-50" />
-                <span>2024</span>
-              </div>
+              {video.vote_average ? (
+                <div className="flex items-center gap-1.5 bg-white/5 px-3 py-1.5 rounded-full border border-white/10 text-white">
+                  <Star size={12} className="text-yellow-500 fill-yellow-500" />
+                  <span>{video.vote_average.toFixed(1)}</span>
+                </div>
+              ) : null}
+              {video.release_year ? (
+                <div className="flex items-center gap-1.5">
+                  <Calendar size={14} className="opacity-50" />
+                  <span>{video.release_year}</span>
+                </div>
+              ) : null}
               {video.duration && (
                 <div className="flex items-center gap-1.5">
                   <Clock size={14} className="opacity-50" />

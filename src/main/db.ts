@@ -26,10 +26,12 @@ export function initDb() {
       tagline TEXT,
       genres TEXT,
       tmdb_id INTEGER,
+      vote_average REAL,
+      release_year INTEGER,
       added_at DATETIME DEFAULT CURRENT_TIMESTAMP
     );
 
-    -- Migration: add tagline and genres if they don't exist
+    -- Migration: add missing columns if they don't exist
     PRAGMA table_info(videos);
   `)
 
@@ -42,6 +44,12 @@ export function initDb() {
   }
   if (!columnNames.includes('genres')) {
     db.exec("ALTER TABLE videos ADD COLUMN genres TEXT")
+  }
+  if (!columnNames.includes('vote_average')) {
+    db.exec("ALTER TABLE videos ADD COLUMN vote_average REAL")
+  }
+  if (!columnNames.includes('release_year')) {
+    db.exec("ALTER TABLE videos ADD COLUMN release_year INTEGER")
   }
 
   db.exec(`
@@ -64,8 +72,8 @@ export function initDb() {
 export function addVideo(video: any) {
   const stmt = db.prepare(`
     INSERT INTO videos (
-      title, file_path, type, series_name, season, episode, duration, poster_path
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      title, file_path, type, series_name, season, episode, duration, poster_path, vote_average, release_year
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(file_path) DO UPDATE SET
       duration = excluded.duration
     WHERE duration = 0 OR duration IS NULL
@@ -78,7 +86,9 @@ export function addVideo(video: any) {
     video.season || null,
     video.episode || null,
     video.duration || 0,
-    video.poster_path || null
+    video.poster_path || null,
+    video.vote_average || null,
+    video.release_year || null
   )
 }
 
@@ -178,7 +188,7 @@ export function getContinueWatching() {
 export function updateVideoMetadata(id: number, metadata: any) {
   const stmt = db.prepare(`
     UPDATE videos
-    SET poster_path = ?, overview = ?, tagline = ?, genres = ?, tmdb_id = ?
+    SET poster_path = ?, overview = ?, tagline = ?, genres = ?, tmdb_id = ?, vote_average = ?, release_year = ?
     WHERE id = ?
   `)
   return stmt.run(
@@ -187,6 +197,8 @@ export function updateVideoMetadata(id: number, metadata: any) {
     metadata.tagline || null, 
     metadata.genres || null, 
     metadata.tmdb_id, 
+    metadata.vote_average || null, 
+    metadata.release_year || null, 
     id
   )
 }

@@ -114,7 +114,7 @@ const App: React.FC = () => {
       <main className="flex-1 overflow-y-auto bg-background">
         <div className="p-8">
           {activeTab === 'home'    && <Home onPlay={handlePlayVideo} onShowDetail={setSelectedVideo} refreshKey={homeRefreshKey} />}
-          {activeTab === 'videos'  && <Videos onPlay={handlePlayVideo} onShowDetail={setSelectedVideo} />}
+          {activeTab === 'videos'  && <Videos onPlay={handlePlayVideo} />}
           {activeTab === 'movies'  && <Movies onPlay={handlePlayVideo} onShowDetail={setSelectedVideo} />}
           {activeTab === 'series'  && <Series onPlay={handlePlayVideo} onShowDetail={setSelectedVideo} />}
           {activeTab === 'settings' && <Settings />}

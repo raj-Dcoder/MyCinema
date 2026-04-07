@@ -234,7 +234,15 @@ function registerMediaProtocol(): void {
       }
 
       if (!fs.existsSync(normalizedPath)) {
-        return new Response('Not Found', { status: 404 })
+        console.error(`[Protocol] 404 Not Found: ${normalizedPath}`)
+        return new Response('Not Found', { 
+          status: 404,
+          headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate' }
+        })
+      }
+
+      if (normalizedPath.includes('-snap')) {
+        console.log(`[Protocol] Serving snap: ${normalizedPath}`)
       }
 
       const stat = fs.statSync(normalizedPath)
@@ -271,6 +279,7 @@ function registerMediaProtocol(): void {
             'Accept-Ranges': 'bytes',
             'Content-Length': chunksize.toString(),
             'Content-Type': contentType,
+            'Cache-Control': 'no-cache'
           }
         })
       } else {
@@ -280,6 +289,7 @@ function registerMediaProtocol(): void {
             'Content-Length': fileSize.toString(),
             'Accept-Ranges': 'bytes',
             'Content-Type': contentType,
+            'Cache-Control': 'no-cache'
           }
         })
       }
@@ -594,6 +604,7 @@ ipcMain.handle('pre-convert-subtitle', async (_, filePath: string, trackIndex: n
     return null
   }
 })
+
 
 
 

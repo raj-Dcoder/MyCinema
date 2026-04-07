@@ -82,7 +82,7 @@ async function findLocalPoster(videoPath: string): Promise<string | null> {
   return null
 }
 
-export async function extractOfflineThumbnail(videoPath: string, videoId: number): Promise<string | null> {
+export async function extractOfflineThumbnail(videoPath: string, videoId: number, duration: number = 0): Promise<string | null> {
   const posterDir = path.join(app.getPath('userData'), 'posters')
   if (!fs.existsSync(posterDir)) {
     fs.mkdirSync(posterDir, { recursive: true })
@@ -93,23 +93,40 @@ export async function extractOfflineThumbnail(videoPath: string, videoId: number
     const localPath = path.join(posterDir, fileName)
     
     if (fs.existsSync(localPath)) {
-      resolve(localPath)
-      return
+      const stats = fs.statSync(localPath)
+      if (stats.size > 0) {
+        console.log(`[FFMPEG] Cache Hit: Snapshot for ${videoId} already exists on disk.`)
+        resolve(localPath)
+        return
+      } else {
+        console.warn(`[FFMPEG] Found corrupted 0-byte ghost thumb at ${localPath}. Purging and regenerating...`)
+        try { fs.unlinkSync(localPath) } catch (e) {}
+      }
     }
+
+    const stamp = (duration > 0 && duration < 2) ? 0.1 : 1
 
     ffmpeg(videoPath)
       .screenshots({
-        timestamps: ['10%'],
+        timestamps: [stamp],
         filename: fileName,
-        folder: posterDir,
-        size: '?x720'
+        folder: posterDir
       })
       .on('end', () => {
-        console.log(`[FFMPEG] Extracted frame to ${localPath}`)
-        resolve(localPath)
+        if (fs.existsSync(localPath)) {
+          const stats = fs.statSync(localPath)
+          if (stats.size > 0) {
+            console.log(`[FFMPEG] Extracted frame to ${localPath}`)
+            return resolve(localPath)
+          } else {
+            fs.unlinkSync(localPath) // cleanup corrupted 0 byte file
+          }
+        }
+        console.error(`[FFMPEG] Failed: file not generated correctly at ${localPath}`)
+        resolve(null)
       })
       .on('error', (err) => {
-        console.error('[FFMPEG] Thumbnail extraction failed:', err)
+        console.error('[FFMPEG] Thumbnail extraction failed:', err.message)
         resolve(null)
       })
   })
@@ -175,6 +192,35 @@ export async function scanFolder(rootPath: string) {
         
         if (isGuid || isTooLong || (spaceCount > 6 && !metadata.series_name)) {
           console.log(`[Scanner] Skipping TMDB for "${searchTitle}" (likely junk/personal file)`)
+          
+          if (isMissingPoster) {
+            console.log(`[Scanner] Taking manual snapshot for junk/personal video ${videoId}`)
+            const snapPath = await extractOfflineThumbnail(filePath, videoId, duration)
+            if (snapPath) {
+               updateVideoMetadata(videoId, { 
+                 poster_path: snapPath, 
+                 overview: null, tagline: null, genres: null, tmdb_id: null, vote_average: null, release_year: null 
+               })
+            }
+          }
+          continue;
+        }
+        
+        // --- NEW CATEGORIZATION LOGIC & TMDB SHORT-CIRCUIT ---
+        // If it's a short clip (< 1 hour) AND it is NOT a strictly formatted series, disable TMDB matching
+        // so it doesn't randomly scrape movies. Wait, in `addVideo` we recorded duration. 
+        if (metadata.type === 'movie' && duration > 0 && duration < 3600) {
+          console.log(`[Scanner] Skipping TMDB for short clip ${videoId} (Duration: ${duration}s). Falls under Videos tab.`)
+          if (isMissingPoster) {
+            console.log(`[Scanner] Taking manual snapshot for short video ${videoId}`)
+            const snapPath = await extractOfflineThumbnail(filePath, videoId, duration)
+            if (snapPath) {
+               updateVideoMetadata(videoId, { 
+                 poster_path: snapPath, 
+                 overview: null, tagline: null, genres: null, tmdb_id: null, vote_average: null, release_year: null 
+               })
+            }
+          }
           continue;
         }
 
@@ -194,24 +240,30 @@ export async function scanFolder(rootPath: string) {
         if (!tmdbMetadata || !tmdbMetadata.poster_path) {
            console.log(`[Scanner] TMDB search for ${videoId} ("${searchTitle}") yielded no poster or failed.`)
            if (isSnap && currentVideoNode) {
-             // Already have a snap, but let's see if we should try snapping again ONLY if snap is missing from disk
-             if (!fs.existsSync(currentVideoNode.poster_path)) {
-                console.log(`[Scanner] Snap file missing for ${videoId}, re-extracting…`)
-                const snapPath = await extractOfflineThumbnail(filePath, videoId)
+             // Already have a snap, but let's see if we should try snapping again ONLY if snap is missing or 0 bytes
+             const p = currentVideoNode.poster_path
+             let isValidSnap = false
+             try { isValidSnap = fs.existsSync(p) && fs.statSync(p).size > 0 } catch(e) {}
+             
+             if (!isValidSnap) {
+                console.log(`[Scanner] Snap file missing or corrupt for ${videoId}, re-extracting…`)
+                const snapPath = await extractOfflineThumbnail(filePath, videoId, duration)
                 if (snapPath) {
-                  updateVideoMetadata(videoId, { 
-                    poster_path: snapPath, 
+                  updateVideoMetadata(videoId, {
+                    poster_path: snapPath,
                     overview: null, 
                     tagline: null, 
                     genres: null, 
-                    tmdb_id: null 
+                    tmdb_id: null,
+                    vote_average: null,
+                    release_year: null
                   })
                 }
              }
              continue; // Don't snap again if we already have it!
            }
            console.log(`[Scanner] Falling back to FFmpeg screenshot for ${videoId}`)
-           const snapPath = await extractOfflineThumbnail(filePath, videoId)
+           const snapPath = await extractOfflineThumbnail(filePath, videoId, duration)
            if (snapPath) {
              console.log(`[Scanner] Saving FFmpeg thumbnail to DB for video ${videoId}`)
              const existingMeta = currentVideoNode 
@@ -219,15 +271,19 @@ export async function scanFolder(rootPath: string) {
                   overview: currentVideoNode.overview, 
                   tagline: currentVideoNode.tagline,
                   genres: currentVideoNode.genres,
-                  tmdb_id: currentVideoNode.tmdb_id 
+                  tmdb_id: currentVideoNode.tmdb_id,
+                  vote_average: currentVideoNode.vote_average,
+                  release_year: currentVideoNode.release_year 
                 } 
-              : { overview: null, tagline: null, genres: null, tmdb_id: null }
+              : { overview: null, tagline: null, genres: null, tmdb_id: null, vote_average: null, release_year: null }
              updateVideoMetadata(videoId, { 
                poster_path: snapPath, 
                overview: existingMeta.overview, 
                tagline: existingMeta.tagline,
                genres: existingMeta.genres,
-               tmdb_id: existingMeta.tmdb_id 
+               tmdb_id: existingMeta.tmdb_id,
+               vote_average: existingMeta.vote_average,
+               release_year: existingMeta.release_year
              })
            }
         } else {
@@ -237,7 +293,9 @@ export async function scanFolder(rootPath: string) {
              overview: tmdbMetadata.overview, 
              tagline: tmdbMetadata.tagline,
              genres: tmdbMetadata.genres,
-             tmdb_id: tmdbMetadata.tmdb_id 
+             tmdb_id: tmdbMetadata.tmdb_id,
+             vote_average: tmdbMetadata.vote_average,
+             release_year: tmdbMetadata.release_year
            })
         }
       }
@@ -337,8 +395,7 @@ function parseFilename(filePath: string): VideoMetadata {
     /(.+?)[. ]s(\d+)[. ]e(\d+)(.*)/i,
     // Add simpler episode numbering
     /(.+?)[. ]episode[. ](\d+)(.*)/i,
-    /(.+?)[. ]ep[. ]?(\d+)(.*)/i,
-    /(.+?)[. -](\d{1,3})(.*)$/i
+    /(.+?)[. ]ep[. ]?(\d+)(.*)/i
   ]
 
   for (let i = 0; i < seriesPatterns.length; i++) {

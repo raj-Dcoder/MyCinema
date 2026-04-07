@@ -1,11 +1,10 @@
-import React, { useEffect, useState } from 'react'
+import React, { useEffect, useState, useRef } from 'react'
 import { Play, Clock, Video as VideoIcon } from 'lucide-react'
 import { Video } from '../types'
 import HorizontalScrollRow from '../components/HorizontalScrollRow'
 
 interface VideosProps {
   onPlay: (video: Video) => void
-  onShowDetail: (video: Video) => void
 }
 
 const ONE_HOUR = 3600 // seconds
@@ -25,41 +24,68 @@ function formatDuration(seconds: number): string {
 const VideoClipCard: React.FC<{ 
   video: Video; 
   onPlay: (v: Video) => void;
-  onShowDetail?: (v: Video) => void;
   isContinueWatching?: boolean;
-}> = ({ video, onPlay, onShowDetail, isContinueWatching }) => {
+}> = ({ video, onPlay, isContinueWatching }) => {
+  const [isHovered, setIsHovered] = useState(false)
+  const videoRef = useRef<HTMLVideoElement>(null)
+
   const posterUrl = video.poster_path
     ? (video.poster_path.startsWith('http')
         ? video.poster_path
         : `media://file/${encodeURIComponent(video.poster_path)}`)
     : null
 
+  useEffect(() => {
+    let interval: NodeJS.Timeout
+    if (isHovered && videoRef.current && (video.duration ?? 0) > 0) {
+      const duration = video.duration!
+      const steps = 8
+      let currentStep = 1
+
+      // Instant jump to the first segment
+      videoRef.current.currentTime = (currentStep / (steps + 1)) * duration
+
+      interval = setInterval(() => {
+        currentStep = (currentStep % steps) + 1
+        if (videoRef.current) {
+          videoRef.current.currentTime = (currentStep / (steps + 1)) * duration
+        }
+      }, 600)
+    }
+    return () => clearInterval(interval)
+  }, [isHovered, video.duration])
+
   const progressPercent = video.last_watched_time && video.duration
     ? (video.last_watched_time / video.duration) * 100
     : 0
 
   const handleClick = () => {
-    if (isContinueWatching) {
-      onPlay(video)
-    } else if (onShowDetail) {
-      onShowDetail(video)
-    } else {
-      onPlay(video)
-    }
+    onPlay(video)
   }
 
   return (
     <div
       className="group relative flex flex-col space-y-2 cursor-pointer"
       onClick={handleClick}
+      onMouseEnter={() => setIsHovered(true)}
+      onMouseLeave={() => setIsHovered(false)}
     >
-      {/* Landscape thumbnail */}
+      {/* Landscape thumbnail / Video Preview */}
       <div className="relative aspect-video w-full overflow-hidden rounded-xl bg-secondary shadow-lg transition-transform duration-300 group-hover:scale-[1.03] group-hover:shadow-2xl">
-        {posterUrl ? (
+        {isHovered ? (
+          <video
+            ref={videoRef}
+            src={`media://file/${encodeURIComponent(video.file_path)}`}
+            className="h-full w-full object-cover"
+            muted
+            playsInline
+            preload="auto"
+          />
+        ) : posterUrl ? (
           <img
             src={posterUrl}
             alt={video.title}
-            className="h-full w-full object-cover"
+            className="h-full w-full object-cover transition-opacity duration-300"
             onError={(e) => {
               (e.target as HTMLImageElement).style.display = 'none'
             }}
@@ -103,7 +129,7 @@ const VideoClipCard: React.FC<{
   )
 }
 
-const Videos: React.FC<VideosProps> = ({ onPlay, onShowDetail }) => {
+const Videos: React.FC<VideosProps> = ({ onPlay }) => {
   const [clips, setClips] = useState<Video[]>([])
   const [continueWatching, setContinueWatching] = useState<Video[]>([])
 
@@ -153,7 +179,7 @@ const Videos: React.FC<VideosProps> = ({ onPlay, onShowDetail }) => {
           <HorizontalScrollRow>
             {continueWatching.map(video => (
               <div key={video.id} className="w-56 md:w-64 lg:w-72 flex-shrink-0">
-                <VideoClipCard video={video} onPlay={onPlay} onShowDetail={onShowDetail} isContinueWatching={true} />
+                <VideoClipCard video={video} onPlay={onPlay} isContinueWatching={true} />
               </div>
             ))}
           </HorizontalScrollRow>
@@ -178,7 +204,7 @@ const Videos: React.FC<VideosProps> = ({ onPlay, onShowDetail }) => {
           )}
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-5 pb-8">
             {clips.map(video => (
-              <VideoClipCard key={video.id} video={video} onPlay={onPlay} onShowDetail={onShowDetail} />
+              <VideoClipCard key={video.id} video={video} onPlay={onPlay} />
             ))}
           </div>
         </section>

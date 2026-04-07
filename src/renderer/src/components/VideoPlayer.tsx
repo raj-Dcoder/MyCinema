@@ -1193,7 +1193,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
             <p className="text-sm font-medium text-gray-300 drop-shadow-sm mt-0.5">
               {currentVideo.type === 'series' 
                 ? `S${currentVideo.season} E${currentVideo.episode} ${currentVideo.series_name ? currentVideo.title : ''}` 
-                : 'Movie'
+                : (currentVideo.duration && currentVideo.duration < 3600 ? 'Video' : 'Movie')
               }
             </p>
           </div>

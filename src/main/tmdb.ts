@@ -73,6 +73,8 @@ export interface TmdbResult {
   tagline:     string | null
   genres:      string | null
   tmdb_id:     number | null
+  vote_average: number | null
+  release_year: number | null
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -96,7 +98,7 @@ export async function fetchTmdbMetadata(
   year?: number,
   existingTmdbId?: number
 ): Promise<TmdbResult> {
-  const empty: TmdbResult = { poster_path: null, overview: null, tagline: null, genres: null, tmdb_id: null }
+  const empty: TmdbResult = { poster_path: null, overview: null, tagline: null, genres: null, tmdb_id: null, vote_average: null, release_year: null }
   const apiKey = getTmdbApiKey()
 
   if (!apiKey) {
@@ -128,7 +130,9 @@ export async function fetchTmdbMetadata(
             overview: sidecar.overview, 
             tagline: sidecar.tagline || null,
             genres: sidecar.genres || null,
-            tmdb_id: sidecar.tmdb_id 
+            tmdb_id: sidecar.tmdb_id,
+            vote_average: sidecar.vote_average || null,
+            release_year: sidecar.release_year || null
           }
         }
         
@@ -139,7 +143,9 @@ export async function fetchTmdbMetadata(
           overview: sidecar.overview, 
           tagline: sidecar.tagline || null,
           genres: sidecar.genres || null,
-          tmdb_id: sidecar.tmdb_id 
+          tmdb_id: sidecar.tmdb_id,
+          vote_average: sidecar.vote_average || null,
+          release_year: sidecar.release_year || null
         }
       }
     } catch {
@@ -157,7 +163,7 @@ export async function fetchTmdbMetadata(
       await resolveDnsDoH('api.themoviedb.org')
     }
 
-    let tmdb_id = existingTmdbId
+    let tmdb_id: number | null = existingTmdbId || null
 
     if (!tmdb_id) {
       // Add year to search if available for pinpoint accuracy
@@ -189,7 +195,7 @@ export async function fetchTmdbMetadata(
 
       if (!data.results || data.results.length === 0) {
         console.log(`[TMDB] No results for "${title}" ${year ? `(${year})` : ''}`)
-        fs.writeFileSync(sidecarPath, JSON.stringify({ overview: null, tmdb_id: null, tagline: null, genres: null }))
+        fs.writeFileSync(sidecarPath, JSON.stringify({ overview: null, tmdb_id: null, tagline: null, genres: null, vote_average: null, release_year: null }))
         return empty
       }
 
@@ -218,13 +224,18 @@ export async function fetchTmdbMetadata(
     const overview = hit.overview || null
     const tagline = hit.tagline || null
     const genres = hit.genres ? hit.genres.map((g: any) => g.name).join(', ') : null
+    
+    // Parse Real Rating & Real Release Year
+    const vote_average = typeof hit.vote_average === 'number' ? Number(hit.vote_average.toFixed(1)) : null
+    const releaseStr = hit.release_date || hit.first_air_date
+    const release_year = releaseStr ? parseInt(releaseStr.substring(0, 4)) : null
 
     // Save sidecar
-    fs.writeFileSync(sidecarPath, JSON.stringify({ overview, tmdb_id, tagline, genres }))
+    fs.writeFileSync(sidecarPath, JSON.stringify({ overview, tmdb_id, tagline, genres, vote_average, release_year }))
 
     if (!remotePosterPath) {
       console.log(`[TMDB] Result found for "${title}" but no poster available`)
-      return { poster_path: null, overview, tagline, genres, tmdb_id }
+      return { poster_path: null, overview, tagline, genres, tmdb_id, vote_average, release_year }
     }
 
     // 3. Download poster
@@ -241,7 +252,7 @@ export async function fetchTmdbMetadata(
     fs.writeFileSync(cachePath, Buffer.from(arrayBuffer))
     
     console.log(`[TMDB] Success! Poster cached for "${title}"`)
-    return { poster_path: cachePath, overview, tagline, genres, tmdb_id }
+    return { poster_path: cachePath, overview, tagline, genres, tmdb_id, vote_average, release_year }
 
   } catch (err: any) {
     console.error(`[TMDB] Error for "${title}" ${year ? `(${year})` : ''}:`, err.message)

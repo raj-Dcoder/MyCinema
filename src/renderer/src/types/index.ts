@@ -14,4 +14,6 @@ export interface Video {
   last_watched_time?: number
   completed?: boolean
   episode_count?: number
+  vote_average?: number
+  release_year?: number
 }

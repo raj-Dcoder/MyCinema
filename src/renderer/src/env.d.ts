@@ -22,6 +22,19 @@ interface Api {
   onUpdateProgress: (callback: (info: { percent: number }) => void) => void
   onUpdateDownloaded: (callback: () => void) => void
   installUpdate: () => void
+  // Torrent download APIs
+  searchTMDB: (query: string) => Promise<any[]>
+  searchTorrentSources: (title: string, year: string, mediaType: string, tmdbId: number) => Promise<any[]>
+  startTorrentDownload: (magnetUrl: string, title: string) => Promise<boolean>
+  cancelTorrentDownload: (id: string) => Promise<boolean>
+  removeDownload: (id: string) => Promise<boolean>
+  pauseResumeTorrent: (id: string) => Promise<boolean>
+  getActiveDownloads: () => Promise<any[]>
+  onTorrentProgress: (callback: (data: any) => void) => () => void
+  // File utilities
+  openFolder: (filePath: string) => Promise<void>
+  getMediaInfo: (filePath: string) => Promise<any>
+  openDownloadsFolder: () => Promise<void>
 }
 
 declare global {

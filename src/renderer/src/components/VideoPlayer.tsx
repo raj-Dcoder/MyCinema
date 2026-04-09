@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react'
-import { Play, Pause, Rewind, FastForward, X, Maximize, Minimize, Volume2, VolumeX, Subtitles, Music, SkipForward as SkipNext, ArrowLeft, MessageSquareText, AlertTriangle, Check, Monitor, RectangleHorizontal, Crop } from 'lucide-react'
+import { Play, Pause, Rewind, FastForward, X, Maximize, Minimize, Volume2, VolumeX, Subtitles, Music, SkipForward as SkipNext, ArrowLeft, MessageSquareText, AlertTriangle, Check, Monitor, RectangleHorizontal, Crop, FolderOpen, Info, Film, HardDrive, ChevronDown, ChevronUp } from 'lucide-react'
 import { Video } from '../types'
 
 // ── VTT Parser (runs once per track selection, no React state) ──────────────
@@ -91,10 +91,28 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
   const activeSubKeyRef = useRef<string | null>(null)
   const [activeSubKey, setActiveSubKey] = useState<string | null>(null)
   const [subtitleLoading, setSubtitleLoading] = useState(false)
+  const [showInfoPanel, setShowInfoPanel] = useState(false)
+  const [mediaInfo, setMediaInfo] = useState<any>(null)
+  const [infoLoading, setInfoLoading] = useState(false)
+  const [showAllAudioInfo, setShowAllAudioInfo] = useState(false)
   
   const previewVideoRef = useRef<HTMLVideoElement>(null)
   const [hoverTime, setHoverTime] = useState<number | null>(null)
   const [hoverPosition, setHoverPosition] = useState<number>(0)
+
+  const handleOpenFolder = () => {
+    window.api.openFolder(currentVideo.file_path)
+  }
+
+  const handleToggleInfoPanel = async () => {
+    if (!showInfoPanel && !mediaInfo) {
+      setInfoLoading(true)
+      const info = await window.api.getMediaInfo(currentVideo.file_path)
+      setMediaInfo(info)
+      setInfoLoading(false)
+    }
+    setShowInfoPanel(p => !p)
+  }
 
   const checkNextEpisode = async (video: Video) => {
     if (video.type === 'series' && video.series_name) {
@@ -595,6 +613,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
           }
           break
         case 'Escape': onClose(); break
+        case 'KeyI': handleToggleInfoPanel(); break
         case 'Equal':
         case 'NumpadAdd': {
           const nextRate = Math.min(5, Math.round((playbackRate + 0.1) * 10) / 10)
@@ -1342,6 +1361,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
               <SkipNext size={20} className="group-hover/next:text-primary transition-colors" />
             </button>
           )}
+
         </div>
       </div>
 
@@ -1455,6 +1475,24 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
           </div>
 
           <div className="flex items-center space-x-6">
+            {/* Open Folder */}
+            <button
+              onClick={(e) => { e.stopPropagation(); handleOpenFolder(); }}
+              className="text-white/70 hover:text-white transition-colors"
+              title="Open in Explorer"
+            >
+              <FolderOpen size={22} className="opacity-90 hover:opacity-100" />
+            </button>
+
+            {/* Media Info */}
+            <button
+              onClick={(e) => { e.stopPropagation(); handleToggleInfoPanel(); }}
+              className={`transition-colors ${showInfoPanel ? 'text-blue-400' : 'text-white/70 hover:text-white'}`}
+              title="Media Info (I)"
+            >
+              <Info size={22} className="opacity-90 hover:opacity-100" />
+            </button>
+
             <button 
               onClick={(e) => { e.stopPropagation(); cycleAspectRatio(); }}
               className="text-white hover:text-primary transition-colors flex items-center"
@@ -1502,8 +1540,127 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
       </div>
       {/* Hidden Custom Audio Extraction Pipeliner */}
       <audio ref={audioRef} style={{ display: 'none' }} />
+
+      {/* ─── Media Info Slide-in Panel ─────────────────────────────────────── */}
+      <div
+        className={`absolute top-0 right-0 h-full w-80 z-50 transition-transform duration-300 ease-out ${
+          showInfoPanel ? 'translate-x-0' : 'translate-x-full'
+        }`}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="h-full bg-black/85 backdrop-blur-2xl border-l border-white/10 flex flex-col">
+          {/* Panel Header */}
+          <div className="flex items-center justify-between px-5 py-4 border-b border-white/5 flex-shrink-0">
+            <div className="flex items-center gap-2">
+              <Info size={15} className="text-blue-400" />
+              <h3 className="text-[11px] font-black text-white uppercase tracking-[0.18em]">Media Info</h3>
+            </div>
+            <button
+              onClick={(e) => { e.stopPropagation(); setShowInfoPanel(false) }}
+              className="w-7 h-7 rounded-md flex items-center justify-center hover:bg-white/10 text-white/40 hover:text-white transition-all"
+            >
+              <X size={14} />
+            </button>
+          </div>
+
+          {/* Panel Body */}
+          <div className="flex-1 overflow-y-auto px-5 py-4 space-y-5 custom-scrollbar">
+            {infoLoading ? (
+              <div className="flex flex-col items-center justify-center h-48 gap-3">
+                <div className="w-7 h-7 border-2 border-blue-500/30 border-t-blue-500 rounded-full animate-spin" />
+                <p className="text-white/30 text-[10px] font-black uppercase tracking-widest">Analyzing...</p>
+              </div>
+            ) : mediaInfo?.error ? (
+              <p className="text-red-400 text-xs font-medium text-center py-8">{mediaInfo.error}</p>
+            ) : mediaInfo ? (
+              <>
+                {/* File */}
+                <PanelSection icon={<HardDrive size={12} className="text-blue-400" />} title="File">
+                  <PanelRow label="Name" value={mediaInfo.file?.name} />
+                  <PanelRow label="Size" value={mediaInfo.file?.size} />
+                  <PanelRow label="Format" value={mediaInfo.container?.format} />
+                  <PanelRow label="Bitrate" value={mediaInfo.container?.bitrate} />
+                </PanelSection>
+
+                {/* Video */}
+                {mediaInfo.video && (
+                  <PanelSection icon={<Film size={12} className="text-purple-400" />} title="Video">
+                    <PanelRow label="Codec" value={mediaInfo.video.codec} />
+                    {mediaInfo.video.profile && <PanelRow label="Profile" value={mediaInfo.video.profile} />}
+                    <PanelRow label="Resolution" value={mediaInfo.video.resolution} />
+                    <PanelRow label="Frame Rate" value={mediaInfo.video.frameRate} />
+                    {mediaInfo.video.bitDepth && <PanelRow label="Bit Depth" value={mediaInfo.video.bitDepth} />}
+                    {mediaInfo.video.bitrate && <PanelRow label="Bitrate" value={mediaInfo.video.bitrate} />}
+                  </PanelSection>
+                )}
+
+                {/* Audio */}
+                {mediaInfo.audio?.length > 0 && (
+                  <PanelSection icon={<Music size={12} className="text-green-400" />} title={`Audio (${mediaInfo.audio.length})`}>
+                    {(showAllAudioInfo ? mediaInfo.audio : mediaInfo.audio.slice(0, 2)).map((track: any, i: number) => (
+                      <div key={i} className={i > 0 ? 'border-t border-white/5 pt-2 mt-1' : ''}>
+                        {mediaInfo.audio.length > 1 && <p className="text-[8px] font-black text-white/25 uppercase tracking-widest mb-1">Track {track.index}{track.language ? ` · ${track.language.toUpperCase()}` : ''}</p>}
+                        <PanelRow label="Codec" value={track.codec} />
+                        <PanelRow label="Channels" value={track.channels} />
+                        <PanelRow label="Sample Rate" value={track.sampleRate} />
+                        {track.bitrate && <PanelRow label="Bitrate" value={track.bitrate} />}
+                      </div>
+                    ))}
+                    {mediaInfo.audio.length > 2 && (
+                      <button onClick={() => setShowAllAudioInfo(p => !p)} className="mt-1.5 flex items-center gap-1 text-[9px] text-white/30 hover:text-white/60 font-black uppercase tracking-widest transition-colors">
+                        {showAllAudioInfo ? <ChevronUp size={10} /> : <ChevronDown size={10} />}
+                        {showAllAudioInfo ? 'Less' : `+${mediaInfo.audio.length - 2} more`}
+                      </button>
+                    )}
+                  </PanelSection>
+                )}
+
+                {/* Subtitles */}
+                {mediaInfo.subtitles?.length > 0 && (
+                  <PanelSection icon={<Subtitles size={12} className="text-yellow-400" />} title={`Subtitles (${mediaInfo.subtitles.length})`}>
+                    <div className="flex flex-wrap gap-1.5">
+                      {mediaInfo.subtitles.map((s: any, i: number) => (
+                        <span key={i} className="px-1.5 py-0.5 bg-white/5 border border-white/10 rounded text-[9px] font-bold text-white/50 uppercase tracking-widest">
+                          {s.language || s.codec || `#${s.index}`}
+                        </span>
+                      ))}
+                    </div>
+                  </PanelSection>
+                )}
+              </>
+            ) : null}
+          </div>
+
+          {/* Panel Footer */}
+          <div className="px-5 py-3 border-t border-white/5 flex-shrink-0">
+            <p className="text-[9px] text-white/20 font-bold uppercase tracking-widest text-center">Press I to toggle</p>
+          </div>
+        </div>
+      </div>
     </div>
   )
 }
+
+// ─── Info Panel Helper Components ────────────────────────────────────────────
+const PanelSection: React.FC<{ icon: React.ReactNode; title: string; children: React.ReactNode }> = ({ icon, title, children }) => (
+  <div>
+    <div className="flex items-center gap-1.5 mb-2">
+      {icon}
+      <h4 className="text-[9px] font-black text-white/30 uppercase tracking-[0.2em]">{title}</h4>
+    </div>
+    <div className="space-y-1.5">{children}</div>
+  </div>
+)
+
+const PanelRow: React.FC<{ label: string; value: string | null | undefined }> = ({ label, value }) => {
+  if (!value) return null
+  return (
+    <div className="flex items-baseline justify-between gap-2">
+      <span className="text-[9px] font-bold text-white/25 uppercase tracking-wide shrink-0">{label}</span>
+      <span className="text-[10px] font-semibold text-white/70 text-right break-all">{value}</span>
+    </div>
+  )
+}
+// ─────────────────────────────────────────────────────────────────────────────
 
 export default VideoPlayer

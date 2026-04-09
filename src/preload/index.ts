@@ -26,6 +26,29 @@ const api = {
   onUpdateProgress: (callback: (info: { percent: number }) => void) => ipcRenderer.on('update-progress', (_e, info) => callback(info)),
   onUpdateDownloaded: (callback: () => void) => ipcRenderer.on('update-downloaded', () => callback()),
   installUpdate: () => ipcRenderer.send('install-update'),
+  // Torrent download APIs
+  searchTMDB: (query: string) => ipcRenderer.invoke('search-tmdb', query),
+  searchTorrentSources: (title: string, year: string, mediaType: string, tmdbId: number) => 
+    ipcRenderer.invoke('search-torrent-sources', title, year, mediaType, tmdbId),
+  startTorrentDownload: (magnetUrl: string, title: string) => 
+    ipcRenderer.invoke('start-torrent-download', magnetUrl, title),
+  cancelTorrentDownload: (id: string) => 
+    ipcRenderer.invoke('cancel-torrent-download', id),
+  removeDownload: (id: string) => 
+    ipcRenderer.invoke('remove-download', id),
+  pauseResumeTorrent: (id: string) => 
+    ipcRenderer.invoke('pause-resume-torrent', id),
+  getActiveDownloads: () => 
+    ipcRenderer.invoke('get-active-downloads'),
+  onTorrentProgress: (callback: (data: any) => void) => {
+    const handler = (_event: any, data: any) => callback(data)
+    ipcRenderer.on('torrent-progress', handler)
+    return () => ipcRenderer.removeListener('torrent-progress', handler)
+  },
+  // File utilities
+  openFolder: (filePath: string) => ipcRenderer.invoke('open-folder', filePath),
+  getMediaInfo: (filePath: string) => ipcRenderer.invoke('get-media-info', filePath),
+  openDownloadsFolder: () => ipcRenderer.invoke('open-downloads-folder'),
 }
 
 // Use `contextBridge` APIs to expose Electron APIs to

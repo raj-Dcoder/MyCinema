@@ -11,6 +11,71 @@ import { PassThrough } from 'stream'
 import { autoUpdater } from 'electron-updater'
 import path from 'path'
 import { pathToFileURL } from 'url'
+import https from 'https'
+import dns from 'dns'
+
+// Custom DNS resolver using Google/Cloudflare to bypass ISP blocks
+const customDns = new dns.Resolver()
+customDns.setServers(['8.8.8.8', '1.1.1.1'])
+
+function resolveHostname(hostname: string): Promise<string> {
+  return new Promise((resolve) => {
+    customDns.resolve4(hostname, (err, addresses) => {
+      if (err || !addresses?.length) {
+        // Fallback: try system DNS
+        dns.resolve4(hostname, (err2, addrs2) => {
+          if (err2 || !addrs2?.length) resolve(hostname) // give up, pass original
+          else resolve(addrs2[0])
+        })
+      } else {
+        resolve(addresses[0])
+      }
+    })
+  })
+}
+
+// Make HTTPS GET requests, resolving DNS through Google/Cloudflare first
+function nodeHttpGet(url: string, timeoutMs: number = 10000): Promise<any> {
+  return new Promise(async (resolve, reject) => {
+    let req: any = null
+    const timer = setTimeout(() => {
+      if (req) req.destroy()
+      reject(new Error(`Timeout fetching ${url} after ${timeoutMs}ms`))
+    }, timeoutMs)
+
+    try {
+      const parsed = new URL(url)
+      const ip = await resolveHostname(parsed.hostname)
+      console.log(`[DNS] ${parsed.hostname} -> ${ip}`)
+
+      const options = {
+        hostname: ip,
+        port: 443,
+        path: parsed.pathname + parsed.search,
+        headers: {
+          'User-Agent': 'MyCinema/1.5',
+          'Host': parsed.hostname
+        },
+        servername: parsed.hostname, // TLS SNI — required for HTTPS to IP
+      }
+
+      req = https.get(options, (res) => {
+        let data = ''
+        res.on('data', (chunk: string) => { data += chunk })
+        res.on('end', () => {
+          clearTimeout(timer)
+          try { resolve(JSON.parse(data)) } catch { resolve(null) }
+        })
+      }).on('error', (err) => {
+        clearTimeout(timer)
+        reject(err)
+      })
+    } catch (err) {
+      clearTimeout(timer)
+      reject(err)
+    }
+  })
+}
 
 // ─── File-system Watcher Registry ────────────────────────────────────────────
 const VIDEO_EXTS = new Set(['.mp4', '.mkv', '.avi', '.mov', '.webm'])
@@ -204,12 +269,31 @@ function createWindow(): void {
     mainWindow.show()
     setupAutoUpdater(mainWindow)
     // Kick off startup scan after window is visible (non-blocking)
-    setImmediate(() => runStartupScan().catch(err => console.error('[Startup] Scan error:', err)))
+    setImmediate(() => {
+      runStartupScan().catch(err => console.error('[Startup] Scan error:', err))
+      autoResumeDownloads().catch(err => console.error('[Startup] Auto-resume error:', err))
+    })
   })
 
   mainWindow.webContents.setWindowOpenHandler((details) => {
     shell.openExternal(details.url)
     return { action: 'deny' }
+  })
+
+  mainWindow.on('close', (e) => {
+    if (activeTorrents.size > 0) {
+      const choice = dialog.showMessageBoxSync(mainWindow, {
+        type: 'warning',
+        buttons: ['Cancel', 'Yes, Quit Application'],
+        defaultId: 0,
+        cancelId: 0,
+        title: 'Active Downloads',
+        message: 'There are ongoing downloads. Closing the app will cancel them. Are you sure you want to quit?'
+      })
+      if (choice === 0) {
+        e.preventDefault()
+      }
+    }
   })
 
   if (is.dev && process.env['ELECTRON_RENDERER_URL']) {
@@ -430,6 +514,10 @@ app.whenReady().then(() => {
 app.on('before-quit', () => {
   folderWatchers.forEach(w => w.close())
   folderWatchers.clear()
+  // Gracefully destroy all active torrents
+  activeTorrents.forEach(t => { try { t.destroy() } catch {} })
+  activeTorrents.clear()
+  if (webtorrentClient) { try { webtorrentClient.destroy() } catch {} }
 })
 
 app.on('window-all-closed', () => {
@@ -608,6 +696,117 @@ ipcMain.handle('pre-convert-subtitle', async (_, filePath: string, trackIndex: n
 
 
 
+// ─── Open Folder in Explorer ─────────────────────────────────────────────────
+ipcMain.handle('open-folder', (_event, filePath: string) => {
+  shell.showItemInFolder(filePath)
+})
+
+ipcMain.handle('open-downloads-folder', () => {
+  const dlPath = path.join(app.getPath('downloads'), 'MyCinema')
+  if (!fs.existsSync(dlPath)) fs.mkdirSync(dlPath, { recursive: true })
+  shell.openPath(dlPath)
+})
+
+// ─── Get Media Info via ffprobe ───────────────────────────────────────────────
+ipcMain.handle('get-media-info', (_event, filePath: string): Promise<any> => {
+  return new Promise((resolve) => {
+    if (!fs.existsSync(filePath)) {
+      resolve({ error: 'File not found' })
+      return
+    }
+
+    const stat = fs.statSync(filePath)
+    const fileSizeBytes = stat.size
+
+    ffmpeg.ffprobe(filePath, (err, metadata) => {
+      if (err) {
+        resolve({ error: err.message })
+        return
+      }
+
+      const format = metadata.format || {}
+      const streams = metadata.streams || []
+
+      const videoStream = streams.find((s: any) => s.codec_type === 'video')
+      const audioStreams = streams.filter((s: any) => s.codec_type === 'audio')
+      const subtitleStreams = streams.filter((s: any) => s.codec_type === 'subtitle')
+
+      const formatFileSize = (bytes: number) => {
+        if (bytes >= 1e9) return `${(bytes / 1e9).toFixed(2)} GB`
+        if (bytes >= 1e6) return `${(bytes / 1e6).toFixed(1)} MB`
+        return `${(bytes / 1e3).toFixed(0)} KB`
+      }
+
+      const formatBitrate = (bps?: number) => {
+        if (!bps) return null
+        if (bps >= 1e6) return `${(bps / 1e6).toFixed(1)} Mbps`
+        return `${(bps / 1e3).toFixed(0)} Kbps`
+      }
+
+      const parseFrameRate = (r?: string) => {
+        if (!r) return null
+        const parts = r.split('/')
+        if (parts.length === 2) {
+          const fps = parseFloat(parts[0]) / parseFloat(parts[1])
+          return isNaN(fps) ? null : `${fps.toFixed(2).replace(/\.00$/, '')} fps`
+        }
+        return r
+      }
+
+      const channelLayout = (s: any) => {
+        if (s.channel_layout) return s.channel_layout
+        const ch = s.channels
+        if (ch === 1) return 'Mono'
+        if (ch === 2) return 'Stereo'
+        if (ch === 6) return '5.1'
+        if (ch === 8) return '7.1'
+        return ch ? `${ch}ch` : null
+      }
+
+      resolve({
+        file: {
+          name: path.basename(filePath),
+          path: filePath,
+          size: formatFileSize(fileSizeBytes),
+          sizeBytes: fileSizeBytes,
+        },
+        container: {
+          format: (format.format_long_name || format.format_name || '').replace('Matroska / WebM', 'MKV'),
+          duration: format.duration ? parseFloat(format.duration as any) : null,
+          bitrate: formatBitrate(format.bit_rate ? parseInt(format.bit_rate as any) : undefined),
+        },
+        video: videoStream ? {
+          codec: videoStream.codec_name?.toUpperCase() || null,
+          codecLong: videoStream.codec_long_name || null,
+          width: videoStream.width || null,
+          height: videoStream.height || null,
+          resolution: videoStream.width && videoStream.height ? `${videoStream.width}×${videoStream.height}` : null,
+          frameRate: parseFrameRate(videoStream.r_frame_rate),
+          bitDepth: videoStream.bits_per_raw_sample ? `${videoStream.bits_per_raw_sample}-bit` : null,
+          colorSpace: videoStream.color_space || null,
+          bitrate: formatBitrate(videoStream.bit_rate ? parseInt(videoStream.bit_rate as any) : undefined),
+          profile: videoStream.profile || null,
+        } : null,
+        audio: audioStreams.map((s: any, i: number) => ({
+          index: i + 1,
+          codec: s.codec_name?.toUpperCase() || null,
+          channels: channelLayout(s),
+          sampleRate: s.sample_rate ? `${parseInt(s.sample_rate) / 1000} kHz` : null,
+          language: s.tags?.language || s.tags?.lang || null,
+          title: s.tags?.title || null,
+          bitrate: formatBitrate(s.bit_rate ? parseInt(s.bit_rate as any) : undefined),
+        })),
+        subtitles: subtitleStreams.map((s: any, i: number) => ({
+          index: i + 1,
+          codec: s.codec_name?.toUpperCase() || null,
+          language: s.tags?.language || s.tags?.lang || null,
+          title: s.tags?.title || null,
+        })),
+      })
+    })
+  })
+})
+
 ipcMain.handle('clear-all-data', async () => {
   try {
     const { response } = await dialog.showMessageBox({
@@ -701,3 +900,536 @@ function setupAutoUpdater(win: BrowserWindow): void {
   autoUpdater.checkForUpdates().catch(err => console.error('Update check failed:', err))
   setInterval(() => autoUpdater.checkForUpdates().catch(() => {}), 2 * 60 * 60 * 1000)
 }
+
+// ─── WebTorrent Download Engine ──────────────────────────────────────────────
+let webtorrentClient: any = null
+const activeTorrents = new Map<string, any>() // id -> torrent instance
+
+async function getWebTorrentClient(): Promise<any> {
+  if (!webtorrentClient) {
+    // Hide the dynamic import from Vite/Rollup so it doesn't try to bundle ESM into CJS
+    const dynamicImport = new Function('modulePath', 'return import(modulePath)')
+    const mod = await dynamicImport('webtorrent')
+    const WebTorrent = mod.default || mod
+    
+    webtorrentClient = new WebTorrent({
+      maxConns: 1000, // Maximized connection limits
+      dht: true, // Ensure DHT is enabled for finding peers beyond trackers
+      lsd: true, // Local Peer Discovery for blazing fast LAN/ISP connections
+    })
+    
+    webtorrentClient.on('error', (err: Error) => {
+      console.error('[WebTorrent] Client error:', err.message)
+    })
+  }
+  return webtorrentClient
+}
+
+function getDownloadPath(): string {
+  const dlPath = path.join(app.getPath('downloads'), 'MyCinema')
+  if (!fs.existsSync(dlPath)) fs.mkdirSync(dlPath, { recursive: true })
+  return dlPath
+}
+
+function formatBytes(bytes: number): string {
+  if (bytes === 0) return '0 B'
+  const k = 1024
+  const sizes = ['B', 'KB', 'MB', 'GB', 'TB']
+  const i = Math.floor(Math.log(bytes) / Math.log(k))
+  return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i]
+}
+
+function formatTime(seconds: number): string {
+  if (!isFinite(seconds) || seconds <= 0) return '—'
+  const h = Math.floor(seconds / 3600)
+  const m = Math.floor((seconds % 3600) / 60)
+  const s = Math.floor(seconds % 60)
+  if (h > 0) return `${h}h ${m}m`
+  if (m > 0) return `${m}m ${s}s`
+  return `${s}s`
+}
+
+function broadcastProgress(id: string, torrent: any, status: string, errorMessage?: string): void {
+  const data: any = {
+    id,
+    title: torrent.name || (torrent as any)._myCinemaTitle || 'Download',
+    progress: Math.round((torrent.progress || 0) * 100 * 100) / 100,
+    downloadSpeed: formatBytes(torrent.downloadSpeed || 0) + '/s',
+    timeRemaining: formatTime(torrent.timeRemaining ? torrent.timeRemaining / 1000 : Infinity),
+    status,
+    size: formatBytes(torrent.length || 0),
+    downloaded: formatBytes(torrent.downloaded || 0),
+  }
+  if (errorMessage) data.errorMessage = errorMessage
+  
+  db.updateDownload(data)
+  BrowserWindow.getAllWindows().forEach(w => w.webContents.send('torrent-progress', data))
+}
+
+// ─── IPC: Search TMDB ────────────────────────────────────────────────────────
+const TMDB_API_KEY = '2dca580c2a14b55200e784d157207b4d'
+
+ipcMain.handle('search-tmdb', async (_, query: string) => {
+  try {
+    const url = `https://api.themoviedb.org/3/search/multi?api_key=${TMDB_API_KEY}&query=${encodeURIComponent(query)}&include_adult=false&page=1`
+    const data: any = await nodeHttpGet(url)
+    const filtered = (data.results || []).filter(
+      (r: any) => r.media_type === 'movie' || r.media_type === 'tv'
+    )
+    return filtered.slice(0, 12)
+  } catch (err) {
+    console.error('[TMDB] Search error:', err)
+    return []
+  }
+})
+
+// ─── IPC: Search Torrent Sources ─────────────────────────────────────────────
+ipcMain.handle('search-torrent-sources', async (_, title: string, year: string, mediaType: string, tmdbId: number) => {
+  try {
+    console.log(`[Torrent] Searching sources for: "${title}" (${year}) type=${mediaType} tmdbId=${tmdbId}`)
+
+    // 1. Fetch IMDB ID for both movies and series to ensure accurate matching
+    let imdbId = ''
+    try {
+      const extUrl = `https://api.themoviedb.org/3/${mediaType}/${tmdbId}/external_ids?api_key=${TMDB_API_KEY}`
+      const extData: any = await nodeHttpGet(extUrl)
+      imdbId = extData?.imdb_id || ''
+      console.log(`[Torrent] Got IMDB ID: ${imdbId}`)
+    } catch (e) {
+      console.error('[Torrent] Failed to get IMDB ID:', e)
+    }
+
+    const sources: any[] = []
+
+    if (mediaType === 'movie') {
+      // A. Fetch from YTS using IMDB ID for 100% accurate match (bypassing fuzzy title/year issues)
+      if (imdbId) {
+        const mirrors = ['yts.mx', 'yts.rs', 'yts.do', 'yts.lt', 'yts.ag']
+        let ytsData: any = null
+
+        for (const domain of mirrors) {
+          try {
+            // YTS supports full IMDB IDs starting with 'tt' as query_term!
+            const searchUrl = `https://${domain}/api/v2/list_movies.json?query_term=${imdbId}&limit=10&sort_by=seeds`
+            const res = await nodeHttpGet(searchUrl, 3000) 
+            if (res?.status === 'ok' && res?.data?.movies?.length > 0) {
+              ytsData = res
+              break
+            }
+          } catch (err: any) {
+            console.log(`[Torrent] YTS mirror ${domain} failed`)
+          }
+        }
+
+        if (ytsData?.data?.movies) {
+          for (const movie of ytsData.data.movies) {
+            for (const torrent of (movie.torrents || [])) {
+              sources.push({
+                title: `${movie.title_long} [${torrent.type?.toUpperCase() || 'WEB'}] (YTS)`,
+                quality: torrent.quality || '720p',
+                size: torrent.size || '—',
+                magnet: `magnet:?xt=urn:btih:${torrent.hash}&dn=${encodeURIComponent(movie.title_long)}`,
+                seeds: torrent.seeds || 0,
+                peers: torrent.peers || 0,
+                type: torrent.type || 'web',
+                isHindi: false
+              })
+            }
+          }
+        }
+      }
+
+      // B. Fetch from Torrentio as an aggregator for high-speed, dual-audio, and hindi content
+      if (imdbId) {
+        try {
+          const torrentioUrl = `https://torrentio.strem.fun/stream/movie/${imdbId}.json`
+          const tData: any = await nodeHttpGet(torrentioUrl, 6000)
+          if (tData && tData.streams) {
+            for (const stream of tData.streams) {
+              if (stream.infoHash) {
+                const streamTitle = stream.title || ''
+                const lowerTitle = streamTitle.toLowerCase()
+                
+                // Parse quality out of Torrentio title
+                const qualityMatch = streamTitle.match(/(2160p|1080p|720p|480p)/i)
+                const quality = qualityMatch ? qualityMatch[1] : (stream.name?.includes('1080p') ? '1080p' : 'HD')
+                
+                // Parse size out of Torrentio title e.g. "💾 2.34 GB"
+                const sizeMatch = streamTitle.match(/([0-9.]+\s*(GB|MB|KB))/i)
+                const size = sizeMatch ? sizeMatch[1] : '—'
+
+                // Parse seeds from Torrentio title e.g. "👤 123"
+                const seedMatch = streamTitle.match(/(?:👤|Seeders:)\s*([0-9]+)/i)
+                const seeds = seedMatch ? parseInt(seedMatch[1]) : 10
+                
+                const isHindi = lowerTitle.includes('hindi') || lowerTitle.includes('dual') || lowerTitle.includes('multi')
+                
+                // Clean up title to drop the emojis and meta info for a cleaner display
+                const cleanTitle = streamTitle.split('\n')[0].replace(/[\[\(][A-Za-z0-9 ]*[\]\)]/g, '').trim() || `${title} (Aggregated)`
+
+                sources.push({
+                  title: cleanTitle.substring(0, 80),
+                  quality: quality,
+                  size: size,
+                  magnet: `magnet:?xt=urn:btih:${stream.infoHash}&dn=${encodeURIComponent(cleanTitle)}`,
+                  seeds: seeds,
+                  peers: Math.floor(seeds * 0.2), // Estimate peers
+                  type: 'web',
+                  isHindi: isHindi
+                })
+              }
+            }
+          }
+        } catch (err: any) {
+          console.error('[Torrent] Torrentio fetch failed:', err.message)
+        }
+      }
+
+    } else {
+      // TV Series logic - using EZTV
+      if (!imdbId) return []
+
+      const imdbNumeric = imdbId.replace(/^tt/, '')
+      const eztvMirrors = ['eztvx.to', 'eztv.re', 'eztv.wf', 'eztv.tf', 'eztv.yt']
+      let data: any = null
+
+      for (const domain of eztvMirrors) {
+        try {
+          const searchUrl = `https://${domain}/api/get-torrents?imdb_id=${imdbNumeric}&limit=30&page=1`
+          const res = await nodeHttpGet(searchUrl, 5000)
+          if (res && res.torrents) {
+            data = res
+            break
+          }
+        } catch (err: any) {
+          console.log(`[Torrent] EZTV mirror ${domain} failed`)
+        }
+      }
+
+      if (data?.torrents) {
+        for (const t of data.torrents) {
+          if (!t.magnet_url) continue
+          const lowerTitle = (t.title || t.filename || '').toLowerCase()
+          sources.push({
+            title: t.title || t.filename || 'Unknown',
+            quality: t.title?.match(/(720p|1080p|2160p|480p)/i)?.[1] || 'SD',
+            size: formatBytes(t.size_bytes || 0),
+            magnet: t.magnet_url,
+            seeds: t.seeds || 0,
+            peers: t.peers || 0,
+            type: 'web',
+            isHindi: lowerTitle.includes('hindi') || lowerTitle.includes('dual')
+          })
+        }
+      }
+    }
+
+    // C. Fetch from APIBay (The Pirate Bay) for both movies and series
+    if (imdbId) {
+      try {
+        const apibayUrl = `https://apibay.org/q.php?q=${imdbId}`
+        const apiBayData: any = await nodeHttpGet(apibayUrl, 5000)
+        
+        if (Array.isArray(apiBayData) && apiBayData[0]?.id !== '0') {
+          for (const t of apiBayData) {
+            const seeders = parseInt(t.seeders) || 0
+            const leechers = parseInt(t.leechers) || 0
+            if (seeders === 0) continue // Skip dead torrents early
+            
+            const titleName = t.name || ''
+            const lowerTitle = titleName.toLowerCase()
+            
+            const qualityMatch = titleName.match(/(2160p|1080p|720p|480p)/i)
+            const quality = qualityMatch ? qualityMatch[1] : 'HD'
+            
+            const isHindi = lowerTitle.includes('hindi') || lowerTitle.includes('dual') || lowerTitle.includes('multi')
+            
+            sources.push({
+              title: `${titleName.substring(0, 80)} (TPB)`,
+              quality: quality,
+              size: formatBytes(parseInt(t.size) || 0),
+              magnet: `magnet:?xt=urn:btih:${t.info_hash}&dn=${encodeURIComponent(titleName)}`,
+              seeds: seeders,
+              peers: leechers,
+              type: 'web',
+              isHindi: isHindi
+            })
+          }
+        }
+      } catch (err: any) {
+        console.error('[Torrent] APIBay fetch failed:', err.message)
+      }
+    }
+
+    // Parse Season / Episode metadata
+    let enrichedSources = sources.map(src => {
+      if (mediaType === 'tv') {
+        const titleLower = src.title.toLowerCase()
+        const seMatch = titleLower.match(/s(\d{1,2})e(\d{1,2})/i) || titleLower.match(/season\s*(\d{1,2})\s*episode\s*(\d{1,2})/i)
+        
+        if (seMatch) {
+          src.parsedSeason = parseInt(seMatch[1])
+          src.parsedEpisode = parseInt(seMatch[2])
+          src.isSeasonPack = false
+        } else {
+          const sMatch = titleLower.match(/s(\d{1,2})\b/i) || titleLower.match(/season\s*(\d{1,2})\b/i)
+          if (sMatch) {
+            src.parsedSeason = parseInt(sMatch[1])
+            src.isSeasonPack = true
+          }
+        }
+      }
+      return src
+    })
+
+    // Filter Season Packs that are not 1080p+
+    if (mediaType === 'tv') {
+      enrichedSources = enrichedSources.filter(src => {
+        if (src.isSeasonPack) {
+          if (src.quality === 'SD' || src.quality === '480p' || src.quality === '720p') {
+            return false
+          }
+        }
+        return true
+      })
+    }
+
+    // Sort heavily by requirements
+    enrichedSources.sort((a, b) => {
+      if (mediaType === 'movie') {
+        return b.seeds - a.seeds
+      } else {
+        // Both are Season Packs
+        if (a.isSeasonPack && b.isSeasonPack) {
+          if (a.parsedSeason !== b.parsedSeason) return (a.parsedSeason || 0) - (b.parsedSeason || 0)
+          return b.seeds - a.seeds
+        }
+        // Pack vs Episode
+        if (a.isSeasonPack && !b.isSeasonPack) return -1
+        if (!a.isSeasonPack && b.isSeasonPack) return 1
+
+        // Both are Episodes
+        if (a.parsedSeason !== b.parsedSeason) return (a.parsedSeason || 0) - (b.parsedSeason || 0)
+        if (a.parsedEpisode !== b.parsedEpisode) return (a.parsedEpisode || 0) - (b.parsedEpisode || 0)
+        
+        // Same Episode: Sort by seeds
+        if (a.seeds !== b.seeds) return b.seeds - a.seeds
+        
+        // Tiebreaker: Resolution
+        const qA = a.quality === '2160p' ? 3 : a.quality === '1080p' ? 2 : a.quality === '720p' ? 1 : 0
+        const qB = b.quality === '2160p' ? 3 : b.quality === '1080p' ? 2 : b.quality === '720p' ? 1 : 0
+        return qB - qA
+      }
+    })
+
+    // Deduplicate by infoHash/magnet to avoid clutter
+    const uniqueSources: any[] = []
+    const seenHashes = new Set()
+    for (const src of enrichedSources) {
+      const match = src.magnet.match(/urn:btih:([a-zA-Z0-9]+)/i)
+      const hash = match ? match[1].toLowerCase() : src.magnet
+      if (!seenHashes.has(hash)) {
+        seenHashes.add(hash)
+        uniqueSources.push(src)
+      }
+    }
+
+    return uniqueSources
+
+  } catch (err) {
+    console.error('[Torrent] Source search error:', err)
+    return []
+  }
+})
+
+// ─── IPC: Start Torrent Download ─────────────────────────────────────────────
+
+async function startWebTorrent(torrentId: string, magnetUrl: string, title: string, initialProgress: number = 0) {
+  const client = await getWebTorrentClient()
+  const downloadPath = getDownloadPath()
+
+  console.log(`[Torrent] Starting download: "${title}" -> ${downloadPath}`)
+  console.log(`[Torrent] Magnet: ${magnetUrl.slice(0, 80)}...`)
+
+  broadcastProgress(torrentId, { downloadSpeed: 0, timeRemaining: 0, length: 0, downloaded: 0, progress: initialProgress / 100, name: title } as any, 'downloading')
+
+  const extraTrackers = [
+    'udp://tracker.opentrackr.org:1337/announce',
+    'udp://tracker.torrent.eu.org:451/announce',
+    'udp://exodus.desync.com:6969/announce',
+    'udp://tracker.cyberia.is:6969/announce',
+    'udp://tracker.tiny-vps.com:6969/announce',
+    'udp://open.stealth.si:80/announce',
+    'udp://tracker.moeking.me:6969/announce',
+    'udp://tracker.bitsearch.to:1337/announce',
+    'udp://tracker.dler.org:6969/announce',
+    'udp://9.rarbg.com:2810/announce',
+    'udp://p4p.arenabg.com:1337'
+  ]
+
+  let enrichedMagnet = magnetUrl
+  for (const tr of extraTrackers) {
+    if (!enrichedMagnet.includes(encodeURIComponent(tr))) {
+      enrichedMagnet += `&tr=${encodeURIComponent(tr)}`
+    }
+  }
+
+  const torrent = client.add(enrichedMagnet, { path: downloadPath })
+  
+  torrent._myCinemaTitle = title
+  activeTorrents.set(torrentId, torrent)
+
+  torrent.on('ready', () => {
+    console.log(`[Torrent] Metadata resolved: ${torrent.name} (${formatBytes(torrent.length)})`)
+  })
+
+  // Periodic progress updates (every 1s)
+  const progressInterval = setInterval(() => {
+    if (torrent.destroyed) {
+      clearInterval(progressInterval)
+      return
+    }
+    broadcastProgress(torrentId, torrent, torrent.paused ? 'paused' : 'downloading')
+  }, 1000)
+
+  torrent.on('done', () => {
+    clearInterval(progressInterval)
+    broadcastProgress(torrentId, torrent, 'done')
+    console.log(`[Torrent] Download complete: ${title}`)
+    setTimeout(() => {
+      if (!torrent.destroyed) torrent.destroy()
+      activeTorrents.delete(torrentId)
+    }, 5000)
+  })
+
+  torrent.on('error', (err: Error) => {
+    clearInterval(progressInterval)
+    broadcastProgress(torrentId, torrent, 'error', err.message)
+    console.error(`[Torrent] Error: ${err.message}`)
+    activeTorrents.delete(torrentId)
+  })
+
+  return torrent
+}
+
+async function autoResumeDownloads() {
+  const downloads = db.getDownloads()
+  for (const dl of downloads) {
+    if (dl.status === 'downloading') {
+      console.log(`[AutoResume] Resuming incomplete download: ${dl.title}`)
+      try {
+        await startWebTorrent(dl.id, dl.magnet, dl.title, dl.progress || 0)
+      } catch (e: any) {
+        console.error(`[AutoResume] Failed to resume ${dl.id}:`, e.message)
+      }
+    }
+  }
+}
+
+ipcMain.handle('start-torrent-download', async (_, magnetUrl: string, title: string) => {
+  try {
+    const torrentId = crypto.randomUUID()
+    
+    db.addDownload({
+      id: torrentId,
+      title,
+      magnet: magnetUrl,
+      status: 'downloading'
+    })
+
+    await startWebTorrent(torrentId, magnetUrl, title, 0)
+    return torrentId
+  } catch (err) {
+    console.error('[Torrent] Start download error:', err)
+    return false
+  }
+})
+
+// ─── IPC: Cancel Torrent ─────────────────────────────────────────────────────
+ipcMain.handle('cancel-torrent-download', async (_, id: string) => {
+  try {
+    const torrent = activeTorrents.get(id)
+    if (torrent && !torrent.destroyed) {
+      torrent.destroy()
+    }
+    activeTorrents.delete(id)
+    // NOTE: Canceling a torrent leaves it in DB as 'paused' or we can leave it as canceled.
+    // The user wants tracking. Let's mark it as 'paused'.
+    // Cancel actually stops it. Let's just update DB to 'paused'.
+    const dlDbData = db.getDownloads().find((d: any) => d.id === id)
+    if (dlDbData) {
+      dlDbData.status = 'paused'
+      db.updateDownload(dlDbData)
+      // Broadcast it so UI updates immediately
+      broadcastProgress(id, { downloadSpeed: 0, timeRemaining: 0, length: 0, downloaded: 0, progress: dlDbData.progress, name: dlDbData.title } as any, 'paused')
+    }
+    return true
+  } catch (err) {
+    console.error('[Torrent] Cancel error:', err)
+    return false
+  }
+})
+
+// ─── IPC: Pause / Resume Torrent ─────────────────────────────────────────────
+ipcMain.handle('pause-resume-torrent', async (_, id: string) => {
+  try {
+    const torrent = activeTorrents.get(id)
+    
+    // Resume Logic
+    if (!torrent || torrent.destroyed) {
+      const dbDl = db.getDownloads().find((d: any) => d.id === id)
+      if (dbDl) {
+        console.log(`[Torrent] Resuming "${dbDl.title}" from ${dbDl.progress}%`)
+        await startWebTorrent(id, dbDl.magnet, dbDl.title, dbDl.progress || 0)
+        return true
+      }
+      return false
+    }
+    
+    // Pause Logic (Stop & Destroy pattern for reliability)
+    console.log(`[Torrent] Pausing download: ${id}`)
+    torrent.destroy()
+    activeTorrents.delete(id)
+    
+    const dlDbData = db.getDownloads().find((d: any) => d.id === id)
+    if (dlDbData) {
+      dlDbData.status = 'paused'
+      db.updateDownload(dlDbData)
+      broadcastProgress(id, { 
+        downloadSpeed: 0, 
+        timeRemaining: 0, 
+        length: 0, 
+        downloaded: 0, 
+        progress: dlDbData.progress / 100, 
+        name: dlDbData.title 
+      } as any, 'paused')
+    }
+    
+    return true
+  } catch (err) {
+    console.error('[Torrent] Pause/Resume error:', err)
+    return false
+  }
+})
+
+// ─── IPC: Get Active Downloads ───────────────────────────────────────────────
+ipcMain.handle('get-active-downloads', async () => {
+  return db.getDownloads()
+})
+
+// ─── IPC: Remove Download ────────────────────────────────────────────────────
+ipcMain.handle('remove-download', async (_, id: string) => {
+  try {
+    const torrent = activeTorrents.get(id)
+    if (torrent && !torrent.destroyed) {
+      torrent.destroy()
+    }
+    activeTorrents.delete(id)
+    db.removeDownloadRow(id)
+    return true
+  } catch (err) {
+    console.error('[Torrent] Remove error:', err)
+    return false
+  }
+})
+

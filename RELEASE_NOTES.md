@@ -1,12 +1,15 @@
 # MyCinema v1.5.0 🚀
 
-A refinement update focusing on enhanced player controls and usability.
+A major update that brings an all-new metadata backend, massive reliability fixes, and enhanced hardware control.
 
 ### 🌟 Features
+- **TMDB Migration**: Transitioned the primary metadata provider to TMDB (The Movie Database) for more reliable, accurate, and high-quality artwork and synopses.
 - **Headphone Control**: Full integration with the MediaSession API to support play/pause from bluetooth headsets and keyboard media buttons.
-- **Detail Screen Navigation**: Quick exit from the Detail Screen utilizing standard mouse back/forward buttons.
+- **Detail Screen Navigation**: Quick exit from the Cinematic Detail Screen utilizing standard mouse back/forward buttons.
 
 ### 🛠️ Improvements & Fixes
+- **Flawless Thumbnails**: Resolved tricky Chromium caching race conditions that blocked image rendering. Now every video—including personal recordings and offline files—securely generates a preview snapshot without silently failing.
+- **Improved Metadata Scanning**: Polished the metadata scanning logic and UI aesthetics to ensure a consistent, beautiful library.
 - **Real-Time Video Scrubbing**: Removed CSS translation lag, delivering instant 1:1 timeline scrubbing while dragging the seekbar.
 
 ***

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react'
-import { Home as HomeIcon, Film, Tv, Settings as SettingsIcon, Video as VideoIcon } from 'lucide-react'
+import { Home as HomeIcon, Film, Tv, Settings as SettingsIcon, Video as VideoIcon, Download as DownloadIcon } from 'lucide-react'
 import { Video } from './types'
 import Home from './pages/Home'
 import Videos from './pages/Videos'
@@ -8,9 +8,10 @@ import Series from './pages/Series'
 import Settings from './pages/Settings'
 import VideoPlayer from './components/VideoPlayer'
 import DetailScreen from './components/DetailScreen'
+import Download from './pages/Download'
 
 const App: React.FC = () => {
-  const [activeTab, setActiveTab] = useState<'home' | 'videos' | 'movies' | 'series' | 'settings'>('home')
+  const [activeTab, setActiveTab] = useState<'home' | 'videos' | 'movies' | 'series' | 'download' | 'settings'>('home')
   const [playingVideo, setPlayingVideo] = useState<Video | null>(null)
   const [selectedVideo, setSelectedVideo] = useState<Video | null>(null)
   const [homeRefreshKey, setHomeRefreshKey] = useState(0)
@@ -98,7 +99,14 @@ const App: React.FC = () => {
           </div>
         )}
 
-        <div className="p-4 border-t border-secondary">
+        <div className="p-4 border-t border-secondary space-y-1">
+          <button 
+            onClick={() => setActiveTab('download')}
+            className={`w-full flex items-center space-x-3 px-4 py-3 rounded-lg transition-colors ${activeTab === 'download' ? 'bg-primary/10 text-primary' : 'hover:bg-secondary'}`}
+          >
+            <DownloadIcon size={20} />
+            <span className="font-medium">Download</span>
+          </button>
           <button 
             onClick={() => setActiveTab('settings')}
             className={`w-full flex items-center space-x-3 px-4 py-3 rounded-lg transition-colors ${activeTab === 'settings' ? 'bg-primary/10 text-primary' : 'hover:bg-secondary'}`}
@@ -117,6 +125,7 @@ const App: React.FC = () => {
           {activeTab === 'videos'  && <Videos onPlay={handlePlayVideo} />}
           {activeTab === 'movies'  && <Movies onPlay={handlePlayVideo} onShowDetail={setSelectedVideo} />}
           {activeTab === 'series'  && <Series onPlay={handlePlayVideo} onShowDetail={setSelectedVideo} />}
+          {activeTab === 'download' && <Download />}
           {activeTab === 'settings' && <Settings />}
         </div>
       </main>

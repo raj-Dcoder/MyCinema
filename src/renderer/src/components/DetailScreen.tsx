@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react'
-import { X, Play, Info, Calendar, Clock, Star, ChevronRight } from 'lucide-react'
+import { X, Play, Info, Calendar, Clock, Star, FolderOpen, Film, Music, Subtitles, HardDrive, ChevronDown, ChevronUp } from 'lucide-react'
 import { Video } from '../types'
 
 interface DetailScreenProps {
@@ -8,9 +8,49 @@ interface DetailScreenProps {
   onPlay: (video: Video) => void
 }
 
+// ─── Media Info helpers ───────────────────────────────────────────────────────
+const InfoSection: React.FC<{ icon: React.ReactNode; title: string; children: React.ReactNode }> = ({ icon, title, children }) => (
+  <div>
+    <div className="flex items-center gap-2 mb-2.5">
+      {icon}
+      <h4 className="text-[10px] font-black text-white/40 uppercase tracking-[0.18em]">{title}</h4>
+    </div>
+    <div className="space-y-1.5 pl-0.5">{children}</div>
+  </div>
+)
+
+const InfoRow: React.FC<{ label: string; value: string | null | undefined }> = ({ label, value }) => {
+  if (!value) return null
+  return (
+    <div className="flex items-baseline justify-between gap-4">
+      <span className="text-[10px] font-bold text-white/30 uppercase tracking-wider shrink-0">{label}</span>
+      <span className="text-[11px] font-semibold text-white/80 text-right break-all">{value}</span>
+    </div>
+  )
+}
+// ─────────────────────────────────────────────────────────────────────────────
+
 const DetailScreen: React.FC<DetailScreenProps> = ({ video, onClose, onPlay }) => {
   const [episodes, setEpisodes] = useState<Video[]>([])
   const [loading, setLoading] = useState(false)
+  const [showInfoModal, setShowInfoModal] = useState(false)
+  const [mediaInfo, setMediaInfo] = useState<any>(null)
+  const [infoLoading, setInfoLoading] = useState(false)
+  const [showAllAudio, setShowAllAudio] = useState(false)
+
+  const handleOpenFolder = () => {
+    window.api.openFolder(video.file_path)
+  }
+
+  const handleShowInfo = async () => {
+    setShowInfoModal(true)
+    if (!mediaInfo) {
+      setInfoLoading(true)
+      const info = await window.api.getMediaInfo(video.file_path)
+      setMediaInfo(info)
+      setInfoLoading(false)
+    }
+  }
 
   useEffect(() => {
     if (video.type === 'series' && video.series_name) {
@@ -145,7 +185,7 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, onClose, onPlay }) =
             </div>
 
             {/* Actions */}
-            <div className="flex flex-wrap gap-5 pt-4">
+            <div className="flex flex-wrap gap-4 pt-4">
               <button 
                 onClick={() => onPlay(video)}
                 className="flex items-center gap-3 bg-red-600 hover:bg-red-700 text-white px-10 py-4 rounded-2xl font-black text-sm tracking-widest transition-all shadow-[0_10px_30px_rgba(220,38,38,0.4)] hover:scale-105 active:scale-95 group uppercase italic"
@@ -153,11 +193,117 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, onClose, onPlay }) =
                 <Play fill="white" size={20} className="group-hover:scale-110 transition-transform" />
                 Play Now
               </button>
-              <button className="flex items-center gap-3 bg-white/10 hover:bg-white/20 text-white px-10 py-4 rounded-2xl font-black text-sm tracking-widest transition-all border border-white/10 hover:scale-105 active:scale-95 uppercase italic glass-effect">
+              <button
+                onClick={handleOpenFolder}
+                className="flex items-center gap-3 bg-white/10 hover:bg-white/20 text-white px-8 py-4 rounded-2xl font-black text-sm tracking-widest transition-all border border-white/10 hover:scale-105 active:scale-95 uppercase italic glass-effect"
+                title="Open containing folder in Explorer"
+              >
+                <FolderOpen size={20} />
+                Open Folder
+              </button>
+              <button
+                onClick={handleShowInfo}
+                className="flex items-center gap-3 bg-white/10 hover:bg-blue-500/20 text-white hover:text-blue-300 px-6 py-4 rounded-2xl font-black text-sm tracking-widest transition-all border border-white/10 hover:border-blue-500/30 hover:scale-105 active:scale-95 uppercase italic glass-effect"
+                title="View media file info"
+              >
                 <Info size={20} />
-                Trailer
+                Info
               </button>
             </div>
+
+            {/* Media Info Modal */}
+            {showInfoModal && (
+              <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm animate-in fade-in duration-200" onClick={() => setShowInfoModal(false)}>
+                <div
+                  className="relative w-full max-w-lg bg-[#0f0f0f] border border-white/10 rounded-2xl shadow-2xl overflow-hidden animate-in slide-in-from-bottom-4 duration-300"
+                  onClick={e => e.stopPropagation()}
+                >
+                  {/* Modal Header */}
+                  <div className="flex items-center justify-between px-6 py-4 border-b border-white/5 bg-white/[0.02]">
+                    <div className="flex items-center gap-3">
+                      <div className="w-8 h-8 rounded-lg bg-blue-500/20 flex items-center justify-center">
+                        <Info size={16} className="text-blue-400" />
+                      </div>
+                      <div>
+                        <h3 className="text-sm font-black text-white uppercase tracking-widest">Media Information</h3>
+                        <p className="text-[10px] text-white/30 font-medium tracking-wide mt-0.5 truncate max-w-[260px]">{mediaInfo?.file?.name || video.title}</p>
+                      </div>
+                    </div>
+                    <button onClick={() => setShowInfoModal(false)} className="p-1.5 rounded-lg hover:bg-white/10 text-white/50 hover:text-white transition-all">
+                      <X size={18} />
+                    </button>
+                  </div>
+
+                  {/* Modal Body */}
+                  <div className="px-6 py-5 space-y-5 max-h-[60vh] overflow-y-auto scrollbar-thin">
+                    {infoLoading ? (
+                      <div className="flex flex-col items-center justify-center py-12 gap-3">
+                        <div className="w-8 h-8 border-2 border-blue-500/30 border-t-blue-500 rounded-full animate-spin" />
+                        <p className="text-white/30 text-xs font-bold uppercase tracking-widest">Analyzing file...</p>
+                      </div>
+                    ) : mediaInfo?.error ? (
+                      <p className="text-red-400 text-sm font-medium text-center py-8">{mediaInfo.error}</p>
+                    ) : mediaInfo ? (
+                      <>
+                        {/* File */}
+                        <InfoSection icon={<HardDrive size={14} className="text-blue-400" />} title="File">
+                          <InfoRow label="Size" value={mediaInfo.file?.size} />
+                          <InfoRow label="Format" value={mediaInfo.container?.format} />
+                          <InfoRow label="Duration" value={mediaInfo.container?.duration ? formatDuration(mediaInfo.container.duration) : null} />
+                          <InfoRow label="Bitrate" value={mediaInfo.container?.bitrate} />
+                        </InfoSection>
+
+                        {/* Video */}
+                        {mediaInfo.video && (
+                          <InfoSection icon={<Film size={14} className="text-purple-400" />} title="Video">
+                            <InfoRow label="Codec" value={mediaInfo.video.codec} />
+                            {mediaInfo.video.profile && <InfoRow label="Profile" value={mediaInfo.video.profile} />}
+                            <InfoRow label="Resolution" value={mediaInfo.video.resolution} />
+                            <InfoRow label="Frame Rate" value={mediaInfo.video.frameRate} />
+                            {mediaInfo.video.bitDepth && <InfoRow label="Bit Depth" value={mediaInfo.video.bitDepth} />}
+                            {mediaInfo.video.bitrate && <InfoRow label="Video Bitrate" value={mediaInfo.video.bitrate} />}
+                          </InfoSection>
+                        )}
+
+                        {/* Audio */}
+                        {mediaInfo.audio?.length > 0 && (
+                          <InfoSection icon={<Music size={14} className="text-green-400" />} title={`Audio (${mediaInfo.audio.length} track${mediaInfo.audio.length > 1 ? 's' : ''})` }>
+                            {(showAllAudio ? mediaInfo.audio : mediaInfo.audio.slice(0, 2)).map((track: any, i: number) => (
+                              <div key={i} className={`${i > 0 ? 'border-t border-white/5 pt-2 mt-2' : ''}`}>
+                                {mediaInfo.audio.length > 1 && <p className="text-[9px] font-black text-white/30 uppercase tracking-widest mb-1">Track {track.index}{track.language ? ` — ${track.language.toUpperCase()}` : ''}{track.title ? ` (${track.title})` : ''}</p>}
+                                <InfoRow label="Codec" value={track.codec} />
+                                <InfoRow label="Channels" value={track.channels} />
+                                <InfoRow label="Sample Rate" value={track.sampleRate} />
+                                {track.bitrate && <InfoRow label="Bitrate" value={track.bitrate} />}
+                              </div>
+                            ))}
+                            {mediaInfo.audio.length > 2 && (
+                              <button onClick={() => setShowAllAudio(p => !p)} className="mt-2 flex items-center gap-1 text-[10px] text-white/40 hover:text-white/70 font-black uppercase tracking-widest transition-colors">
+                                {showAllAudio ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
+                                {showAllAudio ? 'Show less' : `+${mediaInfo.audio.length - 2} more tracks`}
+                              </button>
+                            )}
+                          </InfoSection>
+                        )}
+
+                        {/* Subtitles */}
+                        {mediaInfo.subtitles?.length > 0 && (
+                          <InfoSection icon={<Subtitles size={14} className="text-yellow-400" />} title={`Subtitles (${mediaInfo.subtitles.length})`}>
+                            <div className="flex flex-wrap gap-1.5">
+                              {mediaInfo.subtitles.map((s: any, i: number) => (
+                                <span key={i} className="px-2 py-0.5 bg-white/5 border border-white/10 rounded text-[10px] font-bold text-white/60 uppercase tracking-widest">
+                                  {s.language || s.codec || `Track ${s.index}`}
+                                </span>
+                              ))}
+                            </div>
+                          </InfoSection>
+                        )}
+                      </>
+                    ) : null}
+                  </div>
+                </div>
+              </div>
+            )}
 
             {/* Episodes Section (for Series) */}
             {video.type === 'series' && (

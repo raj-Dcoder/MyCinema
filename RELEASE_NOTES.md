@@ -1,16 +1,22 @@
-# MyCinema v1.5.0 🚀
+# MyCinema v1.6.0 🚀
 
-A major update that brings an all-new metadata backend, massive reliability fixes, and enhanced hardware control.
+A monumental update that introduces true P2P downloading capabilities, completely overhauls the security model, and levels up the cinematic experience.
 
 ### 🌟 Features
+- **P2P Download Engine**: Integrated WebTorrent with a beautiful side-panel UI for searching, streaming, and downloading movies and TV series effortlessly. Includes a brand-new introductory guide.
 - **TMDB Migration**: Transitioned the primary metadata provider to TMDB (The Movie Database) for more reliable, accurate, and high-quality artwork and synopses.
-- **Headphone Control**: Full integration with the MediaSession API to support play/pause from bluetooth headsets and keyboard media buttons.
-- **Detail Screen Navigation**: Quick exit from the Cinematic Detail Screen utilizing standard mouse back/forward buttons.
+- **Headphone Control & Navigation**: Full integration with the MediaSession API to support play/pause from bluetooth headsets/media buttons, and quick exit from the Detail Screen utilizing standard mouse back/forward buttons.
+
+### 🛡️ Security & Privacy Audit
+- **Strict Protocol Containment**: Removed `bypassCSP` loopholes from custom media protocols to completely mitigate cross-site scripting (XSS) risks.
+- **Path Traversal Protection**: Implemented rigorous whitelisting for all renderer-to-main file handlers, strictly limiting read access to user-selected libraries and application paths.
+- **Safe External Links**: Validated and secured UI external links to prevent `javascript:` or `file:` URL payloads.
+- **Local Network Obfuscation**: Disabled DHT and LSD in the WebTorrent configuration by default. Your IP and local network activity are completely hidden during downloads.
 
 ### 🛠️ Improvements & Fixes
-- **Flawless Thumbnails**: Resolved tricky Chromium caching race conditions that blocked image rendering. Now every video—including personal recordings and offline files—securely generates a preview snapshot without silently failing.
-- **Improved Metadata Scanning**: Polished the metadata scanning logic and UI aesthetics to ensure a consistent, beautiful library.
+- **Flawless Thumbnails**: Resolved tricky Chromium caching race conditions that blocked image rendering. Now every video securely generates a preview snapshot without silently failing.
 - **Real-Time Video Scrubbing**: Removed CSS translation lag, delivering instant 1:1 timeline scrubbing while dragging the seekbar.
+- **Optimized P2P Connections**: Reduced router overload by capping WebTorrent conns while injecting high-speed public trackers to maximize speed.
 
 ***
 

@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react'
 import { Search, Download as DownloadIcon, Film, Tv, X, Loader2, HardDrive, CheckCircle2, AlertCircle, Pause, Play, FolderOpen } from 'lucide-react'
+import { DownloadFeatureTour } from '../components/DownloadFeatureTour'
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 interface TMDBResult {
@@ -187,6 +188,7 @@ const Download: React.FC = () => {
 
   return (
     <div className="relative">
+      <DownloadFeatureTour />
       {/* Main Content Area */}
       <div className={`transition-all duration-300 ${panelOpen ? 'mr-[380px]' : ''}`}>
         {/* Header */}

@@ -136,6 +136,37 @@ function detachFolderWatcher(folderPath: string): void {
   }
 }
 
+// ─── File Path Security Guard ─────────────────────────────────────────────────
+/**
+ * Validates that a file path is within one of the user's registered library
+ * folders, the MyCinema downloads folder, or the app userData directory.
+ * Prevents path-traversal attacks where a malicious torrent/subtitle could
+ * craft a URL like media://file/C:/sensitive/passwords.txt to exfiltrate
+ * arbitrary files from the user's system.
+ */
+function isSafeFilePath(inputPath: string): boolean {
+  try {
+    const normalized = path.normalize(inputPath)
+    const allowedRoots = [
+      // User's registered library folders (dynamically checked each call)
+      ...(db.getFolders() as any[]).map((f: any) => path.normalize(f.path)),
+      // The MyCinema torrent download destination — must match getDownloadPath() exactly
+      path.normalize(path.join(app.getPath('downloads'), 'MyCinema')),
+      // App userData: poster cache, subtitle cache, window state, db
+      path.normalize(app.getPath('userData')),
+      // Temp dir used by subtitle pre-conversion
+      path.normalize(app.getPath('temp')),
+    ]
+    // Use case-insensitive prefix matching (handles Windows drive letter casing)
+    return allowedRoots.some(root =>
+      normalized.toLowerCase().startsWith(root.toLowerCase() + path.sep) ||
+      normalized.toLowerCase() === root.toLowerCase()
+    )
+  } catch {
+    return false
+  }
+}
+
 /**
  * Startup scan: silently rescan every saved folder in the background.
  * Runs after the window is visible so it doesn't slow down first-paint.
@@ -244,7 +275,11 @@ function createWindow(): void {
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
       sandbox: false,
-      webSecurity: false // Allow local video playback
+      // webSecurity remains false for local media serving: the real path-traversal
+      // protection is the isSafeFilePath() whitelist guard on every IPC handler and
+      // protocol handler. Enabling webSecurity caused cross-origin CSP rejections
+      // for the custom media:// / subtitle:// / audio:// schemes in some Electron builds.
+      webSecurity: false
     }
   })
 
@@ -276,7 +311,12 @@ function createWindow(): void {
   })
 
   mainWindow.webContents.setWindowOpenHandler((details) => {
-    shell.openExternal(details.url)
+    // Only allow safe external URLs — block javascript:, file:, data: etc.
+    if (details.url.startsWith('https://') || details.url.startsWith('http://')) {
+      shell.openExternal(details.url)
+    } else {
+      console.warn(`[Security] Blocked unsafe openExternal URL: ${details.url.slice(0, 80)}`)
+    }
     return { action: 'deny' }
   })
 
@@ -315,6 +355,12 @@ function registerMediaProtocol(): void {
       let normalizedPath = decodeURIComponent(encodedPath)
       if (normalizedPath.startsWith('/') && normalizedPath.includes(':')) {
         normalizedPath = normalizedPath.slice(1)
+      }
+
+      // Security: block path traversal — only serve files within allowed roots
+      if (!isSafeFilePath(normalizedPath)) {
+        console.error(`[Protocol] 403 Forbidden path: ${normalizedPath}`)
+        return new Response('Forbidden', { status: 403 })
       }
 
       if (!fs.existsSync(normalizedPath)) {
@@ -395,6 +441,12 @@ function registerSubtitleProtocol(): void {
         normalizedPath = normalizedPath.slice(1)
       }
 
+      // Security: block path traversal
+      if (!isSafeFilePath(normalizedPath)) {
+        console.error(`[Protocol] 403 Forbidden subtitle path: ${normalizedPath}`)
+        return new Response('Forbidden', { status: 403 })
+      }
+
       if (!fs.existsSync(normalizedPath)) {
         return new Response('Not Found', { status: 404 })
       }
@@ -429,6 +481,12 @@ function registerAudioProtocol(): void {
       let normalizedPath = decodeURIComponent(encodedPath)
       if (normalizedPath.startsWith('/') && normalizedPath.includes(':')) {
         normalizedPath = normalizedPath.slice(1)
+      }
+
+      // Security: block path traversal
+      if (!isSafeFilePath(normalizedPath)) {
+        console.error(`[Protocol] 403 Forbidden audio path: ${normalizedPath}`)
+        return new Response('Forbidden', { status: 403 })
       }
 
       if (!fs.existsSync(normalizedPath)) {
@@ -603,15 +661,27 @@ ipcMain.handle('scan-folder', async (_, folderPath) => {
   return await scanFolder(folderPath)
 })
 
-ipcMain.handle('get-embedded-subtitles', async (_, filePath) => {
+ipcMain.handle('get-embedded-subtitles', async (_, filePath: string) => {
+  if (!isSafeFilePath(filePath)) {
+    console.error(`[IPC] 403 Forbidden path in get-embedded-subtitles: ${filePath}`)
+    return []
+  }
   return await getEmbeddedSubtitles(filePath)
 })
 
-ipcMain.handle('get-embedded-audio', async (_, filePath) => {
+ipcMain.handle('get-embedded-audio', async (_, filePath: string) => {
+  if (!isSafeFilePath(filePath)) {
+    console.error(`[IPC] 403 Forbidden path in get-embedded-audio: ${filePath}`)
+    return []
+  }
   return await getEmbeddedAudio(filePath)
 })
 
-ipcMain.handle('get-subtitles', async (_, filePath) => {
+ipcMain.handle('get-subtitles', async (_, filePath: string) => {
+  if (!isSafeFilePath(filePath)) {
+    console.error(`[IPC] 403 Forbidden path in get-subtitles: ${filePath}`)
+    return null
+  }
   try {
     const dir = path.dirname(filePath)
     const baseName = path.basename(filePath, path.extname(filePath))
@@ -647,6 +717,10 @@ ipcMain.handle('get-subtitles', async (_, filePath) => {
 
 // Pre-convert subtitle track to static WebVTT file to avoid live FFmpeg streaming glitches during playback
 ipcMain.handle('pre-convert-subtitle', async (_, filePath: string, trackIndex: number, isExternal: boolean) => {
+  if (!isSafeFilePath(filePath)) {
+    console.error(`[IPC] 403 Forbidden path in pre-convert-subtitle: ${filePath}`)
+    return null
+  }
   try {
     const subsDir = path.join(app.getPath('userData'), 'subtitles')
     if (!fs.existsSync(subsDir)) fs.mkdirSync(subsDir, { recursive: true })
@@ -710,6 +784,11 @@ ipcMain.handle('open-downloads-folder', () => {
 // ─── Get Media Info via ffprobe ───────────────────────────────────────────────
 ipcMain.handle('get-media-info', (_event, filePath: string): Promise<any> => {
   return new Promise((resolve) => {
+    if (!isSafeFilePath(filePath)) {
+      console.error(`[IPC] 403 Forbidden path in get-media-info: ${filePath}`)
+      resolve({ error: 'Access denied' })
+      return
+    }
     if (!fs.existsSync(filePath)) {
       resolve({ error: 'File not found' })
       return
@@ -913,9 +992,17 @@ async function getWebTorrentClient(): Promise<any> {
     const WebTorrent = mod.default || mod
     
     webtorrentClient = new WebTorrent({
-      maxConns: 1000, // Maximized connection limits
-      dht: true, // Ensure DHT is enabled for finding peers beyond trackers
-      lsd: true, // Local Peer Discovery for blazing fast LAN/ISP connections
+      // Privacy: DHT disabled by default — DHT broadcasts your real public IP
+      // to the global distributed hash table network, where it can be logged by
+      // copyright enforcement agencies and ISP monitoring systems.
+      dht: false,
+      // Privacy: LSD disabled by default — Local Service Discovery announces
+      // your download activity on the LAN, visible to network admins on
+      // corporate/university/public Wi-Fi.
+      lsd: false,
+      // Reduced from 1000: extreme connection counts can crash home routers
+      // and trigger ISP throttling. 200 is a good balance of speed vs stability.
+      maxConns: 200,
     })
     
     webtorrentClient.on('error', (err: Error) => {
@@ -967,7 +1054,9 @@ function broadcastProgress(id: string, torrent: any, status: string, errorMessag
 }
 
 // ─── IPC: Search TMDB ────────────────────────────────────────────────────────
-const TMDB_API_KEY = '2dca580c2a14b55200e784d157207b4d'
+// Read the key from the environment (injected by electron-vite from .env at build time).
+// Never hardcode API keys in source files.
+const TMDB_API_KEY = process.env.MAIN_VITE_TMDB_API_KEY || (import.meta as any).env?.MAIN_VITE_TMDB_API_KEY || ''
 
 ipcMain.handle('search-tmdb', async (_, query: string) => {
   try {

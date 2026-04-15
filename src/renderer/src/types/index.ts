@@ -8,6 +8,7 @@ export interface Video {
   episode?: number
   duration?: number
   poster_path?: string
+  backdrop_path?: string
   overview?: string
   tagline?: string
   genres?: string

@@ -13,9 +13,9 @@ const InfoSection: React.FC<{ icon: React.ReactNode; title: string; children: Re
   <div>
     <div className="flex items-center gap-2 mb-2.5">
       {icon}
-      <h4 className="text-[10px] font-black text-white/40 uppercase tracking-[0.18em]">{title}</h4>
+      <h4 className="text-[12px] font-black text-white/40 uppercase tracking-[0.18em]">{title}</h4>
     </div>
-    <div className="space-y-1.5 pl-0.5">{children}</div>
+    <div className="space-y-1.5 pl-1">{children}</div>
   </div>
 )
 
@@ -23,8 +23,8 @@ const InfoRow: React.FC<{ label: string; value: string | null | undefined }> = (
   if (!value) return null
   return (
     <div className="flex items-baseline justify-between gap-4">
-      <span className="text-[10px] font-bold text-white/30 uppercase tracking-wider shrink-0">{label}</span>
-      <span className="text-[11px] font-semibold text-white/80 text-right break-all">{value}</span>
+      <span className="text-[11px] font-bold text-white/30 uppercase tracking-wider shrink-0">{label}</span>
+      <span className="text-[12px] font-semibold text-white/80 text-right break-all">{value}</span>
     </div>
   )
 }
@@ -221,12 +221,12 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, onClose, onPlay }) =
                   {/* Modal Header */}
                   <div className="flex items-center justify-between px-6 py-4 border-b border-white/5 bg-white/[0.02]">
                     <div className="flex items-center gap-3">
-                      <div className="w-8 h-8 rounded-lg bg-blue-500/20 flex items-center justify-center">
-                        <Info size={16} className="text-blue-400" />
+                      <div className="w-10 h-10 rounded-lg bg-red-500/10 flex items-center justify-center">
+                        <Info size={18} className="text-red-500" />
                       </div>
                       <div>
-                        <h3 className="text-sm font-black text-white uppercase tracking-widest">Media Information</h3>
-                        <p className="text-[10px] text-white/30 font-medium tracking-wide mt-0.5 truncate max-w-[260px]">{mediaInfo?.file?.name || video.title}</p>
+                        <h3 className="text-[13px] font-black text-white uppercase tracking-widest leading-none">Media Information</h3>
+                        <p className="text-[11px] text-white/30 font-medium tracking-wide mt-1 truncate max-w-[260px]">{mediaInfo?.file?.name || video.title}</p>
                       </div>
                     </div>
                     <button onClick={() => setShowInfoModal(false)} className="p-1.5 rounded-lg hover:bg-white/10 text-white/50 hover:text-white transition-all">
@@ -238,15 +238,15 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, onClose, onPlay }) =
                   <div className="px-6 py-5 space-y-5 max-h-[60vh] overflow-y-auto scrollbar-thin">
                     {infoLoading ? (
                       <div className="flex flex-col items-center justify-center py-12 gap-3">
-                        <div className="w-8 h-8 border-2 border-blue-500/30 border-t-blue-500 rounded-full animate-spin" />
-                        <p className="text-white/30 text-xs font-bold uppercase tracking-widest">Analyzing file...</p>
+                        <div className="w-10 h-10 border-2 border-primary/30 border-t-primary rounded-full animate-spin" />
+                        <p className="text-white/30 text-[12px] font-bold uppercase tracking-widest">Analyzing file...</p>
                       </div>
                     ) : mediaInfo?.error ? (
                       <p className="text-red-400 text-sm font-medium text-center py-8">{mediaInfo.error}</p>
                     ) : mediaInfo ? (
                       <>
                         {/* File */}
-                        <InfoSection icon={<HardDrive size={14} className="text-blue-400" />} title="File">
+                        <InfoSection icon={<HardDrive size={16} className="text-blue-400" />} title="File">
                           <InfoRow label="Size" value={mediaInfo.file?.size} />
                           <InfoRow label="Format" value={mediaInfo.container?.format} />
                           <InfoRow label="Duration" value={mediaInfo.container?.duration ? formatDuration(mediaInfo.container.duration) : null} />
@@ -255,7 +255,7 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, onClose, onPlay }) =
 
                         {/* Video */}
                         {mediaInfo.video && (
-                          <InfoSection icon={<Film size={14} className="text-purple-400" />} title="Video">
+                          <InfoSection icon={<Film size={16} className="text-purple-400" />} title="Video">
                             <InfoRow label="Codec" value={mediaInfo.video.codec} />
                             {mediaInfo.video.profile && <InfoRow label="Profile" value={mediaInfo.video.profile} />}
                             <InfoRow label="Resolution" value={mediaInfo.video.resolution} />
@@ -267,10 +267,10 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, onClose, onPlay }) =
 
                         {/* Audio */}
                         {mediaInfo.audio?.length > 0 && (
-                          <InfoSection icon={<Music size={14} className="text-green-400" />} title={`Audio (${mediaInfo.audio.length} track${mediaInfo.audio.length > 1 ? 's' : ''})` }>
+                          <InfoSection icon={<Music size={16} className="text-green-400" />} title={`Audio (${mediaInfo.audio.length} track${mediaInfo.audio.length > 1 ? 's' : ''})` }>
                             {(showAllAudio ? mediaInfo.audio : mediaInfo.audio.slice(0, 2)).map((track: any, i: number) => (
                               <div key={i} className={`${i > 0 ? 'border-t border-white/5 pt-2 mt-2' : ''}`}>
-                                {mediaInfo.audio.length > 1 && <p className="text-[9px] font-black text-white/30 uppercase tracking-widest mb-1">Track {track.index}{track.language ? ` — ${track.language.toUpperCase()}` : ''}{track.title ? ` (${track.title})` : ''}</p>}
+                                {mediaInfo.audio.length > 1 && <p className="text-[11px] font-black text-white/30 uppercase tracking-widest mb-1.5">Track {track.index}{track.language ? ` — ${track.language.toUpperCase()}` : ''}{track.title ? ` (${track.title})` : ''}</p>}
                                 <InfoRow label="Codec" value={track.codec} />
                                 <InfoRow label="Channels" value={track.channels} />
                                 <InfoRow label="Sample Rate" value={track.sampleRate} />
@@ -278,7 +278,7 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, onClose, onPlay }) =
                               </div>
                             ))}
                             {mediaInfo.audio.length > 2 && (
-                              <button onClick={() => setShowAllAudio(p => !p)} className="mt-2 flex items-center gap-1 text-[10px] text-white/40 hover:text-white/70 font-black uppercase tracking-widest transition-colors">
+                              <button onClick={() => setShowAllAudio(p => !p)} className="mt-2.5 flex items-center gap-1.5 text-[11px] text-white/40 hover:text-white/70 font-black uppercase tracking-widest transition-colors">
                                 {showAllAudio ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
                                 {showAllAudio ? 'Show less' : `+${mediaInfo.audio.length - 2} more tracks`}
                               </button>
@@ -288,10 +288,10 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, onClose, onPlay }) =
 
                         {/* Subtitles */}
                         {mediaInfo.subtitles?.length > 0 && (
-                          <InfoSection icon={<Subtitles size={14} className="text-yellow-400" />} title={`Subtitles (${mediaInfo.subtitles.length})`}>
-                            <div className="flex flex-wrap gap-1.5">
+                          <InfoSection icon={<Subtitles size={16} className="text-yellow-400" />} title={`Subtitles (${mediaInfo.subtitles.length})`}>
+                            <div className="flex flex-wrap gap-2">
                               {mediaInfo.subtitles.map((s: any, i: number) => (
-                                <span key={i} className="px-2 py-0.5 bg-white/5 border border-white/10 rounded text-[10px] font-bold text-white/60 uppercase tracking-widest">
+                                <span key={i} className="px-2.5 py-1 bg-white/5 border border-white/10 rounded text-[11px] font-bold text-white/60 uppercase tracking-widest">
                                   {s.language || s.codec || `Track ${s.index}`}
                                 </span>
                               ))}

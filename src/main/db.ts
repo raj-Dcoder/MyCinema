@@ -51,6 +51,9 @@ export function initDb() {
   if (!columnNames.includes('release_year')) {
     db.exec("ALTER TABLE videos ADD COLUMN release_year INTEGER")
   }
+  if (!columnNames.includes('backdrop_path')) {
+    db.exec("ALTER TABLE videos ADD COLUMN backdrop_path TEXT")
+  }
 
   db.exec(`
     CREATE TABLE IF NOT EXISTS progress (
@@ -202,11 +205,12 @@ export function getContinueWatching() {
 export function updateVideoMetadata(id: number, metadata: any) {
   const stmt = db.prepare(`
     UPDATE videos
-    SET poster_path = ?, overview = ?, tagline = ?, genres = ?, tmdb_id = ?, vote_average = ?, release_year = ?
+    SET poster_path = ?, backdrop_path = ?, overview = ?, tagline = ?, genres = ?, tmdb_id = ?, vote_average = ?, release_year = ?
     WHERE id = ?
   `)
   return stmt.run(
     metadata.poster_path, 
+    metadata.backdrop_path || null,
     metadata.overview, 
     metadata.tagline || null, 
     metadata.genres || null, 

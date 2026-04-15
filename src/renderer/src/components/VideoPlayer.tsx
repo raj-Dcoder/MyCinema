@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react'
-import { Play, Pause, Rewind, FastForward, X, Maximize, Minimize, Volume2, VolumeX, Subtitles, Music, SkipForward as SkipNext, ArrowLeft, MessageSquareText, AlertTriangle, Check, Monitor, RectangleHorizontal, Crop, FolderOpen, Info, Film, HardDrive, ChevronDown, ChevronUp } from 'lucide-react'
+import { Play, Pause, Rewind, FastForward, X, Maximize, Minimize, Volume2, VolumeX, Subtitles, Music, SkipForward as SkipNext, ArrowLeft, MessageSquareText, AlertTriangle, Check, Monitor, RectangleHorizontal, Crop, FolderOpen, Info, Film, HardDrive, ChevronDown, ChevronUp, ListVideo } from 'lucide-react'
 import { Video } from '../types'
 
 // ── VTT Parser (runs once per track selection, no React state) ──────────────
@@ -92,6 +92,8 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
   const [activeSubKey, setActiveSubKey] = useState<string | null>(null)
   const [subtitleLoading, setSubtitleLoading] = useState(false)
   const [showInfoPanel, setShowInfoPanel] = useState(false)
+  const [showEpisodesPanel, setShowEpisodesPanel] = useState(false)
+  const [seriesEpisodes, setSeriesEpisodes] = useState<Video[]>([])
   const [mediaInfo, setMediaInfo] = useState<any>(null)
   const [infoLoading, setInfoLoading] = useState(false)
   const [showAllAudioInfo, setShowAllAudioInfo] = useState(false)
@@ -105,6 +107,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
   }
 
   const handleToggleInfoPanel = async () => {
+    setShowEpisodesPanel(false)
     if (!showInfoPanel && !mediaInfo) {
       setInfoLoading(true)
       const info = await window.api.getMediaInfo(currentVideo.file_path)
@@ -117,9 +120,11 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
   const checkNextEpisode = async (video: Video) => {
     if (video.type === 'series' && video.series_name) {
       const episodes: Video[] = await window.api.getSeriesInfo(video.series_name)
+      setSeriesEpisodes(episodes)
       const currentIndex = episodes.findIndex(e => e.id === video.id)
       setHasNextEpisode(currentIndex !== -1 && currentIndex < episodes.length - 1)
     } else {
+      setSeriesEpisodes([])
       setHasNextEpisode(false)
     }
   }
@@ -166,8 +171,6 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
       audioTracks.forEach((t, i) => arr.push({ id: `nat-${i}`, index: i, native: true, label: formatTrackLabel(t, i + 1) }))
     } else if (embeddedAudio.length > 0) {
       embeddedAudio.forEach((t, i) => arr.push({ id: `ext-${t.index}`, index: t.index, native: false, label: formatTrackLabel(t, i + 1) }))
-    } else {
-      arr.push({ id: 'nat-0', index: 0, native: true, label: 'Default Track' })
     }
     return arr
   }, [embeddedAudio, audioTracks])
@@ -175,21 +178,36 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
   useEffect(() => {
     if (availableAudio.length > 0) {
       if (!availableAudio.find(a => a.id === selectedAudioId)) {
-        const first = availableAudio[0]
-        setSelectedAudioId(first.id)
+        const seriesKey = currentVideo.type === 'series' && currentVideo.series_name ? currentVideo.series_name : 'global'
+        const savedPref = localStorage.getItem(`mycinema_audio_pref_${seriesKey}`)
         
-        if (!first.native) {
+        let target = availableAudio[0]
+        if (savedPref) {
+           const match = availableAudio.find(a => a.label === savedPref)
+           if (match) target = match
+        }
+        
+        setSelectedAudioId(target.id)
+        
+        if (!target.native) {
           if (videoRef.current) videoRef.current.muted = true
           if (audioRef.current && videoRef.current) {
             const time = videoRef.current.currentTime
             setLastSeekTime(time)
-            audioRef.current.src = `audio://file/${encodeURIComponent(currentVideo.file_path)}?track=${first.index}&time=${time}`
+            audioRef.current.src = `audio://file/${encodeURIComponent(currentVideo.file_path)}?track=${target.index}&time=${time}`
             // Auto play handles the bridge firing if the main element starts buffering
           }
+        } else {
+           if (videoRef.current && (videoRef.current as any).audioTracks) {
+              const tracks = (videoRef.current as any).audioTracks
+              for (let i = 0; i < tracks.length; i++) {
+                tracks[i].enabled = i === target.index
+              }
+           }
         }
       }
     }
-  }, [availableAudio, selectedAudioId, currentVideo.file_path])
+  }, [availableAudio, selectedAudioId, currentVideo.file_path, currentVideo.series_name])
 
   useEffect(() => {
     if (seekPopup.show) {
@@ -269,23 +287,75 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
         await Promise.all(conversionJobs)
         setConvertedSubPaths(newPaths)
         console.log('[VideoPlayer] Pre-converted', newPaths.size, 'subtitle track(s)')
-        // Reset active subtitle on new video load
+        
         subtitleCuesRef.current = []
-        activeSubKeyRef.current = null
-        setActiveSubKey(null)
+        
+        const seriesKey = currentVideo.type === 'series' && currentVideo.series_name ? currentVideo.series_name : 'global'
+        const savedSubPref = localStorage.getItem(`mycinema_sub_pref_${seriesKey}`)
+        let restoredId = null
+        
+        if (savedSubPref && savedSubPref !== 'Off') {
+          const tempSubs: any[] = []
+          if (srt) tempSubs.push({ id: 'external-0', label: 'External SRT' })
+          for (const sub of (embeddedS || [])) {
+            tempSubs.push({ id: `embedded-${sub.index}`, label: formatTrackLabel(sub, sub.index) })
+          }
+          const match = tempSubs.find(s => s.label === savedSubPref)
+          if (match) restoredId = match.id
+        }
+
+        if (restoredId) {
+          const vttPath = newPaths.get(restoredId)
+          if (vttPath) {
+            activeSubKeyRef.current = restoredId
+            setActiveSubKey(restoredId)
+            setCurrentSubtitle(0)
+            
+            fetch(`media://file/${encodeURIComponent(vttPath)}`)
+              .then(res => res.text())
+              .then(text => {
+                subtitleCuesRef.current = parseVTT(text)
+              })
+              .catch(err => console.error(err))
+          }
+        } else {
+          activeSubKeyRef.current = null
+          setActiveSubKey(null)
+          setCurrentSubtitle(null)
+          if (subtitleDivRef.current) subtitleDivRef.current.textContent = ''
+        }
       } catch (err) {
         console.error('Failed to get embedded tracks:', err)
       }
     }
+
+    // ── Reset external audio to prevent stale audio bleed on episode switch ──
+    if (audioRef.current) {
+      audioRef.current.pause()
+      audioRef.current.removeAttribute('src')
+      audioRef.current.load()
+    }
+    // Reset audio track state so the availableAudio effect re-selects properly
+    setSelectedAudioId('')
+    setAudioTracks([])
+    setEmbeddedAudio([])
+    setEmbeddedSubs([])
 
     fetchProgress()
     fetchMediaTracks()
     checkNextEpisode(currentVideo)
     setIsPlaying(false)
     if (videoRef.current) {
+      videoRef.current.muted = false
       videoRef.current.load()
       videoRef.current.play().catch(e => console.error('Auto-play failed:', e))
     }
+
+    // Auto-enter fullscreen on first mount
+    if (!document.fullscreenElement && videoRef.current?.parentElement) {
+      videoRef.current.parentElement.requestFullscreen().catch(() => {})
+    }
+
     const handleFullscreenChange = () => {
       setIsFullscreen(!!document.fullscreenElement)
     }
@@ -761,7 +831,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
 
   const playNextEpisode = async () => {
     if (currentVideo.type === 'series' && currentVideo.series_name) {
-      const episodes: Video[] = await window.api.getSeriesInfo(currentVideo.series_name)
+      const episodes: Video[] = seriesEpisodes.length > 0 ? seriesEpisodes : await window.api.getSeriesInfo(currentVideo.series_name)
       const currentIndex = episodes.findIndex(e => e.id === currentVideo.id)
       if (currentIndex !== -1 && currentIndex < episodes.length - 1) {
         setForceRestart(true)
@@ -792,6 +862,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
 
     setShowMediaMenu(false)
     setShowSpeedMenu(false)
+    setShowEpisodesPanel(false)
     
     // Safely enforce visibility extension when a user actively clicks any UI control buttons
     if ((e.target as HTMLElement).closest('.video-controls')) {
@@ -853,6 +924,9 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
     const trackObj = availableAudio.find(a => a.id === trackId)
     if (!trackObj) return
 
+    const seriesKey = currentVideo.type === 'series' && currentVideo.series_name ? currentVideo.series_name : 'global'
+    localStorage.setItem(`mycinema_audio_pref_${seriesKey}`, trackObj.label)
+
     if (trackObj.native) {
       if (videoRef.current) {
         // @ts-ignore
@@ -896,7 +970,10 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
   }
 
   const selectSubtitleTrack = async (key: string | null) => {
+    const seriesKey = currentVideo.type === 'series' && currentVideo.series_name ? currentVideo.series_name : 'global'
+    
     if (key === null) {
+      localStorage.setItem(`mycinema_sub_pref_${seriesKey}`, 'Off')
       activeSubKeyRef.current = null
       setActiveSubKey(null)
       setCurrentSubtitle(null)
@@ -905,6 +982,11 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
       if (subtitleDivRef.current) subtitleDivRef.current.textContent = ''
       setShowMediaMenu(false)
       return
+    }
+
+    const trackObj = availableSubtitles.find(s => s.id === key)
+    if (trackObj) {
+      localStorage.setItem(`mycinema_sub_pref_${seriesKey}`, trackObj.label)
     }
 
     setActiveSubKey(key)
@@ -1475,10 +1557,21 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
           </div>
 
           <div className="flex items-center space-x-6">
+            {/* Episodes */}
+            {currentVideo.type === 'series' && currentVideo.series_name && (
+              <button
+                onClick={(e) => { e.stopPropagation(); setShowInfoPanel(false); setShowEpisodesPanel(!showEpisodesPanel); }}
+                className={`transition-colors flex items-center ${showEpisodesPanel ? 'text-primary' : 'text-white hover:text-primary'}`}
+                title="Episodes"
+              >
+                <ListVideo size={22} className="opacity-90 hover:opacity-100" />
+              </button>
+            )}
+
             {/* Open Folder */}
             <button
               onClick={(e) => { e.stopPropagation(); handleOpenFolder(); }}
-              className="text-white/70 hover:text-white transition-colors"
+              className="text-white hover:text-primary transition-colors"
               title="Open in Explorer"
             >
               <FolderOpen size={22} className="opacity-90 hover:opacity-100" />
@@ -1487,7 +1580,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
             {/* Media Info */}
             <button
               onClick={(e) => { e.stopPropagation(); handleToggleInfoPanel(); }}
-              className={`transition-colors ${showInfoPanel ? 'text-blue-400' : 'text-white/70 hover:text-white'}`}
+              className={`transition-colors ${showInfoPanel ? 'text-primary' : 'text-white hover:text-primary'}`}
               title="Media Info (I)"
             >
               <Info size={22} className="opacity-90 hover:opacity-100" />
@@ -1541,6 +1634,66 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
       {/* Hidden Custom Audio Extraction Pipeliner */}
       <audio ref={audioRef} style={{ display: 'none' }} />
 
+      {/* ─── Episodes Slide-in Panel ─────────────────────────────────────── */}
+      <div
+        className={`absolute top-0 right-0 h-full w-[400px] z-[51] transition-transform duration-300 ease-out ${
+          showEpisodesPanel ? 'translate-x-0' : 'translate-x-[120%]'
+        }`}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="h-full bg-black/85 backdrop-blur-2xl border-l border-white/10 flex flex-col shadow-[-10px_0_30px_rgba(0,0,0,0.5)]">
+          <div className="flex items-center justify-between px-5 py-4 border-b border-white/5 flex-shrink-0">
+            <div className="flex items-center gap-2">
+              <ListVideo size={16} className="text-primary" />
+              <h3 className="text-[14px] font-black text-white uppercase tracking-[0.18em]">Episodes</h3>
+            </div>
+            <button
+              onClick={(e) => { e.stopPropagation(); setShowEpisodesPanel(false) }}
+              className="w-8 h-8 rounded-md flex items-center justify-center hover:bg-white/10 text-white/40 hover:text-white transition-all"
+            >
+              <X size={16} />
+            </button>
+          </div>
+
+          <div className="flex-1 overflow-y-auto px-4 py-4 space-y-2 custom-scrollbar">
+            {seriesEpisodes.map((episode) => {
+              const isActive = episode.id === currentVideo.id;
+              return (
+                <button
+                  key={episode.id}
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    if (isActive) return
+                    setShowEpisodesPanel(false)
+                    setForceRestart(true)
+                    setCurrentVideo(episode)
+                  }}
+                  className={`w-full text-left p-3 rounded-xl flex items-center gap-4 transition-all duration-200 ${
+                    isActive 
+                      ? 'bg-primary/20 border border-primary/30 shadow-sm' 
+                      : 'hover:bg-white/5 border border-transparent'
+                  }`}
+                >
+                  <div className="flex-1 min-w-0">
+                    <p className={`text-[14px] font-bold truncate ${isActive ? 'text-primary' : 'text-white'}`}>
+                      {episode.season ? `S${episode.season} E${episode.episode}` : 'Episode'} - {episode.title}
+                    </p>
+                    <p className={`text-xs mt-1 truncate ${isActive ? 'text-primary/70' : 'text-gray-400'}`}>
+                      {episode.file_path.split(/[/\\]/).pop()}
+                    </p>
+                  </div>
+                  {isActive && (
+                    <div className="flex-shrink-0 w-6 h-6 rounded-full bg-primary flex items-center justify-center">
+                      <Play size={12} className="fill-black text-black ml-0.5" />
+                    </div>
+                  )}
+                </button>
+              )
+            })}
+          </div>
+        </div>
+      </div>
+
       {/* ─── Media Info Slide-in Panel ─────────────────────────────────────── */}
       <div
         className={`absolute top-0 right-0 h-full w-80 z-50 transition-transform duration-300 ease-out ${
@@ -1552,14 +1705,14 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
           {/* Panel Header */}
           <div className="flex items-center justify-between px-5 py-4 border-b border-white/5 flex-shrink-0">
             <div className="flex items-center gap-2">
-              <Info size={15} className="text-blue-400" />
-              <h3 className="text-[11px] font-black text-white uppercase tracking-[0.18em]">Media Info</h3>
+              <Info size={16} className="text-primary" />
+              <h3 className="text-[14px] font-black text-white uppercase tracking-[0.18em]">Media Info</h3>
             </div>
             <button
               onClick={(e) => { e.stopPropagation(); setShowInfoPanel(false) }}
-              className="w-7 h-7 rounded-md flex items-center justify-center hover:bg-white/10 text-white/40 hover:text-white transition-all"
+              className="w-8 h-8 rounded-md flex items-center justify-center hover:bg-white/10 text-white/40 hover:text-white transition-all"
             >
-              <X size={14} />
+              <X size={16} />
             </button>
           </div>
 
@@ -1567,15 +1720,15 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
           <div className="flex-1 overflow-y-auto px-5 py-4 space-y-5 custom-scrollbar">
             {infoLoading ? (
               <div className="flex flex-col items-center justify-center h-48 gap-3">
-                <div className="w-7 h-7 border-2 border-blue-500/30 border-t-blue-500 rounded-full animate-spin" />
-                <p className="text-white/30 text-[10px] font-black uppercase tracking-widest">Analyzing...</p>
+                <div className="w-8 h-8 border-2 border-primary/30 border-t-primary rounded-full animate-spin" />
+                <p className="text-white/30 text-[12px] font-black uppercase tracking-widest">Analyzing...</p>
               </div>
             ) : mediaInfo?.error ? (
               <p className="text-red-400 text-xs font-medium text-center py-8">{mediaInfo.error}</p>
             ) : mediaInfo ? (
               <>
                 {/* File */}
-                <PanelSection icon={<HardDrive size={12} className="text-blue-400" />} title="File">
+                <PanelSection icon={<HardDrive size={14} className="text-blue-400" />} title="File">
                   <PanelRow label="Name" value={mediaInfo.file?.name} />
                   <PanelRow label="Size" value={mediaInfo.file?.size} />
                   <PanelRow label="Format" value={mediaInfo.container?.format} />
@@ -1584,7 +1737,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
 
                 {/* Video */}
                 {mediaInfo.video && (
-                  <PanelSection icon={<Film size={12} className="text-purple-400" />} title="Video">
+                  <PanelSection icon={<Film size={14} className="text-purple-400" />} title="Video">
                     <PanelRow label="Codec" value={mediaInfo.video.codec} />
                     {mediaInfo.video.profile && <PanelRow label="Profile" value={mediaInfo.video.profile} />}
                     <PanelRow label="Resolution" value={mediaInfo.video.resolution} />
@@ -1596,10 +1749,10 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
 
                 {/* Audio */}
                 {mediaInfo.audio?.length > 0 && (
-                  <PanelSection icon={<Music size={12} className="text-green-400" />} title={`Audio (${mediaInfo.audio.length})`}>
+                  <PanelSection icon={<Music size={14} className="text-green-400" />} title={`Audio (${mediaInfo.audio.length})`}>
                     {(showAllAudioInfo ? mediaInfo.audio : mediaInfo.audio.slice(0, 2)).map((track: any, i: number) => (
                       <div key={i} className={i > 0 ? 'border-t border-white/5 pt-2 mt-1' : ''}>
-                        {mediaInfo.audio.length > 1 && <p className="text-[8px] font-black text-white/25 uppercase tracking-widest mb-1">Track {track.index}{track.language ? ` · ${track.language.toUpperCase()}` : ''}</p>}
+                        {mediaInfo.audio.length > 1 && <p className="text-[10px] font-black text-white/25 uppercase tracking-widest mb-1">Track {track.index}{track.language ? ` · ${track.language.toUpperCase()}` : ''}</p>}
                         <PanelRow label="Codec" value={track.codec} />
                         <PanelRow label="Channels" value={track.channels} />
                         <PanelRow label="Sample Rate" value={track.sampleRate} />
@@ -1607,8 +1760,8 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
                       </div>
                     ))}
                     {mediaInfo.audio.length > 2 && (
-                      <button onClick={() => setShowAllAudioInfo(p => !p)} className="mt-1.5 flex items-center gap-1 text-[9px] text-white/30 hover:text-white/60 font-black uppercase tracking-widest transition-colors">
-                        {showAllAudioInfo ? <ChevronUp size={10} /> : <ChevronDown size={10} />}
+                      <button onClick={() => setShowAllAudioInfo(p => !p)} className="mt-2 flex items-center gap-1 text-[11px] text-white/30 hover:text-white/60 font-black uppercase tracking-widest transition-colors">
+                        {showAllAudioInfo ? <ChevronUp size={11} /> : <ChevronDown size={11} />}
                         {showAllAudioInfo ? 'Less' : `+${mediaInfo.audio.length - 2} more`}
                       </button>
                     )}
@@ -1617,10 +1770,10 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
 
                 {/* Subtitles */}
                 {mediaInfo.subtitles?.length > 0 && (
-                  <PanelSection icon={<Subtitles size={12} className="text-yellow-400" />} title={`Subtitles (${mediaInfo.subtitles.length})`}>
+                  <PanelSection icon={<Subtitles size={14} className="text-yellow-400" />} title={`Subtitles (${mediaInfo.subtitles.length})`}>
                     <div className="flex flex-wrap gap-1.5">
                       {mediaInfo.subtitles.map((s: any, i: number) => (
-                        <span key={i} className="px-1.5 py-0.5 bg-white/5 border border-white/10 rounded text-[9px] font-bold text-white/50 uppercase tracking-widest">
+                        <span key={i} className="px-2 py-0.5 bg-white/5 border border-white/10 rounded text-[11px] font-bold text-white/50 uppercase tracking-widest">
                           {s.language || s.codec || `#${s.index}`}
                         </span>
                       ))}
@@ -1633,7 +1786,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
 
           {/* Panel Footer */}
           <div className="px-5 py-3 border-t border-white/5 flex-shrink-0">
-            <p className="text-[9px] text-white/20 font-bold uppercase tracking-widest text-center">Press I to toggle</p>
+            <p className="text-[11px] text-white/20 font-bold uppercase tracking-widest text-center">Press I to toggle</p>
           </div>
         </div>
       </div>
@@ -1644,9 +1797,9 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
 // ─── Info Panel Helper Components ────────────────────────────────────────────
 const PanelSection: React.FC<{ icon: React.ReactNode; title: string; children: React.ReactNode }> = ({ icon, title, children }) => (
   <div>
-    <div className="flex items-center gap-1.5 mb-2">
+    <div className="flex items-center gap-2 mb-2.5">
       {icon}
-      <h4 className="text-[9px] font-black text-white/30 uppercase tracking-[0.2em]">{title}</h4>
+      <h4 className="text-[12px] font-black text-white/30 uppercase tracking-[0.2em]">{title}</h4>
     </div>
     <div className="space-y-1.5">{children}</div>
   </div>
@@ -1656,8 +1809,8 @@ const PanelRow: React.FC<{ label: string; value: string | null | undefined }> = 
   if (!value) return null
   return (
     <div className="flex items-baseline justify-between gap-2">
-      <span className="text-[9px] font-bold text-white/25 uppercase tracking-wide shrink-0">{label}</span>
-      <span className="text-[10px] font-semibold text-white/70 text-right break-all">{value}</span>
+      <span className="text-[11px] font-bold text-white/25 uppercase tracking-wide shrink-0">{label}</span>
+      <span className="text-[12px] font-semibold text-white/70 text-right break-all">{value}</span>
     </div>
   )
 }

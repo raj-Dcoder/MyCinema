@@ -64,11 +64,13 @@ function getTmdbApiKey(): string {
 
 const TMDB_BASE    = 'https://api.themoviedb.org/3'
 const TMDB_IMG     = 'https://image.tmdb.org/t/p/w500'
+const TMDB_BACKDROP = 'https://image.tmdb.org/t/p/w1280'
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
 export interface TmdbResult {
   poster_path: string | null
+  backdrop_path: string | null
   overview:    string | null
   tagline:     string | null
   genres:      string | null
@@ -98,7 +100,7 @@ export async function fetchTmdbMetadata(
   year?: number,
   existingTmdbId?: number
 ): Promise<TmdbResult> {
-  const empty: TmdbResult = { poster_path: null, overview: null, tagline: null, genres: null, tmdb_id: null, vote_average: null, release_year: null }
+  const empty: TmdbResult = { poster_path: null, backdrop_path: null, overview: null, tagline: null, genres: null, tmdb_id: null, vote_average: null, release_year: null }
   const apiKey = getTmdbApiKey()
 
   if (!apiKey) {
@@ -109,6 +111,7 @@ export async function fetchTmdbMetadata(
   const cacheDir  = getCacheDir()
   const key       = crypto.createHash('sha1').update(`${type}::${title.toLowerCase().trim()}::${year || ''}`).digest('hex')
   const cachePath = path.join(cacheDir, `${key}.jpg`)
+  const backdropCachePath = path.join(cacheDir, `${key}-bg.jpg`)
   const sidecarPath = path.join(cacheDir, `${key}.json`)
 
   // 1. Cache HIT (Metadata Sidecar)
@@ -127,6 +130,7 @@ export async function fetchTmdbMetadata(
         if (fs.existsSync(cachePath)) {
           return { 
             poster_path: cachePath, 
+            backdrop_path: fs.existsSync(backdropCachePath) ? backdropCachePath : null,
             overview: sidecar.overview, 
             tagline: sidecar.tagline || null,
             genres: sidecar.genres || null,
@@ -140,6 +144,7 @@ export async function fetchTmdbMetadata(
         // (Verified by the lack of a .jpg file but existence of a .json)
         return { 
           poster_path: null, 
+          backdrop_path: null,
           overview: sidecar.overview, 
           tagline: sidecar.tagline || null,
           genres: sidecar.genres || null,
@@ -221,6 +226,7 @@ export async function fetchTmdbMetadata(
     
     const hit = await detailsResponse.json() as any
     const remotePosterPath = hit.poster_path
+    const remoteBackdropPath = hit.backdrop_path || null
     const overview = hit.overview || null
     const tagline = hit.tagline || null
     const genres = hit.genres ? hit.genres.map((g: any) => g.name).join(', ') : null
@@ -233,26 +239,42 @@ export async function fetchTmdbMetadata(
     // Save sidecar
     fs.writeFileSync(sidecarPath, JSON.stringify({ overview, tmdb_id, tagline, genres, vote_average, release_year }))
 
-    if (!remotePosterPath) {
-      console.log(`[TMDB] Result found for "${title}" but no poster available`)
-      return { poster_path: null, overview, tagline, genres, tmdb_id, vote_average, release_year }
-    }
+    let cachedPoster: string | null = null
+    let cachedBackdrop: string | null = null
 
     // 3. Download poster
-    const posterUrl = `${TMDB_IMG}${remotePosterPath}`
-    console.log(`[TMDB] Downloading poster for "${title}" from ${remotePosterPath}…`)
-    
-    const imgResponse = await fetch(posterUrl, {
-      dispatcher: tmdbDispatcher,
-      headers: { 'User-Agent': 'MyCinema/1.3.0' }
-    })
-    if (!imgResponse.ok) throw new Error(`Poster HTTP ${imgResponse.status}`)
-    
-    const arrayBuffer = await imgResponse.arrayBuffer()
-    fs.writeFileSync(cachePath, Buffer.from(arrayBuffer))
-    
-    console.log(`[TMDB] Success! Poster cached for "${title}"`)
-    return { poster_path: cachePath, overview, tagline, genres, tmdb_id, vote_average, release_year }
+    if (remotePosterPath) {
+      const posterUrl = `${TMDB_IMG}${remotePosterPath}`
+      console.log(`[TMDB] Downloading poster for "${title}" from ${remotePosterPath}…`)
+      
+      try {
+        const imgResponse = await fetch(posterUrl, { dispatcher: tmdbDispatcher, headers: { 'User-Agent': 'MyCinema/1.3.0' } })
+        if (imgResponse.ok) {
+          const arrayBuffer = await imgResponse.arrayBuffer()
+          fs.writeFileSync(cachePath, Buffer.from(arrayBuffer))
+          cachedPoster = cachePath
+          console.log(`[TMDB] Success! Poster cached for "${title}"`)
+        }
+      } catch (e: any) { console.error(`[TMDB] Failed to download poster: ${e.message}`) }
+    }
+
+    // Download backdrop
+    if (remoteBackdropPath) {
+      const backdropUrl = `${TMDB_BACKDROP}${remoteBackdropPath}`
+      console.log(`[TMDB] Downloading backdrop for "${title}" from ${remoteBackdropPath}…`)
+      
+      try {
+        const bgResponse = await fetch(backdropUrl, { dispatcher: tmdbDispatcher, headers: { 'User-Agent': 'MyCinema/1.3.0' } })
+        if (bgResponse.ok) {
+          const arrayBuffer = await bgResponse.arrayBuffer()
+          fs.writeFileSync(backdropCachePath, Buffer.from(arrayBuffer))
+          cachedBackdrop = backdropCachePath
+          console.log(`[TMDB] Success! Backdrop cached for "${title}"`)
+        }
+      } catch (e: any) { console.error(`[TMDB] Failed to download backdrop: ${e.message}`) }
+    }
+
+    return { poster_path: cachedPoster, backdrop_path: cachedBackdrop, overview, tagline, genres, tmdb_id, vote_average, release_year }
 
   } catch (err: any) {
     console.error(`[TMDB] Error for "${title}" ${year ? `(${year})` : ''}:`, err.message)

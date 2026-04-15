@@ -81,7 +81,7 @@ const Home: React.FC<HomeProps> = ({ onPlay, onShowDetail, refreshKey }) => {
           </div>
           <HorizontalScrollRow>
             {continueWatching.map(video => (
-              <div key={video.id} className="w-36 md:w-44 lg:w-52 flex-shrink-0">
+              <div key={video.id} className="w-[85vw] max-w-[800px] md:w-[600px] lg:w-[750px] flex-shrink-0 snap-center">
                 <VideoCard video={video} onPlay={onPlay} onShowDetail={onShowDetail} isContinueWatching={true} />
               </div>
             ))}

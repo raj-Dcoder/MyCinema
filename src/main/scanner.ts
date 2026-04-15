@@ -199,6 +199,7 @@ export async function scanFolder(rootPath: string) {
             if (snapPath) {
                updateVideoMetadata(videoId, { 
                  poster_path: snapPath, 
+                 backdrop_path: null,
                  overview: null, tagline: null, genres: null, tmdb_id: null, vote_average: null, release_year: null 
                })
             }
@@ -217,6 +218,7 @@ export async function scanFolder(rootPath: string) {
             if (snapPath) {
                updateVideoMetadata(videoId, { 
                  poster_path: snapPath, 
+                 backdrop_path: null,
                  overview: null, tagline: null, genres: null, tmdb_id: null, vote_average: null, release_year: null 
                })
             }
@@ -251,6 +253,7 @@ export async function scanFolder(rootPath: string) {
                 if (snapPath) {
                   updateVideoMetadata(videoId, {
                     poster_path: snapPath,
+                    backdrop_path: tmdbMetadata?.backdrop_path || null,
                     overview: null, 
                     tagline: null, 
                     genres: null, 
@@ -273,11 +276,13 @@ export async function scanFolder(rootPath: string) {
                   genres: currentVideoNode.genres,
                   tmdb_id: currentVideoNode.tmdb_id,
                   vote_average: currentVideoNode.vote_average,
-                  release_year: currentVideoNode.release_year 
+                  release_year: currentVideoNode.release_year,
+                  backdrop_path: currentVideoNode.backdrop_path || (tmdbMetadata ? tmdbMetadata.backdrop_path : null)
                 } 
-              : { overview: null, tagline: null, genres: null, tmdb_id: null, vote_average: null, release_year: null }
+              : { overview: null, tagline: null, genres: null, tmdb_id: null, vote_average: null, release_year: null, backdrop_path: tmdbMetadata ? tmdbMetadata.backdrop_path : null }
              updateVideoMetadata(videoId, { 
                poster_path: snapPath, 
+               backdrop_path: existingMeta.backdrop_path,
                overview: existingMeta.overview, 
                tagline: existingMeta.tagline,
                genres: existingMeta.genres,
@@ -290,6 +295,7 @@ export async function scanFolder(rootPath: string) {
            console.log(`[Scanner] Retrieved official TMDB poster for video ${videoId}!`)
            updateVideoMetadata(videoId, { 
              poster_path: tmdbMetadata.poster_path, 
+             backdrop_path: tmdbMetadata.backdrop_path,
              overview: tmdbMetadata.overview, 
              tagline: tmdbMetadata.tagline,
              genres: tmdbMetadata.genres,

@@ -1,6 +1,8 @@
 import React, { useEffect, useRef, useState } from 'react'
-import { Play, Pause, Rewind, FastForward, X, Maximize, Minimize, Volume2, VolumeX, Subtitles, Music, SkipForward as SkipNext, ArrowLeft, MessageSquareText, AlertTriangle, Check, Monitor, RectangleHorizontal, Crop, FolderOpen, Info, Film, HardDrive, ChevronDown, ChevronUp, ListVideo } from 'lucide-react'
+import { Play, Pause, Rewind, FastForward, X, Maximize, Minimize, Volume2, VolumeX, Subtitles, Music, SkipForward as SkipNext, ArrowLeft, MessageSquareText, AlertTriangle, Check, Monitor, RectangleHorizontal, Crop, FolderOpen, Info, Film, HardDrive, ChevronDown, ChevronUp, ListVideo, Users } from 'lucide-react'
 import { Video } from '../types'
+import { useWatchTogether } from '../hooks/useWatchTogether'
+import { WatchTogetherModal } from './WatchTogetherModal'
 
 // ── VTT Parser (runs once per track selection, no React state) ──────────────
 interface SubCue { start: number; end: number; text: string }
@@ -38,9 +40,63 @@ interface VideoPlayerProps {
 
 const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
   const videoRef = useRef<HTMLVideoElement>(null)
+  
   const [isPlaying, setIsPlaying] = useState(false)
   const [currentTime, setCurrentTime] = useState(0)
   const [duration, setDuration] = useState(0)
+
+  const { isHost, roomId, participants, isConnecting, error, startHosting, joinRoom, leaveRoom, broadcastState, onReceiveSyncObj, debugLogs } = useWatchTogether()
+  const [showWatchTogetherState, setShowWatchTogetherState] = useState(false)
+
+  useEffect(() => {
+    onReceiveSyncObj.current = (msg) => {
+      switch (msg.type) {
+        case 'PLAY':
+          if (videoRef.current) {
+            videoRef.current.currentTime = msg.time;
+            videoRef.current.play().catch(e => console.log(e));
+            setIsPlaying(true);
+          }
+          break;
+        case 'PAUSE':
+          if (videoRef.current) {
+            videoRef.current.pause();
+            setIsPlaying(false);
+            videoRef.current.currentTime = msg.time;
+          }
+          break;
+        case 'SEEK':
+          if (videoRef.current) {
+            videoRef.current.currentTime = msg.time;
+            setCurrentTime(msg.time);
+          }
+          break;
+        case 'SYNC':
+          if (videoRef.current && Math.abs(videoRef.current.currentTime - msg.time) > 1.0) {
+            videoRef.current.currentTime = msg.time;
+          }
+          break;
+        case 'SPEED':
+          if (msg.rate !== undefined) {
+            setPlaybackRate(msg.rate);
+            if (videoRef.current) videoRef.current.playbackRate = msg.rate;
+            const audioEl = document.querySelector('audio');
+            if (audioEl) audioEl.playbackRate = msg.rate;
+          }
+          break;
+      }
+    };
+  }, [onReceiveSyncObj]);
+
+  useEffect(() => {
+    let interval: NodeJS.Timeout;
+    if (isHost && isPlaying) {
+      interval = setInterval(() => {
+        if (videoRef.current) broadcastState({ type: 'SYNC', time: videoRef.current.currentTime });
+      }, 3000);
+    }
+    return () => clearInterval(interval);
+  }, [isHost, isPlaying, broadcastState]);
   const [forceRestart, setForceRestart] = useState(false)
   const [showControls, setShowControls] = useState(true)
   const [subtitlePath, setSubtitlePath] = useState<string | null>(null)
@@ -515,6 +571,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
             setIsHolding2x(true)
             videoRef.current.playbackRate = 2
             if (audioRef.current) audioRef.current.playbackRate = 2
+            if (isHost) broadcastState({ type: 'SPEED', time: videoRef.current?.currentTime || 0, rate: 2 });
             spaceHoldTimerRef.current = null
             // Imperatively inject toast into the fullscreen container so it is
             // always visible regardless of React stacking context or showControls.
@@ -715,6 +772,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
           setIsHolding2x(false)
           if (videoRef.current) videoRef.current.playbackRate = playbackRate
           if (audioRef.current) audioRef.current.playbackRate = playbackRate
+          if (isHost) broadcastState({ type: 'SPEED', time: videoRef.current?.currentTime || 0, rate: playbackRate });
         }
         // Always remove the imperative toast on space release
         if (speedToastRef.current) {
@@ -846,13 +904,16 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
 
   const togglePlay = (e?: React.MouseEvent | React.KeyboardEvent) => {
     if (e) e.stopPropagation()
+    if (!isHost && roomId !== null) return;
     if (videoRef.current) {
       if (videoRef.current.paused) {
         videoRef.current.play()
         setIsPlaying(true)
+        if (isHost) broadcastState({ type: 'PLAY', time: videoRef.current.currentTime });
       } else {
         videoRef.current.pause()
         setIsPlaying(false)
+        if (isHost) broadcastState({ type: 'PAUSE', time: videoRef.current.currentTime });
       }
     }
   }
@@ -900,6 +961,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
       
       if (videoRef.current) videoRef.current.playbackRate = 2
       if (audioRef.current) audioRef.current.playbackRate = 2
+      if (isHost) broadcastState({ type: 'SPEED', time: videoRef.current?.currentTime || 0, rate: 2 });
     }, 450)
   }
 
@@ -913,6 +975,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
       setIsHolding2x(false)
       if (videoRef.current) videoRef.current.playbackRate = playbackRate
       if (audioRef.current) audioRef.current.playbackRate = playbackRate
+      if (isHost) broadcastState({ type: 'SPEED', time: videoRef.current?.currentTime || 0, rate: playbackRate });
       
       setTimeout(() => {
         wasHoldingRef.current = false
@@ -967,6 +1030,9 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
     if (videoRef.current) videoRef.current.playbackRate = rate
     if (audioRef.current) audioRef.current.playbackRate = rate
     setShowSpeedMenu(false)
+    if (isHost) {
+      broadcastState({ type: 'SPEED', time: videoRef.current?.currentTime || 0, rate });
+    }
   }
 
   const selectSubtitleTrack = async (key: string | null) => {
@@ -1035,12 +1101,14 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
   }
 
   const seek = (seconds: number) => {
+    if (!isHost && roomId !== null) return;
     if (videoRef.current) {
       const time = videoRef.current.currentTime + seconds
       videoRef.current.currentTime = time
       timeRef.current = time
       handleCustomAudioSeekSync(time)
       setSeekPopup(prev => ({ show: true, text: seconds > 0 ? `+${seconds}s` : `${seconds}s`, id: prev.id + 1 }))
+      if (isHost) broadcastState({ type: 'SEEK', time });
     }
   }
 
@@ -1054,12 +1122,14 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
   }
 
   const handleSeekMouseUp = (e: React.MouseEvent<HTMLInputElement> | React.TouchEvent<HTMLInputElement>) => {
+    if (!isHost && roomId !== null) return;
     setIsSeeking(false)
     const time = parseFloat((e.target as HTMLInputElement).value)
     if (videoRef.current) {
       videoRef.current.currentTime = time
       timeRef.current = time
       handleCustomAudioSeekSync(time)
+      if (isHost) broadcastState({ type: 'SEEK', time });
     }
   }
 
@@ -1485,7 +1555,8 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
             onMouseUp={(e) => { handleSeekMouseUp(e); (e.target as HTMLElement).blur(); }}
             onTouchStart={handleSeekMouseDown}
             onTouchEnd={(e) => { handleSeekMouseUp(e); (e.target as HTMLElement).blur(); }}
-            className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-20"
+            disabled={!isHost && roomId !== null}
+            className={`absolute inset-0 w-full h-full opacity-0 z-20 ${!isHost && roomId !== null ? 'cursor-not-allowed' : 'cursor-pointer'}`}
           />
           
           <div className="absolute left-0 right-0 top-1/2 -translate-y-1/2 h-1 bg-gray-600 rounded-full" />
@@ -1575,6 +1646,15 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
               title="Open in Explorer"
             >
               <FolderOpen size={22} className="opacity-90 hover:opacity-100" />
+            </button>
+
+            {/* Watch Together */}
+            <button
+              onClick={(e) => { e.stopPropagation(); setShowWatchTogetherState(true); }}
+              className={`transition-colors ${roomId !== null ? 'text-indigo-400' : 'text-white hover:text-indigo-400'}`}
+              title="Watch Together"
+            >
+              <Users size={22} className="opacity-90 hover:opacity-100" />
             </button>
 
             {/* Media Info */}
@@ -1790,6 +1870,20 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
           </div>
         </div>
       </div>
+
+      <WatchTogetherModal
+        isHost={isHost}
+        roomId={roomId}
+        participants={participants}
+        isConnecting={isConnecting}
+        error={error}
+        startHosting={startHosting}
+        joinRoom={joinRoom}
+        leaveRoom={leaveRoom}
+        isOpen={showWatchTogetherState}
+        onClose={() => setShowWatchTogetherState(false)}
+        debugLogs={debugLogs}
+      />
     </div>
   )
 }

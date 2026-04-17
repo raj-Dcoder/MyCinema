@@ -105,3 +105,4 @@ out/
 *.db
 test-*.js
 RELEASE_GUIDE.md
+.tmp-guest-profile/

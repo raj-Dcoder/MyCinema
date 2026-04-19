@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react'
-import { Search, Download as DownloadIcon, Film, Tv, X, Loader2, HardDrive, CheckCircle2, AlertCircle, Pause, Play, FolderOpen } from 'lucide-react'
+import { Search, Download as DownloadIcon, Film, Tv, X, Loader2, HardDrive, CheckCircle2, AlertCircle, Pause, Play, FolderOpen, Bookmark, BookmarkCheck, ChevronLeft, ChevronRight } from 'lucide-react'
 import { DownloadFeatureTour } from '../components/DownloadFeatureTour'
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -44,6 +44,7 @@ interface ActiveDownload {
 }
 
 const TMDB_IMG = 'https://image.tmdb.org/t/p'
+const WATCHLIST_KEY = 'mycinema_watchlist'
 
 const Download: React.FC = () => {
   const [query, setQuery] = useState('')
@@ -55,9 +56,49 @@ const Download: React.FC = () => {
   const [downloads, setDownloads] = useState<ActiveDownload[]>([])
   const [showDownloads, setShowDownloads] = useState(false)
   const searchInputRef = useRef<HTMLInputElement>(null)
+  const watchlistScrollRef = useRef<HTMLDivElement>(null)
 
   const [selectedSeason, setSelectedSeason] = useState<string>('all')
   const [selectedEpisode, setSelectedEpisode] = useState<string>('all')
+
+  // ─── WatchList State ────────────────────────────────────────────────────
+  const [watchlist, setWatchlist] = useState<TMDBResult[]>(() => {
+    try {
+      const stored = localStorage.getItem(WATCHLIST_KEY)
+      return stored ? JSON.parse(stored) : []
+    } catch { return [] }
+  })
+
+  const saveWatchlist = (items: TMDBResult[]) => {
+    setWatchlist(items)
+    localStorage.setItem(WATCHLIST_KEY, JSON.stringify(items))
+  }
+
+  const isInWatchlist = (id: number) => watchlist.some(w => w.id === id)
+
+  const toggleWatchlist = (item: TMDBResult, e?: React.MouseEvent) => {
+    e?.stopPropagation()
+    if (isInWatchlist(item.id)) {
+      saveWatchlist(watchlist.filter(w => w.id !== item.id))
+    } else {
+      saveWatchlist([item, ...watchlist])
+    }
+  }
+
+  const removeFromWatchlist = (id: number, e?: React.MouseEvent) => {
+    e?.stopPropagation()
+    saveWatchlist(watchlist.filter(w => w.id !== id))
+  }
+
+  const scrollWatchlist = (direction: 'left' | 'right') => {
+    if (watchlistScrollRef.current) {
+      const scrollAmount = 320
+      watchlistScrollRef.current.scrollBy({
+        left: direction === 'left' ? -scrollAmount : scrollAmount,
+        behavior: 'smooth'
+      })
+    }
+  }
 
   // Listen for torrent progress from main process
   useEffect(() => {
@@ -251,6 +292,101 @@ const Download: React.FC = () => {
           </div>
         </div>
 
+        {/* ─── WatchList Section ──────────────────────────────────────────── */}
+        {results.length === 0 && !searching && watchlist.length > 0 && (
+          <div className="mb-6 animate-in fade-in duration-300">
+            {/* Header */}
+            <div className="flex items-center justify-between mb-3">
+              <div className="flex items-center gap-2.5">
+                <div className="flex items-center justify-center w-8 h-8 rounded-lg bg-amber-500/10 border border-amber-500/20">
+                  <Bookmark size={15} className="text-amber-400" />
+                </div>
+                <div>
+                  <h2 className="text-sm font-bold text-text">My Watchlist</h2>
+                  <p className="text-[10px] text-muted">{watchlist.length} title{watchlist.length !== 1 ? 's' : ''} saved</p>
+                </div>
+              </div>
+              <div className="flex items-center gap-1">
+                <button
+                  onClick={() => scrollWatchlist('left')}
+                  className="p-1.5 rounded-lg text-muted hover:text-text hover:bg-white/5 transition-colors"
+                >
+                  <ChevronLeft size={16} />
+                </button>
+                <button
+                  onClick={() => scrollWatchlist('right')}
+                  className="p-1.5 rounded-lg text-muted hover:text-text hover:bg-white/5 transition-colors"
+                >
+                  <ChevronRight size={16} />
+                </button>
+              </div>
+            </div>
+
+            {/* Horizontal Scrollable Row */}
+            <div
+              ref={watchlistScrollRef}
+              className="flex gap-3 overflow-x-auto pb-2 scrollbar-hide scroll-smooth"
+            >
+              {watchlist.map(item => (
+                <button
+                  key={`wl-${item.media_type}-${item.id}`}
+                  onClick={() => handleSelectResult(item)}
+                  className={`group relative flex-shrink-0 w-[140px] flex flex-col rounded-xl overflow-hidden border transition-all duration-300 ${
+                    selectedItem?.id === item.id
+                      ? 'border-primary ring-2 ring-primary/30 scale-[1.02]'
+                      : 'border-secondary/50 hover:border-amber-400/40 hover:scale-[1.03]'
+                  }`}
+                >
+                  {/* Poster */}
+                  <div className="aspect-[2/3] bg-surface relative overflow-hidden">
+                    {item.poster_path ? (
+                      <img
+                        src={`${TMDB_IMG}/w342${item.poster_path}`}
+                        alt={item.title || item.name}
+                        className="w-full h-full object-cover"
+                        loading="lazy"
+                      />
+                    ) : (
+                      <div className="w-full h-full flex items-center justify-center text-muted/30">
+                        <Film size={32} />
+                      </div>
+                    )}
+                    {/* Media Type Badge */}
+                    <div className="absolute top-2 left-2 px-2 py-0.5 rounded-md text-[10px] font-bold uppercase tracking-wider bg-black/60 backdrop-blur-sm text-white/90">
+                      {item.media_type === 'movie' ? 'Movie' : 'Series'}
+                    </div>
+                    {/* Rating */}
+                    {item.vote_average > 0 && (
+                      <div className="absolute top-2 right-2 px-1.5 py-0.5 rounded-md text-[10px] font-bold bg-primary/80 backdrop-blur-sm text-white">
+                        ★ {item.vote_average.toFixed(1)}
+                      </div>
+                    )}
+                    {/* Remove Button — visible on hover */}
+                    <button
+                      onClick={(e) => removeFromWatchlist(item.id, e)}
+                      className="absolute bottom-2 right-2 p-1.5 rounded-full bg-black/60 backdrop-blur-sm text-white/70 hover:text-red-400 hover:bg-black/80 opacity-0 group-hover:opacity-100 transition-all duration-200 z-10"
+                      title="Remove from Watchlist"
+                    >
+                      <X size={12} />
+                    </button>
+                    {/* Watchlist Indicator */}
+                    <div className="absolute bottom-2 left-2 p-1.5 rounded-full bg-amber-500/20 backdrop-blur-sm text-amber-400 opacity-0 group-hover:opacity-100 transition-all duration-200">
+                      <BookmarkCheck size={12} />
+                    </div>
+                  </div>
+                  {/* Info */}
+                  <div className="p-2.5 bg-surface">
+                    <p className="text-xs font-medium text-text truncate">{item.title || item.name}</p>
+                    <p className="text-[10px] text-muted mt-0.5">
+                      {(item.release_date || item.first_air_date || '—').slice(0, 4)}
+                    </p>
+                  </div>
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
         {/* Active Downloads Panel */}
         {showDownloads && downloads.length > 0 && (
           <div className="bg-surface/90 backdrop-blur-xl border border-secondary rounded-2xl overflow-hidden mb-6">
@@ -359,6 +495,18 @@ const Download: React.FC = () => {
                       ★ {item.vote_average.toFixed(1)}
                     </div>
                   )}
+                  {/* Add/Remove Watchlist Button */}
+                  <button
+                    onClick={(e) => toggleWatchlist(item, e)}
+                    className={`absolute bottom-2 right-2 p-1.5 rounded-full backdrop-blur-sm transition-all duration-200 z-10 ${
+                      isInWatchlist(item.id)
+                        ? 'bg-amber-500/20 text-amber-400 opacity-100'
+                        : 'bg-black/50 text-white/70 hover:text-amber-400 hover:bg-amber-500/20 opacity-0 group-hover:opacity-100'
+                    }`}
+                    title={isInWatchlist(item.id) ? 'Remove from Watchlist' : 'Add to Watchlist'}
+                  >
+                    {isInWatchlist(item.id) ? <BookmarkCheck size={14} /> : <Bookmark size={14} />}
+                  </button>
                 </div>
                 <div className="p-2.5 bg-surface">
                   <p className="text-xs font-medium text-text truncate">{item.title || item.name}</p>
@@ -372,12 +520,13 @@ const Download: React.FC = () => {
         )}
 
         {/* Empty State */}
-        {!searching && results.length === 0 && !selectedItem && (
+        {!searching && results.length === 0 && !selectedItem && watchlist.length === 0 && (
           <div className="flex flex-col items-center justify-center py-24 text-muted space-y-4">
             <div className="w-20 h-20 rounded-full bg-surface border border-secondary flex items-center justify-center">
               <Search size={32} className="opacity-30" />
             </div>
             <p className="text-sm">Search for a movie or series to get started.</p>
+            <p className="text-xs text-muted/50">Add titles to your <span className="text-amber-400/70">Watchlist</span> to save them for later</p>
             <p className="text-xs text-muted/50">Powered by TMDB • Downloads via P2P • Consider using a VPN for privacy</p>
           </div>
         )}

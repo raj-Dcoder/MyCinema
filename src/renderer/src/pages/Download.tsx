@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react'
 import { Search, Download as DownloadIcon, Film, Tv, X, Loader2, HardDrive, CheckCircle2, AlertCircle, Pause, Play, FolderOpen, Bookmark, BookmarkCheck, ChevronLeft, ChevronRight } from 'lucide-react'
+import { DownloadFeatureTour } from '../components/DownloadFeatureTour'
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 interface TMDBResult {
@@ -13,6 +14,7 @@ interface TMDBResult {
   release_date?: string
   first_air_date?: string
   vote_average: number
+  category?: string
 }
 
 interface TorrentSource {
@@ -57,7 +59,6 @@ const Download: React.FC = () => {
   const [downloadToRemove, setDownloadToRemove] = useState<string | null>(null)
   const removedIdsRef = useRef<Set<string>>(new Set())
   const searchInputRef = useRef<HTMLInputElement>(null)
-  const watchlistScrollRef = useRef<HTMLDivElement>(null)
 
   const [selectedSeason, setSelectedSeason] = useState<string>('all')
   const [selectedEpisode, setSelectedEpisode] = useState<string>('all')
@@ -70,6 +71,10 @@ const Download: React.FC = () => {
     } catch { return [] }
   })
 
+  const [categorizingItem, setCategorizingItem] = useState<TMDBResult | null>(null)
+  const [newCategoryName, setNewCategoryName] = useState('')
+  const [isCreatingCategory, setIsCreatingCategory] = useState(false)
+
   const saveWatchlist = (items: TMDBResult[]) => {
     setWatchlist(items)
     localStorage.setItem(WATCHLIST_KEY, JSON.stringify(items))
@@ -79,26 +84,20 @@ const Download: React.FC = () => {
 
   const toggleWatchlist = (item: TMDBResult, e?: React.MouseEvent) => {
     e?.stopPropagation()
-    if (isInWatchlist(item.id)) {
-      saveWatchlist(watchlist.filter(w => w.id !== item.id))
-    } else {
-      saveWatchlist([item, ...watchlist])
-    }
+    setCategorizingItem(item)
+    setIsCreatingCategory(false)
+    setNewCategoryName('')
+  }
+
+  const addToWatchlist = (item: TMDBResult, category: string = 'Watchlist') => {
+    const newItem = { ...item, category }
+    saveWatchlist([newItem, ...watchlist.filter(w => w.id !== item.id)])
+    setCategorizingItem(null)
   }
 
   const removeFromWatchlist = (id: number, e?: React.MouseEvent) => {
     e?.stopPropagation()
     saveWatchlist(watchlist.filter(w => w.id !== id))
-  }
-
-  const scrollWatchlist = (direction: 'left' | 'right') => {
-    if (watchlistScrollRef.current) {
-      const scrollAmount = 320
-      watchlistScrollRef.current.scrollBy({
-        left: direction === 'left' ? -scrollAmount : scrollAmount,
-        behavior: 'smooth'
-      })
-    }
   }
 
   // Listen for torrent progress from main process
@@ -262,6 +261,7 @@ const Download: React.FC = () => {
 
   return (
     <div className="relative">
+      <DownloadFeatureTour />
       {/* Compact Removal Tooltip/Menu */}
       {downloadToRemove && (
         <div 
@@ -375,96 +375,90 @@ const Download: React.FC = () => {
 
         {/* ─── WatchList Section ──────────────────────────────────────────── */}
         {results.length === 0 && !searching && watchlist.length > 0 && (
-          <div className="mb-6 animate-in fade-in duration-300">
-            {/* Header */}
-            <div className="flex items-center justify-between mb-3">
-              <div className="flex items-center gap-2.5">
-                <div className="flex items-center justify-center w-8 h-8 rounded-lg bg-amber-500/10 border border-amber-500/20">
-                  <Bookmark size={15} className="text-amber-400" />
-                </div>
-                <div>
-                  <h2 className="text-sm font-bold text-text">My Watchlist</h2>
-                  <p className="text-[10px] text-muted">{watchlist.length} title{watchlist.length !== 1 ? 's' : ''} saved</p>
-                </div>
-              </div>
-              <div className="flex items-center gap-1">
-                <button
-                  onClick={() => scrollWatchlist('left')}
-                  className="p-1.5 rounded-lg text-muted hover:text-text hover:bg-white/5 transition-colors"
-                >
-                  <ChevronLeft size={16} />
-                </button>
-                <button
-                  onClick={() => scrollWatchlist('right')}
-                  className="p-1.5 rounded-lg text-muted hover:text-text hover:bg-white/5 transition-colors"
-                >
-                  <ChevronRight size={16} />
-                </button>
-              </div>
-            </div>
+          <div className="space-y-8 mb-6 animate-in fade-in duration-300">
+            {Array.from(new Set(watchlist.map(w => w.category || 'Watchlist'))).sort((a, b) => {
+              if (a === 'Watchlist') return -1
+              if (b === 'Watchlist') return 1
+              return a.localeCompare(b)
+            }).map(category => {
+              const categoryItems = watchlist.filter(w => (w.category || 'Watchlist') === category)
+              return (
+                <div key={category} className="animate-in slide-in-from-left-4 duration-500">
+                  {/* Header */}
+                  <div className="flex items-center justify-between mb-3">
+                    <div className="flex items-center gap-2.5">
+                      <div className="flex items-center justify-center w-8 h-8 rounded-lg bg-amber-500/10 border border-amber-500/20">
+                        <Bookmark size={15} className="text-amber-400" />
+                      </div>
+                      <div>
+                        <h2 className="text-sm font-bold text-text">{category}</h2>
+                        <p className="text-[10px] text-muted">{categoryItems.length} title{categoryItems.length !== 1 ? 's' : ''} saved</p>
+                      </div>
+                    </div>
+                  </div>
 
-            {/* Horizontal Scrollable Row */}
-            <div
-              ref={watchlistScrollRef}
-              className="flex gap-3 overflow-x-auto pb-2 scrollbar-hide scroll-smooth"
-            >
-              {watchlist.map(item => (
-                <button
-                  key={`wl-${item.media_type}-${item.id}`}
-                  onClick={() => handleSelectResult(item)}
-                  className={`group relative flex-shrink-0 w-[140px] flex flex-col rounded-xl overflow-hidden border transition-all duration-300 ${
-                    selectedItem?.id === item.id
-                      ? 'border-primary ring-2 ring-primary/30 scale-[1.02]'
-                      : 'border-secondary/50 hover:border-amber-400/40 hover:scale-[1.03]'
-                  }`}
-                >
-                  {/* Poster */}
-                  <div className="aspect-[2/3] bg-surface relative overflow-hidden">
-                    {item.poster_path ? (
-                      <img
-                        src={`${TMDB_IMG}/w342${item.poster_path}`}
-                        alt={item.title || item.name}
-                        className="w-full h-full object-cover"
-                        loading="lazy"
-                      />
-                    ) : (
-                      <div className="w-full h-full flex items-center justify-center text-muted/30">
-                        <Film size={32} />
-                      </div>
-                    )}
-                    {/* Media Type Badge */}
-                    <div className="absolute top-2 left-2 px-2 py-0.5 rounded-md text-[10px] font-bold uppercase tracking-wider bg-black/60 backdrop-blur-sm text-white/90">
-                      {item.media_type === 'movie' ? 'Movie' : 'Series'}
-                    </div>
-                    {/* Rating */}
-                    {item.vote_average > 0 && (
-                      <div className="absolute top-2 right-2 px-1.5 py-0.5 rounded-md text-[10px] font-bold bg-primary/80 backdrop-blur-sm text-white">
-                        ★ {item.vote_average.toFixed(1)}
-                      </div>
-                    )}
-                    {/* Remove Button — visible on hover */}
-                    <button
-                      onClick={(e) => removeFromWatchlist(item.id, e)}
-                      className="absolute bottom-2 right-2 p-1.5 rounded-full bg-black/60 backdrop-blur-sm text-white/70 hover:text-red-400 hover:bg-black/80 opacity-0 group-hover:opacity-100 transition-all duration-200 z-10"
-                      title="Remove from Watchlist"
-                    >
-                      <X size={12} />
-                    </button>
-                    {/* Watchlist Indicator */}
-                    <div className="absolute bottom-2 left-2 p-1.5 rounded-full bg-amber-500/20 backdrop-blur-sm text-amber-400 opacity-0 group-hover:opacity-100 transition-all duration-200">
-                      <BookmarkCheck size={12} />
-                    </div>
+                  {/* Horizontal Scrollable Row */}
+                  <div className="flex gap-3 overflow-x-auto pb-2 scrollbar-hide scroll-smooth">
+                    {categoryItems.map(item => (
+                      <button
+                        key={`wl-${item.media_type}-${item.id}`}
+                        onClick={() => handleSelectResult(item)}
+                        className={`group relative flex-shrink-0 w-[140px] flex flex-col rounded-xl overflow-hidden border transition-all duration-300 ${
+                          selectedItem?.id === item.id
+                            ? 'border-primary ring-2 ring-primary/30 scale-[1.02]'
+                            : 'border-secondary/50 hover:border-amber-400/40 hover:scale-[1.03]'
+                        }`}
+                      >
+                        {/* Poster */}
+                        <div className="aspect-[2/3] bg-surface relative overflow-hidden">
+                          {item.poster_path ? (
+                            <img
+                              src={`${TMDB_IMG}/w342${item.poster_path}`}
+                              alt={item.title || item.name}
+                              className="w-full h-full object-cover"
+                              loading="lazy"
+                            />
+                          ) : (
+                            <div className="w-full h-full flex items-center justify-center text-muted/30">
+                              <Film size={32} />
+                            </div>
+                          )}
+                          {/* Media Type Badge */}
+                          <div className="absolute top-2 left-2 px-2 py-0.5 rounded-md text-[10px] font-bold uppercase tracking-wider bg-black/60 backdrop-blur-sm text-white/90">
+                            {item.media_type === 'movie' ? 'Movie' : 'Series'}
+                          </div>
+                          {/* Rating */}
+                          {item.vote_average > 0 && (
+                            <div className="absolute top-2 right-2 px-1.5 py-0.5 rounded-md text-[10px] font-bold bg-primary/80 backdrop-blur-sm text-white">
+                              ★ {item.vote_average.toFixed(1)}
+                            </div>
+                          )}
+                          {/* Remove Button — visible on hover */}
+                          <button
+                            onClick={(e) => removeFromWatchlist(item.id, e)}
+                            className="absolute bottom-2 right-2 p-1.5 rounded-full bg-black/60 backdrop-blur-sm text-white/70 hover:text-red-400 hover:bg-black/80 opacity-0 group-hover:opacity-100 transition-all duration-200 z-10"
+                            title="Remove from Watchlist"
+                          >
+                            <X size={12} />
+                          </button>
+                          {/* Watchlist Indicator */}
+                          <div className="absolute bottom-2 left-2 p-1.5 rounded-full bg-amber-500/20 backdrop-blur-sm text-amber-400 opacity-0 group-hover:opacity-100 transition-all duration-200">
+                            <BookmarkCheck size={12} />
+                          </div>
+                        </div>
+                        {/* Info */}
+                        <div className="p-2.5 bg-surface">
+                          <p className="text-xs font-medium text-text truncate">{item.title || item.name}</p>
+                          <p className="text-[10px] text-muted mt-0.5">
+                            {(item.release_date || item.first_air_date || '—').slice(0, 4)}
+                          </p>
+                        </div>
+                      </button>
+                    ))}
                   </div>
-                  {/* Info */}
-                  <div className="p-2.5 bg-surface">
-                    <p className="text-xs font-medium text-text truncate">{item.title || item.name}</p>
-                    <p className="text-[10px] text-muted mt-0.5">
-                      {(item.release_date || item.first_air_date || '—').slice(0, 4)}
-                    </p>
-                  </div>
-                </button>
-              ))}
-            </div>
+                </div>
+              )
+            })}
           </div>
         )}
 
@@ -737,6 +731,143 @@ const Download: React.FC = () => {
           </div>
         )}
       </div>
+
+      {/* ─── Category Selector Modal ───────────────────────────────────────── */}
+      {categorizingItem && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-200">
+          <div className="w-full max-w-sm bg-surface border border-secondary rounded-2xl shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200">
+            <div className="px-6 py-5 border-b border-secondary flex items-center justify-between">
+              <div>
+                <h3 className="text-base font-bold text-text">Save to...</h3>
+                <p className="text-[11px] text-muted mt-0.5 truncate max-w-[200px]">
+                  {categorizingItem.title || categorizingItem.name}
+                </p>
+              </div>
+              <button
+                onClick={() => setCategorizingItem(null)}
+                className="p-2 rounded-xl hover:bg-white/5 text-muted hover:text-text transition-colors"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="p-4 space-y-1.5 max-h-[300px] overflow-y-auto">
+              {/* Default Option */}
+              <button
+                onClick={() => addToWatchlist(categorizingItem, 'Watchlist')}
+                className={`w-full flex items-center gap-3 p-3 rounded-xl transition-all group ${
+                  (watchlist.find(w => w.id === categorizingItem.id)?.category || 'Watchlist') === 'Watchlist'
+                    ? 'bg-amber-500/10 text-amber-400'
+                    : 'hover:bg-amber-500/10 text-muted hover:text-amber-400'
+                }`}
+              >
+                <div className={`w-8 h-8 rounded-lg flex items-center justify-center transition-colors ${
+                  (watchlist.find(w => w.id === categorizingItem.id)?.category || 'Watchlist') === 'Watchlist'
+                    ? 'bg-amber-500/20'
+                    : 'bg-secondary/50 group-hover:bg-amber-500/20'
+                }`}>
+                  <Bookmark size={14} />
+                </div>
+                <span className="text-sm font-medium">Watchlist</span>
+                {(watchlist.find(w => w.id === categorizingItem.id)?.category || 'Watchlist') === 'Watchlist' ? (
+                  <CheckCircle2 size={14} className="ml-auto" />
+                ) : (
+                  <span className="ml-auto text-[10px] opacity-0 group-hover:opacity-100 uppercase tracking-widest font-bold">Default</span>
+                )}
+              </button>
+
+              {/* Existing Categories */}
+              {Array.from(new Set(watchlist.map(w => w.category || 'Watchlist')))
+                .filter(cat => cat !== 'Watchlist')
+                .sort()
+                .map(category => {
+                  const isCurrent = watchlist.find(w => w.id === categorizingItem.id)?.category === category
+                  return (
+                    <button
+                      key={category}
+                      onClick={() => addToWatchlist(categorizingItem, category)}
+                      className={`w-full flex items-center gap-3 p-3 rounded-xl transition-all group ${
+                        isCurrent
+                          ? 'bg-primary/10 text-primary'
+                          : 'hover:bg-primary/10 text-muted hover:text-primary'
+                      }`}
+                    >
+                      <div className={`w-8 h-8 rounded-lg flex items-center justify-center transition-colors ${
+                        isCurrent
+                          ? 'bg-primary/20'
+                          : 'bg-secondary/50 group-hover:bg-primary/20'
+                      }`}>
+                        <Bookmark size={14} />
+                      </div>
+                      <span className="text-sm font-medium">{category}</span>
+                      {isCurrent && <CheckCircle2 size={14} className="ml-auto" />}
+                    </button>
+                  )
+                })}
+
+              {/* Remove Option */}
+              {isInWatchlist(categorizingItem.id) && (
+                <button
+                  onClick={() => {
+                    saveWatchlist(watchlist.filter(w => w.id !== categorizingItem.id))
+                    setCategorizingItem(null)
+                  }}
+                  className="w-full flex items-center gap-3 p-3 rounded-xl hover:bg-red-500/10 text-muted hover:text-red-400 group transition-all mt-2 border-t border-secondary/50 pt-4"
+                >
+                  <div className="w-8 h-8 rounded-lg bg-secondary/50 flex items-center justify-center group-hover:bg-red-500/20">
+                    <X size={14} />
+                  </div>
+                  <span className="text-sm font-medium">Remove from Watchlist</span>
+                </button>
+              )}
+            </div>
+
+            <div className="p-4 bg-secondary/20 border-t border-secondary">
+              {!isCreatingCategory ? (
+                <button
+                  onClick={() => setIsCreatingCategory(true)}
+                  className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl border border-dashed border-muted/30 text-muted hover:text-text hover:border-primary/50 transition-all text-sm font-medium"
+                >
+                  <Bookmark size={14} className="opacity-50" />
+                  Create New Category
+                </button>
+              ) : (
+                <div className="space-y-3 animate-in slide-in-from-bottom-2 duration-200">
+                  <input
+                    autoFocus
+                    type="text"
+                    value={newCategoryName}
+                    onChange={(e) => setNewCategoryName(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' && newCategoryName.trim()) {
+                        addToWatchlist(categorizingItem, newCategoryName.trim())
+                      }
+                      if (e.key === 'Escape') setIsCreatingCategory(false)
+                    }}
+                    placeholder="Category name (e.g. Business Movies)"
+                    className="w-full px-4 py-2.5 bg-surface border border-primary/30 rounded-xl text-sm outline-none focus:ring-2 focus:ring-primary/20 placeholder:text-muted/40"
+                  />
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => setIsCreatingCategory(false)}
+                      className="flex-1 py-2 text-xs font-medium text-muted hover:text-text transition-colors"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      disabled={!newCategoryName.trim()}
+                      onClick={() => addToWatchlist(categorizingItem, newCategoryName.trim())}
+                      className="flex-[2] py-2 bg-primary text-black font-bold text-xs rounded-lg disabled:opacity-50 transition-all"
+                    >
+                      Create & Save
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

@@ -77,6 +77,61 @@ function nodeHttpGet(url: string, timeoutMs: number = 10000): Promise<any> {
   })
 }
 
+// Generic HTTPS request helper — supports GET/POST + custom headers (needed for OpenSubtitles API)
+function nodeHttpRequest(
+  url: string,
+  opts: { method?: string; headers?: Record<string, string>; body?: string; timeoutMs?: number } = {}
+): Promise<any> {
+  const { method = 'GET', headers = {}, body, timeoutMs = 10000 } = opts
+  return new Promise(async (resolve, reject) => {
+    let req: any = null
+    const timer = setTimeout(() => {
+      if (req) req.destroy()
+      reject(new Error(`Timeout ${method} ${url} after ${timeoutMs}ms`))
+    }, timeoutMs)
+
+    try {
+      const parsed = new URL(url)
+      const ip = await resolveHostname(parsed.hostname)
+
+      const requestOpts: any = {
+        hostname: ip,
+        port: 443,
+        path: parsed.pathname + parsed.search,
+        method,
+        headers: {
+          'User-Agent': 'MyCinema v1.7',
+          'Host': parsed.hostname,
+          ...headers,
+        },
+        servername: parsed.hostname,
+      }
+
+      if (body) {
+        requestOpts.headers['Content-Length'] = Buffer.byteLength(body)
+      }
+
+      req = https.request(requestOpts, (res) => {
+        let data = ''
+        res.on('data', (chunk: string) => { data += chunk })
+        res.on('end', () => {
+          clearTimeout(timer)
+          try { resolve(JSON.parse(data)) } catch { resolve(data) }
+        })
+      }).on('error', (err) => {
+        clearTimeout(timer)
+        reject(err)
+      })
+
+      if (body) req.write(body)
+      req.end()
+    } catch (err) {
+      clearTimeout(timer)
+      reject(err)
+    }
+  })
+}
+
 // ─── File-system Watcher Registry ────────────────────────────────────────────
 const VIDEO_EXTS = new Set(['.mp4', '.mkv', '.avi', '.mov', '.webm'])
 const folderWatchers = new Map<string, fs.FSWatcher>()
@@ -1039,7 +1094,8 @@ function formatTime(seconds: number): string {
 function broadcastProgress(id: string, torrent: any, status: string, errorMessage?: string): void {
   const data: any = {
     id,
-    title: torrent.name || (torrent as any)._myCinemaTitle || 'Download',
+    title: (torrent as any)._myCinemaTitle || torrent.name || 'Download',
+    name: torrent.name || (torrent as any)._myCinemaName || null,
     progress: Math.round((torrent.progress || 0) * 100 * 100) / 100,
     downloadSpeed: formatBytes(torrent.downloadSpeed || 0) + '/s',
     timeRemaining: formatTime(torrent.timeRemaining ? torrent.timeRemaining / 1000 : Infinity),
@@ -1057,6 +1113,7 @@ function broadcastProgress(id: string, torrent: any, status: string, errorMessag
 // Read the key from the environment (injected by electron-vite from .env at build time).
 // Never hardcode API keys in source files.
 const TMDB_API_KEY = process.env.MAIN_VITE_TMDB_API_KEY || (import.meta as any).env?.MAIN_VITE_TMDB_API_KEY || ''
+const OPENSUBTITLES_API_KEY = process.env.MAIN_VITE_OPENSUBTITLES_API_KEY || (import.meta as any).env?.MAIN_VITE_OPENSUBTITLES_API_KEY || ''
 
 ipcMain.handle('search-tmdb', async (_, query: string) => {
   try {
@@ -1071,6 +1128,99 @@ ipcMain.handle('search-tmdb', async (_, query: string) => {
     return []
   }
 })
+
+// ─── Hindi Detection Helper ──────────────────────────────────────────────────
+function isHindiContent(title: string): boolean {
+  const lower = title.toLowerCase()
+  return (
+    lower.includes('hindi') ||
+    lower.includes('dual audio') ||
+    lower.includes('dual-audio') ||
+    lower.includes('multi audio') ||
+    lower.includes('multi-audio') ||
+    lower.includes('multi') ||
+    lower.includes('dubbed') ||
+    lower.includes('hin ') ||
+    lower.includes('[hin]') ||
+    lower.includes('(hin)') ||
+    lower.includes(' hin.') ||
+    lower.includes('.hin.') ||
+    lower.includes('हिंदी') ||
+    lower.includes('audio:hindi') ||
+    lower.includes('audio hindi') ||
+    /\bhindi?\b/.test(lower) ||
+    /\bdual\b/.test(lower) ||
+    /\bdub\b/.test(lower)
+  )
+}
+
+// ─── Torrentio Stream Parser Helper ──────────────────────────────────────────
+const TORRENTIO_BASE = 'https://torrentio.strem.fun/sort=seeders|qualityfilter=cam,screener'
+
+function parseTorrentioStream(stream: any, fallbackTitle: string): any | null {
+  if (!stream.infoHash) return null
+  const streamTitle = stream.title || ''
+  
+  // Parse quality
+  const qualityMatch = streamTitle.match(/(2160p|1080p|720p|480p)/i)
+  const quality = qualityMatch ? qualityMatch[1] : (stream.name?.includes('1080p') ? '1080p' : 'HD')
+  
+  // Parse size e.g. "💾 2.34 GB"
+  const sizeMatch = streamTitle.match(/([0-9.]+\s*(GB|MB|KB))/i)
+  const size = sizeMatch ? sizeMatch[1] : '—'
+
+  // Parse seeds e.g. "👤 123"
+  const seedMatch = streamTitle.match(/(?:👤|Seeders:)\s*([0-9]+)/i)
+  const seeds = seedMatch ? parseInt(seedMatch[1]) : 0
+  if (seeds === 0) return null // Skip dead torrents
+  
+  const isHindi = isHindiContent(streamTitle)
+  
+  // Clean up title
+  const cleanTitle = streamTitle.split('\n')[0].replace(/[\[\(][A-Za-z0-9 ]*[\]\)]/g, '').trim() || `${fallbackTitle} (Aggregated)`
+
+  return {
+    title: cleanTitle.substring(0, 80),
+    quality,
+    size,
+    magnet: `magnet:?xt=urn:btih:${stream.infoHash}&dn=${encodeURIComponent(cleanTitle)}`,
+    seeds,
+    peers: Math.floor(seeds * 0.2),
+    type: 'web',
+    isHindi
+  }
+}
+
+// ─── Shared Tracker List & Magnet Enrichment ─────────────────────────────────
+const EXTRA_TRACKERS = [
+  'udp://tracker.opentrackr.org:1337/announce',
+  'udp://tracker.torrent.eu.org:451/announce',
+  'udp://exodus.desync.com:6969/announce',
+  'udp://tracker.cyberia.is:6969/announce',
+  'udp://tracker.tiny-vps.com:6969/announce',
+  'udp://open.stealth.si:80/announce',
+  'udp://tracker.moeking.me:6969/announce',
+  'udp://tracker.bitsearch.to:1337/announce',
+  'udp://tracker.dler.org:6969/announce',
+  'udp://9.rarbg.com:2810/announce',
+  'udp://p4p.arenabg.com:1337',
+  'udp://open.tracker.cl:1337/announce',
+  'udp://explodie.org:6969/announce',
+  'udp://tracker.opentrackr.org:1337/announce',
+  'https://tracker.nanoha.org:443/announce',
+  'udp://tracker.openbittorrent.com:6969/announce',
+  'udp://tracker.pomf.se:80/announce',
+]
+
+function enrichMagnetWithTrackers(magnetUrl: string): string {
+  let enriched = magnetUrl
+  for (const tr of EXTRA_TRACKERS) {
+    if (!enriched.includes(encodeURIComponent(tr))) {
+      enriched += `&tr=${encodeURIComponent(tr)}`
+    }
+  }
+  return enriched
+}
 
 // ─── IPC: Search Torrent Sources ─────────────────────────────────────────────
 ipcMain.handle('search-torrent-sources', async (_, title: string, year: string, mediaType: string, tmdbId: number) => {
@@ -1113,15 +1263,18 @@ ipcMain.handle('search-torrent-sources', async (_, title: string, year: string, 
         if (ytsData?.data?.movies) {
           for (const movie of ytsData.data.movies) {
             for (const torrent of (movie.torrents || [])) {
+              const seeds = torrent.seeds || 0
+              const peers = torrent.peers || 0
+              if (seeds === 0 && peers === 0) continue // Skip dead torrents
               sources.push({
                 title: `${movie.title_long} [${torrent.type?.toUpperCase() || 'WEB'}] (YTS)`,
                 quality: torrent.quality || '720p',
                 size: torrent.size || '—',
                 magnet: `magnet:?xt=urn:btih:${torrent.hash}&dn=${encodeURIComponent(movie.title_long)}`,
-                seeds: torrent.seeds || 0,
-                peers: torrent.peers || 0,
+                seeds,
+                peers,
                 type: torrent.type || 'web',
-                isHindi: false
+                isHindi: isHindiContent(movie.title_long || '')
               })
             }
           }
@@ -1131,42 +1284,13 @@ ipcMain.handle('search-torrent-sources', async (_, title: string, year: string, 
       // B. Fetch from Torrentio as an aggregator for high-speed, dual-audio, and hindi content
       if (imdbId) {
         try {
-          const torrentioUrl = `https://torrentio.strem.fun/stream/movie/${imdbId}.json`
+          const torrentioUrl = `${TORRENTIO_BASE}/stream/movie/${imdbId}.json`
+          console.log(`[Torrent] Fetching Torrentio: ${torrentioUrl}`)
           const tData: any = await nodeHttpGet(torrentioUrl, 6000)
           if (tData && tData.streams) {
             for (const stream of tData.streams) {
-              if (stream.infoHash) {
-                const streamTitle = stream.title || ''
-                const lowerTitle = streamTitle.toLowerCase()
-                
-                // Parse quality out of Torrentio title
-                const qualityMatch = streamTitle.match(/(2160p|1080p|720p|480p)/i)
-                const quality = qualityMatch ? qualityMatch[1] : (stream.name?.includes('1080p') ? '1080p' : 'HD')
-                
-                // Parse size out of Torrentio title e.g. "💾 2.34 GB"
-                const sizeMatch = streamTitle.match(/([0-9.]+\s*(GB|MB|KB))/i)
-                const size = sizeMatch ? sizeMatch[1] : '—'
-
-                // Parse seeds from Torrentio title e.g. "👤 123"
-                const seedMatch = streamTitle.match(/(?:👤|Seeders:)\s*([0-9]+)/i)
-                const seeds = seedMatch ? parseInt(seedMatch[1]) : 10
-                
-                const isHindi = lowerTitle.includes('hindi') || lowerTitle.includes('dual') || lowerTitle.includes('multi')
-                
-                // Clean up title to drop the emojis and meta info for a cleaner display
-                const cleanTitle = streamTitle.split('\n')[0].replace(/[\[\(][A-Za-z0-9 ]*[\]\)]/g, '').trim() || `${title} (Aggregated)`
-
-                sources.push({
-                  title: cleanTitle.substring(0, 80),
-                  quality: quality,
-                  size: size,
-                  magnet: `magnet:?xt=urn:btih:${stream.infoHash}&dn=${encodeURIComponent(cleanTitle)}`,
-                  seeds: seeds,
-                  peers: Math.floor(seeds * 0.2), // Estimate peers
-                  type: 'web',
-                  isHindi: isHindi
-                })
-              }
+              const parsed = parseTorrentioStream(stream, title)
+              if (parsed) sources.push(parsed)
             }
           }
         } catch (err: any) {
@@ -1198,17 +1322,38 @@ ipcMain.handle('search-torrent-sources', async (_, title: string, year: string, 
       if (data?.torrents) {
         for (const t of data.torrents) {
           if (!t.magnet_url) continue
-          const lowerTitle = (t.title || t.filename || '').toLowerCase()
+          const seeds = t.seeds || 0
+          const peers = t.peers || 0
+          if (seeds === 0 && peers === 0) continue // Skip dead torrents
+          const torrentTitle = t.title || t.filename || 'Unknown'
           sources.push({
-            title: t.title || t.filename || 'Unknown',
-            quality: t.title?.match(/(720p|1080p|2160p|480p)/i)?.[1] || 'SD',
+            title: torrentTitle,
+            quality: torrentTitle.match(/(720p|1080p|2160p|480p)/i)?.[1] || 'SD',
             size: formatBytes(t.size_bytes || 0),
             magnet: t.magnet_url,
-            seeds: t.seeds || 0,
-            peers: t.peers || 0,
+            seeds,
+            peers,
             type: 'web',
-            isHindi: lowerTitle.includes('hindi') || lowerTitle.includes('dual')
+            isHindi: isHindiContent(torrentTitle)
           })
+        }
+      }
+
+      // D. Fetch from Torrentio for TV Series (aggregates many sources)
+      if (imdbId) {
+        try {
+          // Fetch general series streams (Torrentio returns season packs + recent episodes)
+          const torrentioUrl = `${TORRENTIO_BASE}/stream/series/${imdbId}.json`
+          console.log(`[Torrent] Fetching Torrentio series: ${torrentioUrl}`)
+          const tData: any = await nodeHttpGet(torrentioUrl, 6000)
+          if (tData && tData.streams) {
+            for (const stream of tData.streams) {
+              const parsed = parseTorrentioStream(stream, title)
+              if (parsed) sources.push(parsed)
+            }
+          }
+        } catch (err: any) {
+          console.error('[Torrent] Torrentio series fetch failed:', err.message)
         }
       }
     }
@@ -1226,12 +1371,9 @@ ipcMain.handle('search-torrent-sources', async (_, title: string, year: string, 
             if (seeders === 0) continue // Skip dead torrents early
             
             const titleName = t.name || ''
-            const lowerTitle = titleName.toLowerCase()
             
             const qualityMatch = titleName.match(/(2160p|1080p|720p|480p)/i)
             const quality = qualityMatch ? qualityMatch[1] : 'HD'
-            
-            const isHindi = lowerTitle.includes('hindi') || lowerTitle.includes('dual') || lowerTitle.includes('multi')
             
             sources.push({
               title: `${titleName.substring(0, 80)} (TPB)`,
@@ -1241,12 +1383,34 @@ ipcMain.handle('search-torrent-sources', async (_, title: string, year: string, 
               seeds: seeders,
               peers: leechers,
               type: 'web',
-              isHindi: isHindi
+              isHindi: isHindiContent(titleName)
             })
           }
         }
       } catch (err: any) {
         console.error('[Torrent] APIBay fetch failed:', err.message)
+      }
+    }
+
+    // E. Fetch from MediaFusion (Stremio addon — indexes many Hindi/Dual audio sources)
+    if (imdbId) {
+      try {
+        const mfType = mediaType === 'movie' ? 'movie' : 'series'
+        const mfUrl = `https://mediafusion.elfhosted.com/stream/${mfType}/${imdbId}.json`
+        console.log(`[Torrent] Fetching MediaFusion: ${mfUrl}`)
+        const mfData: any = await nodeHttpGet(mfUrl, 6000)
+        if (mfData && mfData.streams) {
+          for (const stream of mfData.streams) {
+            const parsed = parseTorrentioStream(stream, title) // Same stream format as Torrentio
+            if (parsed) {
+              parsed.title = parsed.title ? `${parsed.title}` : `${title} (MF)`
+              sources.push(parsed)
+            }
+          }
+          console.log(`[Torrent] MediaFusion returned ${mfData.streams.length} streams`)
+        }
+      } catch (err: any) {
+        console.error('[Torrent] MediaFusion fetch failed:', err.message)
       }
     }
 
@@ -1283,14 +1447,21 @@ ipcMain.handle('search-torrent-sources', async (_, title: string, year: string, 
       })
     }
 
-    // Sort heavily by requirements
+    // Sort heavily by requirements — Hindi content prioritized
     enrichedSources.sort((a, b) => {
       if (mediaType === 'movie') {
+        // Hindi/Dual Audio first
+        if (a.isHindi && !b.isHindi) return -1
+        if (!a.isHindi && b.isHindi) return 1
+        // Then by seeds
         return b.seeds - a.seeds
       } else {
         // Both are Season Packs
         if (a.isSeasonPack && b.isSeasonPack) {
           if (a.parsedSeason !== b.parsedSeason) return (a.parsedSeason || 0) - (b.parsedSeason || 0)
+          // Hindi first within same season pack
+          if (a.isHindi && !b.isHindi) return -1
+          if (!a.isHindi && b.isHindi) return 1
           return b.seeds - a.seeds
         }
         // Pack vs Episode
@@ -1301,7 +1472,9 @@ ipcMain.handle('search-torrent-sources', async (_, title: string, year: string, 
         if (a.parsedSeason !== b.parsedSeason) return (a.parsedSeason || 0) - (b.parsedSeason || 0)
         if (a.parsedEpisode !== b.parsedEpisode) return (a.parsedEpisode || 0) - (b.parsedEpisode || 0)
         
-        // Same Episode: Sort by seeds
+        // Same Episode: Hindi first, then seeds
+        if (a.isHindi && !b.isHindi) return -1
+        if (!a.isHindi && b.isHindi) return 1
         if (a.seeds !== b.seeds) return b.seeds - a.seeds
         
         // Tiebreaker: Resolution
@@ -1324,6 +1497,7 @@ ipcMain.handle('search-torrent-sources', async (_, title: string, year: string, 
     }
 
     return uniqueSources
+      .map(src => ({ ...src, magnet: enrichMagnetWithTrackers(src.magnet) }))
 
   } catch (err) {
     console.error('[Torrent] Source search error:', err)
@@ -1342,34 +1516,26 @@ async function startWebTorrent(torrentId: string, magnetUrl: string, title: stri
 
   broadcastProgress(torrentId, { downloadSpeed: 0, timeRemaining: 0, length: 0, downloaded: 0, progress: initialProgress / 100, name: title } as any, 'downloading')
 
-  const extraTrackers = [
-    'udp://tracker.opentrackr.org:1337/announce',
-    'udp://tracker.torrent.eu.org:451/announce',
-    'udp://exodus.desync.com:6969/announce',
-    'udp://tracker.cyberia.is:6969/announce',
-    'udp://tracker.tiny-vps.com:6969/announce',
-    'udp://open.stealth.si:80/announce',
-    'udp://tracker.moeking.me:6969/announce',
-    'udp://tracker.bitsearch.to:1337/announce',
-    'udp://tracker.dler.org:6969/announce',
-    'udp://9.rarbg.com:2810/announce',
-    'udp://p4p.arenabg.com:1337'
-  ]
-
-  let enrichedMagnet = magnetUrl
-  for (const tr of extraTrackers) {
-    if (!enrichedMagnet.includes(encodeURIComponent(tr))) {
-      enrichedMagnet += `&tr=${encodeURIComponent(tr)}`
-    }
-  }
+  // Re-use the shared tracker list (magnets are already enriched at search time,
+  // but downloads from the DB may not be, so enrich again just in case)
+  let enrichedMagnet = enrichMagnetWithTrackers(magnetUrl)
 
   const torrent = client.add(enrichedMagnet, { path: downloadPath })
   
   torrent._myCinemaTitle = title
+  
+  // Set internal name as soon as we can, even before 'ready'
+  // WebTorrent often sets .name from the magnet 'dn' parameter if available
+  if (torrent.name) {
+    torrent._myCinemaName = torrent.name
+  }
+
   activeTorrents.set(torrentId, torrent)
 
   torrent.on('ready', () => {
     console.log(`[Torrent] Metadata resolved: ${torrent.name} (${formatBytes(torrent.length)})`)
+    torrent._myCinemaName = torrent.name
+    broadcastProgress(torrentId, torrent, torrent.paused ? 'paused' : 'downloading')
   })
 
   // Periodic progress updates (every 1s)
@@ -1507,14 +1673,54 @@ ipcMain.handle('get-active-downloads', async () => {
 })
 
 // ─── IPC: Remove Download ────────────────────────────────────────────────────
-ipcMain.handle('remove-download', async (_, id: string) => {
+ipcMain.handle('remove-download', async (_, id: string, deleteFile: boolean = false) => {
   try {
     const torrent = activeTorrents.get(id)
-    if (torrent && !torrent.destroyed) {
-      torrent.destroy()
+    let folderName = ''
+    
+    // 1. Get folder name if possible
+    if (torrent) {
+      folderName = torrent.name
+    } else {
+      const dbDl = db.getDownloads().find((d: any) => d.id === id)
+      if (dbDl) folderName = dbDl.name
     }
-    activeTorrents.delete(id)
+
+    // 2. Stop and remove from memory
+    if (torrent) {
+      if (!torrent.destroyed) {
+        torrent.destroy()
+      }
+      activeTorrents.delete(id)
+    }
+    
+    // 3. Delete from DB
     db.removeDownloadRow(id)
+
+    // 4. Optionally delete physical files
+    if (deleteFile && folderName) {
+      // Run deletion in background and don't let it block success of UI removal
+      // We also wait a tiny bit to allow WebTorrent to release file handles
+      setTimeout(() => {
+        try {
+          const dlPath = path.join(getDownloadPath(), folderName)
+          if (fs.existsSync(dlPath)) {
+            console.log(`[Torrent] Deleting physical files at: ${dlPath}`)
+            fs.rmSync(dlPath, { recursive: true, force: true })
+          }
+        } catch (err: any) {
+          console.error(`[Torrent] Physical file deletion failed for ${folderName}:`, err.message)
+          // Retry once more after 2 seconds if it failed (likely due to file lock)
+          setTimeout(() => {
+            try {
+              const dlPath = path.join(getDownloadPath(), folderName)
+              if (fs.existsSync(dlPath)) fs.rmSync(dlPath, { recursive: true, force: true })
+            } catch (e) {}
+          }, 2000)
+        }
+      }, 200)
+    }
+    
     return true
   } catch (err) {
     console.error('[Torrent] Remove error:', err)
@@ -1522,3 +1728,168 @@ ipcMain.handle('remove-download', async (_, id: string) => {
   }
 })
 
+// ─── OpenSubtitles: Search Subtitles ─────────────────────────────────────────
+ipcMain.handle('search-opensubtitles', async (_, params: {
+  query?: string
+  tmdbId?: number
+  season?: number
+  episode?: number
+  languages?: string
+  mediaType?: string
+}) => {
+  if (!OPENSUBTITLES_API_KEY) {
+    console.error('[OpenSubtitles] No API key configured')
+    return { error: 'No OpenSubtitles API key configured. Add MAIN_VITE_OPENSUBTITLES_API_KEY to your .env file.' }
+  }
+
+  try {
+    const searchParams = new URLSearchParams()
+
+    if (params.tmdbId) {
+      searchParams.set('tmdb_id', params.tmdbId.toString())
+      if (params.mediaType === 'tv' || params.mediaType === 'series') {
+        searchParams.set('type', 'episode')
+      }
+    } else if (params.query) {
+      searchParams.set('query', params.query)
+    } else {
+      return { error: 'No search query or TMDB ID provided' }
+    }
+
+    if (params.season) searchParams.set('season_number', params.season.toString())
+    if (params.episode) searchParams.set('episode_number', params.episode.toString())
+    searchParams.set('languages', params.languages || 'en,hi')
+    searchParams.set('order_by', 'download_count')
+    searchParams.set('order_direction', 'desc')
+
+    const url = `https://api.opensubtitles.com/api/v1/subtitles?${searchParams.toString()}`
+    console.log('[OpenSubtitles] Searching:', url)
+
+    // Use Electron's net.fetch (Chromium network stack) to bypass ISP blocks
+    const response = await net.fetch(url, {
+      method: 'GET',
+      headers: {
+        'Api-Key': OPENSUBTITLES_API_KEY,
+        'Content-Type': 'application/json',
+        'User-Agent': 'MyCinema v1.7',
+      },
+    })
+
+    const data = await response.json()
+
+    if (data.errors || data.error) {
+      console.error('[OpenSubtitles] API error:', data.errors || data.error)
+      return { error: data.errors?.[0] || data.error || 'API request failed' }
+    }
+
+    const results = (data.data || []).map((item: any) => {
+      const attrs = item.attributes || {}
+      const bestFile = attrs.files?.[0]
+      return {
+        id: item.id,
+        fileId: bestFile?.file_id,
+        language: attrs.language || 'unknown',
+        releaseName: attrs.release || attrs.feature_details?.movie_name || 'Subtitle',
+        downloadCount: attrs.download_count || 0,
+        fileName: bestFile?.file_name || 'subtitle.srt',
+        rating: attrs.ratings || 0,
+        hearingImpaired: attrs.hearing_impaired || false,
+        aiTranslated: attrs.ai_translated || false,
+        machineTranslated: attrs.machine_translated || false,
+      }
+    })
+
+    console.log(`[OpenSubtitles] Found ${results.length} results`)
+    return { results }
+  } catch (err: any) {
+    console.error('[OpenSubtitles] Search error:', err.message)
+    return { error: err.message }
+  }
+})
+
+// ─── OpenSubtitles: Download Subtitle ────────────────────────────────────────
+ipcMain.handle('download-opensubtitle', async (_, params: {
+  fileId: number
+  videoFilePath: string
+  fileName?: string
+}) => {
+  if (!OPENSUBTITLES_API_KEY) {
+    return { error: 'No OpenSubtitles API key configured' }
+  }
+
+  try {
+    // Step 1: Request download link from OpenSubtitles
+    console.log(`[OpenSubtitles] Requesting download link for file_id: ${params.fileId}`)
+    const dlResponse = await net.fetch('https://api.opensubtitles.com/api/v1/download', {
+      method: 'POST',
+      headers: {
+        'Api-Key': OPENSUBTITLES_API_KEY,
+        'Content-Type': 'application/json',
+        'Accept': 'application/json',
+        'User-Agent': 'MyCinema v1.7',
+      },
+      body: JSON.stringify({ file_id: params.fileId }),
+    })
+
+    const dlData = await dlResponse.json()
+
+    if (dlData.errors || dlData.error) {
+      console.error('[OpenSubtitles] Download API error:', dlData)
+      return { error: dlData.errors?.[0] || dlData.error || 'Download request failed' }
+    }
+
+    const downloadUrl = dlData.link
+    if (!downloadUrl) {
+      return { error: 'No download link received from OpenSubtitles' }
+    }
+
+    const remaining = dlData.remaining
+    console.log(`[OpenSubtitles] Download link received. Remaining downloads today: ${remaining}`)
+
+    // Step 2: Download the SRT file content using Electron's net.fetch
+    const srtResponse = await net.fetch(downloadUrl)
+    const srtContent = await srtResponse.text()
+
+    // Step 3: Save the SRT file alongside the video
+    const videoDir = path.dirname(params.videoFilePath)
+    const videoBaseName = path.basename(params.videoFilePath, path.extname(params.videoFilePath))
+    const srtPath = path.join(videoDir, `${videoBaseName}.srt`)
+
+    fs.writeFileSync(srtPath, srtContent, 'utf-8')
+    console.log(`[OpenSubtitles] Saved subtitle to: ${srtPath}`)
+
+    // Step 4: Pre-convert to WebVTT for the player
+    const subsDir = path.join(app.getPath('userData'), 'subtitles')
+    if (!fs.existsSync(subsDir)) fs.mkdirSync(subsDir, { recursive: true })
+    const hash = crypto.createHash('sha1').update(`${srtPath}-0`).digest('hex').slice(0, 16)
+    const vttPath = path.join(subsDir, `${hash}.vtt`)
+
+    // Remove stale cache if exists
+    if (fs.existsSync(vttPath)) fs.unlinkSync(vttPath)
+
+    const vttResult: string | null = await new Promise((resolve) => {
+      ffmpeg(srtPath)
+        .outputOptions(['-map 0:0', '-c:s webvtt', '-f webvtt'])
+        .output(vttPath)
+        .on('end', () => {
+          console.log(`[OpenSubtitles] Converted to VTT: ${vttPath}`)
+          resolve(vttPath)
+        })
+        .on('error', (err) => {
+          console.error('[OpenSubtitles] VTT conversion failed:', err.message)
+          if (fs.existsSync(vttPath)) try { fs.unlinkSync(vttPath) } catch {}
+          resolve(null)
+        })
+        .run()
+    })
+
+    return {
+      srtPath,
+      vttPath: vttResult,
+      remaining,
+    }
+  } catch (err: any) {
+    console.error('[OpenSubtitles] Download error:', err.message)
+    return { error: err.message }
+  }
+})

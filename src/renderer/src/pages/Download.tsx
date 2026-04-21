@@ -1,6 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react'
 import { Search, Download as DownloadIcon, Film, Tv, X, Loader2, HardDrive, CheckCircle2, AlertCircle, Pause, Play, FolderOpen, Bookmark, BookmarkCheck, ChevronLeft, ChevronRight } from 'lucide-react'
-import { DownloadFeatureTour } from '../components/DownloadFeatureTour'
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 interface TMDBResult {
@@ -55,6 +54,8 @@ const Download: React.FC = () => {
   const [loadingSources, setLoadingSources] = useState(false)
   const [downloads, setDownloads] = useState<ActiveDownload[]>([])
   const [showDownloads, setShowDownloads] = useState(false)
+  const [downloadToRemove, setDownloadToRemove] = useState<string | null>(null)
+  const removedIdsRef = useRef<Set<string>>(new Set())
   const searchInputRef = useRef<HTMLInputElement>(null)
   const watchlistScrollRef = useRef<HTMLDivElement>(null)
 
@@ -105,12 +106,30 @@ const Download: React.FC = () => {
     // Reconnect to existing downloads on mount
     window.api.getActiveDownloads().then((active: ActiveDownload[]) => {
       if (active && active.length > 0) {
-        setDownloads(active)
+        setDownloads(prev => {
+          // Merge active downloads from DB with current state (which might have progress updates already)
+          // Filter out anything in removedIdsRef just in case
+          const filteredActive = active.filter(a => !removedIdsRef.current.has(a.id))
+          
+          const newDownloads = [...prev]
+          filteredActive.forEach(a => {
+            const index = newDownloads.findIndex(d => d.id === a.id)
+            if (index === -1) {
+              newDownloads.push(a)
+            } else {
+              // Only update if we don't have progress yet or status is different
+              newDownloads[index] = { ...a, ...newDownloads[index] }
+            }
+          })
+          return newDownloads
+        })
         setShowDownloads(true)
       }
     }).catch((err: any) => console.error('Failed to get active downloads:', err))
 
     const cleanup = window.api.onTorrentProgress((data: any) => {
+      if (removedIdsRef.current.has(data.id)) return
+      
       setDownloads(prev => {
         const existing = prev.find(d => d.id === data.id)
         if (existing) {
@@ -182,12 +201,26 @@ const Download: React.FC = () => {
     }
   }
 
-  const handleRemoveDownload = async (id: string) => {
+  const handleRemoveDownload = async (id: string | null, deleteFile: boolean = false) => {
+    if (!id) return
+    const targetId = id
+    
+    // Optimistic UI update
+    removedIdsRef.current.add(targetId)
+    setDownloads(prev => prev.filter(d => d.id !== targetId))
+    setDownloadToRemove(null)
+
     try {
-      await window.api.removeDownload(id)
-      setDownloads(prev => prev.filter(d => d.id !== id))
+      const success = await window.api.removeDownload(targetId, deleteFile)
+      if (!success) {
+        // If it failed, we might want to re-add it or just log
+        // For now, just log and allow the user to try again if it reappears on refresh
+        console.error('[Download] Remove failed in main process')
+        removedIdsRef.current.delete(targetId)
+      }
     } catch (err) {
       console.error('[Download] Remove error:', err)
+      removedIdsRef.current.delete(targetId)
     }
   }
 
@@ -229,7 +262,55 @@ const Download: React.FC = () => {
 
   return (
     <div className="relative">
-      <DownloadFeatureTour />
+      {/* Compact Removal Tooltip/Menu */}
+      {downloadToRemove && (
+        <div 
+          className="fixed inset-0 z-[100]" 
+          onClick={() => setDownloadToRemove(null)}
+        >
+          <div 
+            className="absolute bg-surface/95 backdrop-blur-2xl border border-white/10 rounded-xl shadow-2xl overflow-hidden min-w-[180px] animate-in fade-in zoom-in duration-200"
+            style={{ 
+              top: window.innerHeight - 200 > (document.getElementById(`dl-btn-${downloadToRemove}`)?.getBoundingClientRect().bottom || 0) 
+                ? (document.getElementById(`dl-btn-${downloadToRemove}`)?.getBoundingClientRect().bottom || 0) + 8 
+                : (document.getElementById(`dl-btn-${downloadToRemove}`)?.getBoundingClientRect().top || 0) - 100,
+              left: Math.max(20, (document.getElementById(`dl-btn-${downloadToRemove}`)?.getBoundingClientRect().right || 0) - 180)
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="p-1.5 flex flex-col gap-1">
+              <button
+                onClick={() => handleRemoveDownload(downloadToRemove, false)}
+                className="flex items-center gap-3 px-3 py-2.5 rounded-lg hover:bg-white/5 text-left transition-colors group"
+              >
+                <div className="w-8 h-8 rounded-lg bg-white/5 flex items-center justify-center text-muted group-hover:text-primary transition-colors">
+                  <X size={16} />
+                </div>
+                <div className="flex flex-col">
+                  <span className="text-xs font-bold text-text">Remove History</span>
+                  <span className="text-[10px] text-muted">Keep files on disk</span>
+                </div>
+              </button>
+              
+              <div className="h-px bg-white/5 mx-2" />
+              
+              <button
+                onClick={() => handleRemoveDownload(downloadToRemove, true)}
+                className="flex items-center gap-3 px-3 py-2.5 rounded-lg hover:bg-red-500/10 text-left transition-colors group"
+              >
+                <div className="w-8 h-8 rounded-lg bg-red-500/10 flex items-center justify-center text-red-400">
+                  <AlertCircle size={16} />
+                </div>
+                <div className="flex flex-col">
+                  <span className="text-xs font-bold text-red-400">Delete Permanently</span>
+                  <span className="text-[10px] text-red-400/60">Delete from disk</span>
+                </div>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Main Content Area */}
       <div className={`transition-all duration-300 ${panelOpen ? 'mr-[380px]' : ''}`}>
         {/* Header */}
@@ -445,7 +526,8 @@ const Download: React.FC = () => {
                       </div>
                     )}
                     <button
-                      onClick={() => handleRemoveDownload(dl.id)}
+                      id={`dl-btn-${dl.id}`}
+                      onClick={() => setDownloadToRemove(dl.id)}
                       className="p-1 rounded-lg text-muted hover:text-red-400 hover:bg-red-400/10 transition-colors"
                       title={dl.status === 'downloading' ? 'Cancel & Remove' : 'Remove from List'}
                     >

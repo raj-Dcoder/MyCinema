@@ -73,6 +73,7 @@ export function initDb() {
     CREATE TABLE IF NOT EXISTS downloads (
       id TEXT PRIMARY KEY,
       title TEXT NOT NULL,
+      name TEXT,
       magnet TEXT NOT NULL,
       progress REAL DEFAULT 0,
       download_speed TEXT DEFAULT '0 B/s',
@@ -84,6 +85,13 @@ export function initDb() {
       added_at DATETIME DEFAULT CURRENT_TIMESTAMP
     );
   `)
+
+  // Check and add columns for downloads if they don't exist
+  const dlColumns = db.prepare("PRAGMA table_info(downloads)").all()
+  const dlColumnNames = dlColumns.map((c: any) => c.name)
+  if (!dlColumnNames.includes('name')) {
+    db.exec("ALTER TABLE downloads ADD COLUMN name TEXT")
+  }
 }
 
 export function addVideo(video: any) {
@@ -249,10 +257,11 @@ export function removeFolder(folderPath: string) {
 
 export function addDownload(dl: any) {
   const stmt = db.prepare(`
-    INSERT INTO downloads (id, title, magnet, progress, download_speed, time_remaining, status, size, downloaded, error_message)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO downloads (id, title, name, magnet, progress, download_speed, time_remaining, status, size, downloaded, error_message)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(id) DO UPDATE SET
       title = excluded.title,
+      name = excluded.name,
       progress = excluded.progress,
       download_speed = excluded.download_speed,
       time_remaining = excluded.time_remaining,
@@ -262,18 +271,18 @@ export function addDownload(dl: any) {
       error_message = excluded.error_message
   `)
   return stmt.run(
-    dl.id, dl.title, dl.magnet, dl.progress || 0, dl.downloadSpeed || '0 B/s', dl.timeRemaining || '—', dl.status || 'pending', dl.size || '—', dl.downloaded || '0 B', dl.errorMessage || null
+    dl.id, dl.title, dl.name || null, dl.magnet, dl.progress || 0, dl.downloadSpeed || '0 B/s', dl.timeRemaining || '—', dl.status || 'pending', dl.size || '—', dl.downloaded || '0 B', dl.errorMessage || null
   )
 }
 
 export function updateDownload(dl: any) {
   const stmt = db.prepare(`
     UPDATE downloads
-    SET title = ?, progress = ?, download_speed = ?, time_remaining = ?, status = ?, size = ?, downloaded = ?, error_message = ?
+    SET title = ?, name = ?, progress = ?, download_speed = ?, time_remaining = ?, status = ?, size = ?, downloaded = ?, error_message = ?
     WHERE id = ?
   `)
   return stmt.run(
-    dl.title, dl.progress, dl.downloadSpeed, dl.timeRemaining, dl.status, dl.size, dl.downloaded, dl.errorMessage || null, dl.id
+    dl.title, dl.name || null, dl.progress, dl.downloadSpeed, dl.timeRemaining, dl.status, dl.size, dl.downloaded, dl.errorMessage || null, dl.id
   )
 }
 
@@ -281,6 +290,7 @@ export function getDownloads() {
   return db.prepare('SELECT * FROM downloads ORDER BY added_at DESC').all().map((row: any) => ({
     id: row.id,
     title: row.title,
+    name: row.name,
     magnet: row.magnet,
     progress: row.progress,
     downloadSpeed: row.download_speed,

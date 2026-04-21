@@ -11,8 +11,22 @@ import DetailScreen from './components/DetailScreen'
 import Download from './pages/Download'
 
 const App: React.FC = () => {
-  const [activeTab, setActiveTab] = useState<'home' | 'videos' | 'movies' | 'series' | 'download' | 'settings'>('home')
-  const [isSidebarExpanded, setIsSidebarExpanded] = useState(true)
+  const [activeTab, setActiveTab] = useState<'home' | 'videos' | 'movies' | 'series' | 'download' | 'settings'>(() => {
+    return (localStorage.getItem('sidebar_active_tab') as any) || 'home'
+  })
+  const [isSidebarExpanded, setIsSidebarExpanded] = useState(() => {
+    const saved = localStorage.getItem('sidebar_expanded')
+    return saved === null ? true : saved === 'true'
+  })
+
+  useEffect(() => {
+    localStorage.setItem('sidebar_active_tab', activeTab)
+  }, [activeTab])
+
+  useEffect(() => {
+    localStorage.setItem('sidebar_expanded', isSidebarExpanded.toString())
+  }, [isSidebarExpanded])
+
   const [playingVideo, setPlayingVideo] = useState<Video | null>(null)
   const [selectedVideo, setSelectedVideo] = useState<Video | null>(null)
   const [homeRefreshKey, setHomeRefreshKey] = useState(0)

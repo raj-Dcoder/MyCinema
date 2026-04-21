@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react'
-import { Play, Pause, Rewind, FastForward, X, Maximize, Minimize, Volume2, VolumeX, Subtitles, Music, SkipForward as SkipNext, ArrowLeft, MessageSquareText, AlertTriangle, Check, Monitor, RectangleHorizontal, Crop, FolderOpen, Info, Film, HardDrive, ChevronDown, ChevronUp, ListVideo, Users } from 'lucide-react'
+import { Play, Pause, Rewind, FastForward, X, Maximize, Minimize, Volume2, VolumeX, Subtitles, Music, SkipForward as SkipNext, ArrowLeft, MessageSquareText, AlertTriangle, Check, Monitor, RectangleHorizontal, Crop, FolderOpen, Info, Film, HardDrive, ChevronDown, ChevronUp, ListVideo, Users, Search, Globe, Loader2, Download } from 'lucide-react'
 import { Video } from '../types'
 import { useWatchTogether } from '../hooks/useWatchTogether'
 import { WatchTogetherModal } from './WatchTogetherModal'
@@ -153,6 +153,13 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
   const [mediaInfo, setMediaInfo] = useState<any>(null)
   const [infoLoading, setInfoLoading] = useState(false)
   const [showAllAudioInfo, setShowAllAudioInfo] = useState(false)
+  
+  // Online subtitle search state
+  const [onlineSubResults, setOnlineSubResults] = useState<any[]>([])
+  const [onlineSubLoading, setOnlineSubLoading] = useState(false)
+  const [onlineSubError, setOnlineSubError] = useState<string | null>(null)
+  const [showOnlineSearch, setShowOnlineSearch] = useState(false)
+  const [downloadingSubId, setDownloadingSubId] = useState<number | null>(null)
   
   const previewVideoRef = useRef<HTMLVideoElement>(null)
   const [hoverTime, setHoverTime] = useState<number | null>(null)
@@ -1090,6 +1097,95 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
     }
   }
 
+  // ─── Online Subtitle Search (OpenSubtitles) ──────────────────────────────────
+  const searchOnlineSubs = async () => {
+    setOnlineSubLoading(true)
+    setOnlineSubError(null)
+    setOnlineSubResults([])
+    setShowOnlineSearch(true)
+
+    try {
+      const params: any = {
+        languages: 'en,hi',
+      }
+
+      // Prefer TMDB ID search for accuracy
+      const videoAny = currentVideo as any
+      if (videoAny.tmdb_id) {
+        params.tmdbId = videoAny.tmdb_id
+        params.mediaType = currentVideo.type === 'series' ? 'tv' : 'movie'
+      } else {
+        // Fallback to title-based search
+        params.query = currentVideo.type === 'series' && currentVideo.series_name
+          ? currentVideo.series_name
+          : currentVideo.title
+      }
+
+      if (currentVideo.type === 'series') {
+        if (currentVideo.season) params.season = currentVideo.season
+        if (currentVideo.episode) params.episode = currentVideo.episode
+      }
+
+      const response = await window.api.searchOnlineSubtitles(params)
+
+      if (response.error) {
+        setOnlineSubError(response.error)
+      } else {
+        setOnlineSubResults(response.results || [])
+        if ((response.results || []).length === 0) {
+          setOnlineSubError('No subtitles found for this title')
+        }
+      }
+    } catch (err: any) {
+      setOnlineSubError(err.message || 'Search failed')
+    } finally {
+      setOnlineSubLoading(false)
+    }
+  }
+
+  const downloadOnlineSub = async (sub: any) => {
+    setDownloadingSubId(sub.fileId)
+    try {
+      const result = await window.api.downloadOnlineSubtitle({
+        fileId: sub.fileId,
+        videoFilePath: currentVideo.file_path,
+        fileName: sub.fileName,
+      })
+
+      if (result.error) {
+        setOnlineSubError(result.error)
+        setDownloadingSubId(null)
+        return
+      }
+
+      // Subtitle downloaded and converted — update the player state
+      setSubtitlePath(result.srtPath)
+      setShowOnlineSearch(false)
+
+      // Add to converted paths and select it
+      if (result.vttPath) {
+        setConvertedSubPaths(prev => new Map(prev).set('external-0', result.vttPath))
+
+        // Load the VTT cues and activate
+        activeSubKeyRef.current = 'external-0'
+        setActiveSubKey('external-0')
+        setCurrentSubtitle(0)
+
+        const res = await fetch(`media://file/${encodeURIComponent(result.vttPath)}`)
+        const text = await res.text()
+        subtitleCuesRef.current = parseVTT(text)
+        console.log('[Subtitle] Online subtitle loaded with', subtitleCuesRef.current.length, 'cues')
+      }
+
+      setShowMediaMenu(false)
+      showTrackToast('subtitle', `Downloaded (${sub.language.toUpperCase()})`)
+    } catch (err: any) {
+      setOnlineSubError(err.message || 'Download failed')
+    } finally {
+      setDownloadingSubId(null)
+    }
+  }
+
 
   const handleCustomAudioSeekSync = (time: number) => {
     const trackObj = availableAudio.find(a => a.id === selectedAudioId)
@@ -1402,8 +1498,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
 
         {/* Top Right Actions */}
         <div className="flex items-center space-x-4">
-          {(availableAudio.length > 0 || availableSubtitles.length > 0) && (
-            <div className="relative">
+          <div className="relative">
               <button 
                 onClick={(e) => { 
                   e.stopPropagation()
@@ -1450,11 +1545,72 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
                     )}
                     
                     {/* Subtitles Column */}
-                    {availableSubtitles.length > 0 && (
-                      <div className={`flex-1 min-w-0 ${availableAudio.length > 0 ? 'border-l border-white/5' : ''}`}>
-                        <div className="px-4 py-3 border-b border-white/5 mb-1">
-                          <h3 className="text-[10px] font-black text-white/40 tracking-[0.15em] uppercase">Subtitles</h3>
+                    <div className={`flex-1 min-w-0 ${availableAudio.length > 0 ? 'border-l border-white/5' : ''}`}>
+                      <div className="px-4 py-3 border-b border-white/5 mb-1">
+                        <h3 className="text-[10px] font-black text-white/40 tracking-[0.15em] uppercase">Subtitles</h3>
+                      </div>
+
+                      {/* Online Search Results View */}
+                      {showOnlineSearch ? (
+                        <div className="px-1.5 pb-2">
+                          <button
+                            onClick={(e) => { e.stopPropagation(); setShowOnlineSearch(false); setOnlineSubError(null); }}
+                            className="w-full flex items-center space-x-2 px-3 py-2 rounded-xl text-white/50 hover:text-white hover:bg-white/5 transition-all text-left mb-1"
+                          >
+                            <ArrowLeft size={14} />
+                            <span className="text-[12px] font-bold">Back to tracks</span>
+                          </button>
+
+                          {onlineSubLoading && (
+                            <div className="flex items-center justify-center py-8">
+                              <Loader2 size={20} className="text-primary animate-spin" />
+                              <span className="ml-2 text-[13px] text-white/40 font-medium">Searching…</span>
+                            </div>
+                          )}
+
+                          {onlineSubError && !onlineSubLoading && (
+                            <div className="px-3 py-4 text-center">
+                              <p className="text-[12px] text-white/40 font-medium">{onlineSubError}</p>
+                            </div>
+                          )}
+
+                          <div className="max-h-[280px] overflow-y-auto custom-scrollbar space-y-0.5">
+                            {onlineSubResults.map((sub) => (
+                              <button
+                                key={sub.fileId}
+                                onClick={(e) => { e.stopPropagation(); if (downloadingSubId !== sub.fileId) downloadOnlineSub(sub); }}
+                                disabled={downloadingSubId === sub.fileId}
+                                className="w-full flex items-start space-x-3 px-3 py-2.5 rounded-xl text-left transition-all duration-200 group text-white/60 hover:bg-white/5 hover:text-white disabled:opacity-50"
+                              >
+                                <div className="flex-shrink-0 mt-0.5">
+                                  {downloadingSubId === sub.fileId ? (
+                                    <Loader2 size={16} className="text-primary animate-spin" />
+                                  ) : (
+                                    <Download size={16} className="text-white/30 group-hover:text-primary transition-colors" />
+                                  )}
+                                </div>
+                                <div className="flex-1 min-w-0">
+                                  <div className="flex items-center space-x-2">
+                                    <span className="text-[10px] font-black px-1.5 py-0.5 rounded bg-white/10 uppercase tracking-wider">
+                                      {sub.language}
+                                    </span>
+                                    {sub.hearingImpaired && (
+                                      <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-yellow-500/20 text-yellow-300">CC</span>
+                                    )}
+                                  </div>
+                                  <p className="text-[12px] font-medium mt-1 truncate leading-tight">
+                                    {sub.releaseName}
+                                  </p>
+                                  <p className="text-[10px] text-white/30 mt-0.5">
+                                    {sub.downloadCount.toLocaleString()} downloads
+                                  </p>
+                                </div>
+                              </button>
+                            ))}
+                          </div>
                         </div>
+                      ) : (
+                        /* Local Tracks View */
                         <div className="px-1.5 pb-2 max-h-[320px] overflow-y-auto custom-scrollbar">
                           <button
                             onClick={(e) => { e.stopPropagation(); selectSubtitleTrack(null); }}
@@ -1485,24 +1641,25 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
                               )
                             })}
                         </div>
-                      </div>
-                    )}
+                      )}
+                    </div>
                   </div>
                   
-                  {/* Footer */}
+                  {/* Footer — Search Online button */}
                   <button 
-                    onClick={(e) => e.stopPropagation()}
-                    className="w-full bg-white/[0.03] hover:bg-white/[0.08] transition-colors p-3 flex justify-center items-center group/footer border-t border-white/5"
+                    onClick={(e) => { e.stopPropagation(); if (!showOnlineSearch) searchOnlineSubs(); }}
+                    className="w-full bg-white/[0.03] hover:bg-primary/10 transition-colors p-3 flex justify-center items-center group/footer border-t border-white/5"
                   >
-                    <div className="flex items-center space-x-2 text-white/30 group-hover/footer:text-white/60 transition-colors">
-                      <AlertTriangle size={12} />
-                      <span className="text-[10px] font-bold uppercase tracking-widest">Report an Issue</span>
+                    <div className="flex items-center space-x-2 text-white/40 group-hover/footer:text-primary transition-colors">
+                      <Globe size={13} />
+                      <span className="text-[10px] font-bold uppercase tracking-widest">
+                        {availableSubtitles.length === 0 ? 'Search Subtitles Online' : 'Find More Subtitles'}
+                      </span>
                     </div>
                   </button>
                 </div>
               )}
             </div>
-          )}
 
           {currentVideo.type === 'series' && hasNextEpisode && (
             <button 

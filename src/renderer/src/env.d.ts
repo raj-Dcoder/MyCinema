@@ -27,7 +27,7 @@ interface Api {
   searchTorrentSources: (title: string, year: string, mediaType: string, tmdbId: number) => Promise<any[]>
   startTorrentDownload: (magnetUrl: string, title: string) => Promise<boolean>
   cancelTorrentDownload: (id: string) => Promise<boolean>
-  removeDownload: (id: string) => Promise<boolean>
+  removeDownload: (id: string, deleteFile?: boolean) => Promise<boolean>
   pauseResumeTorrent: (id: string) => Promise<boolean>
   getActiveDownloads: () => Promise<any[]>
   onTorrentProgress: (callback: (data: any) => void) => () => void
@@ -35,6 +35,9 @@ interface Api {
   openFolder: (filePath: string) => Promise<void>
   getMediaInfo: (filePath: string) => Promise<any>
   openDownloadsFolder: () => Promise<void>
+  // OpenSubtitles API
+  searchOnlineSubtitles: (params: { query?: string; tmdbId?: number; season?: number; episode?: number; languages?: string; mediaType?: string }) => Promise<any>
+  downloadOnlineSubtitle: (params: { fileId: number; videoFilePath: string; fileName?: string }) => Promise<any>
 }
 
 declare global {

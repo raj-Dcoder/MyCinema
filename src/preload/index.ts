@@ -34,8 +34,8 @@ const api = {
     ipcRenderer.invoke('start-torrent-download', magnetUrl, title),
   cancelTorrentDownload: (id: string) => 
     ipcRenderer.invoke('cancel-torrent-download', id),
-  removeDownload: (id: string) => 
-    ipcRenderer.invoke('remove-download', id),
+  removeDownload: (id: string, deleteFile?: boolean) => 
+    ipcRenderer.invoke('remove-download', id, deleteFile),
   pauseResumeTorrent: (id: string) => 
     ipcRenderer.invoke('pause-resume-torrent', id),
   getActiveDownloads: () => 
@@ -49,6 +49,11 @@ const api = {
   openFolder: (filePath: string) => ipcRenderer.invoke('open-folder', filePath),
   getMediaInfo: (filePath: string) => ipcRenderer.invoke('get-media-info', filePath),
   openDownloadsFolder: () => ipcRenderer.invoke('open-downloads-folder'),
+  // OpenSubtitles API
+  searchOnlineSubtitles: (params: { query?: string; tmdbId?: number; season?: number; episode?: number; languages?: string; mediaType?: string }) =>
+    ipcRenderer.invoke('search-opensubtitles', params),
+  downloadOnlineSubtitle: (params: { fileId: number; videoFilePath: string; fileName?: string }) =>
+    ipcRenderer.invoke('download-opensubtitle', params),
 }
 
 // Use `contextBridge` APIs to expose Electron APIs to

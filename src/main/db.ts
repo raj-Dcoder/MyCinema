@@ -123,7 +123,12 @@ export function addVideo(video: any) {
 }
 
 export function getVideos() {
-  return db.prepare('SELECT * FROM videos ORDER BY added_at DESC').all()
+  return db.prepare(`
+    SELECT v.*, p.last_watched_time, p.completed
+    FROM videos v
+    LEFT JOIN progress p ON v.id = p.video_id
+    ORDER BY v.added_at DESC
+  `).all()
 }
 
 export function deleteVideo(id: number) {

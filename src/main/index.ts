@@ -670,11 +670,11 @@ ipcMain.handle('get-videos', () => {
 })
 
 ipcMain.handle('get-video-progress', (_, videoId) => {
-  return db.getProgress(videoId)
+  return db.getVideoProgress(videoId)
 })
 
 ipcMain.on('update-video-progress', (_, videoId, time, completed, isClosing) => {
-  db.updateProgress(videoId, time, completed)
+  db.updateVideoProgress(videoId, time, completed)
   if (isClosing) {
     BrowserWindow.getAllWindows().forEach(w => w.webContents.send('library-updated'))
   }
@@ -1073,7 +1073,9 @@ function getDownloadPath(): string {
   return dlPath
 }
 
-function formatBytes(bytes: number): string {
+function formatBytes(bytes: any): string {
+  if (typeof bytes === 'string') return bytes
+  if (typeof bytes !== 'number' || isNaN(bytes)) return '—'
   if (bytes === 0) return '0 B'
   const k = 1024
   const sizes = ['B', 'KB', 'MB', 'GB', 'TB']
@@ -1081,7 +1083,8 @@ function formatBytes(bytes: number): string {
   return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i]
 }
 
-function formatTime(seconds: number): string {
+function formatTime(seconds: any): string {
+  if (typeof seconds === 'string') return seconds
   if (!isFinite(seconds) || seconds <= 0) return '—'
   const h = Math.floor(seconds / 3600)
   const m = Math.floor((seconds % 3600) / 60)
@@ -1092,16 +1095,40 @@ function formatTime(seconds: number): string {
 }
 
 function broadcastProgress(id: string, torrent: any, status: string, errorMessage?: string): void {
+  // Try to get existing data from DB to avoid UI flickers (0/0 size when pausing/resuming)
+  const existing = db.getDownloads().find((d: any) => d.id === id)
+
+  // Calculate new progress percentage
+  let newProgress = existing?.progress || 0
+  if (torrent.progress !== undefined) {
+    const calculated = Math.round((torrent.progress || 0) * 100 * 100) / 100
+    // Only update if it's higher, or if it's a "done" status (to allow 100%)
+    // But never let it drop to 0 if we already have progress, unless it's an error/reset
+    if (calculated > newProgress || status === 'done') {
+      newProgress = calculated
+    }
+  }
+
   const data: any = {
     id,
-    title: (torrent as any)._myCinemaTitle || torrent.name || 'Download',
-    name: torrent.name || (torrent as any)._myCinemaName || null,
-    progress: Math.round((torrent.progress || 0) * 100 * 100) / 100,
-    downloadSpeed: formatBytes(torrent.downloadSpeed || 0) + '/s',
-    timeRemaining: formatTime(torrent.timeRemaining ? torrent.timeRemaining / 1000 : Infinity),
+    title: (torrent as any)._myCinemaTitle || torrent.name || existing?.title || 'Download',
+    name: torrent.name || (torrent as any)._myCinemaName || existing?.name || null,
+    progress: newProgress,
+    downloadSpeed: torrent.downloadSpeed !== undefined 
+      ? formatBytes(torrent.downloadSpeed || 0) + '/s' 
+      : (existing?.downloadSpeed || '0 B/s'),
+    timeRemaining: torrent.timeRemaining !== undefined 
+      ? formatTime(torrent.timeRemaining ? torrent.timeRemaining / 1000 : Infinity) 
+      : (existing?.timeRemaining || '—'),
     status,
-    size: formatBytes(torrent.length || 0),
-    downloaded: formatBytes(torrent.downloaded || 0),
+    // Only update size/downloaded if they are greater than 0, or if we don't have existing data
+    size: (torrent.length && torrent.length > 0) 
+      ? formatBytes(torrent.length) 
+      : (existing?.size || '—'),
+    downloaded: (torrent.downloaded && torrent.downloaded > 0) 
+      ? formatBytes(torrent.downloaded) 
+      : (existing?.downloaded || '0 B'),
+    tmdbId: existing?.tmdbId || null
   }
   if (errorMessage) data.errorMessage = errorMessage
   
@@ -1581,7 +1608,7 @@ async function autoResumeDownloads() {
   }
 }
 
-ipcMain.handle('start-torrent-download', async (_, magnetUrl: string, title: string) => {
+ipcMain.handle('start-torrent-download', async (_, magnetUrl: string, title: string, tmdbId?: number) => {
   try {
     const torrentId = crypto.randomUUID()
     
@@ -1589,7 +1616,8 @@ ipcMain.handle('start-torrent-download', async (_, magnetUrl: string, title: str
       id: torrentId,
       title,
       magnet: magnetUrl,
-      status: 'downloading'
+      status: 'downloading',
+      tmdbId
     })
 
     await startWebTorrent(torrentId, magnetUrl, title, 0)
@@ -1604,19 +1632,30 @@ ipcMain.handle('start-torrent-download', async (_, magnetUrl: string, title: str
 ipcMain.handle('cancel-torrent-download', async (_, id: string) => {
   try {
     const torrent = activeTorrents.get(id)
+    
+    // Capture state before destroying
+    const finalProgress = torrent ? torrent.progress : null
+    const finalLength = torrent ? torrent.length : null
+    const finalDownloaded = torrent ? torrent.downloaded : null
+
     if (torrent && !torrent.destroyed) {
       torrent.destroy()
     }
     activeTorrents.delete(id)
-    // NOTE: Canceling a torrent leaves it in DB as 'paused' or we can leave it as canceled.
-    // The user wants tracking. Let's mark it as 'paused'.
-    // Cancel actually stops it. Let's just update DB to 'paused'.
+    
     const dlDbData = db.getDownloads().find((d: any) => d.id === id)
     if (dlDbData) {
       dlDbData.status = 'paused'
       db.updateDownload(dlDbData)
       // Broadcast it so UI updates immediately
-      broadcastProgress(id, { downloadSpeed: 0, timeRemaining: 0, length: 0, downloaded: 0, progress: dlDbData.progress, name: dlDbData.title } as any, 'paused')
+      broadcastProgress(id, { 
+        downloadSpeed: 0, 
+        timeRemaining: 0, 
+        length: finalLength || 0, 
+        downloaded: finalDownloaded || 0, 
+        progress: finalProgress !== null ? finalProgress : (dlDbData.progress / 100), 
+        name: dlDbData.title 
+      } as any, 'paused')
     }
     return true
   } catch (err) {
@@ -1643,6 +1682,12 @@ ipcMain.handle('pause-resume-torrent', async (_, id: string) => {
     
     // Pause Logic (Stop & Destroy pattern for reliability)
     console.log(`[Torrent] Pausing download: ${id}`)
+    
+    // Capture state before destroying
+    const finalProgress = torrent.progress
+    const finalLength = torrent.length
+    const finalDownloaded = torrent.downloaded
+    
     torrent.destroy()
     activeTorrents.delete(id)
     
@@ -1653,9 +1698,9 @@ ipcMain.handle('pause-resume-torrent', async (_, id: string) => {
       broadcastProgress(id, { 
         downloadSpeed: 0, 
         timeRemaining: 0, 
-        length: 0, 
-        downloaded: 0, 
-        progress: dlDbData.progress / 100, 
+        length: finalLength || 0, 
+        downloaded: finalDownloaded || 0, 
+        progress: finalProgress, 
         name: dlDbData.title 
       } as any, 'paused')
     }

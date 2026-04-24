@@ -17,4 +17,5 @@ export interface Video {
   episode_count?: number
   vote_average?: number
   release_year?: number
+  tmdb_id?: number
 }

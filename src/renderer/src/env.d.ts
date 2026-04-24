@@ -25,7 +25,7 @@ interface Api {
   // Torrent download APIs
   searchTMDB: (query: string) => Promise<any[]>
   searchTorrentSources: (title: string, year: string, mediaType: string, tmdbId: number) => Promise<any[]>
-  startTorrentDownload: (magnetUrl: string, title: string) => Promise<boolean>
+  startTorrentDownload: (magnetUrl: string, title: string, tmdbId?: number) => Promise<string | boolean>
   cancelTorrentDownload: (id: string) => Promise<boolean>
   removeDownload: (id: string, deleteFile?: boolean) => Promise<boolean>
   pauseResumeTorrent: (id: string) => Promise<boolean>

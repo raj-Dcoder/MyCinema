@@ -160,7 +160,7 @@ const App: React.FC = () => {
           {activeTab === 'videos'  && <Videos onPlay={handlePlayVideo} />}
           {activeTab === 'movies'  && <Movies onPlay={handlePlayVideo} onShowDetail={setSelectedVideo} />}
           {activeTab === 'series'  && <Series onPlay={handlePlayVideo} onShowDetail={setSelectedVideo} />}
-          {activeTab === 'download' && <Download />}
+          {activeTab === 'download' && <Download onShowDetail={setSelectedVideo} />}
           {activeTab === 'settings' && <Settings />}
         </div>
       </main>

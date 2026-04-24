@@ -1,6 +1,9 @@
 import React, { useState, useEffect, useRef } from 'react'
-import { Search, Download as DownloadIcon, Film, Tv, X, Loader2, HardDrive, CheckCircle2, AlertCircle, Pause, Play, FolderOpen, Bookmark, BookmarkCheck, ChevronLeft, ChevronRight } from 'lucide-react'
+import { Search, Download as DownloadIcon, Film, Tv, X, Loader2, HardDrive, CheckCircle2, AlertCircle, Pause, Play, FolderOpen, Bookmark, BookmarkCheck, ChevronLeft, ChevronRight, ArrowLeft } from 'lucide-react'
 import { DownloadFeatureTour } from '../components/DownloadFeatureTour'
+import HorizontalScrollRow from '../components/HorizontalScrollRow'
+
+import { Video } from '../types'
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 interface TMDBResult {
@@ -41,13 +44,18 @@ interface ActiveDownload {
   status: 'downloading' | 'done' | 'error' | 'paused'
   size: string
   downloaded: string
+  tmdbId?: number
   errorMessage?: string
 }
 
 const TMDB_IMG = 'https://image.tmdb.org/t/p'
 const WATCHLIST_KEY = 'mycinema_watchlist'
 
-const Download: React.FC = () => {
+interface DownloadProps {
+  onShowDetail?: (video: Video) => void
+}
+
+const Download: React.FC<DownloadProps> = ({ onShowDetail }) => {
   const [query, setQuery] = useState('')
   const [results, setResults] = useState<TMDBResult[]>([])
   const [searching, setSearching] = useState(false)
@@ -55,8 +63,10 @@ const Download: React.FC = () => {
   const [sources, setSources] = useState<TorrentSource[]>([])
   const [loadingSources, setLoadingSources] = useState(false)
   const [downloads, setDownloads] = useState<ActiveDownload[]>([])
+  const [allVideos, setAllVideos] = useState<Video[]>([])
   const [showDownloads, setShowDownloads] = useState(false)
   const [downloadToRemove, setDownloadToRemove] = useState<string | null>(null)
+  const [loadingDetailId, setLoadingDetailId] = useState<string | null>(null)
   const removedIdsRef = useRef<Set<string>>(new Set())
   const searchInputRef = useRef<HTMLInputElement>(null)
 
@@ -80,7 +90,10 @@ const Download: React.FC = () => {
     localStorage.setItem(WATCHLIST_KEY, JSON.stringify(items))
   }
 
-  const isInWatchlist = (id: number) => watchlist.some(w => w.id === id)
+  const isSameItem = (a: TMDBResult, b: TMDBResult) => a.id === b.id && a.media_type === b.media_type
+
+  const isInWatchlist = (id: number, media_type: string) => 
+    watchlist.some(w => w.id === id && w.media_type === media_type)
 
   const toggleWatchlist = (item: TMDBResult, e?: React.MouseEvent) => {
     e?.stopPropagation()
@@ -91,14 +104,26 @@ const Download: React.FC = () => {
 
   const addToWatchlist = (item: TMDBResult, category: string = 'Watchlist') => {
     const newItem = { ...item, category }
-    saveWatchlist([newItem, ...watchlist.filter(w => w.id !== item.id)])
+    saveWatchlist([newItem, ...watchlist.filter(w => !isSameItem(w, item))])
     setCategorizingItem(null)
   }
 
-  const removeFromWatchlist = (id: number, e?: React.MouseEvent) => {
+  const removeFromWatchlist = (id: number, media_type: string, e?: React.MouseEvent) => {
     e?.stopPropagation()
-    saveWatchlist(watchlist.filter(w => w.id !== id))
+    saveWatchlist(watchlist.filter(w => !(w.id === id && w.media_type === media_type)))
   }
+
+  // Fetch all videos for matching
+  const fetchVideos = () => {
+    window.api.getVideos().then(setAllVideos).catch(console.error)
+  }
+
+  useEffect(() => {
+    fetchVideos()
+    // Refresh videos every 30 seconds to catch new scans
+    const interval = setInterval(fetchVideos, 30000)
+    return () => clearInterval(interval)
+  }, [])
 
   // Listen for torrent progress from main process
   useEffect(() => {
@@ -106,23 +131,24 @@ const Download: React.FC = () => {
     window.api.getActiveDownloads().then((active: ActiveDownload[]) => {
       if (active && active.length > 0) {
         setDownloads(prev => {
-          // Merge active downloads from DB with current state (which might have progress updates already)
-          // Filter out anything in removedIdsRef just in case
           const filteredActive = active.filter(a => !removedIdsRef.current.has(a.id))
-          
           const newDownloads = [...prev]
           filteredActive.forEach(a => {
             const index = newDownloads.findIndex(d => d.id === a.id)
             if (index === -1) {
               newDownloads.push(a)
             } else {
-              // Only update if we don't have progress yet or status is different
-              newDownloads[index] = { ...a, ...newDownloads[index] }
+              newDownloads[index] = { ...newDownloads[index], ...a }
             }
           })
           return newDownloads
         })
-        setShowDownloads(true)
+        
+        // Only show by default if at least one is actively downloading (not paused/done/error)
+        const hasActiveDownloading = active.some(a => a.status === 'downloading')
+        if (hasActiveDownloading) {
+          setShowDownloads(true)
+        }
       }
     }).catch((err: any) => console.error('Failed to get active downloads:', err))
 
@@ -185,7 +211,7 @@ const Download: React.FC = () => {
   const handleStartDownload = async (source: TorrentSource) => {
     const title = selectedItem?.title || selectedItem?.name || 'Unknown'
     try {
-      await window.api.startTorrentDownload(source.magnet, `${title} (${source.quality})`)
+      await window.api.startTorrentDownload(source.magnet, `${title} (${source.quality})`, selectedItem?.id)
       setShowDownloads(true)
     } catch (err) {
       console.error('[Download] Start download error:', err)
@@ -193,10 +219,21 @@ const Download: React.FC = () => {
   }
 
   const handlePauseResume = async (id: string) => {
+    const dl = downloads.find(d => d.id === id)
+    if (!dl) return
+
+    // Optimistic status update for speed
+    const newStatus = dl.status === 'paused' ? 'downloading' : 'paused'
+    setDownloads(prev => prev.map(d => d.id === id ? { ...d, status: newStatus as any } : d))
+    
     try {
       await window.api.pauseResumeTorrent(id)
+      if (newStatus === 'downloading') {
+        setShowDownloads(true)
+      }
     } catch (err) {
       console.error('[Download] Pause/Resume error:', err)
+      // Note: progress handler will eventually sync the correct state if this fails
     }
   }
 
@@ -258,6 +295,17 @@ const Download: React.FC = () => {
       return true
     })
   }, [sources, selectedSeason, selectedEpisode, selectedItem])
+
+  // Optimization: Memoize a video map for O(1) lookup during render
+  const videoMap = React.useMemo(() => {
+    const map = new Map<string, Video>()
+    allVideos.forEach(v => {
+      if (v.tmdb_id) map.set(`tmdb-${v.tmdb_id}`, v)
+      map.set(`title-${v.title.toLowerCase()}`, v)
+      if (v.series_name) map.set(`series-${v.series_name.toLowerCase()}`, v)
+    })
+    return map
+  }, [allVideos])
 
   return (
     <div className="relative">
@@ -351,8 +399,21 @@ const Download: React.FC = () => {
         </div>
 
         {/* Search Bar */}
-        <div className="relative mb-6">
-          <div className="flex items-center bg-surface/80 backdrop-blur-xl border border-secondary rounded-2xl overflow-hidden focus-within:border-primary/50 transition-colors shadow-lg shadow-black/10">
+        <div className="relative mb-6 flex items-center gap-3">
+          {results.length > 0 && (
+            <button
+              onClick={() => {
+                setResults([])
+                setQuery('')
+                setSelectedItem(null)
+              }}
+              className="p-3.5 rounded-2xl bg-surface/80 backdrop-blur-xl border border-secondary text-muted hover:text-primary hover:border-primary/50 transition-all shadow-lg shadow-black/10 group"
+              title="Back to Watchlist"
+            >
+              <ArrowLeft size={20} className="group-hover:-translate-x-0.5 transition-transform" />
+            </button>
+          )}
+          <div className="flex-1 flex items-center bg-surface/80 backdrop-blur-xl border border-secondary rounded-2xl overflow-hidden focus-within:border-primary/50 transition-colors shadow-lg shadow-black/10">
             <Search size={18} className="ml-5 text-muted flex-shrink-0" />
             <input
               ref={searchInputRef}
@@ -372,6 +433,125 @@ const Download: React.FC = () => {
             </button>
           </div>
         </div>
+
+        {/* Active Downloads Panel - Moved here (Above Watchlist) */}
+        {showDownloads && downloads.length > 0 && (
+          <div className="bg-surface/90 backdrop-blur-xl border border-secondary rounded-2xl overflow-hidden mb-8 animate-in slide-in-from-top-4 duration-500">
+            <div className="flex items-center justify-between px-5 py-3 border-b border-secondary">
+              <div className="flex items-center gap-2">
+                <div className="w-2 h-2 rounded-full bg-primary animate-pulse" />
+                <h3 className="text-sm font-semibold text-text">Active Downloads</h3>
+              </div>
+              <button onClick={() => setShowDownloads(false)} className="text-muted hover:text-text transition-colors">
+                <X size={16} />
+              </button>
+            </div>
+            <div className="divide-y divide-secondary/50">
+              {downloads.map(dl => {
+                // Optimized matching using memoized map
+                const matchingVideo = (() => {
+                  if (dl.tmdbId && videoMap.has(`tmdb-${dl.tmdbId}`)) {
+                    return videoMap.get(`tmdb-${dl.tmdbId}`)
+                  }
+                  const cleanDlTitle = dl.title.replace(/\s*\([^)]*\)\s*$/, '').toLowerCase()
+                  return videoMap.get(`title-${cleanDlTitle}`) || videoMap.get(`series-${cleanDlTitle}`)
+                })()
+
+                const handleShowDetailWithDelay = (video: Video) => {
+                  setLoadingDetailId(dl.id)
+                  setTimeout(() => {
+                    onShowDetail?.(video)
+                    setLoadingDetailId(null)
+                  }, 800)
+                }
+
+                return (
+                  <div key={dl.id} className="px-5 py-4 space-y-2">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-3 flex-1 min-w-0 mr-4">
+                        <button
+                          disabled={!matchingVideo || loadingDetailId === dl.id}
+                          onClick={() => matchingVideo && handleShowDetailWithDelay(matchingVideo)}
+                          className={`flex-shrink-0 p-1.5 rounded-lg transition-all group ${
+                            matchingVideo 
+                              ? 'bg-primary/20 text-primary hover:bg-primary/30 cursor-pointer shadow-lg shadow-primary/10' 
+                              : 'bg-white/5 text-muted/20 cursor-not-allowed'
+                          } ${loadingDetailId === dl.id ? 'animate-pulse' : ''}`}
+                          title={matchingVideo ? "View Details & Play" : "Fetching Movie Metadata..."}
+                        >
+                          {loadingDetailId === dl.id ? (
+                            <Loader2 size={14} className="animate-spin" />
+                          ) : (
+                            <Play 
+                              size={14} 
+                              fill={matchingVideo ? "currentColor" : "none"} 
+                              className={matchingVideo ? "group-hover:scale-110 transition-transform" : ""} 
+                            />
+                          )}
+                        </button>
+                        <span className="text-sm font-medium text-text truncate" title={dl.title}>{dl.title}</span>
+                      </div>
+                      <div className="flex items-center gap-2 flex-shrink-0">
+                        {dl.status === 'downloading' && (
+                        <>
+                          <span className="text-xs text-muted">{dl.downloadSpeed}</span>
+                          <span className="text-xs text-muted">•</span>
+                          <span className="text-xs text-muted">{dl.timeRemaining}</span>
+                        </>
+                      )}
+                      {dl.status === 'done' && (
+                        <span className="flex items-center gap-1 text-xs text-green-400">
+                          <CheckCircle2 size={14} /> Complete
+                        </span>
+                      )}
+                      {dl.status === 'error' && (
+                        <span className="flex items-center gap-1 text-xs text-red-400">
+                          <AlertCircle size={14} /> Failed
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <div className="flex-1 h-1.5 bg-white/5 rounded-full overflow-hidden">
+                      <div
+                        className={`h-full rounded-full transition-[width] duration-500 ${
+                          dl.status === 'done' ? 'bg-green-400' :
+                          dl.status === 'error' ? 'bg-red-400' :
+                          'bg-primary'
+                        }`}
+                        style={{ width: `${Math.max(0, Math.min(100, dl.progress || 0))}%` }}
+                      />
+                    </div>
+                    <span className="text-xs text-muted w-10 text-right">{Math.round(dl.progress)}%</span>
+                    {(dl.status === 'downloading' || dl.status === 'paused') && (
+                      <div className="flex items-center gap-1">
+                        <button
+                          onClick={() => handlePauseResume(dl.id)}
+                          className="p-1 rounded-lg text-muted hover:text-primary hover:bg-primary/10 transition-colors"
+                          title={dl.status === 'paused' ? 'Resume' : 'Pause'}
+                        >
+                          {dl.status === 'paused' ? <Play size={14} /> : <Pause size={14} />}
+                        </button>
+                      </div>
+                    )}
+                    <button
+                      id={`dl-btn-${dl.id}`}
+                      onClick={() => setDownloadToRemove(dl.id)}
+                      className="p-1 rounded-lg text-muted hover:text-red-400 hover:bg-red-400/10 transition-colors"
+                      title={dl.status === 'downloading' ? 'Cancel & Remove' : 'Remove from List'}
+                    >
+                      <X size={14} />
+                    </button>
+                  </div>
+                  {dl.status !== 'done' && dl.downloaded && dl.size && (
+                    <p className="text-[11px] text-muted/70">{dl.downloaded} / {dl.size}</p>
+                  )}
+                </div>
+              )
+            })}
+            </div>
+          </div>
+        )}
 
         {/* ─── WatchList Section ──────────────────────────────────────────── */}
         {results.length === 0 && !searching && watchlist.length > 0 && (
@@ -398,7 +578,7 @@ const Download: React.FC = () => {
                   </div>
 
                   {/* Horizontal Scrollable Row */}
-                  <div className="flex gap-3 overflow-x-auto pb-2 scrollbar-hide scroll-smooth">
+                  <HorizontalScrollRow>
                     {categoryItems.map(item => (
                       <button
                         key={`wl-${item.media_type}-${item.id}`}
@@ -435,7 +615,7 @@ const Download: React.FC = () => {
                           )}
                           {/* Remove Button — visible on hover */}
                           <button
-                            onClick={(e) => removeFromWatchlist(item.id, e)}
+                            onClick={(e) => removeFromWatchlist(item.id, item.media_type, e)}
                             className="absolute bottom-2 right-2 p-1.5 rounded-full bg-black/60 backdrop-blur-sm text-white/70 hover:text-red-400 hover:bg-black/80 opacity-0 group-hover:opacity-100 transition-all duration-200 z-10"
                             title="Remove from Watchlist"
                           >
@@ -455,85 +635,10 @@ const Download: React.FC = () => {
                         </div>
                       </button>
                     ))}
-                  </div>
+                  </HorizontalScrollRow>
                 </div>
               )
             })}
-          </div>
-        )}
-
-        {/* Active Downloads Panel */}
-        {showDownloads && downloads.length > 0 && (
-          <div className="bg-surface/90 backdrop-blur-xl border border-secondary rounded-2xl overflow-hidden mb-6">
-            <div className="flex items-center justify-between px-5 py-3 border-b border-secondary">
-              <h3 className="text-sm font-semibold text-text">Active Downloads</h3>
-              <button onClick={() => setShowDownloads(false)} className="text-muted hover:text-text transition-colors">
-                <X size={16} />
-              </button>
-            </div>
-            <div className="divide-y divide-secondary/50">
-              {downloads.map(dl => (
-                <div key={dl.id} className="px-5 py-4 space-y-2">
-                  <div className="flex items-center justify-between">
-                    <span className="text-sm font-medium text-text truncate flex-1 mr-4" title={dl.title}>{dl.title}</span>
-                    <div className="flex items-center gap-2 flex-shrink-0">
-                      {dl.status === 'downloading' && (
-                        <>
-                          <span className="text-xs text-muted">{dl.downloadSpeed}</span>
-                          <span className="text-xs text-muted">•</span>
-                          <span className="text-xs text-muted">{dl.timeRemaining}</span>
-                        </>
-                      )}
-                      {dl.status === 'done' && (
-                        <span className="flex items-center gap-1 text-xs text-green-400">
-                          <CheckCircle2 size={14} /> Complete
-                        </span>
-                      )}
-                      {dl.status === 'error' && (
-                        <span className="flex items-center gap-1 text-xs text-red-400">
-                          <AlertCircle size={14} /> Failed
-                        </span>
-                      )}
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-3">
-                    <div className="flex-1 h-1.5 bg-white/5 rounded-full overflow-hidden">
-                      <div
-                        className={`h-full rounded-full transition-all duration-500 ${
-                          dl.status === 'done' ? 'bg-green-400' :
-                          dl.status === 'error' ? 'bg-red-400' :
-                          'bg-primary'
-                        }`}
-                        style={{ width: `${dl.progress}%` }}
-                      />
-                    </div>
-                    <span className="text-xs text-muted w-10 text-right">{Math.round(dl.progress)}%</span>
-                    {(dl.status === 'downloading' || dl.status === 'paused') && (
-                      <div className="flex items-center gap-1">
-                        <button
-                          onClick={() => handlePauseResume(dl.id)}
-                          className="p-1 rounded-lg text-muted hover:text-primary hover:bg-primary/10 transition-colors"
-                          title={dl.status === 'paused' ? 'Resume' : 'Pause'}
-                        >
-                          {dl.status === 'paused' ? <Play size={14} /> : <Pause size={14} />}
-                        </button>
-                      </div>
-                    )}
-                    <button
-                      id={`dl-btn-${dl.id}`}
-                      onClick={() => setDownloadToRemove(dl.id)}
-                      className="p-1 rounded-lg text-muted hover:text-red-400 hover:bg-red-400/10 transition-colors"
-                      title={dl.status === 'downloading' ? 'Cancel & Remove' : 'Remove from List'}
-                    >
-                      <X size={14} />
-                    </button>
-                  </div>
-                  {dl.status !== 'done' && dl.downloaded && dl.size && (
-                    <p className="text-[11px] text-muted/70">{dl.downloaded} / {dl.size}</p>
-                  )}
-                </div>
-              ))}
-            </div>
           </div>
         )}
 
@@ -575,13 +680,13 @@ const Download: React.FC = () => {
                   <button
                     onClick={(e) => toggleWatchlist(item, e)}
                     className={`absolute bottom-2 right-2 p-1.5 rounded-full backdrop-blur-sm transition-all duration-200 z-10 ${
-                      isInWatchlist(item.id)
+                      isInWatchlist(item.id, item.media_type)
                         ? 'bg-amber-500/20 text-amber-400 opacity-100'
                         : 'bg-black/50 text-white/70 hover:text-amber-400 hover:bg-amber-500/20 opacity-0 group-hover:opacity-100'
                     }`}
-                    title={isInWatchlist(item.id) ? 'Remove from Watchlist' : 'Add to Watchlist'}
+                    title={isInWatchlist(item.id, item.media_type) ? 'Remove from Watchlist' : 'Add to Watchlist'}
                   >
-                    {isInWatchlist(item.id) ? <BookmarkCheck size={14} /> : <Bookmark size={14} />}
+                    {isInWatchlist(item.id, item.media_type) ? <BookmarkCheck size={14} /> : <Bookmark size={14} />}
                   </button>
                 </div>
                 <div className="p-2.5 bg-surface">
@@ -756,20 +861,29 @@ const Download: React.FC = () => {
               <button
                 onClick={() => addToWatchlist(categorizingItem, 'Watchlist')}
                 className={`w-full flex items-center gap-3 p-3 rounded-xl transition-all group ${
-                  (watchlist.find(w => w.id === categorizingItem.id)?.category || 'Watchlist') === 'Watchlist'
+                  (() => {
+                    const existing = watchlist.find(w => w.id === categorizingItem.id && w.media_type === categorizingItem.media_type)
+                    return existing && (existing.category || 'Watchlist') === 'Watchlist'
+                  })()
                     ? 'bg-amber-500/10 text-amber-400'
                     : 'hover:bg-amber-500/10 text-muted hover:text-amber-400'
                 }`}
               >
                 <div className={`w-8 h-8 rounded-lg flex items-center justify-center transition-colors ${
-                  (watchlist.find(w => w.id === categorizingItem.id)?.category || 'Watchlist') === 'Watchlist'
+                  (() => {
+                    const existing = watchlist.find(w => w.id === categorizingItem.id && w.media_type === categorizingItem.media_type)
+                    return existing && (existing.category || 'Watchlist') === 'Watchlist'
+                  })()
                     ? 'bg-amber-500/20'
                     : 'bg-secondary/50 group-hover:bg-amber-500/20'
                 }`}>
                   <Bookmark size={14} />
                 </div>
                 <span className="text-sm font-medium">Watchlist</span>
-                {(watchlist.find(w => w.id === categorizingItem.id)?.category || 'Watchlist') === 'Watchlist' ? (
+                {(() => {
+                  const existing = watchlist.find(w => w.id === categorizingItem.id && w.media_type === categorizingItem.media_type)
+                  return existing && (existing.category || 'Watchlist') === 'Watchlist'
+                })() ? (
                   <CheckCircle2 size={14} className="ml-auto" />
                 ) : (
                   <span className="ml-auto text-[10px] opacity-0 group-hover:opacity-100 uppercase tracking-widest font-bold">Default</span>
@@ -781,7 +895,10 @@ const Download: React.FC = () => {
                 .filter(cat => cat !== 'Watchlist')
                 .sort()
                 .map(category => {
-                  const isCurrent = watchlist.find(w => w.id === categorizingItem.id)?.category === category
+                  const isCurrent = (() => {
+                    const existing = watchlist.find(w => w.id === categorizingItem.id && w.media_type === categorizingItem.media_type)
+                    return existing && existing.category === category
+                  })()
                   return (
                     <button
                       key={category}
@@ -806,10 +923,10 @@ const Download: React.FC = () => {
                 })}
 
               {/* Remove Option */}
-              {isInWatchlist(categorizingItem.id) && (
+              {isInWatchlist(categorizingItem.id, categorizingItem.media_type) && (
                 <button
                   onClick={() => {
-                    saveWatchlist(watchlist.filter(w => w.id !== categorizingItem.id))
+                    saveWatchlist(watchlist.filter(w => !isSameItem(w, categorizingItem)))
                     setCategorizingItem(null)
                   }}
                   className="w-full flex items-center gap-3 p-3 rounded-xl hover:bg-red-500/10 text-muted hover:text-red-400 group transition-all mt-2 border-t border-secondary/50 pt-4"

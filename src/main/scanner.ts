@@ -361,71 +361,60 @@ export async function getEmbeddedAudio(filePath: string): Promise<any[]> {
 }
 
 function parseFilename(filePath: string): VideoMetadata {
-  let fileName = path.basename(filePath, path.extname(filePath))
+  const fileName = path.basename(filePath, path.extname(filePath))
   const parentDir = path.basename(path.dirname(filePath))
   const grandParentDir = path.basename(path.dirname(path.dirname(filePath)))
 
-  // Strip year and everything after it for scene releases
-  let cleanName = fileName
+  // 1. Extract Year but don't truncate the whole filename yet
   let year: number | undefined
   const yearMatch = fileName.match(/[._\s(](19|20)\d{2}([._\s)]|$)/)
   if (yearMatch) {
     year = parseInt(yearMatch[0].replace(/[^0-9]/g, ''))
-    cleanName = fileName.substring(0, yearMatch.index).trim()
   }
 
-  // Heavy cleaning for pirated site noise
-  const noise = [
-    /\b\d{3,4}p\b/gi, /\bWEBRip\b/gi, /\bBluRay\b/gi, /\bx264\b/gi, /\bx265\b/gi, /\bh264\b/gi, /\bh265\b/gi,
-    /\bHDR\b/gi, /\bDVDRip\b/gi, /\bBDRip\b/gi, /\bHDRip\b/gi, /\bAAC\b/gi, /\bDTS\b/gi, /\bDD5\.1\b/gi, /\b10bit\b/gi, /\bWEB-DL\b/gi,
-    /\bDirectors?\.Cut\b/gi, /\bRemastered\b/gi, /\bExtended\b/gi, /\bUncut\b/gi, /\bRepack\b/gi, /\bProper\b/gi,
-    /\[.*?\]/g, /\(.*?\)/g, /www\..*?\.[a-z]{2,3}/gi, /\bHDHub4u\b/gi, /\bHindi\b/gi, /\bEnglish\b/gi, /\bDual Audio\b/gi, /\bESub\b/gi, /\bHD\b/gi
-  ]
-  
-  noise.forEach(pattern => { cleanName = cleanName.replace(pattern, '') })
-  cleanName = cleanName.replace(/[._-]/g, ' ').replace(/\s+/g, ' ').trim()
-
-  // Suffixes that break searches
-  if (cleanName.toLowerCase().endsWith(' the movie')) {
-    cleanName = cleanName.substring(0, cleanName.length - 10).trim()
-  }
-
-  // If title is way too long after cleaning, it's probably a junk file
-  if (cleanName.length > 100) cleanName = cleanName.substring(0, 100).trim()
-
-  // Robust Series patterns
+  // 2. Robust Series patterns (applied to the FULL filename)
   const seriesPatterns = [
     /(.+?)[. ]s(\d+)e(\d+)(.*)/i,
     /(.+?)[. ](\d+)x(\d+)(.*)/i,
     /(.+?)[. ]season[. ](\d+)[. ]episode[. ](\d+)(.*)/i,
     /(.+?)[. ]s(\d+)[. ]e(\d+)(.*)/i,
-    // Add simpler episode numbering
     /(.+?)[. ]episode[. ](\d+)(.*)/i,
     /(.+?)[. ]ep[. ]?(\d+)(.*)/i
   ]
 
   for (let i = 0; i < seriesPatterns.length; i++) {
     const pattern = seriesPatterns[i]
-    const match = cleanName.match(pattern)
+    const match = fileName.match(pattern)
     
     if (match) {
-      // Logic: if we found a year (e.g. 2025) and this is an aggressive pattern (just a number),
-      // favor identifying it as a movie sequel instead of an episode.
       const isAggressivePattern = i === seriesPatterns.length - 1
-      if (isAggressivePattern && year) continue;
+      if (isAggressivePattern && year && !fileName.toLowerCase().includes('episode') && !fileName.toLowerCase().includes('ep')) {
+         // If it's just a number at the end and we have a year, it's likely a movie sequel
+         continue;
+      }
 
-      const seriesName = match[1].trim()
-      // If the match only has 2 groups (seriesName and episode), assume season 1
+      let seriesName = match[1].trim()
+      
+      // Clean seriesName of year and noise
+      const seriesYearMatch = seriesName.match(/[._\s(](19|20)\d{2}([._\s)]|$)/)
+      if (seriesYearMatch) {
+        seriesName = seriesName.substring(0, seriesYearMatch.index).trim()
+      }
+
+      const noise = [
+        /\b\d{3,4}p\b/gi, /\bWEBRip\b/gi, /\bBluRay\b/gi, /\bx264\b/gi, /\bx265\b/gi, /\bh264\b/gi, /\bh265\b/gi,
+        /\bHDR\b/gi, /\bDVDRip\b/gi, /\bBDRip\b/gi, /\bHDRip\b/gi, /\bAAC\b/gi, /\bDTS\b/gi, /\bDD5\.1\b/gi, /\b10bit\b/gi, /\bWEB-DL\b/gi,
+        /\[.*?\]/g, /\(.*?\)/g, /[._-]/g
+      ]
+      noise.forEach(p => { seriesName = seriesName.replace(p, ' ') })
+      seriesName = seriesName.replace(/\s+/g, ' ').trim()
+
       const isShortMatch = !match[4]
       const season = isShortMatch ? 1 : parseInt(match[2])
       const episode = isShortMatch ? parseInt(match[2]) : parseInt(match[3])
       const extra = (match[4] || match[3] || '').replace(/^[. -]+/, '').trim()
       
-      // Filter out common years from being misidentified as episodes
       if (isShortMatch && (episode > 1900 && episode < 2100)) continue;
-
-      // Special case: "The.Bad.Guys.2" after year "2025" is stripped.
-      // If it's a single digit episode at the end of the name and we have a year, it's a movie.
       if (isAggressivePattern && episode < 10 && !extra) continue;
 
       const episodeTitle = extra ? extra : `S${season.toString().padStart(2, '0')}E${episode.toString().padStart(2, '0')}`
@@ -441,11 +430,11 @@ function parseFilename(filePath: string): VideoMetadata {
     }
   }
 
-  // Check if parent folder looks like a season and grandparent like a series
+  // 3. Check folder structure (Season/Series)
   const seasonMatch = parentDir.match(/season[. ](\d+)/i) || parentDir.match(/s(\d+)/i)
   if (seasonMatch) {
     const season = parseInt(seasonMatch[1])
-    const episodeMatch = cleanName.match(/episode[. ](\d+)/i) || cleanName.match(/e(\d+)/i) || cleanName.match(/^(\d+)/)
+    const episodeMatch = fileName.match(/episode[. ](\d+)/i) || fileName.match(/e(\d+)/i) || fileName.match(/^(\d+)/)
     
     if (episodeMatch) {
       const episode = parseInt(episodeMatch[1])
@@ -462,7 +451,26 @@ function parseFilename(filePath: string): VideoMetadata {
     }
   }
 
-  // Movie (fallback)
+  // 4. Movie (fallback) - Now we do the heavy cleaning for movie title
+  let cleanName = fileName
+  if (yearMatch) {
+    cleanName = fileName.substring(0, yearMatch.index).trim()
+  }
+
+  const movieNoise = [
+    /\b\d{3,4}p\b/gi, /\bWEBRip\b/gi, /\bBluRay\b/gi, /\bx264\b/gi, /\bx265\b/gi, /\bh264\b/gi, /\bh265\b/gi,
+    /\bHDR\b/gi, /\bDVDRip\b/gi, /\bBDRip\b/gi, /\bHDRip\b/gi, /\bAAC\b/gi, /\bDTS\b/gi, /\bDD5\.1\b/gi, /\b10bit\b/gi, /\bWEB-DL\b/gi,
+    /\bDirectors?\.Cut\b/gi, /\bRemastered\b/gi, /\bExtended\b/gi, /\bUncut\b/gi, /\bRepack\b/gi, /\bProper\b/gi,
+    /\[.*?\]/g, /\(.*?\)/g, /www\..*?\.[a-z]{2,3}/gi, /\bHDHub4u\b/gi, /\bHindi\b/gi, /\bEnglish\b/gi, /\bDual Audio\b/gi, /\bESub\b/gi, /\bHD\b/gi
+  ]
+  movieNoise.forEach(pattern => { cleanName = cleanName.replace(pattern, '') })
+  cleanName = cleanName.replace(/[._-]/g, ' ').replace(/\s+/g, ' ').trim()
+
+  if (cleanName.toLowerCase().endsWith(' the movie')) {
+    cleanName = cleanName.substring(0, cleanName.length - 10).trim()
+  }
+  if (cleanName.length > 100) cleanName = cleanName.substring(0, 100).trim()
+
   return {
     title: cleanName,
     type: 'movie',

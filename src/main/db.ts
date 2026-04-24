@@ -81,6 +81,7 @@ export function initDb() {
       status TEXT DEFAULT 'pending',
       size TEXT DEFAULT '—',
       downloaded TEXT DEFAULT '0 B',
+      tmdb_id INTEGER,
       error_message TEXT,
       added_at DATETIME DEFAULT CURRENT_TIMESTAMP
     );
@@ -92,13 +93,16 @@ export function initDb() {
   if (!dlColumnNames.includes('name')) {
     db.exec("ALTER TABLE downloads ADD COLUMN name TEXT")
   }
+  if (!dlColumnNames.includes('tmdb_id')) {
+    db.exec("ALTER TABLE downloads ADD COLUMN tmdb_id INTEGER")
+  }
 }
 
 export function addVideo(video: any) {
   const stmt = db.prepare(`
     INSERT INTO videos (
-      title, file_path, type, series_name, season, episode, duration, poster_path, vote_average, release_year
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      title, file_path, type, series_name, season, episode, duration, poster_path, vote_average, release_year, tmdb_id
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(file_path) DO UPDATE SET
       duration = excluded.duration
     WHERE duration = 0 OR duration IS NULL
@@ -113,7 +117,8 @@ export function addVideo(video: any) {
     video.duration || 0,
     video.poster_path || null,
     video.vote_average || null,
-    video.release_year || null
+    video.release_year || null,
+    video.tmdb_id || null
   )
 }
 
@@ -154,60 +159,51 @@ function queueNextEpisode(videoId: number) {
           SELECT id FROM videos WHERE series_name = ?
         )
       `).run(currentVideo.series_name)
-      console.log(`[DB] Series ${currentVideo.series_name} completed. Cleared from Continue Watching.`)
       return
     }
 
     const nextEpisode = episodes[currentIndex + 1]
-    console.log(`[DB] Queuing next episode: ${nextEpisode.title} (id=${nextEpisode.id})`)
-
-    // Always reset the next episode to 0:00, completed=false
     db.prepare(`
-      INSERT INTO progress (video_id, last_watched_time, completed, updated_at)
-      VALUES (?, 0, 0, CURRENT_TIMESTAMP)
-      ON CONFLICT(video_id) DO UPDATE SET
-        last_watched_time = 0,
-        completed = 0,
-        updated_at = CURRENT_TIMESTAMP
+      INSERT INTO progress (video_id, last_watched_time, completed)
+      VALUES (?, 0, 0)
+      ON CONFLICT(video_id) DO NOTHING
     `).run(nextEpisode.id)
-
-    console.log(`[DB] Successfully queued next episode id=${nextEpisode.id}`)
   } catch (err) {
     console.error('[DB] queueNextEpisode error:', err)
   }
 }
 
-export function updateProgress(videoId: number, time: number, completed: boolean) {
-  try {
-    db.prepare(`
-      INSERT INTO progress (video_id, last_watched_time, completed, updated_at)
-      VALUES (?, ?, ?, CURRENT_TIMESTAMP)
-      ON CONFLICT(video_id) DO UPDATE SET
-        last_watched_time = excluded.last_watched_time,
-        completed = excluded.completed,
-        updated_at = CURRENT_TIMESTAMP
-    `).run(videoId, time, completed ? 1 : 0)
-
-    if (completed) {
-      queueNextEpisode(videoId)
-    }
-  } catch (err) {
-    console.error('[DB] updateProgress error:', err)
+export function updateVideoProgress(videoId: number, time: number, completed: boolean, queueNext: boolean = false) {
+  const stmt = db.prepare(`
+    INSERT INTO progress (video_id, last_watched_time, completed, updated_at)
+    VALUES (?, ?, ?, CURRENT_TIMESTAMP)
+    ON CONFLICT(video_id) DO UPDATE SET
+      last_watched_time = excluded.last_watched_time,
+      completed = excluded.completed,
+      updated_at = excluded.updated_at
+  `)
+  const result = stmt.run(videoId, time, completed ? 1 : 0)
+  
+  if (completed && queueNext) {
+    queueNextEpisode(videoId)
   }
+  
+  return result
 }
 
-export function getProgress(videoId: number) {
-  return db.prepare('SELECT * FROM progress WHERE video_id = ?').get(videoId)
+export function getVideoProgress(videoId: number) {
+  return db.prepare('SELECT * FROM progress WHERE video_id = ?').get(videoId) as any
 }
 
 export function getContinueWatching() {
   return db.prepare(`
-    SELECT v.*, p.last_watched_time, p.completed
+    SELECT v.*, p.last_watched_time, p.completed, p.updated_at
     FROM videos v
     JOIN progress p ON v.id = p.video_id
     WHERE p.completed = 0
     ORDER BY p.updated_at DESC
-  `).all()
+    LIMIT 10
+  `).all() as any[]
 }
 
 export function updateVideoMetadata(id: number, metadata: any) {
@@ -257,8 +253,8 @@ export function removeFolder(folderPath: string) {
 
 export function addDownload(dl: any) {
   const stmt = db.prepare(`
-    INSERT INTO downloads (id, title, name, magnet, progress, download_speed, time_remaining, status, size, downloaded, error_message)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO downloads (id, title, name, magnet, progress, download_speed, time_remaining, status, size, downloaded, tmdb_id, error_message)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(id) DO UPDATE SET
       title = excluded.title,
       name = excluded.name,
@@ -268,21 +264,22 @@ export function addDownload(dl: any) {
       status = excluded.status,
       size = excluded.size,
       downloaded = excluded.downloaded,
+      tmdb_id = excluded.tmdb_id,
       error_message = excluded.error_message
   `)
   return stmt.run(
-    dl.id, dl.title, dl.name || null, dl.magnet, dl.progress || 0, dl.downloadSpeed || '0 B/s', dl.timeRemaining || '—', dl.status || 'pending', dl.size || '—', dl.downloaded || '0 B', dl.errorMessage || null
+    dl.id, dl.title, dl.name || null, dl.magnet, dl.progress || 0, dl.downloadSpeed || '0 B/s', dl.timeRemaining || '—', dl.status || 'pending', dl.size || '—', dl.downloaded || '0 B', dl.tmdbId || null, dl.errorMessage || null
   )
 }
 
 export function updateDownload(dl: any) {
   const stmt = db.prepare(`
     UPDATE downloads
-    SET title = ?, name = ?, progress = ?, download_speed = ?, time_remaining = ?, status = ?, size = ?, downloaded = ?, error_message = ?
+    SET title = ?, name = ?, progress = ?, download_speed = ?, time_remaining = ?, status = ?, size = ?, downloaded = ?, tmdb_id = ?, error_message = ?
     WHERE id = ?
   `)
   return stmt.run(
-    dl.title, dl.name || null, dl.progress, dl.downloadSpeed, dl.timeRemaining, dl.status, dl.size, dl.downloaded, dl.errorMessage || null, dl.id
+    dl.title, dl.name || null, dl.progress, dl.downloadSpeed, dl.timeRemaining, dl.status, dl.size, dl.downloaded, dl.tmdbId || null, dl.errorMessage || null, dl.id
   )
 }
 
@@ -298,6 +295,7 @@ export function getDownloads() {
     status: row.status,
     size: row.size,
     downloaded: row.downloaded,
+    tmdbId: row.tmdb_id,
     errorMessage: row.error_message
   }))
 }

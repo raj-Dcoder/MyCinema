@@ -30,8 +30,8 @@ const api = {
   searchTMDB: (query: string) => ipcRenderer.invoke('search-tmdb', query),
   searchTorrentSources: (title: string, year: string, mediaType: string, tmdbId: number) => 
     ipcRenderer.invoke('search-torrent-sources', title, year, mediaType, tmdbId),
-  startTorrentDownload: (magnetUrl: string, title: string) => 
-    ipcRenderer.invoke('start-torrent-download', magnetUrl, title),
+  startTorrentDownload: (magnetUrl: string, title: string, tmdbId?: number) => 
+    ipcRenderer.invoke('start-torrent-download', magnetUrl, title, tmdbId),
   cancelTorrentDownload: (id: string) => 
     ipcRenderer.invoke('cancel-torrent-download', id),
   removeDownload: (id: string, deleteFile?: boolean) => 

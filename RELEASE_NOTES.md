@@ -1,3 +1,24 @@
+# MyCinema v1.10.0 🚀
+
+This release brings major enhancements to the Video Library, making it easier to track your progress and discover content.
+
+### 📺 Revamped Video Library
+- **Continue Watching**: Never lose your place! A new dedicated section shows your most recently started videos.
+- **Dynamic Previews**: Hover over any video thumbnail to see a multi-segment preview of the content.
+- **Progress Indicators**: At-a-glance progress bars show exactly how much of a video you've watched. Green bars indicate completed videos.
+
+### 🔍 Powerful Navigation
+- **Advanced Filtering**: Quickly find what you're looking for with new filters for Watched/Unwatched status and video duration (Short/Long).
+- **Flexible Sorting**: Sort your library by Recently Added, Alphabetical order, or Duration.
+- **Shuffle & Play All**: One-click buttons to start a random video or play your entire filtered collection in sequence.
+
+### 🛠️ Under-the-Hood
+- **Optimized Queries**: Video fetching now includes real-time progress data from the database.
+- **Cleaner Search**: Improved search bar with a quick-clear option.
+- **Better Empty States**: more helpful guidance when no videos match your current filters.
+
+***
+
 # MyCinema v1.6.0 🚀
 
 A monumental update that introduces true P2P downloading capabilities, completely overhauls the security model, and levels up the cinematic experience.

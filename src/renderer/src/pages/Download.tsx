@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react'
-import { Search, Download as DownloadIcon, Film, Tv, X, Loader2, HardDrive, CheckCircle2, AlertCircle, Pause, Play, FolderOpen, Bookmark, BookmarkCheck, ChevronLeft, ChevronRight, ArrowLeft } from 'lucide-react'
+import { Search, Download as DownloadIcon, Film, Tv, X, Loader2, HardDrive, CheckCircle2, AlertCircle, Pause, Play, FolderOpen, Bookmark, BookmarkCheck, ChevronLeft, ChevronRight, ArrowLeft, Languages } from 'lucide-react'
 import { DownloadFeatureTour } from '../components/DownloadFeatureTour'
 import HorizontalScrollRow from '../components/HorizontalScrollRow'
 
@@ -72,6 +72,7 @@ const Download: React.FC<DownloadProps> = ({ onShowDetail }) => {
 
   const [selectedSeason, setSelectedSeason] = useState<string>('all')
   const [selectedEpisode, setSelectedEpisode] = useState<string>('all')
+  const [hindiOnly, setHindiOnly] = useState<boolean>(false)
 
   // ─── WatchList State ────────────────────────────────────────────────────
   const [watchlist, setWatchlist] = useState<TMDBResult[]>(() => {
@@ -284,6 +285,10 @@ const Download: React.FC<DownloadProps> = ({ onShowDetail }) => {
 
   const filteredSources = React.useMemo(() => {
     return sources.filter(s => {
+      // 1. Apply Hindi Only filter if active
+      if (hindiOnly && !s.isHindi) return false
+
+      // 2. TV Series specific filtering
       if (selectedItem?.media_type !== 'tv') return true
       if (selectedSeason === 'packs') return s.isSeasonPack
       if (selectedSeason !== 'all') {
@@ -294,7 +299,7 @@ const Download: React.FC<DownloadProps> = ({ onShowDetail }) => {
       }
       return true
     })
-  }, [sources, selectedSeason, selectedEpisode, selectedItem])
+  }, [sources, selectedSeason, selectedEpisode, selectedItem, hindiOnly])
 
   // Optimization: Memoize a video map for O(1) lookup during render
   const videoMap = React.useMemo(() => {
@@ -767,6 +772,18 @@ const Download: React.FC<DownloadProps> = ({ onShowDetail }) => {
                     <h3 className="text-[10px] font-semibold uppercase tracking-widest text-muted">
                       {filteredSources.length} Source{filteredSources.length !== 1 ? 's' : ''} Available
                     </h3>
+                    
+                    <button 
+                      onClick={() => setHindiOnly(!hindiOnly)}
+                      className={`flex items-center gap-1.5 px-2 py-1 rounded text-[10px] font-bold transition-all border ${
+                        hindiOnly 
+                          ? 'bg-[#FF9933]/20 text-[#FF9933] border-[#FF9933]/30 shadow-sm shadow-[#FF9933]/10' 
+                          : 'bg-white/5 text-muted/60 border-white/10 hover:text-muted hover:bg-white/10'
+                      }`}
+                    >
+                      <Languages size={10} />
+                      {hindiOnly ? 'HINDI ONLY' : 'ALL AUDIO'}
+                    </button>
                   </div>
 
                   {selectedItem?.media_type === 'tv' && (
@@ -802,11 +819,11 @@ const Download: React.FC<DownloadProps> = ({ onShowDetail }) => {
                     >
                       <div className="flex items-start justify-between gap-2">
                         <div className="flex-1 min-w-0">
-                          <p className="text-xs text-text truncate leading-relaxed">{source.title}</p>
+                          <p className="text-xs text-text truncate leading-relaxed" title={source.title}>{source.title}</p>
                           <div className="flex items-center gap-2 mt-1">
                             <span className="text-[10px] font-bold text-primary bg-primary/10 px-1.5 py-0.5 rounded">{source.quality}</span>
                             {source.isHindi && (
-                              <span className="text-[10px] font-bold text-[#FF9933] bg-[#FF9933]/10 px-1.5 py-0.5 rounded border border-[#FF9933]/20">HINDI / DUAL</span>
+                              <span className="text-[10px] font-bold text-[#FF9933] bg-[#FF9933]/10 px-1.5 py-0.5 rounded border border-[#FF9933]/20">HINDI</span>
                             )}
                             <span className="text-[10px] text-muted">{source.size}</span>
                             <span className="text-[10px] text-green-400/70">{source.seeds}↑</span>
@@ -816,7 +833,7 @@ const Download: React.FC<DownloadProps> = ({ onShowDetail }) => {
                         <button
                           onClick={() => handleStartDownload(source)}
                           className="flex-shrink-0 p-2 rounded-lg bg-primary/10 hover:bg-primary text-primary hover:text-white transition-all duration-200"
-                          title="Download"
+                          title={source.title}
                         >
                           <DownloadIcon size={14} />
                         </button>

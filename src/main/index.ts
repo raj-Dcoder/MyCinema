@@ -1161,23 +1161,27 @@ function isHindiContent(title: string): boolean {
   const lower = title.toLowerCase()
   return (
     lower.includes('hindi') ||
-    lower.includes('dual audio') ||
-    lower.includes('dual-audio') ||
-    lower.includes('multi audio') ||
-    lower.includes('multi-audio') ||
-    lower.includes('multi') ||
-    lower.includes('dubbed') ||
-    lower.includes('hin ') ||
-    lower.includes('[hin]') ||
-    lower.includes('(hin)') ||
-    lower.includes(' hin.') ||
-    lower.includes('.hin.') ||
     lower.includes('हिंदी') ||
     lower.includes('audio:hindi') ||
     lower.includes('audio hindi') ||
-    /\bhindi?\b/.test(lower) ||
-    /\bdual\b/.test(lower) ||
-    /\bdub\b/.test(lower)
+    lower.includes('katmoviehd') ||
+    lower.includes('hdhub4u') ||
+    lower.includes('vegamovies') ||
+    lower.includes('dotmovies') ||
+    lower.includes('bolly4u') ||
+    lower.includes('gdtot') ||
+    lower.includes('hubcloud') ||
+    lower.includes('extramovies') ||
+    lower.includes('9xmovies') ||
+    lower.includes('world4ufree') ||
+    lower.includes('moviesflix') ||
+    lower.includes('skymovieshd') ||
+    lower.includes('u3p') ||
+    lower.includes('darksiderg') ||
+    lower.includes('mkvcinemas') ||
+    lower.includes('1tamilmv') ||
+    /\bhin(di?)?\b/i.test(lower) ||
+    /[\[\(\.]hin[\]\)\.]/i.test(lower)
   )
 }
 
@@ -1192,8 +1196,8 @@ function parseTorrentioStream(stream: any, fallbackTitle: string): any | null {
   const qualityMatch = streamTitle.match(/(2160p|1080p|720p|480p)/i)
   const quality = qualityMatch ? qualityMatch[1] : (stream.name?.includes('1080p') ? '1080p' : 'HD')
   
-  // Parse size e.g. "💾 2.34 GB"
-  const sizeMatch = streamTitle.match(/([0-9.]+\s*(GB|MB|KB))/i)
+  // Parse size e.g. "💾 2.34 GB" or "💾 980 MB"
+  const sizeMatch = streamTitle.match(/([0-9.]+\s*(GB|MB|KB|GiB|MiB))/i)
   const size = sizeMatch ? sizeMatch[1] : '—'
 
   // Parse seeds e.g. "👤 123"
@@ -1238,6 +1242,36 @@ const EXTRA_TRACKERS = [
   'udp://tracker.openbittorrent.com:6969/announce',
   'udp://tracker.pomf.se:80/announce',
 ]
+
+function isRelevanceMatch(resultTitle: string, searchTitle: string, mediaType: string, year: string): boolean {
+  const rt = resultTitle.toLowerCase().replace(/[.\-_]/g, ' ');
+  const st = searchTitle.toLowerCase().replace(/[.\-_]/g, ' ');
+  
+  // 1. Title MUST be present as a whole word
+  const titleRegex = new RegExp(`\\b${st.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i');
+  if (!titleRegex.test(rt)) return false;
+
+  // 2. Short title protection (e.g. "From", "The Bear")
+  // If title is short, it should appear at the very beginning of the result
+  if (st.length <= 5) {
+    const titleIndex = rt.indexOf(st);
+    if (titleIndex > 2) return false; // Must be near start
+  }
+
+  // 3. If it's a TV series, check for season/episode markers or "complete"
+  if (mediaType === 'tv') {
+    const isTVPattern = /s\d{1,2}|season\s*\d{1,2}|episode\s*\d{1,2}|complete/i.test(rt);
+    if (!isTVPattern) return false;
+  }
+
+  // 4. For movies, if year is provided, check if a different year exists in the result title
+  if (mediaType === 'movie' && year) {
+    const yearsInTitle = rt.match(/\b(19|20)\d{2}\b/g);
+    if (yearsInTitle && !yearsInTitle.includes(year)) return false;
+  }
+
+  return true;
+}
 
 function enrichMagnetWithTrackers(magnetUrl: string): string {
   let enriched = magnetUrl
@@ -1438,6 +1472,100 @@ ipcMain.handle('search-torrent-sources', async (_, title: string, year: string, 
         }
       } catch (err: any) {
         console.error('[Torrent] MediaFusion fetch failed:', err.message)
+      }
+    }
+
+    // F. Secondary Search: Title-based search on APIBay for Hindi content (Bypasses IMDB mapping issues)
+    try {
+      const queryYear = (mediaType === 'movie' && year) ? ` ${year}` : ''
+      const searchTitle = `${title}${queryYear} Hindi`
+      const apibayTitleUrl = `https://apibay.org/q.php?q=${encodeURIComponent(searchTitle)}`
+      console.log(`[Torrent] Fetching APIBay Title Search (Hindi): ${apibayTitleUrl}`)
+      const apiBayData: any = await nodeHttpGet(apibayTitleUrl, 5000)
+      
+      if (Array.isArray(apiBayData) && apiBayData[0]?.id !== '0') {
+        for (const t of apiBayData) {
+          const seeders = parseInt(t.seeders) || 0
+          if (seeders < 1) continue
+          
+          const titleName = t.name || ''
+          // Only add if it's actually Hindi AND matches the requested title/type/year
+          if (isHindiContent(titleName) && isRelevanceMatch(titleName, title, mediaType, year)) {
+            const qualityMatch = titleName.match(/(2160p|1080p|720p|480p)/i)
+            sources.push({
+              title: `${titleName.substring(0, 80)} (TPB-HI)`,
+              quality: qualityMatch ? qualityMatch[1] : 'HD',
+              size: formatBytes(parseInt(t.size) || 0),
+              magnet: `magnet:?xt=urn:btih:${t.info_hash}&dn=${encodeURIComponent(titleName)}`,
+              seeds: seeders,
+              peers: parseInt(t.leechers) || 0,
+              type: 'web',
+              isHindi: true
+            })
+          }
+        }
+      }
+    } catch (err: any) {
+      console.error('[Torrent] APIBay title search failed:', err.message)
+    }
+
+    // G. Bitsearch: Specialized search for Hindi and high-quality dubs
+    try {
+      const queryYear = (mediaType === 'movie' && year) ? ` ${year}` : ''
+      const bitsearchUrl = `https://bitsearch.to/api/search?q=${encodeURIComponent(title + queryYear + ' Hindi')}&limit=20`
+      console.log(`[Torrent] Fetching Bitsearch: ${bitsearchUrl}`)
+      const bsData: any = await nodeHttpGet(bitsearchUrl, 5000)
+      if (bsData && Array.isArray(bsData.results)) {
+        for (const t of bsData.results) {
+          const seeds = t.seeders || 0
+          if (seeds < 1) continue
+          
+          const titleName = t.name || ''
+          if (isHindiContent(titleName) && isRelevanceMatch(titleName, title, mediaType, year)) {
+            const qualityMatch = titleName.match(/(2160p|1080p|720p|480p)/i)
+            // Ensure size is correctly formatted (Bitsearch sometimes returns bytes or strings)
+            let rawSize = t.size || '0'
+            let formattedSize = rawSize
+            if (/^\d+$/.test(rawSize)) {
+              formattedSize = formatBytes(parseInt(rawSize))
+            }
+
+            sources.push({
+              title: `${titleName.substring(0, 80)} (BS-HI)`,
+              quality: qualityMatch ? qualityMatch[1] : 'HD',
+              size: formattedSize,
+              magnet: t.magnet || `magnet:?xt=urn:btih:${t.info_hash}&dn=${encodeURIComponent(titleName)}`,
+              seeds: seeds,
+              peers: t.leechers || 0,
+              type: 'web',
+              isHindi: true
+            })
+          }
+        }
+      }
+    } catch (err: any) {
+      console.log('[Torrent] Bitsearch failed or not accessible')
+    }
+
+    // H. Dedicated "Hindi Dubbed" Aggregator Search (1337x / TorrentGalaxy via Torrentio)
+    if (imdbId) {
+      try {
+        const dubbedUrl = `${TORRENTIO_BASE}/stream/${mediaType === 'movie' ? 'movie' : 'series'}/${imdbId}.json`
+        console.log(`[Torrent] Fetching Dubbed Aggregator: ${dubbedUrl}`)
+        const dubbedData: any = await nodeHttpGet(dubbedUrl, 6000)
+        if (dubbedData && dubbedData.streams) {
+          for (const stream of dubbedData.streams) {
+            if (isHindiContent(stream.title || '')) {
+              const parsed = parseTorrentioStream(stream, title)
+              if (parsed) {
+                parsed.title = `${parsed.title} (DUB)`
+                sources.push(parsed)
+              }
+            }
+          }
+        }
+      } catch (err: any) {
+        console.error('[Torrent] Dubbed aggregator fetch failed')
       }
     }
 

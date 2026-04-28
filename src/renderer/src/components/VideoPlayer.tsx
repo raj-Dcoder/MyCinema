@@ -1,11 +1,24 @@
 import React, { useEffect, useRef, useState } from 'react'
-import { Play, Pause, Rewind, FastForward, X, Maximize, Minimize, Volume2, VolumeX, Subtitles, Music, SkipForward as SkipNext, ArrowLeft, MessageSquareText, AlertTriangle, Check, Monitor, RectangleHorizontal, Crop, FolderOpen, Info, Film, HardDrive, ChevronDown, ChevronUp, ListVideo, Users, Search, Globe, Loader2, Download } from 'lucide-react'
+import { Play, Pause, Rewind, FastForward, X, Maximize, Minimize, Volume2, VolumeX, Subtitles, Music, SkipForward as SkipNext, ArrowLeft, MessageSquareText, AlertTriangle, Check, Monitor, RectangleHorizontal, Crop, FolderOpen, Info, Film, HardDrive, ChevronDown, ChevronUp, ListVideo, Users, Search, Globe, Loader2, Download, RotateCcw, Zap, Sparkles, Wand2 } from 'lucide-react'
 import { Video } from '../types'
 import { useWatchTogether } from '../hooks/useWatchTogether'
 import { WatchTogetherModal } from './WatchTogetherModal'
+import FPSBoostRenderer from './FPSBoostRenderer'
+import QualityBoostRenderer from './QualityBoostRenderer'
+import {
+  SUBTITLE_SYNC_COARSE_STEP_MS,
+  SUBTITLE_SYNC_FINE_STEP_MS,
+  SUBTITLE_SYNC_MAX_MS,
+  SUBTITLE_SYNC_MIN_MS,
+  clampSubtitleOffsetMs,
+  createSubtitleSyncStorageKey,
+  formatSubtitleOffsetMs,
+  parseStoredSubtitleOffsetMs,
+  resolveSubtitleCue,
+  type SubCue
+} from '../utils/subtitleSync'
 
 // ── VTT Parser (runs once per track selection, no React state) ──────────────
-interface SubCue { start: number; end: number; text: string }
 function parseVTTTime(s: string): number {
   const clean = s.split(' ')[0]
   const parts = clean.split(':').map(Number)
@@ -108,6 +121,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
   const [audioTracks, setAudioTracks] = useState<any[]>([])
   const [selectedAudioId, setSelectedAudioId] = useState<string>('')
   const [showMediaMenu, setShowMediaMenu] = useState(false)
+  const [showAdvancedMenu, setShowAdvancedMenu] = useState(false)
   const [currentSubtitle, setCurrentSubtitle] = useState<number | null>(null)
   const [playbackRate, setPlaybackRate] = useState<number>(1)
   const [showSpeedMenu, setShowSpeedMenu] = useState(false)
@@ -116,7 +130,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
   const [speedPopup, setSpeedPopup] = useState<{ show: boolean, rate: number, id: number }>({ show: false, rate: 1, id: 0 })
   const ASPECT_MODES: ('contain' | 'cover' | 'fill')[] = ['contain', 'cover', 'fill'];
   const [aspectMode, setAspectMode] = useState<('contain' | 'cover' | 'fill')>('contain');
-  const [trackPopup, setTrackPopup] = useState<{ show: boolean, type: 'audio' | 'subtitle' | 'aspect', text: string, id: number }>({ show: false, type: 'subtitle', text: '', id: 0 })
+  const [trackPopup, setTrackPopup] = useState<{ show: boolean, type: 'audio' | 'subtitle' | 'subtitleSync' | 'aspect', text: string, id: number }>({ show: false, type: 'subtitle', text: '', id: 0 })
   const [seekPreview, setSeekPreview] = useState<number | null>(null)
   const seekPreviewRef = useRef<number>(0)
   const [embeddedSubs, setEmbeddedSubs] = useState<any[]>([])
@@ -145,14 +159,28 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
   const subtitleDivRef = useRef<HTMLDivElement | null>(null)
   const subtitleCuesRef = useRef<SubCue[]>([])
   const activeSubKeyRef = useRef<string | null>(null)
+  const activeSubtitleCueIndexRef = useRef(-1)
+  const subtitleOffsetStorageKeyRef = useRef<string | null>(null)
+  const subtitleOffsetRef = useRef(0)
   const [activeSubKey, setActiveSubKey] = useState<string | null>(null)
+  const [subtitleOffsetMs, setSubtitleOffsetMs] = useState(0)
   const [subtitleLoading, setSubtitleLoading] = useState(false)
+  const [fpsBoostEnabled, setFpsBoostEnabled] = useState(() => {
+    return localStorage.getItem('mycinema_fps_boost') === 'true'
+  })
+  const [qualityBoostEnabled, setQualityBoostEnabled] = useState(() => {
+    return localStorage.getItem('mycinema_quality_boost') === 'true'
+  })
+  const [audioBoostEnabled, setAudioBoostEnabled] = useState(() => {
+    return localStorage.getItem('mycinema_audio_boost') === 'true'
+  })
   const [showInfoPanel, setShowInfoPanel] = useState(false)
   const [showEpisodesPanel, setShowEpisodesPanel] = useState(false)
   const [seriesEpisodes, setSeriesEpisodes] = useState<Video[]>([])
   const [mediaInfo, setMediaInfo] = useState<any>(null)
   const [infoLoading, setInfoLoading] = useState(false)
   const [showAllAudioInfo, setShowAllAudioInfo] = useState(false)
+  const [showSubtitleSyncPanel, setShowSubtitleSyncPanel] = useState(false)
   
   // Online subtitle search state
   const [onlineSubResults, setOnlineSubResults] = useState<any[]>([])
@@ -164,6 +192,130 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
   const previewVideoRef = useRef<HTMLVideoElement>(null)
   const [hoverTime, setHoverTime] = useState<number | null>(null)
   const [hoverPosition, setHoverPosition] = useState<number>(0)
+
+  const [isAnyBoostEnabled, setIsAnyBoostEnabled] = useState(false)
+
+  useEffect(() => {
+    // Small debounce to prevent flickering when toggling boost features
+    const timer = setTimeout(() => {
+      setIsAnyBoostEnabled(fpsBoostEnabled || qualityBoostEnabled)
+    }, 50)
+    return () => clearTimeout(timer)
+  }, [fpsBoostEnabled, qualityBoostEnabled])
+
+  useEffect(() => {
+    localStorage.setItem('mycinema_fps_boost', fpsBoostEnabled.toString())
+  }, [fpsBoostEnabled])
+
+  useEffect(() => {
+    localStorage.setItem('mycinema_quality_boost', qualityBoostEnabled.toString())
+  }, [qualityBoostEnabled])
+
+  useEffect(() => {
+    localStorage.setItem('mycinema_audio_boost', audioBoostEnabled.toString())
+  }, [audioBoostEnabled])
+
+  // ─── Audio Boost Logic (Web Audio API) ──────────────────────────────────────
+  const audioCtxRef = useRef<AudioContext | null>(null)
+  const videoSourceNodeRef = useRef<MediaElementAudioSourceNode | null>(null)
+  const audioSourceNodeRef = useRef<MediaElementAudioSourceNode | null>(null)
+  const bassFilterRef = useRef<BiquadFilterNode | null>(null)
+  const clarityFilterRef = useRef<BiquadFilterNode | null>(null)
+  const compressorRef = useRef<DynamicsCompressorNode | null>(null)
+  const boostGainRef = useRef<GainNode | null>(null)
+
+  useEffect(() => {
+    const initAudio = () => {
+      try {
+        if (!audioCtxRef.current) {
+          audioCtxRef.current = new (window.AudioContext || (window as any).webkitAudioContext)()
+        }
+        const ctx = audioCtxRef.current
+
+        // Create nodes if they don't exist
+        if (!bassFilterRef.current) {
+          bassFilterRef.current = ctx.createBiquadFilter()
+          bassFilterRef.current.type = 'lowshelf'
+          bassFilterRef.current.frequency.value = 150 
+        }
+        
+        if (!clarityFilterRef.current) {
+          clarityFilterRef.current = ctx.createBiquadFilter()
+          clarityFilterRef.current.type = 'highshelf'
+          clarityFilterRef.current.frequency.value = 3000
+        }
+
+        if (!compressorRef.current) {
+          compressorRef.current = ctx.createDynamicsCompressor()
+          compressorRef.current.threshold.value = -24
+          compressorRef.current.knee.value = 30
+          compressorRef.current.ratio.value = 12
+          compressorRef.current.attack.value = 0.003
+          compressorRef.current.release.value = 0.25
+        }
+
+        if (!boostGainRef.current) {
+          boostGainRef.current = ctx.createGain()
+        }
+
+        // Connect videoRef
+        if (videoRef.current && !videoSourceNodeRef.current) {
+          videoSourceNodeRef.current = ctx.createMediaElementSource(videoRef.current)
+          videoSourceNodeRef.current.connect(bassFilterRef.current)
+        }
+
+        // Connect audioRef (for external tracks)
+        if (audioRef.current && !audioSourceNodeRef.current) {
+          audioSourceNodeRef.current = ctx.createMediaElementSource(audioRef.current)
+          audioSourceNodeRef.current.connect(bassFilterRef.current)
+        }
+
+        // Chain: Bass -> Clarity -> Compressor -> Gain -> Destination
+        bassFilterRef.current.connect(clarityFilterRef.current)
+        clarityFilterRef.current.connect(compressorRef.current)
+        compressorRef.current.connect(boostGainRef.current)
+        boostGainRef.current.connect(ctx.destination)
+
+        if (ctx.state === 'suspended') {
+          ctx.resume()
+        }
+      } catch (e) {
+        console.error('Audio Boost initialization failed:', e)
+      }
+    }
+
+    if (isPlaying) {
+      initAudio()
+    }
+
+    // Update values based on enabled state
+    if (bassFilterRef.current) {
+      bassFilterRef.current.gain.setTargetAtTime(audioBoostEnabled ? 7 : 0, audioCtxRef.current?.currentTime || 0, 0.1)
+    }
+    if (clarityFilterRef.current) {
+      clarityFilterRef.current.gain.setTargetAtTime(audioBoostEnabled ? 5 : 0, audioCtxRef.current?.currentTime || 0, 0.1)
+    }
+    if (boostGainRef.current) {
+      boostGainRef.current.gain.setTargetAtTime(audioBoostEnabled ? 1.6 : 1.0, audioCtxRef.current?.currentTime || 0, 0.1)
+    }
+
+    return () => {
+      // We don't necessarily want to close the context on every effect run,
+      // but we should ensure it's suspended if we're not playing.
+      if (audioCtxRef.current && !isPlaying) {
+        audioCtxRef.current.suspend()
+      }
+    }
+  }, [audioBoostEnabled, isPlaying])
+
+  useEffect(() => {
+    return () => {
+      if (audioCtxRef.current) {
+        audioCtxRef.current.close()
+        audioCtxRef.current = null
+      }
+    }
+  }, [])
 
   const handleOpenFolder = () => {
     window.api.openFolder(currentVideo.file_path)
@@ -350,9 +502,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
         await Promise.all(conversionJobs)
         setConvertedSubPaths(newPaths)
         console.log('[VideoPlayer] Pre-converted', newPaths.size, 'subtitle track(s)')
-        
-        subtitleCuesRef.current = []
-        
+
         const seriesKey = currentVideo.type === 'series' && currentVideo.series_name ? currentVideo.series_name : 'global'
         const savedSubPref = localStorage.getItem(`mycinema_sub_pref_${seriesKey}`)
         let restoredId = null
@@ -368,24 +518,14 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
         }
 
         if (restoredId) {
-          const vttPath = newPaths.get(restoredId)
-          if (vttPath) {
-            activeSubKeyRef.current = restoredId
-            setActiveSubKey(restoredId)
-            setCurrentSubtitle(0)
-            
-            fetch(`media://file/${encodeURIComponent(vttPath)}`)
-              .then(res => res.text())
-              .then(text => {
-                subtitleCuesRef.current = parseVTT(text)
-              })
-              .catch(err => console.error(err))
-          }
+          await selectSubtitleTrack(restoredId, {
+            closeMenu: false,
+            persistPreference: false,
+            presetVttPath: newPaths.get(restoredId) || null,
+            externalSubtitlePath: srt
+          })
         } else {
-          activeSubKeyRef.current = null
-          setActiveSubKey(null)
-          setCurrentSubtitle(null)
-          if (subtitleDivRef.current) subtitleDivRef.current.textContent = ''
+          clearActiveSubtitleSelection(false)
         }
       } catch (err) {
         console.error('Failed to get embedded tracks:', err)
@@ -403,6 +543,8 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
     setAudioTracks([])
     setEmbeddedAudio([])
     setEmbeddedSubs([])
+    clearActiveSubtitleSelection(false)
+    setConvertedSubPaths(new Map())
 
     fetchProgress()
     fetchMediaTracks()
@@ -516,6 +658,18 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
     }
   }, [showControls])
 
+  useEffect(() => {
+    if (activeSubKey !== null && videoRef.current) {
+      renderSubtitleAtTime(videoRef.current.currentTime)
+    }
+  }, [activeSubKey, subtitleOffsetMs])
+
+  useEffect(() => {
+    if (!showMediaMenu || showOnlineSearch) {
+      setShowSubtitleSyncPanel(false)
+    }
+  }, [showMediaMenu, showOnlineSearch])
+
   // ─────────────────────────────────────────────────────────────────────────────
   // ── Subtitle track state ──
   // ─────────────────────────────────────────────────────────────────────────────
@@ -536,12 +690,107 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
     }, 1000)
   }
 
-  const showTrackToast = (type: 'audio' | 'subtitle' | 'aspect', text: string) => {
+  const showTrackToast = (type: 'audio' | 'subtitle' | 'subtitleSync' | 'aspect', text: string) => {
     const id = Date.now()
     setTrackPopup({ show: true, type, text, id })
     setTimeout(() => {
       setTrackPopup(prev => prev.id === id ? { ...prev, show: false } : prev)
     }, 1500)
+  }
+
+  const clearRenderedSubtitle = () => {
+    activeSubtitleCueIndexRef.current = -1
+    if (subtitleDivRef.current) {
+      subtitleDivRef.current.textContent = ''
+      subtitleDivRef.current.style.display = 'none'
+    }
+  }
+
+  const getSubtitleSourceId = (key: string | null, externalPathOverride?: string | null) => {
+    if (key === null) return null
+    if (key === 'external-0') {
+      const resolvedPath = externalPathOverride ?? subtitlePath ?? currentVideo.file_path
+      return `external:${resolvedPath}`
+    }
+
+    if (key.startsWith('embedded-')) {
+      return `embedded:${key.replace('embedded-', '')}`
+    }
+
+    return key
+  }
+
+  const applySubtitleOffset = (
+    nextOffsetMs: number,
+    options: { persist?: boolean; showToast?: boolean } = {}
+  ) => {
+    const clamped = clampSubtitleOffsetMs(nextOffsetMs)
+    subtitleOffsetRef.current = clamped
+    setSubtitleOffsetMs(clamped)
+    activeSubtitleCueIndexRef.current = -1
+
+    if (options.persist !== false && subtitleOffsetStorageKeyRef.current) {
+      localStorage.setItem(subtitleOffsetStorageKeyRef.current, String(clamped))
+    }
+
+    if (options.showToast) {
+      showTrackToast('subtitleSync', formatSubtitleOffsetMs(clamped))
+    }
+  }
+
+  const loadSubtitleOffsetForTrack = (key: string | null, externalPathOverride?: string | null) => {
+    const sourceId = getSubtitleSourceId(key, externalPathOverride)
+    subtitleOffsetStorageKeyRef.current = sourceId
+      ? createSubtitleSyncStorageKey(currentVideo.file_path, sourceId)
+      : null
+
+    const storedOffset = subtitleOffsetStorageKeyRef.current
+      ? parseStoredSubtitleOffsetMs(localStorage.getItem(subtitleOffsetStorageKeyRef.current))
+      : 0
+
+    applySubtitleOffset(storedOffset, { persist: false })
+  }
+
+  const clearActiveSubtitleSelection = (closeMenu = true) => {
+    activeSubKeyRef.current = null
+    setActiveSubKey(null)
+    setCurrentSubtitle(null)
+    setSubtitleLoading(false)
+    setShowSubtitleSyncPanel(false)
+    subtitleCuesRef.current = []
+    loadSubtitleOffsetForTrack(null)
+    clearRenderedSubtitle()
+    if (closeMenu) setShowMediaMenu(false)
+  }
+
+  const nudgeSubtitleOffset = (deltaMs: number) => {
+    if (activeSubKeyRef.current === null) return
+    const nextOffset = subtitleOffsetRef.current + deltaMs
+    applySubtitleOffset(nextOffset, { showToast: true })
+  }
+
+  const resetSubtitleOffset = () => {
+    if (activeSubKeyRef.current === null && subtitleOffsetRef.current === 0) return
+    applySubtitleOffset(0, { showToast: true })
+  }
+
+  const renderSubtitleAtTime = (playbackTime: number) => {
+    if (!subtitleDivRef.current || activeSubKeyRef.current === null) return
+
+    const { cue, index } = resolveSubtitleCue(
+      subtitleCuesRef.current,
+      playbackTime,
+      subtitleOffsetRef.current,
+      activeSubtitleCueIndexRef.current
+    )
+
+    activeSubtitleCueIndexRef.current = index
+
+    const nextText = cue ? cue.text : ''
+    if (subtitleDivRef.current.textContent !== nextText) {
+      subtitleDivRef.current.textContent = nextText
+      subtitleDivRef.current.style.display = nextText ? 'block' : 'none'
+    }
   }
 
   const cycleAspectRatio = () => {
@@ -746,6 +995,21 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
             showTrackToast('audio', 'None Available')
           }
           break
+        case 'BracketLeft':
+          if (activeSubKeyRef.current !== null) {
+            nudgeSubtitleOffset(-SUBTITLE_SYNC_FINE_STEP_MS)
+          }
+          break
+        case 'BracketRight':
+          if (activeSubKeyRef.current !== null) {
+            nudgeSubtitleOffset(SUBTITLE_SYNC_FINE_STEP_MS)
+          }
+          break
+        case 'Backslash':
+          if (activeSubKeyRef.current !== null && subtitleOffsetRef.current !== 0) {
+            resetSubtitleOffset()
+          }
+          break
         case 'Escape': onClose(); break
         case 'KeyI': handleToggleInfoPanel(); break
         case 'Equal':
@@ -930,6 +1194,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
 
     setShowMediaMenu(false)
     setShowSpeedMenu(false)
+    setShowAdvancedMenu(false)
     setShowEpisodesPanel(false)
     
     // Safely enforce visibility extension when a user actively clicks any UI control buttons
@@ -1042,44 +1307,60 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
     }
   }
 
-  const selectSubtitleTrack = async (key: string | null) => {
+  const selectSubtitleTrack = async (
+    key: string | null,
+    options: {
+      closeMenu?: boolean
+      persistPreference?: boolean
+      presetVttPath?: string | null
+      externalSubtitlePath?: string | null
+    } = {}
+  ) => {
     const seriesKey = currentVideo.type === 'series' && currentVideo.series_name ? currentVideo.series_name : 'global'
-    
+    const { closeMenu = true, persistPreference = true, presetVttPath = null, externalSubtitlePath } = options
+
     if (key === null) {
-      localStorage.setItem(`mycinema_sub_pref_${seriesKey}`, 'Off')
-      activeSubKeyRef.current = null
-      setActiveSubKey(null)
-      setCurrentSubtitle(null)
-      setSubtitleLoading(false)
-      subtitleCuesRef.current = []
-      if (subtitleDivRef.current) subtitleDivRef.current.textContent = ''
-      setShowMediaMenu(false)
+      if (persistPreference) {
+        localStorage.setItem(`mycinema_sub_pref_${seriesKey}`, 'Off')
+      }
+      clearActiveSubtitleSelection(closeMenu)
       return
     }
 
     const trackObj = availableSubtitles.find(s => s.id === key)
-    if (trackObj) {
-      localStorage.setItem(`mycinema_sub_pref_${seriesKey}`, trackObj.label)
+    if (persistPreference) {
+      const trackLabel = trackObj?.label || (key === 'external-0' ? 'External SRT' : key)
+      localStorage.setItem(`mycinema_sub_pref_${seriesKey}`, trackLabel)
     }
 
     setActiveSubKey(key)
     setCurrentSubtitle(0)
     setSubtitleLoading(true)
-    setShowMediaMenu(false)
+    if (closeMenu) setShowMediaMenu(false)
     activeSubKeyRef.current = key
-    if (subtitleDivRef.current) subtitleDivRef.current.textContent = ''
+    subtitleCuesRef.current = []
+    loadSubtitleOffsetForTrack(key, externalSubtitlePath)
+    clearRenderedSubtitle()
 
     try {
-      let vttPath = convertedSubPaths.get(key) || null
+      let vttPath = presetVttPath || convertedSubPaths.get(key) || null
+      if (presetVttPath) {
+        setConvertedSubPaths(prev => new Map(prev).set(key, presetVttPath))
+      }
+
       if (!vttPath) {
         const isExternal = key === 'external-0'
         const trackIndex = isExternal ? 0 : parseInt(key.replace('embedded-', ''), 10)
-        const sourceFile = isExternal ? (subtitlePath || currentVideo.file_path) : currentVideo.file_path
+        const sourceFile = isExternal ? (externalSubtitlePath ?? subtitlePath ?? currentVideo.file_path) : currentVideo.file_path
         vttPath = await window.api.preConvertSubtitle(sourceFile, trackIndex, isExternal)
         if (vttPath) setConvertedSubPaths(prev => new Map(prev).set(key, vttPath!))
       }
 
-      if (!vttPath) { setSubtitleLoading(false); return }
+      if (!vttPath) {
+        clearRenderedSubtitle()
+        setSubtitleLoading(false)
+        return
+      }
 
       // Fetch and parse VTT into memory once for high-speed DOM rendering
       const res = await fetch(`media://file/${encodeURIComponent(vttPath)}`)
@@ -1089,9 +1370,14 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
       if (activeSubKeyRef.current !== key) return
       
       subtitleCuesRef.current = parseVTT(text)
+      activeSubtitleCueIndexRef.current = -1
+      if (videoRef.current) {
+        renderSubtitleAtTime(videoRef.current.currentTime)
+      }
       console.log('[Subtitle] Loaded', subtitleCuesRef.current.length, 'cues for', key)
     } catch (err) {
       console.error('[Subtitle] Failed to load cues:', err)
+      clearRenderedSubtitle()
     } finally {
       if (activeSubKeyRef.current === key) setSubtitleLoading(false)
     }
@@ -1107,6 +1393,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
     try {
       const params: any = {
         languages: 'en,hi',
+        videoFilePath: currentVideo.file_path,
       }
 
       // Prefer TMDB ID search for accuracy
@@ -1162,21 +1449,11 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
       setSubtitlePath(result.srtPath)
       setShowOnlineSearch(false)
 
-      // Add to converted paths and select it
-      if (result.vttPath) {
-        setConvertedSubPaths(prev => new Map(prev).set('external-0', result.vttPath))
-
-        // Load the VTT cues and activate
-        activeSubKeyRef.current = 'external-0'
-        setActiveSubKey('external-0')
-        setCurrentSubtitle(0)
-
-        const res = await fetch(`media://file/${encodeURIComponent(result.vttPath)}`)
-        const text = await res.text()
-        subtitleCuesRef.current = parseVTT(text)
-        console.log('[Subtitle] Online subtitle loaded with', subtitleCuesRef.current.length, 'cues')
-      }
-
+      await selectSubtitleTrack('external-0', {
+        closeMenu: false,
+        presetVttPath: result.vttPath || null,
+        externalSubtitlePath: result.srtPath
+      })
       setShowMediaMenu(false)
       showTrackToast('subtitle', `Downloaded (${sub.language.toUpperCase()})`)
     } catch (err: any) {
@@ -1294,6 +1571,41 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
     return `${hrs > 0 ? hrs + ':' : ''}${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`
   }
 
+  const subtitleSyncDisabled = activeSubKey === null
+  const subtitleSyncValue = formatSubtitleOffsetMs(subtitleOffsetMs)
+  const subtitleOffsetIsZero = subtitleOffsetMs === 0
+  const subtitleSyncRailPercent = `${((clampSubtitleOffsetMs(subtitleOffsetMs) - SUBTITLE_SYNC_MIN_MS) / (SUBTITLE_SYNC_MAX_MS - SUBTITLE_SYNC_MIN_MS)) * 100}%`
+  const subtitleSyncControls = [
+    {
+      key: 'earlier-large',
+      value: '-2s',
+      title: 'Show subtitles 2 seconds earlier',
+      onClick: () => nudgeSubtitleOffset(-SUBTITLE_SYNC_COARSE_STEP_MS),
+      disabled: subtitleSyncDisabled
+    },
+    {
+      key: 'earlier-small',
+      value: '-250ms',
+      title: 'Show subtitles 250 milliseconds earlier',
+      onClick: () => nudgeSubtitleOffset(-SUBTITLE_SYNC_FINE_STEP_MS),
+      disabled: subtitleSyncDisabled
+    },
+    {
+      key: 'later-small',
+      value: '+250ms',
+      title: 'Show subtitles 250 milliseconds later',
+      onClick: () => nudgeSubtitleOffset(SUBTITLE_SYNC_FINE_STEP_MS),
+      disabled: subtitleSyncDisabled
+    },
+    {
+      key: 'later-large',
+      value: '+2s',
+      title: 'Show subtitles 2 seconds later',
+      onClick: () => nudgeSubtitleOffset(SUBTITLE_SYNC_COARSE_STEP_MS),
+      disabled: subtitleSyncDisabled
+    }
+  ] as const
+
   return (
     <div 
       className={`fixed inset-0 z-50 bg-black flex flex-col items-center justify-center group overflow-hidden ${!showControls ? 'cursor-none' : ''}`}
@@ -1317,7 +1629,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
       <video
         ref={videoRef}
         src={`media://file/${encodeURIComponent(currentVideo.file_path)}`}
-        className={`w-full h-full outline-none ${showControls ? 'subs-up' : 'subs-down'}`}
+        className={`w-full h-full outline-none transition-opacity duration-200 ${showControls ? 'subs-up' : 'subs-down'} ${isAnyBoostEnabled ? 'opacity-0 pointer-events-none' : 'opacity-100'}`}
         style={{ 
           objectFit: aspectMode as any, 
           clipPath: 'inset(0px)',
@@ -1336,16 +1648,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
             }
             timeRef.current = videoRef.current.currentTime
 
-            // Custom subtitle overlay — direct DOM mutation, zero React re-render
-            if (subtitleDivRef.current && activeSubKeyRef.current !== null) {
-              const t = videoRef.current.currentTime
-              const cue = subtitleCuesRef.current.find(c => t >= c.start && t <= c.end)
-              const newText = cue ? cue.text : ''
-              if (subtitleDivRef.current.textContent !== newText) {
-                subtitleDivRef.current.textContent = newText
-                subtitleDivRef.current.style.display = newText ? 'block' : 'none'
-              }
-            }
+            renderSubtitleAtTime(videoRef.current.currentTime)
           }
         }}
         onDurationChange={() => {
@@ -1393,6 +1696,20 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
         autoPlay
       >
       </video>
+
+      <FPSBoostRenderer
+              videoRef={videoRef}
+              enabled={fpsBoostEnabled}
+              aspectMode={aspectMode}
+              isPlaying={isPlaying}
+            />
+
+      <QualityBoostRenderer
+              videoRef={videoRef}
+              enabled={qualityBoostEnabled}
+              aspectMode={aspectMode}
+              isPlaying={isPlaying}
+            />
 
       <style>{`
         @keyframes seekAnim {
@@ -1453,12 +1770,12 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
         >
           <div className="bg-black/60 text-white font-bold backdrop-blur-md items-center animate-seek shadow-2xl border border-white/10 flex flex-row space-x-2 px-5 py-2.5 rounded-full">
             {trackPopup.type === 'audio' ? <Music size={20} className="text-primary" /> 
-             : trackPopup.type === 'subtitle' ? <Subtitles size={20} className="text-primary" />
+             : trackPopup.type === 'subtitle' || trackPopup.type === 'subtitleSync' ? <Subtitles size={20} className="text-primary" />
              : trackPopup.type === 'aspect' && aspectMode === 'cover' ? <Crop size={20} className="text-primary" />
              : trackPopup.type === 'aspect' && aspectMode === 'fill' ? <RectangleHorizontal size={20} className="text-primary" />
              : <Monitor size={20} className="text-primary" />}
             <span className="text-sm font-bold tracking-wide text-center" style={{ maxWidth: '280px' }}>
-              {trackPopup.type === 'audio' ? 'Audio' : trackPopup.type === 'subtitle' ? 'Subtitle' : 'Aspect'}: {trackPopup.text}
+              {trackPopup.type === 'audio' ? 'Audio' : trackPopup.type === 'aspect' ? 'Aspect' : trackPopup.type === 'subtitleSync' ? 'Subtitle Sync' : 'Subtitle'}: {trackPopup.text}
             </span>
           </div>
         </div>
@@ -1503,6 +1820,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
                 onClick={(e) => { 
                   e.stopPropagation()
                   setShowSpeedMenu(false)
+                  setShowAdvancedMenu(false)
                   setShowMediaMenu(!showMediaMenu)
                 }}
                 className={`flex items-center space-x-2 px-4 py-2 rounded-lg bg-black/50 transition-colors backdrop-blur-md border border-white/5 ${showMediaMenu ? 'text-white bg-black/80' : 'text-white hover:bg-black/80'}`}
@@ -1546,8 +1864,29 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
                     
                     {/* Subtitles Column */}
                     <div className={`flex-1 min-w-0 ${availableAudio.length > 0 ? 'border-l border-white/5' : ''}`}>
-                      <div className="px-4 py-3 border-b border-white/5 mb-1">
+                      <div className="px-4 py-3 border-b border-white/5 mb-1 flex items-center justify-between gap-3">
                         <h3 className="text-[10px] font-black text-white/40 tracking-[0.15em] uppercase">Subtitles</h3>
+                        {!showOnlineSearch && (
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              if (subtitleSyncDisabled) return
+                              setShowSubtitleSyncPanel(prev => !prev)
+                            }}
+                            disabled={subtitleSyncDisabled}
+                            className={`h-6 shrink-0 rounded-full border px-2.5 flex items-center gap-1.5 text-[9px] font-bold uppercase tracking-wider transition-all ${
+                              subtitleSyncDisabled
+                                ? 'border-white/5 bg-white/[0.02] text-white/20 cursor-not-allowed'
+                                : showSubtitleSyncPanel
+                                  ? 'border-primary/40 bg-primary/15 text-primary'
+                                  : 'border-white/10 bg-white/[0.03] text-white/50 hover:border-white/20 hover:text-white/80'
+                            }`}
+                            title={subtitleSyncDisabled ? 'Select a subtitle track first' : showSubtitleSyncPanel ? 'Hide subtitle sync controls' : 'Show subtitle sync controls'}
+                          >
+                            <span>Sync</span>
+                            {showSubtitleSyncPanel ? <ChevronUp size={11} /> : <ChevronDown size={11} />}
+                          </button>
+                        )}
                       </div>
 
                       {/* Online Search Results View */}
@@ -1611,35 +1950,104 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
                         </div>
                       ) : (
                         /* Local Tracks View */
-                        <div className="px-1.5 pb-2 max-h-[320px] overflow-y-auto custom-scrollbar">
-                          <button
-                            onClick={(e) => { e.stopPropagation(); selectSubtitleTrack(null); }}
-                            className={`w-full flex items-center space-x-3 px-3 py-2.5 rounded-xl text-left transition-all duration-200 group ${currentSubtitle === null ? 'bg-primary/15 text-primary' : 'text-white/60 hover:bg-white/5 hover:text-white'}`}
-                          >
-                            <div className={`flex-shrink-0 w-5 h-5 rounded-full border-2 flex items-center justify-center transition-colors ${currentSubtitle === null ? 'border-primary bg-primary' : 'border-white/20 group-hover:border-white/40'}`}>
-                              {currentSubtitle === null && <Check size={12} strokeWidth={4} className="text-white" />}
-                            </div>
-                            <span className="text-[14px] font-semibold truncate tracking-tight">
-                              Off
-                            </span>
-                          </button>
-                          {availableSubtitles.map((track) => {
-                              const isActive = activeSubKey !== null && activeSubKey === track.id
-                              return (
-                              <button
-                                key={track.idx}
-                                onClick={(e) => { e.stopPropagation(); selectSubtitleTrack(track.id); }}
-                                className={`w-full flex items-center space-x-3 px-3 py-2.5 rounded-xl text-left transition-all duration-200 group ${isActive ? 'bg-primary/15 text-primary' : 'text-white/60 hover:bg-white/5 hover:text-white'}`}
-                              >
-                                <div className={`flex-shrink-0 w-5 h-5 rounded-full border-2 flex items-center justify-center transition-colors ${isActive ? 'border-primary bg-primary' : 'border-white/20 group-hover:border-white/40'}`}>
-                                  {isActive && <Check size={12} strokeWidth={4} className="text-white" />}
-                                </div>
-                                <span className="text-[14px] font-semibold truncate tracking-tight">
-                                  {track.label}
+                        <div className="px-1.5 pb-2 space-y-2">
+                          {showSubtitleSyncPanel && (
+                            <div className={`mx-1.5 mb-3 rounded-xl border transition-all duration-300 ${
+                              subtitleSyncDisabled
+                                ? 'border-white/5 bg-white/[0.01] opacity-40 grayscale pointer-events-none'
+                                : 'border-white/8 bg-white/[0.02]'
+                            }`}>
+                              {/* Header row */}
+                              <div className="flex items-center justify-between px-3 pt-2.5 pb-2 border-b border-white/5">
+                                <span className="text-[9px] font-black uppercase tracking-[0.22em] text-white/30">
+                                  Subtitle Sync
                                 </span>
-                              </button>
-                              )
-                            })}
+                                <div className="flex items-center gap-2">
+                                  <span className={`text-[11px] font-black tabular-nums ${subtitleOffsetIsZero ? 'text-white/40' : 'text-primary'}`}>
+                                    {subtitleSyncValue}
+                                  </span>
+                                  {!subtitleOffsetIsZero && (
+                                    <button
+                                      onClick={(e) => { e.stopPropagation(); resetSubtitleOffset(); }}
+                                      className="flex items-center gap-1 rounded-lg border border-white/10 bg-white/[0.04] px-2 py-0.5 text-[9px] font-bold text-white/40 hover:text-white hover:border-white/20 transition-all"
+                                      title="Reset subtitle offset"
+                                    >
+                                      <RotateCcw size={9} />
+                                      Reset
+                                    </button>
+                                  )}
+                                </div>
+                              </div>
+
+                              {/* Rail */}
+                              <div className="px-3 pt-2.5 pb-1">
+                                <div className="flex items-center justify-between mb-1.5 text-[8px] font-black uppercase tracking-[0.18em] text-white/18">
+                                  <span>Earlier</span>
+                                  <span>Later</span>
+                                </div>
+                                <div className="relative h-4">
+                                  <div className="absolute left-0 right-0 top-1/2 h-[2px] -translate-y-1/2 rounded-full bg-white/8" />
+                                  <div className="absolute left-1/2 top-1/2 h-2.5 w-px -translate-x-1/2 -translate-y-1/2 bg-white/15" />
+                                  <div
+                                    className={`absolute top-1/2 h-3.5 w-3.5 -translate-x-1/2 -translate-y-1/2 rounded-full shadow-sm ${
+                                      subtitleOffsetIsZero ? 'bg-white/60' : 'bg-primary shadow-primary/30'
+                                    }`}
+                                    style={{ left: subtitleSyncRailPercent }}
+                                  />
+                                </div>
+                              </div>
+
+                              {/* Nudge buttons */}
+                              <div className="px-3 pb-2.5 grid grid-cols-4 gap-1.5">
+                                {subtitleSyncControls.map((control) => (
+                                  <button
+                                    key={control.key}
+                                    onClick={(e) => { e.stopPropagation(); control.onClick(); }}
+                                    title={control.title}
+                                    className="h-8 rounded-lg border border-white/8 bg-white/[0.03] text-[10px] font-black text-white/60 hover:text-white hover:border-white/18 hover:bg-white/[0.07] transition-all active:scale-95"
+                                  >
+                                    {control.value}
+                                  </button>
+                                ))}
+                              </div>
+
+                              {/* Keyboard hint */}
+                              <div className="px-3 pb-2.5 text-center text-[9px] text-white/25 font-medium tracking-wide">
+                                [ ] nudge &nbsp;·&nbsp; \ reset
+                              </div>
+                            </div>
+                          )}
+
+                          <div className="max-h-[232px] overflow-y-auto custom-scrollbar">
+                            <button
+                              onClick={(e) => { e.stopPropagation(); selectSubtitleTrack(null); }}
+                              className={`w-full flex items-center space-x-3 px-3 py-2.5 rounded-xl text-left transition-all duration-200 group ${currentSubtitle === null ? 'bg-primary/15 text-primary' : 'text-white/60 hover:bg-white/5 hover:text-white'}`}
+                            >
+                              <div className={`flex-shrink-0 w-5 h-5 rounded-full border-2 flex items-center justify-center transition-colors ${currentSubtitle === null ? 'border-primary bg-primary' : 'border-white/20 group-hover:border-white/40'}`}>
+                                {currentSubtitle === null && <Check size={12} strokeWidth={4} className="text-white" />}
+                              </div>
+                              <span className="text-[14px] font-semibold truncate tracking-tight">
+                                Off
+                              </span>
+                            </button>
+                            {availableSubtitles.map((track) => {
+                                const isActive = activeSubKey !== null && activeSubKey === track.id
+                                return (
+                                <button
+                                  key={track.idx}
+                                  onClick={(e) => { e.stopPropagation(); selectSubtitleTrack(track.id); }}
+                                  className={`w-full flex items-center space-x-3 px-3 py-2.5 rounded-xl text-left transition-all duration-200 group ${isActive ? 'bg-primary/15 text-primary' : 'text-white/60 hover:bg-white/5 hover:text-white'}`}
+                                >
+                                  <div className={`flex-shrink-0 w-5 h-5 rounded-full border-2 flex items-center justify-center transition-colors ${isActive ? 'border-primary bg-primary' : 'border-white/20 group-hover:border-white/40'}`}>
+                                    {isActive && <Check size={12} strokeWidth={4} className="text-white" />}
+                                  </div>
+                                  <span className="text-[14px] font-semibold truncate tracking-tight">
+                                    {track.label}
+                                  </span>
+                                </button>
+                                )
+                              })}
+                          </div>
                         </div>
                       )}
                     </div>
@@ -1675,7 +2083,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
       </div>
 
       {/* Controls */}
-      <div className={`absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/90 to-transparent px-10 pb-10 pt-20 transition-opacity duration-300 video-controls ${showControls ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}>
+      <div className={`absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/90 to-transparent px-10 pb-10 pt-20 transition-opacity duration-300 video-controls z-40 ${showControls ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}>
         {/* Progress Bar Wrapper */}
         <div 
           className="group/progress relative h-6 mb-4 flex items-center cursor-pointer"
@@ -1832,6 +2240,91 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
                : aspectMode === 'fill' ? <RectangleHorizontal size={22} className="opacity-90 hover:opacity-100" />
                : <Monitor size={22} className="opacity-90 hover:opacity-100" />}
             </button>
+
+            <div className="relative flex items-center">
+              {showAdvancedMenu && (
+                <div 
+                  className="absolute bottom-full right-0 mb-6 bg-[#111111]/90 backdrop-blur-2xl rounded-2xl shadow-[0_20px_50px_rgba(0,0,0,0.6)] border border-white/10 overflow-hidden z-50 animate-in fade-in slide-in-from-bottom-2 duration-300 w-[280px]"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <div className="px-4 py-3 border-b border-white/5 bg-white/[0.02]">
+                    <div className="flex items-center space-x-2">
+                      <Sparkles size={14} className="text-primary" />
+                      <h3 className="text-[10px] font-black text-white uppercase tracking-[0.2em]">Advanced Settings</h3>
+                    </div>
+                  </div>
+                  
+                  <div className="p-2 space-y-1">
+                    {/* FPS Boost Toggle */}
+                    <button
+                      onClick={(e) => { e.stopPropagation(); setFpsBoostEnabled(!fpsBoostEnabled); }}
+                      className={`w-full flex items-center justify-between px-3 py-3 rounded-xl transition-all duration-200 group ${fpsBoostEnabled ? 'bg-primary/10 text-primary' : 'text-white/60 hover:bg-white/5 hover:text-white'}`}
+                    >
+                      <div className="flex items-center space-x-3">
+                        <Zap size={18} className={fpsBoostEnabled ? "text-primary" : "text-white/30"} />
+                        <div className="text-left">
+                          <p className="text-[13px] font-bold tracking-tight">FPS Boost</p>
+                          <p className="text-[10px] opacity-50 font-medium">Smoother GPU motion</p>
+                        </div>
+                      </div>
+                      <div className={`flex-shrink-0 w-8 h-4.5 rounded-full relative transition-colors duration-300 ${fpsBoostEnabled ? 'bg-primary' : 'bg-white/10'}`}>
+                        <div className={`absolute top-0.75 left-0.75 w-3 h-3 rounded-full bg-white transition-transform duration-300 ${fpsBoostEnabled ? 'translate-x-3.5' : 'translate-x-0'}`} />
+                      </div>
+                    </button>
+
+                    {/* Audio Boost */}
+                    <button
+                      onClick={(e) => { e.stopPropagation(); setAudioBoostEnabled(!audioBoostEnabled); }}
+                      className={`w-full flex items-center justify-between px-3 py-3 rounded-xl transition-all duration-200 group ${audioBoostEnabled ? 'bg-primary/10 text-primary' : 'text-white/60 hover:bg-white/5 hover:text-white'}`}
+                    >
+                      <div className="flex items-center space-x-3">
+                        <Volume2 size={18} className={audioBoostEnabled ? "text-primary" : "text-white/30"} />
+                        <div className="text-left">
+                          <p className="text-[13px] font-bold tracking-tight">Audio Boost</p>
+                          <p className="text-[10px] opacity-50 font-medium">Clearer & Bass Boost</p>
+                        </div>
+                      </div>
+                      <div className={`flex-shrink-0 w-8 h-4.5 rounded-full relative transition-colors duration-300 ${audioBoostEnabled ? 'bg-primary' : 'bg-white/10'}`}>
+                        <div className={`absolute top-0.75 left-0.75 w-3 h-3 rounded-full bg-white transition-transform duration-300 ${audioBoostEnabled ? 'translate-x-3.5' : 'translate-x-0'}`} />
+                      </div>
+                    </button>
+
+                    {/* AI Enhance Toggle */}
+                    <button
+                      onClick={(e) => { e.stopPropagation(); setQualityBoostEnabled(!qualityBoostEnabled); }}
+                      className={`w-full flex items-center justify-between px-3 py-3 rounded-xl transition-all duration-200 group ${qualityBoostEnabled ? 'bg-primary/10 text-primary' : 'text-white/60 hover:bg-white/5 hover:text-white'}`}
+                    >
+                      <div className="flex items-center space-x-3">
+                        <Wand2 size={18} className={qualityBoostEnabled ? "text-primary" : "text-white/30"} />
+                        <div className="text-left">
+                          <p className="text-[13px] font-bold tracking-tight">AI Enhance</p>
+                          <p className="text-[10px] opacity-50 font-medium">Sharpen & Vibrance</p>
+                        </div>
+                      </div>
+                      <div className={`flex-shrink-0 w-8 h-4.5 rounded-full relative transition-colors duration-300 ${qualityBoostEnabled ? 'bg-primary' : 'bg-white/10'}`}>
+                        <div className={`absolute top-0.75 left-0.75 w-3 h-3 rounded-full bg-white transition-transform duration-300 ${qualityBoostEnabled ? 'translate-x-3.5' : 'translate-x-0'}`} />
+                      </div>
+                    </button>
+                  </div>
+                  
+                  <div className="px-4 py-2 border-t border-white/5 bg-white/[0.01]">
+                    <span className="text-[9px] font-black text-primary/60 uppercase tracking-widest">Beta Features</span>
+                  </div>
+                </div>
+              )}
+              <button 
+                onClick={(e) => { 
+                  e.stopPropagation(); 
+                  setShowMediaMenu(false);
+                  setShowSpeedMenu(false);
+                  setShowAdvancedMenu(!showAdvancedMenu); 
+                }}
+                className={`transition-colors flex items-center ${showAdvancedMenu ? 'text-primary' : 'text-white hover:text-primary'}`}
+                title="Advanced Settings (Beta)"
+              >
+                <Sparkles size={22} className={showAdvancedMenu ? "opacity-100" : "opacity-90 hover:opacity-100"} />
+              </button>
+            </div>
             <div className="relative flex items-center">
               {showSpeedMenu && (
                 <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-6 bg-gray-900 rounded-lg shadow-xl border border-gray-700 overflow-hidden min-w-[120px] z-50">
@@ -1853,6 +2346,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
                 onClick={(e) => { 
                   e.stopPropagation(); 
                   setShowMediaMenu(false); 
+                  setShowAdvancedMenu(false);
                   setShowSpeedMenu(!showSpeedMenu); 
                 }}
                 className={`text-white transition-colors text-sm font-bold w-12 flex justify-center ${showSpeedMenu ? 'text-primary' : 'hover:text-primary'}`}

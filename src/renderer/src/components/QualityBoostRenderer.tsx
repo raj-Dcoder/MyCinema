@@ -1,0 +1,262 @@
+import React, { useEffect, useRef, useState } from 'react';
+
+interface QualityBoostRendererProps {
+  videoRef: React.RefObject<HTMLVideoElement>;
+  enabled: boolean;
+  aspectMode: 'contain' | 'cover' | 'fill';
+  isPlaying: boolean;
+}
+
+const QualityBoostRenderer: React.FC<QualityBoostRendererProps> = ({ videoRef, enabled, aspectMode, isPlaying }) => {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const requestRef = useRef<number>();
+  const glRef = useRef<WebGLRenderingContext | null>(null);
+  const programRef = useRef<WebGLProgram | null>(null);
+  const textureRef = useRef<WebGLTexture | null>(null);
+  const locationsRef = useRef<{
+    position: number;
+    texCoord: number;
+    uResolution: WebGLUniformLocation | null;
+    uImage: WebGLUniformLocation | null;
+  }>({
+    position: -1,
+    texCoord: -1,
+    uResolution: null,
+    uImage: null,
+  });
+  const positionBufferRef = useRef<WebGLBuffer | null>(null);
+  const texCoordBufferRef = useRef<WebGLBuffer | null>(null);
+  const textureSizeRef = useRef<{ width: number; height: number }>({ width: 0, height: 0 });
+
+  const VS_SOURCE = `
+    attribute vec2 a_position;
+    attribute vec2 a_texCoord;
+    varying vec2 v_texCoord;
+    void main() {
+      gl_Position = vec4(a_position, 0.0, 1.0);
+      v_texCoord = a_texCoord;
+    }
+  `;
+
+  // Quality Boost Shader: Sharpening + Shadow Recovery + Soft Contrast + Vibrance
+    const FS_SOURCE = `
+    precision mediump float;
+    uniform sampler2D u_image;
+    uniform vec2 u_resolution;
+    varying vec2 v_texCoord;
+
+    // Constants for the effect
+    const float SHARPEN_AMOUNT = 0.35;
+    const float VIBRANCE_AMOUNT = 0.25;
+    const float CONTRAST_AMOUNT = 1.08;
+    const float SHADOW_LIFT = 0.08;    // Lifts dark areas to reveal detail
+    const float GAMMA = 0.90;          // Brightens mid-tones slightly
+
+    void main() {
+      vec2 step = 1.0 / u_resolution;
+      
+      // 1. Sampling for sharpening
+      vec4 center = texture2D(u_image, v_texCoord);
+      vec4 left   = texture2D(u_image, v_texCoord + vec2(-step.x, 0.0));
+      vec4 right  = texture2D(u_image, v_texCoord + vec2(step.x, 0.0));
+      vec4 top    = texture2D(u_image, v_texCoord + vec2(0.0, -step.y));
+      vec4 bottom = texture2D(u_image, v_texCoord + vec2(0.0, step.y));
+      
+      // Edge detection (Laplacian)
+      vec4 edge = 4.0 * center - left - right - top - bottom;
+      vec3 color = center.rgb + SHARPEN_AMOUNT * edge.rgb;
+      
+      // 2. Dynamic Range & Shadow Recovery
+      // Calculate luminance (Rec. 709)
+      float luminance = dot(color.rgb, vec3(0.2126, 0.7152, 0.0722));
+      
+      // Shadow Mask: Strongest at 0.0 luminance, fades by 0.4
+      float shadowMask = clamp(1.0 - (luminance / 0.4), 0.0, 1.0);
+      // Lift shadows while preserving absolute black
+      color.rgb += shadowMask * SHADOW_LIFT * (1.0 - exp(-5.0 * luminance));
+      
+      // 3. Soft Contrast (using a smooth curve instead of linear math)
+      // This avoids "crushing" the blacks and "clipping" the whites
+      vec3 contrastColor = color.rgb * color.rgb * (3.0 - 2.0 * color.rgb);
+      color.rgb = mix(color.rgb, contrastColor, CONTRAST_AMOUNT - 1.0);
+      
+      // 4. Gamma Correction (Mid-tone lift)
+      color.rgb = pow(clamp(color.rgb, 0.0, 1.0), vec3(GAMMA));
+      
+      // 5. Vibrance (Selective Saturation)
+      float average = (color.r + color.g + color.b) / 3.0;
+      float mx = max(color.r, max(color.g, color.b));
+      float amt = (mx - average) * (-VIBRANCE_AMOUNT * 3.0);
+      color.rgb = mix(color.rgb, vec3(mx), amt);
+      
+      gl_FragColor = vec4(clamp(color.rgb, 0.0, 1.0), center.a);
+    }
+  `;
+
+  useEffect(() => {
+    if (!canvasRef.current || !videoRef.current) return;
+
+    const canvas = canvasRef.current;
+    const gl = canvas.getContext('webgl', { 
+      preserveDrawingBuffer: false, 
+      alpha: false, // Video is opaque
+      antialias: false,
+      powerPreference: 'high-performance'
+    });
+    if (!gl) return;
+    glRef.current = gl;
+
+    // Create shaders
+    const vs = gl.createShader(gl.VERTEX_SHADER)!;
+    gl.shaderSource(vs, VS_SOURCE);
+    gl.compileShader(vs);
+
+    const fs = gl.createShader(gl.FRAGMENT_SHADER)!;
+    gl.shaderSource(fs, FS_SOURCE);
+    gl.compileShader(fs);
+
+    const program = gl.createProgram()!;
+    gl.attachShader(program, vs);
+    gl.attachShader(program, fs);
+    gl.linkProgram(program);
+    programRef.current = program;
+
+    // Cache locations
+    locationsRef.current = {
+      position: gl.getAttribLocation(program, 'a_position'),
+      texCoord: gl.getAttribLocation(program, 'a_texCoord'),
+      uResolution: gl.getUniformLocation(program, 'u_resolution'),
+      uImage: gl.getUniformLocation(program, 'u_image'),
+    };
+
+    // Set up geometry
+    positionBufferRef.current = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, positionBufferRef.current);
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([
+      -1, -1,  1, -1, -1,  1,
+      -1,  1,  1, -1,  1,  1,
+    ]), gl.STATIC_DRAW);
+
+    texCoordBufferRef.current = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, texCoordBufferRef.current);
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([
+      0, 0,  1, 0,  0, 1,
+      0, 1,  1, 0,  1, 1,
+    ]), gl.STATIC_DRAW);
+    
+    // Set up textures
+    gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
+    
+    const texture = gl.createTexture()!;
+    gl.bindTexture(gl.TEXTURE_2D, texture);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    textureRef.current = texture;
+
+    return () => {
+      if (glRef.current) {
+        const gl = glRef.current;
+        if (textureRef.current) gl.deleteTexture(textureRef.current);
+        if (positionBufferRef.current) gl.deleteBuffer(positionBufferRef.current);
+        if (texCoordBufferRef.current) gl.deleteBuffer(texCoordBufferRef.current);
+        if (programRef.current) gl.deleteProgram(programRef.current);
+      }
+    };
+  }, [videoRef]);
+
+  useEffect(() => {
+    if (!glRef.current || !programRef.current) return;
+
+    const canvas = canvasRef.current!;
+    const gl = glRef.current;
+    const program = programRef.current;
+    const locations = locationsRef.current;
+
+    const render = () => {
+      // If disabled, we stop the loop and clear the canvas
+      if (!enabled) {
+        if (glRef.current) {
+          glRef.current.clearColor(0, 0, 0, 0);
+          glRef.current.clear(glRef.current.COLOR_BUFFER_BIT);
+        }
+        requestRef.current = undefined;
+        return;
+      }
+
+      if (!videoRef.current || !glRef.current) {
+        requestRef.current = requestAnimationFrame(render);
+        return;
+      }
+      
+      const video = videoRef.current;
+      const gl = glRef.current;
+      
+      if (video.readyState >= 2) {
+        if (canvas.width !== video.videoWidth || canvas.height !== video.videoHeight) {
+          canvas.width = video.videoWidth;
+          canvas.height = video.videoHeight;
+          gl.viewport(0, 0, canvas.width, canvas.height);
+        }
+
+        gl.useProgram(program);
+
+        // Position attribute
+        gl.enableVertexAttribArray(locations.position);
+        gl.bindBuffer(gl.ARRAY_BUFFER, positionBufferRef.current);
+        gl.vertexAttribPointer(locations.position, 2, gl.FLOAT, false, 0, 0);
+
+        // TexCoord attribute
+        gl.enableVertexAttribArray(locations.texCoord);
+        gl.bindBuffer(gl.ARRAY_BUFFER, texCoordBufferRef.current);
+        gl.vertexAttribPointer(locations.texCoord, 2, gl.FLOAT, false, 0, 0);
+
+        // Resolution uniform
+        gl.uniform2f(locations.uResolution, canvas.width, canvas.height);
+
+        // Update texture with video frame
+        gl.activeTexture(gl.TEXTURE0);
+        gl.bindTexture(gl.TEXTURE_2D, textureRef.current);
+        
+        if (textureSizeRef.current.width === video.videoWidth && textureSizeRef.current.height === video.videoHeight) {
+          gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, gl.RGBA, gl.UNSIGNED_BYTE, video);
+        } else {
+          gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, video);
+          textureSizeRef.current = { width: video.videoWidth, height: video.videoHeight };
+        }
+        
+        gl.uniform1i(locations.uImage, 0);
+
+        gl.drawArrays(gl.TRIANGLES, 0, 6);
+      }
+
+      requestRef.current = requestAnimationFrame(render);
+    };
+
+    requestRef.current = requestAnimationFrame(render);
+
+    return () => {
+      if (requestRef.current) cancelAnimationFrame(requestRef.current);
+    };
+  }, [enabled, videoRef, isPlaying]);
+
+  return (
+    <div className="absolute inset-0 pointer-events-none">
+      <canvas
+        ref={canvasRef}
+        className={`absolute inset-0 w-full h-full ${
+          enabled ? 'opacity-100' : 'opacity-0'
+        }`}
+        style={{
+          objectFit: aspectMode,
+          width: '100%',
+          height: '100%',
+        }}
+      />
+
+    </div>
+  );
+};
+
+export default QualityBoostRenderer;

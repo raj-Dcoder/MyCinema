@@ -6,10 +6,13 @@ const require = createRequire(import.meta.url)
 const Database = require('better-sqlite3')
 
 const dbPath = join(app.getPath('userData'), 'mycinema.db')
-const db = new Database(dbPath)
+const db = new Database(dbPath, { 
+  timeout: 10000 // 10 seconds timeout for busy/locked database
+})
 
 // Initialize database
 export function initDb() {
+  db.pragma('journal_mode = WAL') // Write-Ahead Logging for better concurrency
   db.pragma('foreign_keys = ON')
   db.exec(`
     CREATE TABLE IF NOT EXISTS videos (

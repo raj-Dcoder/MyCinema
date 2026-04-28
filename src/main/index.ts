@@ -640,6 +640,11 @@ app.on('window-all-closed', () => {
 })
 
 // IPC Handlers
+ipcMain.on('log-to-main', (_event, message) => {
+  const timestamp = new Date().toLocaleTimeString();
+  console.log(`[Renderer Log][${timestamp}] ${message}`);
+})
+
 ipcMain.handle('select-folder', async () => {
   const result = await dialog.showOpenDialog({
     properties: ['openDirectory']
@@ -732,38 +737,85 @@ ipcMain.handle('get-embedded-audio', async (_, filePath: string) => {
   return await getEmbeddedAudio(filePath)
 })
 
+function tokenizeSubtitleName(value: string): string[] {
+  return value
+    .toLowerCase()
+    .replace(/\.[a-z0-9]{2,4}$/i, '')
+    .split(/[^a-z0-9]+/i)
+    .filter(token =>
+      token.length >= 2 &&
+      !/^(srt|sub|vtt|utf|utf8|default|english|eng|en|cc|sdh|subtitles?)$/.test(token)
+    )
+}
+
+function scoreSubtitleCandidate(videoFilePath: string, subtitlePath: string): number {
+  const videoBaseName = path.basename(videoFilePath, path.extname(videoFilePath)).toLowerCase()
+  const subtitleFileName = path.basename(subtitlePath).toLowerCase()
+  const subtitleBaseName = path.basename(subtitlePath, path.extname(subtitlePath)).toLowerCase()
+
+  if (subtitleBaseName === videoBaseName) return 1_000
+  if (subtitleBaseName === `${videoBaseName}.en` || subtitleBaseName === `${videoBaseName}.eng`) return 980
+  if (subtitleBaseName.startsWith(`${videoBaseName}.`) || subtitleBaseName.startsWith(`${videoBaseName} `)) return 940
+
+  let score = 0
+  const videoTokens = new Set(tokenizeSubtitleName(videoBaseName))
+  for (const token of tokenizeSubtitleName(subtitleBaseName)) {
+    if (videoTokens.has(token)) score += 25
+  }
+
+  const parentDir = path.basename(path.dirname(subtitlePath)).toLowerCase()
+  if (parentDir === 'subs' || parentDir === 'subtitles') score += 10
+  if (subtitleFileName.includes('opensubtitles')) score -= 15
+  if (subtitleBaseName === 'english' || subtitleBaseName === 'eng' || subtitleBaseName === 'en') score -= 30
+
+  return score
+}
+
+function findBestExternalSubtitle(videoFilePath: string): string | null {
+  const dir = path.dirname(videoFilePath)
+  const baseName = path.basename(videoFilePath, path.extname(videoFilePath))
+  const candidatePaths = new Set<string>([
+    path.join(dir, `${baseName}.srt`),
+    path.join(dir, `${baseName}.en.srt`),
+    path.join(dir, `${baseName}.eng.srt`),
+    path.join(dir, 'English.srt'),
+    path.join(dir, 'english.srt'),
+    path.join(dir, 'subs', `${baseName}.srt`),
+    path.join(dir, 'Subtitles', `${baseName}.srt`),
+  ])
+
+  const directoriesToScan = [
+    dir,
+    path.join(dir, 'subs'),
+    path.join(dir, 'Subtitles'),
+  ]
+
+  for (const scanDir of directoriesToScan) {
+    if (!fs.existsSync(scanDir)) continue
+    for (const entry of fs.readdirSync(scanDir, { withFileTypes: true })) {
+      if (!entry.isFile()) continue
+      if (path.extname(entry.name).toLowerCase() !== '.srt') continue
+      candidatePaths.add(path.join(scanDir, entry.name))
+    }
+  }
+
+  const rankedCandidates = Array.from(candidatePaths)
+    .filter(candidate => fs.existsSync(candidate))
+    .map(candidate => ({ candidate, score: scoreSubtitleCandidate(videoFilePath, candidate) }))
+    .sort((a, b) => b.score - a.score)
+
+  if (rankedCandidates.length === 0) return null
+  if (rankedCandidates[0].score < 30) return null
+  return rankedCandidates[0].candidate
+}
+
 ipcMain.handle('get-subtitles', async (_, filePath: string) => {
   if (!isSafeFilePath(filePath)) {
     console.error(`[IPC] 403 Forbidden path in get-subtitles: ${filePath}`)
     return null
   }
   try {
-    const dir = path.dirname(filePath)
-    const baseName = path.basename(filePath, path.extname(filePath))
-    
-    // 1. Check for exact match or common naming conventions
-    const possibleSrts = [
-      path.join(dir, `${baseName}.srt`),
-      path.join(dir, `${baseName}.en.srt`),
-      path.join(dir, `${baseName}.eng.srt`),
-      path.join(dir, 'English.srt'),
-      path.join(dir, 'english.srt'),
-      path.join(dir, 'subs', `${baseName}.srt`),
-      path.join(dir, 'Subtitles', `${baseName}.srt`)
-    ]
-
-    for (const srt of possibleSrts) {
-      if (fs.existsSync(srt)) return srt
-    }
-
-    // 2. Fallback: Search for ANY .srt file in the same directory
-    if (fs.existsSync(dir)) {
-      const files = fs.readdirSync(dir)
-      const anySrt = files.find(f => f.toLowerCase().endsWith('.srt'))
-      if (anySrt) return path.join(dir, anySrt)
-    }
-
-    return null
+    return findBestExternalSubtitle(filePath)
   } catch (error) {
     console.error('Failed to get subtitles:', error)
     return null
@@ -780,9 +832,11 @@ ipcMain.handle('pre-convert-subtitle', async (_, filePath: string, trackIndex: n
     const subsDir = path.join(app.getPath('userData'), 'subtitles')
     if (!fs.existsSync(subsDir)) fs.mkdirSync(subsDir, { recursive: true })
     
-    // Create a short, fixed-length cache key (16-char hex) so the output path
-    // never hits Windows' 260-char MAX_PATH limit, even for very long filenames.
-    const hash = crypto.createHash('sha1').update(`${filePath}-${trackIndex}`).digest('hex').slice(0, 16)
+    // Include file metadata so a replaced/updated subtitle does not reuse an
+    // older converted VTT with stale timings.
+    const stat = fs.statSync(filePath)
+    const cacheKey = `${filePath}-${trackIndex}-${stat.size}-${Math.floor(stat.mtimeMs)}`
+    const hash = crypto.createHash('sha1').update(cacheKey).digest('hex').slice(0, 16)
     const outPath = path.join(subsDir, `${hash}.vtt`)
     
     // Return cached file if it already exists
@@ -1142,6 +1196,64 @@ function broadcastProgress(id: string, torrent: any, status: string, errorMessag
 const TMDB_API_KEY = process.env.MAIN_VITE_TMDB_API_KEY || (import.meta as any).env?.MAIN_VITE_TMDB_API_KEY || ''
 const OPENSUBTITLES_API_KEY = process.env.MAIN_VITE_OPENSUBTITLES_API_KEY || (import.meta as any).env?.MAIN_VITE_OPENSUBTITLES_API_KEY || ''
 
+function computeOpenSubtitlesHash(filePath: string): { moviehash: string; moviebytesize: number } | null {
+  try {
+    const stat = fs.statSync(filePath)
+    const chunkSize = 64 * 1024
+    if (stat.size < chunkSize * 2) return null
+
+    const fd = fs.openSync(filePath, 'r')
+    try {
+      const buffer = Buffer.alloc(chunkSize)
+      let hash = BigInt(stat.size)
+
+      fs.readSync(fd, buffer, 0, chunkSize, 0)
+      for (let i = 0; i < chunkSize; i += 8) {
+        hash = (hash + buffer.readBigUInt64LE(i)) & BigInt('0xffffffffffffffff')
+      }
+
+      fs.readSync(fd, buffer, 0, chunkSize, stat.size - chunkSize)
+      for (let i = 0; i < chunkSize; i += 8) {
+        hash = (hash + buffer.readBigUInt64LE(i)) & BigInt('0xffffffffffffffff')
+      }
+
+      return {
+        moviehash: hash.toString(16).padStart(16, '0'),
+        moviebytesize: stat.size,
+      }
+    } finally {
+      fs.closeSync(fd)
+    }
+  } catch (err: any) {
+    console.error('[OpenSubtitles] Failed to compute movie hash:', err.message)
+    return null
+  }
+}
+
+function getReleaseTokens(value: string): string[] {
+  return value
+    .toLowerCase()
+    .replace(/\.[a-z0-9]{2,4}$/i, '')
+    .split(/[^a-z0-9]+/i)
+    .filter(token => token.length >= 3 && !/^(720p|1080p|2160p|480p|x264|x265|h264|h265|web|webrip|bluray|brrip|hdrip|dvdrip|aac|dts|yts|rarbg)$/.test(token))
+}
+
+function scoreSubtitleReleaseMatch(videoFilePath: string | undefined, releaseName: string, fileName: string): number {
+  if (!videoFilePath) return 0
+  const videoName = path.basename(videoFilePath, path.extname(videoFilePath)).toLowerCase()
+  const combined = `${releaseName} ${fileName}`.toLowerCase()
+  if (combined.includes(videoName)) return 100
+
+  const videoTokens = new Set(getReleaseTokens(videoName))
+  if (videoTokens.size === 0) return 0
+
+  let score = 0
+  for (const token of getReleaseTokens(combined)) {
+    if (videoTokens.has(token)) score += 6
+  }
+  return Math.min(score, 60)
+}
+
 ipcMain.handle('search-tmdb', async (_, query: string) => {
   try {
     const url = `https://api.themoviedb.org/3/search/multi?api_key=${TMDB_API_KEY}&query=${encodeURIComponent(query)}&include_adult=false&page=1`
@@ -1156,7 +1268,7 @@ ipcMain.handle('search-tmdb', async (_, query: string) => {
   }
 })
 
-// ─── Hindi Detection Helper ──────────────────────────────────────────────────
+// ─── Hindi Detection & Ranking Helpers ────────────────────────────────────────
 function isHindiContent(title: string): boolean {
   const lower = title.toLowerCase()
   return (
@@ -1164,7 +1276,14 @@ function isHindiContent(title: string): boolean {
     lower.includes('हिंदी') ||
     lower.includes('audio:hindi') ||
     lower.includes('audio hindi') ||
+    lower.includes('dual audio') ||
+    lower.includes('dual-audio') ||
+    lower.includes('multi audio') ||
+    lower.includes('multi-audio') ||
+    lower.includes('dubbed') ||
+    lower.includes('hin-eng') ||
     lower.includes('katmoviehd') ||
+    lower.includes('katmovieshd') ||
     lower.includes('hdhub4u') ||
     lower.includes('vegamovies') ||
     lower.includes('dotmovies') ||
@@ -1176,13 +1295,62 @@ function isHindiContent(title: string): boolean {
     lower.includes('world4ufree') ||
     lower.includes('moviesflix') ||
     lower.includes('skymovieshd') ||
+    lower.includes('uhdmovies') ||
+    lower.includes('luxmovies') ||
+    lower.includes('mkvmoviespoint') ||
+    lower.includes('mkvmad') ||
     lower.includes('u3p') ||
     lower.includes('darksiderg') ||
     lower.includes('mkvcinemas') ||
     lower.includes('1tamilmv') ||
+    lower.includes('tamilmv') ||
+    lower.includes('bollyshare') ||
+    lower.includes('desiremovies') ||
+    lower.includes('moviespapa') ||
+    lower.includes('moviesnation') ||
+    lower.includes('hdmovies24') ||
+    lower.includes('hdmovies4u') ||
+    lower.includes('filmyzilla') ||
+    lower.includes('downloadhub') ||
+    lower.includes('khatrimaza') ||
+    lower.includes('moviespur') ||
+    lower.includes('7starhd') ||
+    lower.includes('tamilyogi') ||
+    lower.includes('isaimini') ||
+    lower.includes('tamilrockers') ||
     /\bhin(di?)?\b/i.test(lower) ||
     /[\[\(\.]hin[\]\)\.]/i.test(lower)
   )
+}
+
+function getHindiScore(title: string): number {
+  const lower = title.toLowerCase()
+  let score = 0
+  
+  // High quality sites requested by user
+  const premiumSites = [
+    'katmoviehd', 'katmovieshd', 'vegamovies', 'dotmovies', 'hdhub4u', 'uhdmovies', 
+    'luxmovies', 'darksiderg', 'bolly4u', '1tamilmv', 'tamilmv', 'hdmovies4u', 
+    'bollyshare', 'desiremovies', 'moviespapa', 'moviesnation', 'hdmovies24',
+    'filmyzilla', 'downloadhub', 'tamilblasters', '7starhd'
+  ]
+  
+  for (const site of premiumSites) {
+    if (lower.includes(site)) {
+      score += 45 // Slightly higher priority
+      break
+    }
+  }
+
+  if (lower.includes('hindi')) score += 20
+  if (lower.includes('dual audio') || lower.includes('dual-audio')) score += 15
+  if (lower.includes('multi audio') || lower.includes('multi-audio')) score += 15
+  if (lower.includes('dubbed')) score += 10
+  if (lower.includes('official')) score += 10
+  if (lower.includes('1080p')) score += 5
+  if (lower.includes('2160p') || lower.includes('4k')) score += 15
+  
+  return score
 }
 
 // ─── Torrentio Stream Parser Helper ──────────────────────────────────────────
@@ -1475,12 +1643,145 @@ ipcMain.handle('search-torrent-sources', async (_, title: string, year: string, 
       }
     }
 
-    // F. Secondary Search: Title-based search on APIBay for Hindi content (Bypasses IMDB mapping issues)
+    // G. SolidTorrents: Excellent coverage for Indian/Hindi content
     try {
-      const queryYear = (mediaType === 'movie' && year) ? ` ${year}` : ''
+      const solidQueries = [
+        mediaType === 'movie' ? `${title} ${year} Hindi` : `${title} Hindi`,
+        `${title} Dual Audio`
+      ]
+      
+      for (const q of solidQueries) {
+        const solidUrl = `https://solidtorrents.to/api/v1/search?q=${encodeURIComponent(q)}&category=all&sort=seeders`
+        console.log(`[Torrent] Fetching SolidTorrents: ${solidUrl}`)
+        const solidData: any = await nodeHttpGet(solidUrl, 5000)
+        if (solidData && solidData.results) {
+          for (const t of solidData.results) {
+            const seeds = t.swarm?.seeders || 0
+            if (seeds < 1) continue
+
+            const titleName = t.title || ''
+            if (!isRelevanceMatch(titleName, title, mediaType, year)) continue
+
+            sources.push({
+              title: `${titleName.substring(0, 80)} (Solid)`,
+              quality: titleName.match(/(2160p|1080p|720p|480p)/i)?.[1] || 'HD',
+              size: formatBytes(t.size || 0),
+              magnet: t.magnet || `magnet:?xt=urn:btih:${t.infoHash}&dn=${encodeURIComponent(titleName)}`,
+              seeds,
+              peers: t.swarm?.leechers || 0,
+              type: 'web',
+              isHindi: isHindiContent(titleName)
+            })
+          }
+        }
+      }
+    } catch (err: any) {
+      console.error('[Torrent] SolidTorrents fetch failed:', err.message)
+    }
+
+    // H. Bitsearch: Targeted multi-keyword search for Hindi sites (KatmovieHD, HDhub4u, etc.)
+    const siteKeywords = [
+      'Hindi', 'KatmovieHD', 'HDhub4u', 'Vegamovies', 'UHDmovies', 
+      'Dotmovies', 'Bolly4u', 'Hdmovies4u', '1TamilMV', 'TamilMV', 
+      'Moviesflix', 'Filmyzilla', 'Downloadhub', 'TamilBlasters', '7starhd'
+    ]
+    const queryYear = (mediaType === 'movie' && year) ? ` ${year}` : ''
+    
+    // Use a smaller batch size for parallel requests to avoid being blocked or timing out
+    const keywordBatches = []
+    const batchSize = 4
+    for (let i = 0; i < siteKeywords.length; i += batchSize) {
+      keywordBatches.push(siteKeywords.slice(i, i + batchSize))
+    }
+
+    for (const batch of keywordBatches) {
+      await Promise.all(batch.map(async (keyword) => {
+        try {
+          const query = `${title}${queryYear} ${keyword}`
+          const bitUrl = `https://bitsearch.to/search?q=${encodeURIComponent(query)}&sort=seeders`
+          const html = await nodeHttpRequest(bitUrl, { timeoutMs: 8000 }) 
+          if (typeof html === 'string') {
+            // Robust regex for Bitsearch results
+            const resultRegex = /<li class="search-result[\s\S]*?<h3 class="title">[\s\S]*?<a href="([^"]+)">([^<]+)<\/a>[\s\S]*?<div class="stats">[\s\S]*?<div>[\s\S]*?([0-9.]+\s*[GMK]B)[\s\S]*?<div>[\s\S]*?([0-9,]+)[\s\S]*?<div>[\s\S]*?([0-9,]+)[\s\S]*?<a class="dl-magnet" href="([^"]+)"/g
+            let match
+            while ((match = resultRegex.exec(html)) !== null) {
+              const [, , tTitle, tSize, tSeeds, tPeers, tMagnet] = match
+              const cleanTitle = tTitle.trim()
+              const seeds = parseInt(tSeeds.replace(/,/g, '')) || 0
+              if (seeds < 1) continue
+              if (!isRelevanceMatch(cleanTitle, title, mediaType, year)) continue
+
+              sources.push({
+                title: `${cleanTitle.substring(0, 80)} (Bit)`,
+                quality: cleanTitle.match(/(2160p|1080p|720p|480p)/i)?.[1] || 'HD',
+                size: tSize.trim(),
+                magnet: tMagnet,
+                seeds,
+                peers: parseInt(tPeers.replace(/,/g, '')) || 0,
+                type: 'web',
+                isHindi: isHindiContent(cleanTitle)
+              })
+            }
+          }
+        } catch (e) {}
+      }))
+    }
+
+    // H2. 1337x: High-quality results often including Hindi/Dual-Audio
+    try {
+      const x1337Mirrors = ['1337x.to', '1337x.st', 'x1337x.ws']
+      const xQuery = mediaType === 'movie' ? `${title} ${year} Hindi` : `${title} Hindi`
+      
+      for (const domain of x1337Mirrors) {
+        try {
+          const xUrl = `https://${domain}/sort-search/${encodeURIComponent(xQuery)}/seeders/desc/1/`
+          const html = await nodeHttpRequest(xUrl, { timeoutMs: 6000 })
+          if (typeof html === 'string') {
+            // Regex for 1337x search results table
+            const rowRegex = /<td class="coll-1 name">[\s\S]*?<a href="\/torrent\/(\d+)\/([^/]+)\/">([^<]+)<\/a>[\s\S]*?<td class="coll-2 seeds">(\d+)<\/td>[\s\S]*?<td class="coll-3 leeches">(\d+)<\/td>[\s\S]*?<td class="coll-4 size">([^<]+)<span/g
+            let match
+            const torrentsToFetch = []
+            while ((match = rowRegex.exec(html)) !== null) {
+              const [ , tId, tSlug, tTitle, tSeeds, tLeeches, tSize] = match
+              const seeds = parseInt(tSeeds) || 0
+              if (seeds < 1) continue
+              if (!isRelevanceMatch(tTitle, title, mediaType, year)) continue
+              
+              torrentsToFetch.push({ id: tId, slug: tSlug, title: tTitle, seeds, peers: parseInt(tLeeches) || 0, size: tSize.trim() })
+              if (torrentsToFetch.length >= 5) break // Limit to top 5 for speed
+            }
+
+            // Fetch magnets for the top results (1337x requires a separate page load for magnet)
+            await Promise.all(torrentsToFetch.map(async (t) => {
+              try {
+                const detailUrl = `https://${domain}/torrent/${t.id}/${t.slug}/`
+                const detailHtml = await nodeHttpRequest(detailUrl, { timeoutMs: 5000 })
+                const magnetMatch = detailHtml.match(/href="(magnet:\?xt=urn:btih:[^"]+)"/)
+                if (magnetMatch) {
+                  sources.push({
+                    title: `${t.title.substring(0, 80)} (1337x)`,
+                    quality: t.title.match(/(2160p|1080p|720p|480p)/i)?.[1] || 'HD',
+                    size: t.size,
+                    magnet: magnetMatch[1],
+                    seeds: t.seeds,
+                    peers: t.peers,
+                    type: 'web',
+                    isHindi: isHindiContent(t.title)
+                  })
+                }
+              } catch (e) {}
+            }))
+            
+            if (torrentsToFetch.length > 0) break // Success, don't try other mirrors
+          }
+        } catch (e) {}
+      }
+    } catch (err: any) {}
+
+    // I. Secondary Search: Title-based search on APIBay for Hindi content
+    try {
       const searchTitle = `${title}${queryYear} Hindi`
       const apibayTitleUrl = `https://apibay.org/q.php?q=${encodeURIComponent(searchTitle)}`
-      console.log(`[Torrent] Fetching APIBay Title Search (Hindi): ${apibayTitleUrl}`)
       const apiBayData: any = await nodeHttpGet(apibayTitleUrl, 5000)
       
       if (Array.isArray(apiBayData) && apiBayData[0]?.id !== '0') {
@@ -1489,12 +1790,10 @@ ipcMain.handle('search-torrent-sources', async (_, title: string, year: string, 
           if (seeders < 1) continue
           
           const titleName = t.name || ''
-          // Only add if it's actually Hindi AND matches the requested title/type/year
           if (isHindiContent(titleName) && isRelevanceMatch(titleName, title, mediaType, year)) {
-            const qualityMatch = titleName.match(/(2160p|1080p|720p|480p)/i)
             sources.push({
               title: `${titleName.substring(0, 80)} (TPB-HI)`,
-              quality: qualityMatch ? qualityMatch[1] : 'HD',
+              quality: titleName.match(/(2160p|1080p|720p|480p)/i)?.[1] || 'HD',
               size: formatBytes(parseInt(t.size) || 0),
               magnet: `magnet:?xt=urn:btih:${t.info_hash}&dn=${encodeURIComponent(titleName)}`,
               seeds: seeders,
@@ -1505,68 +1804,25 @@ ipcMain.handle('search-torrent-sources', async (_, title: string, year: string, 
           }
         }
       }
-    } catch (err: any) {
-      console.error('[Torrent] APIBay title search failed:', err.message)
-    }
+    } catch (err: any) {}
 
-    // G. Bitsearch: Specialized search for Hindi and high-quality dubs
-    try {
-      const queryYear = (mediaType === 'movie' && year) ? ` ${year}` : ''
-      const bitsearchUrl = `https://bitsearch.to/api/search?q=${encodeURIComponent(title + queryYear + ' Hindi')}&limit=20`
-      console.log(`[Torrent] Fetching Bitsearch: ${bitsearchUrl}`)
-      const bsData: any = await nodeHttpGet(bitsearchUrl, 5000)
-      if (bsData && Array.isArray(bsData.results)) {
-        for (const t of bsData.results) {
-          const seeds = t.seeders || 0
-          if (seeds < 1) continue
-          
-          const titleName = t.name || ''
-          if (isHindiContent(titleName) && isRelevanceMatch(titleName, title, mediaType, year)) {
-            const qualityMatch = titleName.match(/(2160p|1080p|720p|480p)/i)
-            // Ensure size is correctly formatted (Bitsearch sometimes returns bytes or strings)
-            let rawSize = t.size || '0'
-            let formattedSize = rawSize
-            if (/^\d+$/.test(rawSize)) {
-              formattedSize = formatBytes(parseInt(rawSize))
-            }
-
-            sources.push({
-              title: `${titleName.substring(0, 80)} (BS-HI)`,
-              quality: qualityMatch ? qualityMatch[1] : 'HD',
-              size: formattedSize,
-              magnet: t.magnet || `magnet:?xt=urn:btih:${t.info_hash}&dn=${encodeURIComponent(titleName)}`,
-              seeds: seeds,
-              peers: t.leechers || 0,
-              type: 'web',
-              isHindi: true
-            })
-          }
-        }
-      }
-    } catch (err: any) {
-      console.log('[Torrent] Bitsearch failed or not accessible')
-    }
-
-    // H. Dedicated "Hindi Dubbed" Aggregator Search (1337x / TorrentGalaxy via Torrentio)
+    // J. Dedicated Hindi/Dubbed Aggregators (KnightCrawler)
     if (imdbId) {
       try {
-        const dubbedUrl = `${TORRENTIO_BASE}/stream/${mediaType === 'movie' ? 'movie' : 'series'}/${imdbId}.json`
-        console.log(`[Torrent] Fetching Dubbed Aggregator: ${dubbedUrl}`)
-        const dubbedData: any = await nodeHttpGet(dubbedUrl, 6000)
-        if (dubbedData && dubbedData.streams) {
-          for (const stream of dubbedData.streams) {
+        const kcUrl = `https://knightcrawler.elfhosted.com/stream/${mediaType === 'movie' ? 'movie' : 'series'}/${imdbId}.json`
+        const kcData: any = await nodeHttpGet(kcUrl, 6000)
+        if (kcData && kcData.streams) {
+          for (const stream of kcData.streams) {
             if (isHindiContent(stream.title || '')) {
               const parsed = parseTorrentioStream(stream, title)
               if (parsed) {
-                parsed.title = `${parsed.title} (DUB)`
+                parsed.title = `${parsed.title} (KC)`
                 sources.push(parsed)
               }
             }
           }
         }
-      } catch (err: any) {
-        console.error('[Torrent] Dubbed aggregator fetch failed')
-      }
+      } catch (err: any) {}
     }
 
     // Parse Season / Episode metadata
@@ -1602,23 +1858,28 @@ ipcMain.handle('search-torrent-sources', async (_, title: string, year: string, 
       })
     }
 
-    // Sort heavily by requirements — Hindi content prioritized
+    // Sort heavily by requirements — Hindi content and premium sites prioritized
     enrichedSources.sort((a, b) => {
+      const scoreA = getHindiScore(a.title)
+      const scoreB = getHindiScore(b.title)
+
       if (mediaType === 'movie') {
-        // Hindi/Dual Audio first
-        if (a.isHindi && !b.isHindi) return -1
-        if (!a.isHindi && b.isHindi) return 1
-        // Then by seeds
+        // Priority 1: Hindi Score (includes site priority)
+        if (scoreA !== scoreB) return scoreB - scoreA
+        
+        // Priority 2: Seeds
         return b.seeds - a.seeds
       } else {
+        // TV Series logic
         // Both are Season Packs
         if (a.isSeasonPack && b.isSeasonPack) {
           if (a.parsedSeason !== b.parsedSeason) return (a.parsedSeason || 0) - (b.parsedSeason || 0)
-          // Hindi first within same season pack
-          if (a.isHindi && !b.isHindi) return -1
-          if (!a.isHindi && b.isHindi) return 1
+          
+          // Same season pack: Hindi score first
+          if (scoreA !== scoreB) return scoreB - scoreA
           return b.seeds - a.seeds
         }
+        
         // Pack vs Episode
         if (a.isSeasonPack && !b.isSeasonPack) return -1
         if (!a.isSeasonPack && b.isSeasonPack) return 1
@@ -1627,9 +1888,8 @@ ipcMain.handle('search-torrent-sources', async (_, title: string, year: string, 
         if (a.parsedSeason !== b.parsedSeason) return (a.parsedSeason || 0) - (b.parsedSeason || 0)
         if (a.parsedEpisode !== b.parsedEpisode) return (a.parsedEpisode || 0) - (b.parsedEpisode || 0)
         
-        // Same Episode: Hindi first, then seeds
-        if (a.isHindi && !b.isHindi) return -1
-        if (!a.isHindi && b.isHindi) return 1
+        // Same Episode: Hindi score first, then seeds
+        if (scoreA !== scoreB) return scoreB - scoreA
         if (a.seeds !== b.seeds) return b.seeds - a.seeds
         
         // Tiebreaker: Resolution
@@ -1909,6 +2169,7 @@ ipcMain.handle('search-opensubtitles', async (_, params: {
   episode?: number
   languages?: string
   mediaType?: string
+  videoFilePath?: string
 }) => {
   if (!OPENSUBTITLES_API_KEY) {
     console.error('[OpenSubtitles] No API key configured')
@@ -1917,6 +2178,10 @@ ipcMain.handle('search-opensubtitles', async (_, params: {
 
   try {
     const searchParams = new URLSearchParams()
+    const videoFilePath = params.videoFilePath && isSafeFilePath(params.videoFilePath)
+      ? params.videoFilePath
+      : undefined
+    const fileHash = videoFilePath ? computeOpenSubtitlesHash(videoFilePath) : null
 
     if (params.tmdbId) {
       searchParams.set('tmdb_id', params.tmdbId.toString())
@@ -1931,6 +2196,10 @@ ipcMain.handle('search-opensubtitles', async (_, params: {
 
     if (params.season) searchParams.set('season_number', params.season.toString())
     if (params.episode) searchParams.set('episode_number', params.episode.toString())
+    if (fileHash) {
+      searchParams.set('moviehash', fileHash.moviehash)
+      searchParams.set('moviebytesize', fileHash.moviebytesize.toString())
+    }
     searchParams.set('languages', params.languages || 'en,hi')
     searchParams.set('order_by', 'download_count')
     searchParams.set('order_direction', 'desc')
@@ -1958,19 +2227,30 @@ ipcMain.handle('search-opensubtitles', async (_, params: {
     const results = (data.data || []).map((item: any) => {
       const attrs = item.attributes || {}
       const bestFile = attrs.files?.[0]
+      const releaseName = attrs.release || attrs.feature_details?.movie_name || 'Subtitle'
+      const fileName = bestFile?.file_name || 'subtitle.srt'
+      const hashMatch = Boolean(attrs.moviehash_match)
+      const releaseMatchScore = scoreSubtitleReleaseMatch(videoFilePath, releaseName, fileName)
       return {
         id: item.id,
         fileId: bestFile?.file_id,
         language: attrs.language || 'unknown',
-        releaseName: attrs.release || attrs.feature_details?.movie_name || 'Subtitle',
+        releaseName,
         downloadCount: attrs.download_count || 0,
-        fileName: bestFile?.file_name || 'subtitle.srt',
+        fileName,
         rating: attrs.ratings || 0,
+        hashMatch,
+        releaseMatchScore,
         hearingImpaired: attrs.hearing_impaired || false,
         aiTranslated: attrs.ai_translated || false,
         machineTranslated: attrs.machine_translated || false,
       }
-    })
+    }).filter((result: any) => result.fileId)
+      .sort((a: any, b: any) => {
+        if (a.hashMatch !== b.hashMatch) return a.hashMatch ? -1 : 1
+        if (a.releaseMatchScore !== b.releaseMatchScore) return b.releaseMatchScore - a.releaseMatchScore
+        return (b.downloadCount || 0) - (a.downloadCount || 0)
+      })
 
     console.log(`[OpenSubtitles] Found ${results.length} results`)
     return { results }
@@ -1988,6 +2268,10 @@ ipcMain.handle('download-opensubtitle', async (_, params: {
 }) => {
   if (!OPENSUBTITLES_API_KEY) {
     return { error: 'No OpenSubtitles API key configured' }
+  }
+  if (!isSafeFilePath(params.videoFilePath)) {
+    console.error(`[OpenSubtitles] 403 Forbidden video path: ${params.videoFilePath}`)
+    return { error: 'Invalid video path' }
   }
 
   try {
@@ -2026,7 +2310,7 @@ ipcMain.handle('download-opensubtitle', async (_, params: {
     // Step 3: Save the SRT file alongside the video
     const videoDir = path.dirname(params.videoFilePath)
     const videoBaseName = path.basename(params.videoFilePath, path.extname(params.videoFilePath))
-    const srtPath = path.join(videoDir, `${videoBaseName}.srt`)
+    const srtPath = path.join(videoDir, `${videoBaseName}.opensubtitles.${params.fileId}.srt`)
 
     fs.writeFileSync(srtPath, srtContent, 'utf-8')
     console.log(`[OpenSubtitles] Saved subtitle to: ${srtPath}`)

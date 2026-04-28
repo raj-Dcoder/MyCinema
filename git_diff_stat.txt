@@ -1,0 +1,6 @@
+ package.json                                |   2 +-
+ src/main/db.ts                              |   5 +-
+ src/main/index.ts                           | 488 ++++++++++++++++----
+ src/preload/index.ts                        |   1 +
+ src/renderer/src/components/VideoPlayer.tsx | 692 ++++++++++++++++++++++++----
+ 5 files changed, 985 insertions(+), 203 deletions(-)

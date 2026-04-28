@@ -54,6 +54,7 @@ const api = {
     ipcRenderer.invoke('search-opensubtitles', params),
   downloadOnlineSubtitle: (params: { fileId: number; videoFilePath: string; fileName?: string }) =>
     ipcRenderer.invoke('download-opensubtitle', params),
+  log: (message: string) => ipcRenderer.send('log-to-main', message),
 }
 
 // Use `contextBridge` APIs to expose Electron APIs to

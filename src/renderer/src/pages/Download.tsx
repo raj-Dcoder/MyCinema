@@ -1,6 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react'
 import { Search, Download as DownloadIcon, Film, Tv, X, Loader2, HardDrive, CheckCircle2, AlertCircle, Pause, Play, FolderOpen, Bookmark, BookmarkCheck, ChevronLeft, ChevronRight, ArrowLeft, Languages } from 'lucide-react'
-import { DownloadFeatureTour } from '../components/DownloadFeatureTour'
 import HorizontalScrollRow from '../components/HorizontalScrollRow'
 
 import { Video } from '../types'
@@ -314,7 +313,6 @@ const Download: React.FC<DownloadProps> = ({ onShowDetail }) => {
 
   return (
     <div className="relative">
-      <DownloadFeatureTour />
       {/* Compact Removal Tooltip/Menu */}
       {downloadToRemove && (
         <div 

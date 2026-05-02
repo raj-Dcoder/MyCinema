@@ -34,6 +34,37 @@ const App: React.FC = () => {
     window.api.onUpdateAvailable((info) => setUpdateState({ status: 'available', version: info.version }))
     window.api.onUpdateProgress((info) => setUpdateState(prev => ({ ...prev, status: 'downloading', percent: info.percent })))
     window.api.onUpdateDownloaded(() => setUpdateState(prev => ({ ...prev, status: 'ready' })))
+
+    const playExternalFile = (filePath: string) => {
+      window.api.getVideos().then((videos: any) => {
+        const existing = videos.find((v: any) => v.file_path === filePath)
+        if (existing) {
+          setPlayingVideo(existing)
+        } else {
+          const fakeVideo: Video = {
+            id: -1,
+            title: filePath.split(/[\\/]/).pop() || 'Unknown Video',
+            file_path: filePath,
+            type: 'movie',
+            duration: 0
+          }
+          setPlayingVideo(fakeVideo)
+        }
+      })
+    }
+
+    // Check if there was a file clicked before the app was ready
+    window.api.getPendingExternalFile().then((filePath) => {
+      if (filePath) playExternalFile(filePath)
+    })
+
+    const cleanupOpenExternal = window.api.onOpenExternalFile((filePath: string) => {
+      playExternalFile(filePath)
+    })
+
+    return () => {
+      cleanupOpenExternal()
+    }
   }, [])
 
   const handleSelectFolder = async () => {

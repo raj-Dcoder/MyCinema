@@ -16,6 +16,12 @@ const api = {
   getEmbeddedSubtitles: (filePath: string) => ipcRenderer.invoke('get-embedded-subtitles', filePath),
   getEmbeddedAudio: (filePath: string) => ipcRenderer.invoke('get-embedded-audio', filePath),
   preConvertSubtitle: (filePath: string, trackIndex: number, isExternal: boolean) => ipcRenderer.invoke('pre-convert-subtitle', filePath, trackIndex, isExternal),
+  onOpenExternalFile: (callback: (filePath: string) => void) => {
+    const handler = (_e: any, filePath: string) => callback(filePath)
+    ipcRenderer.on('open-external-file', handler)
+    return () => ipcRenderer.removeListener('open-external-file', handler)
+  },
+  getPendingExternalFile: () => ipcRenderer.invoke('get-pending-external-file'),
   onLibraryUpdated: (callback: () => void) => ipcRenderer.on('library-updated', (_event) => callback()),
   removeAllLibraryUpdateListeners: () => ipcRenderer.removeAllListeners('library-updated'),
   getFolders: () => ipcRenderer.invoke('get-folders'),

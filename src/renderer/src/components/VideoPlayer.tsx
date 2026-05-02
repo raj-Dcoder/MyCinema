@@ -284,7 +284,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
       }
     }
 
-    if (isPlaying) {
+    if (isPlaying && audioBoostEnabled) {
       initAudio()
     }
 
@@ -316,6 +316,12 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
       }
     }
   }, [])
+
+  // Sync internal state when the video prop changes (e.g. user opens a new file while player is already open)
+  // This ensures that switching from one external file to another (both with ID -1) triggers a re-load.
+  useEffect(() => {
+    setCurrentVideo(video)
+  }, [video])
 
   const handleOpenFolder = () => {
     window.api.openFolder(currentVideo.file_path)
@@ -569,7 +575,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
     return () => {
       document.removeEventListener('fullscreenchange', handleFullscreenChange)
     }
-  }, [currentVideo.id])
+  }, [currentVideo.id, currentVideo.file_path])
 
   // ─────────────────────────────────────────────────────────────────────────────
   // ── Imperative subtitle overlay (matches the working 2x Speed Toast pattern) ──
@@ -1334,7 +1340,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
     }
 
     setActiveSubKey(key)
-    setCurrentSubtitle(0)
+    setCurrentSubtitle(trackObj?.idx ?? null)
     setSubtitleLoading(true)
     if (closeMenu) setShowMediaMenu(false)
     activeSubKeyRef.current = key

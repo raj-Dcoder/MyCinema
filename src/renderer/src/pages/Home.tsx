@@ -2,7 +2,6 @@ import React, { useEffect, useState } from 'react'
 import { Video } from '../types'
 import VideoCard from '../components/VideoCard'
 import HorizontalScrollRow from '../components/HorizontalScrollRow'
-import { WhatsNewTour } from '../components/WhatsNewTour'
 
 interface HomeProps {
   onPlay: (video: Video) => void
@@ -71,7 +70,6 @@ const Home: React.FC<HomeProps> = ({ onPlay, onShowDetail, refreshKey }) => {
 
   return (
     <div className="space-y-12">
-      <WhatsNewTour />
       {continueWatching.length > 0 && (
         <section>
           <div className="mb-6">

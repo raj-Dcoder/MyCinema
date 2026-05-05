@@ -30,205 +30,109 @@ const VideoCard: React.FC<VideoCardProps> = ({ video, onPlay, onShowDetail, isCo
     if (!seconds) return null
     const h = Math.floor(seconds / 3600)
     const m = Math.floor((seconds % 3600) / 60)
-    if (h > 0) return `${h}H ${m}M`
-    return `${m}M`
-  }
-
-  const getFormat = (filePath: string) => {
-    const ext = filePath.split('.').pop()?.toUpperCase()
-    return ext || 'MKV'
+    if (h > 0) return `${h}h ${m}m`
+    return `${m}m`
   }
 
   const genres = video.genres 
      ? video.genres.split(',').map(g => g.trim()).filter(g => g.length > 0) 
      : []
 
-  const getFinishTimeInfo = (v: Video) => {
-    if (!v.duration || v.last_watched_time === undefined) return null
-    
-    const timeLeftSeconds = v.duration - v.last_watched_time
-    const totalMins = Math.ceil(timeLeftSeconds / 60)
-    
-    const now = new Date()
-    const finishDate = new Date(now.getTime() + timeLeftSeconds * 1000)
-    
-    let hours = finishDate.getHours()
-    const minutes = finishDate.getMinutes()
-    const ampm = hours >= 12 ? 'pm' : 'am'
-    hours = hours % 12
-    hours = hours ? hours : 12 
-    
-    const formattedTime = `${hours}:${minutes.toString().padStart(2, '0')} ${ampm}`
-    
-    return (
-      <span className="flex flex-wrap items-center justify-start gap-x-1.5 lowercase italic font-medium tracking-widest opacity-80">
-        <span className="whitespace-nowrap">{totalMins}min left</span>
-        <span className="opacity-40 italic text-[11px] leading-none">•</span>
-        <span className="whitespace-nowrap">you can finish it by {formattedTime}</span>
-      </span>
-    )
-  }
-
   const handleClick = () => {
-    if (isContinueWatching) {
-      onPlay(video)
-    } else if (onShowDetail) {
+    if (onShowDetail) {
       onShowDetail(video)
     } else {
       onPlay(video)
     }
   }
 
+  // "Continue Watching" style (Side Panel)
   if (isContinueWatching) {
-    const displayImage = backdropUrl || posterUrl
     return (
       <div 
-        className="group relative flex flex-row justify-start h-72 md:h-96 lg:h-[28rem] w-full bg-secondary/40 rounded-3xl overflow-hidden shadow-2xl cursor-pointer ring-1 ring-white/5 hover:ring-white/20 hover:-translate-y-2 hover:shadow-[0_20px_50px_rgba(0,0,0,0.5)] transition-all duration-400 ease-out"
-        onClick={handleClick}
-        style={{ WebkitMaskImage: '-webkit-radial-gradient(white, black)' }}
+        className="group flex items-center gap-4 p-2 rounded-2xl hover:bg-white/5 transition-all cursor-pointer"
+        onClick={() => onPlay(video)}
       >
-        {/* Background Image */}
-        <div className="absolute inset-0 z-0 overflow-hidden bg-black rounded-3xl">
-           {displayImage && <img src={displayImage} className="w-full h-full object-cover opacity-100 group-hover:opacity-90 transition-all duration-700 ease-out scale-105 group-hover:scale-100 object-center" alt="" />}
-           <div className="absolute inset-0 bg-gradient-to-r from-black/50 via-transparent to-transparent group-hover:from-black/60 group-hover:via-black/5 transition-all duration-500"></div>
-           <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent group-hover:from-black/70 group-hover:via-black/10 transition-all duration-500"></div>
+        <div className="relative w-24 aspect-video rounded-xl overflow-hidden bg-secondary flex-shrink-0">
+          {backdropUrl || posterUrl ? (
+            <img src={backdropUrl || posterUrl || ''} className="w-full h-full object-cover" alt="" />
+          ) : (
+            <div className="w-full h-full bg-neutral-800" />
+          )}
+          <div className="absolute inset-0 bg-black/20 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+            <Play fill="white" size={16} className="text-white" />
+          </div>
+          {progressPercent > 0 && (
+            <div className="absolute bottom-0 left-0 right-0 h-1 bg-white/20">
+              <div className="h-full bg-red-600" style={{ width: `${progressPercent}%` }} />
+            </div>
+          )}
         </div>
-        
-        {/* Content overlaid directly on the backdrop */}
-        <div className="relative z-10 flex flex-col justify-end items-start text-left flex-1 p-6 md:p-8 w-full md:w-3/4 lg:w-2/3">
-           <h2 className="text-3xl md:text-5xl font-bold text-white line-clamp-2 mb-2 group-hover:text-red-100 transition-colors drop-shadow-lg">
-              {video.type === 'series' && video.series_name ? video.series_name : video.title}
-           </h2>
-           
-           <p className="text-white/80 text-sm md:text-lg font-bold tracking-widest mb-4 drop-shadow-md">
-              {video.type === 'series' && video.season !== undefined && video.episode !== undefined ? (
-                <span className="text-red-400">
-                  SEASON {video.season} • EPISODE {video.episode}
-                </span>
-              ) : video.release_year ? (
-                <span>{video.release_year}</span>
-              ) : null}
-           </p>
-  
-           <div className="flex flex-col items-start translate-y-1 group-hover:translate-y-0 transition-transform duration-300 mb-1">
-              {video.duration && video.last_watched_time !== undefined && getFinishTimeInfo(video)}
-           </div>
-        </div>
-
-        {/* Play Button - Bottom Right */}
-        <div className="absolute bottom-6 right-6 md:bottom-8 md:right-8 z-10 overflow-visible flex items-end">
-          <div className="w-16 h-16 md:w-20 md:h-20 bg-red-600 rounded-full flex items-center justify-center shadow-[0_0_40px_rgba(220,38,38,0.5)] transform scale-90 group-hover:scale-110 transition-transform duration-300 hover:bg-red-500">
-             <Play fill="white" className="w-8 h-8 md:w-10 md:h-10 ml-2" />
+        <div className="flex-1 min-w-0">
+          <h4 className="text-sm font-bold text-white truncate leading-tight mb-1">{video.type === 'series' && video.series_name ? video.series_name : video.title}</h4>
+          <div className="flex items-center gap-2 text-[10px] font-bold text-muted uppercase tracking-wider">
+            {video.release_year && <span>{video.release_year}</span>}
+            {video.duration && <span>• {formatDuration(video.duration)}</span>}
           </div>
         </div>
-
-
-        {/* Progress bar attached to bottom of card */}
-        {progressPercent > 0 && (
-          <div className="absolute bottom-0 left-0 right-0 h-2 bg-black/60 z-20">
-            <div 
-              className="h-full bg-red-600 transition-all shadow-[0_0_12px_rgba(220,38,38,0.8)]" 
-              style={{ width: `${progressPercent}%` }}
-            />
-          </div>
-        )}
+        <div className="text-[11px] font-black text-white/40">{Math.round(progressPercent)}%</div>
       </div>
     )
   }
 
+  // Standard Poster Style (Home/Grid)
   return (
     <div 
-      className="group relative flex flex-col space-y-2 cursor-pointer transition-all duration-300"
+      className="group flex flex-col gap-3 cursor-pointer"
       onClick={handleClick}
     >
-      <div 
-        className="relative aspect-[2/3] w-full overflow-hidden rounded-xl bg-secondary shadow-lg ring-1 ring-white/10 group-hover:ring-red-600/50 transition-all duration-300 group-hover:-translate-y-1 group-hover:shadow-[0_8px_30px_rgba(220,38,38,0.2)]"
-        style={{ WebkitMaskImage: '-webkit-radial-gradient(white, black)' }}
-      >
-        <div className="absolute inset-0 bg-neutral-900 animate-pulse" style={{ display: posterUrl ? 'none' : 'block' }}></div>
+      <div className="relative aspect-[2/3] w-full rounded-2xl overflow-hidden bg-secondary shadow-lg ring-1 ring-white/5 group-hover:ring-red-600/50 transition-all duration-300 group-hover:-translate-y-2">
         {posterUrl ? (
           <img 
             src={posterUrl} 
             alt={video.title} 
-            className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-105"
-            onError={(e) => {
-              (e.target as HTMLImageElement).src = 'https://via.placeholder.com/500x750?text=No+Poster'
-            }}
+            className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-110"
           />
         ) : (
-          <div className="relative z-10 flex h-full w-full items-center justify-center bg-secondary text-muted text-sm text-center p-4">
-            <span className="opacity-50">{video.title}</span>
+          <div className="h-full w-full flex items-center justify-center p-4 text-center">
+            <span className="text-xs text-muted font-bold uppercase tracking-widest opacity-50">{video.title}</span>
           </div>
         )}
-        
-        {/* Badges for Catalog Cards */}
-        <div className="absolute top-2 right-2 z-10 flex gap-1 transform transition-transform duration-300 group-hover:-translate-y-2 group-hover:opacity-0">
-          {video.vote_average && video.vote_average > 0 ? (
-            <span className="px-1.5 py-0.5 bg-black/60 backdrop-blur-md rounded-md text-[10px] font-bold text-white border border-white/10 flex items-center gap-1">
-              <span className="text-yellow-400">★</span> {video.vote_average.toFixed(1)}
-            </span>
-          ) : null}
-        </div>
 
-        {/* Hover Overlay - Catalog */}
-        <div className="absolute inset-0 bg-gradient-to-t from-black/95 via-black/60 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300 flex flex-col justify-end p-4 text-center backdrop-blur-[2px]">
-          {/* Play Button - Centered */}
-          <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-            <div className="w-16 h-16 bg-red-600 rounded-full flex items-center justify-center shadow-[0_0_30px_rgba(220,38,38,0.4)] transform scale-75 group-hover:scale-100 transition-transform duration-500 ease-out">
-              <Play fill="white" size={32} className="ml-1 text-white" />
-            </div>
+        {/* Rating Badge */}
+        {video.vote_average && video.vote_average > 0 && (
+          <div className="absolute top-3 right-3 z-10 px-1.5 py-0.5 bg-black/60 backdrop-blur-md rounded-lg border border-white/10 flex items-center gap-1">
+            <span className="text-yellow-400 text-[10px]">★</span>
+            <span className="text-white text-[10px] font-black">{video.vote_average.toFixed(1)}</span>
           </div>
+        )}
 
-          {/* Quick Info Below Play Button */}
-          <div className="relative z-10 translate-y-4 group-hover:translate-y-0 transition-transform duration-300">
-            {/* Tagline or Overview */}
-            {(video.tagline || video.overview) && (
-              <p className="text-white/90 text-[0.75rem] mb-3 line-clamp-3 leading-snug drop-shadow-md">
-                {video.tagline || video.overview}
-              </p>
-            )}
+        {/* Trending Badge */}
+        {video.isExternal && (
+          <div className="absolute top-3 left-3 z-10 px-2 py-0.5 bg-primary/20 backdrop-blur-md border border-primary/30 rounded-lg flex items-center gap-1.5">
+            <div className="w-1 h-1 bg-primary rounded-full animate-pulse" />
+            <span className="text-[8px] font-black text-white uppercase tracking-widest italic">Trending</span>
+          </div>
+        )}
 
-            {/* Info Row: Duration and Format */}
-            <div className="flex items-center justify-center space-x-2 text-white/70 text-[10px] font-bold tracking-tight">
-              {video.episode_count ? (
-                <span className="text-red-400">{video.episode_count} Episodes</span>
-              ) : (
-                <>
-                  {video.type === 'series' && video.season !== undefined && video.episode !== undefined ? (
-                    <>
-                      <span className="text-red-400">
-                        S{video.season.toString().padStart(2, '0')} E{video.episode.toString().padStart(2, '0')}
-                      </span>
-                      <span>•</span>
-                    </>
-                  ) : null}
-                  {video.duration ? (
-                    <>
-                      <span>{formatDuration(video.duration)}</span>
-                      <span>•</span>
-                    </>
-                  ) : null}
-                </>
-              )}
-              <span className="uppercase bg-white/10 px-1.5 py-0.5 rounded">{getFormat(video.file_path)}</span>
-            </div>
+        {/* Play Overlay */}
+        <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+          <div className="w-12 h-12 bg-red-600 rounded-full flex items-center justify-center shadow-xl transform scale-75 group-hover:scale-100 transition-transform duration-300">
+            <Play fill="white" size={24} className="text-white ml-1" />
           </div>
         </div>
       </div>
-      
-      {/* Title Area */}
-      <div className="px-1 pt-1 flex flex-col">
-        <h3 className="font-bold tracking-tight text-white/90 group-hover:text-white transition-colors line-clamp-1 text-[0.95rem]">
+
+      {/* Info Below */}
+      <div className="space-y-1 px-1">
+        <h3 className="text-sm font-bold text-white truncate leading-tight group-hover:text-primary transition-colors">
           {video.type === 'series' && video.series_name ? video.series_name : video.title}
         </h3>
-        
-        {/* Subtitle / Meta */}
-        <p className="text-[0.8rem] text-white/50 font-medium tracking-wide mt-0.5 flex items-center truncate">
-          {video.release_year ? `${video.release_year} • ` : ''}
-          {video.type === 'series' && video.episode_count 
-            ? `${video.episode_count} Episodes`
-            : (genres.length > 0 ? genres[0] : (video.type === 'series' ? 'Web Series' : 'Movie'))}
-        </p>
+        <div className="flex items-center gap-2 text-[10px] font-bold text-muted uppercase tracking-wider">
+          {video.release_year && <span>{video.release_year}</span>}
+          <span>•</span>
+          <span className="truncate">{genres.length > 0 ? genres[0] : (video.type === 'series' ? 'Web Series' : 'Movie')}</span>
+        </div>
       </div>
     </div>
   )

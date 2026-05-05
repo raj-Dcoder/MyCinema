@@ -1,5 +1,6 @@
 import { app } from 'electron'
 import { join } from 'path'
+import path from 'path'
 import { createRequire } from 'module'
 
 const require = createRequire(import.meta.url)
@@ -31,6 +32,21 @@ export function initDb() {
       tmdb_id INTEGER,
       vote_average REAL,
       release_year INTEGER,
+      is_favorite BOOLEAN DEFAULT 0,
+      is_watchlist BOOLEAN DEFAULT 0,
+      added_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE TABLE IF NOT EXISTS watchlist (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      tmdb_id INTEGER UNIQUE NOT NULL,
+      title TEXT NOT NULL,
+      type TEXT CHECK(type IN ('movie', 'series')) NOT NULL,
+      poster_path TEXT,
+      backdrop_path TEXT,
+      overview TEXT,
+      vote_average REAL,
+      release_year INTEGER,
       added_at DATETIME DEFAULT CURRENT_TIMESTAMP
     );
 
@@ -56,6 +72,12 @@ export function initDb() {
   }
   if (!columnNames.includes('backdrop_path')) {
     db.exec("ALTER TABLE videos ADD COLUMN backdrop_path TEXT")
+  }
+  if (!columnNames.includes('is_favorite')) {
+    db.exec("ALTER TABLE videos ADD COLUMN is_favorite BOOLEAN DEFAULT 0")
+  }
+  if (!columnNames.includes('is_watchlist')) {
+    db.exec("ALTER TABLE videos ADD COLUMN is_watchlist BOOLEAN DEFAULT 0")
   }
 
   db.exec(`
@@ -252,9 +274,70 @@ export function addFolder(folderPath: string) {
   `).run(folderPath)
 }
 
+export function toggleFavorite(id: number) {
+  const current = db.prepare('SELECT is_favorite FROM videos WHERE id = ?').get(id) as any
+  if (!current) return null
+  const newValue = current.is_favorite ? 0 : 1
+  db.prepare('UPDATE videos SET is_favorite = ? WHERE id = ?').run(newValue, id)
+  return newValue
+}
+
+export function toggleWatchlist(id: number) {
+  const current = db.prepare('SELECT is_watchlist FROM videos WHERE id = ?').get(id) as any
+  if (!current) return null
+  const newValue = current.is_watchlist ? 0 : 1
+  db.prepare('UPDATE videos SET is_watchlist = ? WHERE id = ?').run(newValue, id)
+  return newValue
+}
+
+export function addToWatchlistExternal(item: any) {
+  const stmt = db.prepare(`
+    INSERT INTO watchlist (tmdb_id, title, type, poster_path, backdrop_path, overview, vote_average, release_year)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(tmdb_id) DO NOTHING
+  `)
+  return stmt.run(
+    item.tmdb_id,
+    item.title,
+    item.type,
+    item.poster_path,
+    item.backdrop_path,
+    item.overview,
+    item.vote_average,
+    item.release_year
+  )
+}
+
+export function removeFromWatchlistExternal(tmdbId: number) {
+  return db.prepare('DELETE FROM watchlist WHERE tmdb_id = ?').run(tmdbId)
+}
+
+export function getWatchlist() {
+  const external = db.prepare('SELECT *, 1 as isExternal, 1 as is_watchlist FROM watchlist').all()
+  const internal = db.prepare(`
+    SELECT v.*, 0 as isExternal 
+    FROM videos v 
+    WHERE v.is_watchlist = 1
+  `).all()
+  return [...external, ...internal].sort((a, b) => new Date(b.added_at).getTime() - new Date(a.added_at).getTime())
+}
+
+export function getFavorites() {
+  return db.prepare('SELECT * FROM videos WHERE is_favorite = 1 ORDER BY added_at DESC').all()
+}
+
 export function removeFolder(folderPath: string) {
-  // Delete all videos under this folder path
-  db.prepare(`DELETE FROM videos WHERE file_path LIKE ?`).run(`${folderPath}%`)
+  const normalizedFolderPath = path.normalize(folderPath)
+  const folderPrefix = normalizedFolderPath.endsWith(path.sep)
+    ? normalizedFolderPath
+    : `${normalizedFolderPath}${path.sep}`
+
+  // Delete only files in this exact folder tree. A plain prefix match would also
+  // remove siblings such as "C:\Movies 2" when deleting "C:\Movies".
+  db.prepare(`DELETE FROM videos WHERE file_path = ? OR file_path LIKE ?`).run(
+    normalizedFolderPath,
+    `${folderPrefix}%`
+  )
   // Delete the folder record itself
   db.prepare(`DELETE FROM watched_folders WHERE path = ?`).run(folderPath)
 }
@@ -310,6 +393,20 @@ export function getDownloads() {
 
 export function removeDownloadRow(id: string) {
   return db.prepare('DELETE FROM downloads WHERE id = ?').run(id)
+}
+
+export function getDownloadByTorrentName(name: string) {
+  return db.prepare('SELECT * FROM downloads WHERE name = ?').get(name) as any
+}
+
+export function findVideoByTmdbId(tmdbId: number) {
+  return db.prepare(`
+    SELECT v.*, p.last_watched_time, p.completed
+    FROM videos v
+    LEFT JOIN progress p ON v.id = p.video_id
+    WHERE v.tmdb_id = ?
+    LIMIT 1
+  `).get(tmdbId) as any
 }
 
 export default db

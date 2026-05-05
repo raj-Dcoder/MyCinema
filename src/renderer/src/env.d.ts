@@ -1,3 +1,5 @@
+/// <reference types="vite/client" />
+
 import { electronAPI } from '@electron-toolkit/preload'
 
 interface Api {
@@ -20,6 +22,13 @@ interface Api {
   getFolders: () => Promise<any[]>
   removeFolder: (folderPath: string) => Promise<boolean>
   clearAllData: () => Promise<boolean>
+  fetchTrending: (type: 'movie' | 'series') => Promise<any[]>
+  toggleFavorite: (id: number) => Promise<number | null>
+  toggleWatchlist: (id: number) => Promise<number | null>
+  addToWatchlistExternal: (item: any) => Promise<any>
+  removeFromWatchlistExternal: (tmdbId: number) => Promise<any>
+  getWatchlist: () => Promise<any[]>
+  getFavorites: () => Promise<any[]>
   onUpdateAvailable: (callback: (info: { version: string }) => void) => void
   onUpdateProgress: (callback: (info: { percent: number }) => void) => void
   onUpdateDownloaded: (callback: () => void) => void

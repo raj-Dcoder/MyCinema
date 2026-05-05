@@ -91,7 +91,74 @@ function cacheKey(title: string, type: 'movie' | 'series'): string {
   return crypto.createHash('sha1').update(`${type}::${title.toLowerCase().trim()}`).digest('hex')
 }
 
+// ─── Trending Cache ──────────────────────────────────────────────────────────
+
+const trendingCache: Record<string, { data: any[], timestamp: number }> = {}
+const TRENDING_CACHE_TTL = 1000 * 60 * 60 * 4 // 4 hours
+
 // ─── Public API ──────────────────────────────────────────────────────────────
+
+export async function fetchTrending(type: 'movie' | 'series'): Promise<any[]> {
+  const apiKey = getTmdbApiKey()
+  if (!apiKey) {
+    console.warn('[TMDB] TMDB_API_KEY is not set — skipping trending fetch')
+    return []
+  }
+
+  // Check Cache
+  const now = Date.now()
+  if (trendingCache[type] && (now - trendingCache[type].timestamp) < TRENDING_CACHE_TTL) {
+    console.log(`[TMDB] Serving trending ${type} from memory cache (age: ${Math.round((now - trendingCache[type].timestamp)/1000/60)} mins)`)
+    return trendingCache[type].data
+  }
+
+  try {
+    const endpoint = type === 'series' ? 'tv' : 'movie'
+    const url = `${TMDB_BASE}/trending/${endpoint}/week?api_key=${apiKey}`
+    console.log(`[TMDB] Fetching trending ${type} from: ${url.replace(apiKey, 'REDACTED')}`)
+    
+    if (!cachedTmdbIp) {
+      await resolveDnsDoH('api.themoviedb.org')
+    }
+
+    const response = await fetch(url, { 
+      dispatcher: tmdbDispatcher,
+      headers: {
+        'User-Agent': 'MyCinema/1.3.0',
+        'Accept': 'application/json'
+      }
+    })
+
+    if (!response.ok) throw new Error(`HTTP ${response.status}`)
+    const data = await response.json() as any
+    
+    console.log(`[TMDB] Successfully fetched ${data.results?.length || 0} trending ${type}`)
+    
+    const results = (data.results || []).map((item: any) => ({
+      id: item.id,
+      tmdb_id: item.id,
+      title: item.title || item.name,
+      overview: item.overview,
+      poster_path: item.poster_path ? `${TMDB_IMG}${item.poster_path}` : null,
+      backdrop_path: item.backdrop_path ? `${TMDB_BACKDROP}${item.backdrop_path}` : null,
+      vote_average: item.vote_average,
+      release_year: (item.release_date || item.first_air_date || '').substring(0, 4),
+      type: type,
+      isExternal: true
+    }))
+
+    // Save to cache
+    trendingCache[type] = {
+      data: results,
+      timestamp: Date.now()
+    }
+
+    return results
+  } catch (err) {
+    console.error(`[TMDB] Error fetching trending ${type}:`, err)
+    return []
+  }
+}
 
 export async function fetchTmdbMetadata(
   videoId: number,

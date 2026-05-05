@@ -3,11 +3,13 @@ import React, { useEffect, useRef, useState } from 'react';
 interface QualityBoostRendererProps {
   videoRef: React.RefObject<HTMLVideoElement>;
   enabled: boolean;
+  sharpnessEnabled: boolean;
+  vibranceEnabled: boolean;
   aspectMode: 'contain' | 'cover' | 'fill';
   isPlaying: boolean;
 }
 
-const QualityBoostRenderer: React.FC<QualityBoostRendererProps> = ({ videoRef, enabled, aspectMode, isPlaying }) => {
+const QualityBoostRenderer: React.FC<QualityBoostRendererProps> = ({ videoRef, enabled, sharpnessEnabled, vibranceEnabled, aspectMode, isPlaying }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const requestRef = useRef<number>();
   const glRef = useRef<WebGLRenderingContext | null>(null);
@@ -18,11 +20,15 @@ const QualityBoostRenderer: React.FC<QualityBoostRendererProps> = ({ videoRef, e
     texCoord: number;
     uResolution: WebGLUniformLocation | null;
     uImage: WebGLUniformLocation | null;
+    uSharpenAmount: WebGLUniformLocation | null;
+    uVibranceAmount: WebGLUniformLocation | null;
   }>({
     position: -1,
     texCoord: -1,
     uResolution: null,
     uImage: null,
+    uSharpenAmount: null,
+    uVibranceAmount: null,
   });
   const positionBufferRef = useRef<WebGLBuffer | null>(null);
   const texCoordBufferRef = useRef<WebGLBuffer | null>(null);
@@ -45,9 +51,10 @@ const QualityBoostRenderer: React.FC<QualityBoostRendererProps> = ({ videoRef, e
     uniform vec2 u_resolution;
     varying vec2 v_texCoord;
 
+    uniform float u_sharpenAmount;
+    uniform float u_vibranceAmount;
+
     // Constants for the effect
-    const float SHARPEN_AMOUNT = 0.35;
-    const float VIBRANCE_AMOUNT = 0.25;
     const float CONTRAST_AMOUNT = 1.08;
     const float SHADOW_LIFT = 0.08;    // Lifts dark areas to reveal detail
     const float GAMMA = 0.90;          // Brightens mid-tones slightly
@@ -64,29 +71,30 @@ const QualityBoostRenderer: React.FC<QualityBoostRendererProps> = ({ videoRef, e
       
       // Edge detection (Laplacian)
       vec4 edge = 4.0 * center - left - right - top - bottom;
-      vec3 color = center.rgb + SHARPEN_AMOUNT * edge.rgb;
+      vec3 color = center.rgb + u_sharpenAmount * edge.rgb;
       
-      // 2. Dynamic Range & Shadow Recovery
+      // 2. Dynamic Range & Shadow Recovery, grouped with vibrance/color boost
       // Calculate luminance (Rec. 709)
       float luminance = dot(color.rgb, vec3(0.2126, 0.7152, 0.0722));
       
       // Shadow Mask: Strongest at 0.0 luminance, fades by 0.4
       float shadowMask = clamp(1.0 - (luminance / 0.4), 0.0, 1.0);
       // Lift shadows while preserving absolute black
-      color.rgb += shadowMask * SHADOW_LIFT * (1.0 - exp(-5.0 * luminance));
+      color.rgb += shadowMask * SHADOW_LIFT * u_vibranceAmount * 4.0 * (1.0 - exp(-5.0 * luminance));
       
       // 3. Soft Contrast (using a smooth curve instead of linear math)
       // This avoids "crushing" the blacks and "clipping" the whites
       vec3 contrastColor = color.rgb * color.rgb * (3.0 - 2.0 * color.rgb);
-      color.rgb = mix(color.rgb, contrastColor, CONTRAST_AMOUNT - 1.0);
+      color.rgb = mix(color.rgb, contrastColor, (CONTRAST_AMOUNT - 1.0) * u_vibranceAmount * 4.0);
       
       // 4. Gamma Correction (Mid-tone lift)
-      color.rgb = pow(clamp(color.rgb, 0.0, 1.0), vec3(GAMMA));
+      vec3 gammaColor = pow(clamp(color.rgb, 0.0, 1.0), vec3(GAMMA));
+      color.rgb = mix(color.rgb, gammaColor, u_vibranceAmount * 4.0);
       
       // 5. Vibrance (Selective Saturation)
       float average = (color.r + color.g + color.b) / 3.0;
       float mx = max(color.r, max(color.g, color.b));
-      float amt = (mx - average) * (-VIBRANCE_AMOUNT * 3.0);
+      float amt = (mx - average) * (-u_vibranceAmount * 3.0);
       color.rgb = mix(color.rgb, vec3(mx), amt);
       
       gl_FragColor = vec4(clamp(color.rgb, 0.0, 1.0), center.a);
@@ -127,6 +135,8 @@ const QualityBoostRenderer: React.FC<QualityBoostRendererProps> = ({ videoRef, e
       texCoord: gl.getAttribLocation(program, 'a_texCoord'),
       uResolution: gl.getUniformLocation(program, 'u_resolution'),
       uImage: gl.getUniformLocation(program, 'u_image'),
+      uSharpenAmount: gl.getUniformLocation(program, 'u_sharpenAmount'),
+      uVibranceAmount: gl.getUniformLocation(program, 'u_vibranceAmount'),
     };
 
     // Set up geometry
@@ -214,6 +224,8 @@ const QualityBoostRenderer: React.FC<QualityBoostRendererProps> = ({ videoRef, e
 
         // Resolution uniform
         gl.uniform2f(locations.uResolution, canvas.width, canvas.height);
+        gl.uniform1f(locations.uSharpenAmount, sharpnessEnabled ? 0.35 : 0.0);
+        gl.uniform1f(locations.uVibranceAmount, vibranceEnabled ? 0.25 : 0.0);
 
         // Update texture with video frame
         gl.activeTexture(gl.TEXTURE0);
@@ -239,7 +251,7 @@ const QualityBoostRenderer: React.FC<QualityBoostRendererProps> = ({ videoRef, e
     return () => {
       if (requestRef.current) cancelAnimationFrame(requestRef.current);
     };
-  }, [enabled, videoRef, isPlaying]);
+  }, [enabled, sharpnessEnabled, vibranceEnabled, videoRef, isPlaying]);
 
   return (
     <div className="absolute inset-0 pointer-events-none">

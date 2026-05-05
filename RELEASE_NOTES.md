@@ -1,21 +1,74 @@
-# MyCinema v1.10.0 🚀
+# MyCinema v1.15.3 🚀
 
-This release brings major enhancements to the Video Library, making it easier to track your progress and discover content.
+Focused patch release for refreshed app branding.
 
-### 📺 Revamped Video Library
-- **Continue Watching**: Never lose your place! A new dedicated section shows your most recently started videos.
-- **Dynamic Previews**: Hover over any video thumbnail to see a multi-segment preview of the content.
-- **Progress Indicators**: At-a-glance progress bars show exactly how much of a video you've watched. Green bars indicate completed videos.
+### 🎬 Branding
+- **New App Logo**: Updated the in-app MyCinema logo to the supplied gradient film-mark artwork.
+- **New Windows App Icon**: Regenerated the packaged `.ico` app icon from the same source image for installer, desktop, and taskbar usage.
+- **Consistent Release Assets**: Aligned renderer, favicon, and build resource images so the app presents one consistent identity.
 
-### 🔍 Powerful Navigation
-- **Advanced Filtering**: Quickly find what you're looking for with new filters for Watched/Unwatched status and video duration (Short/Long).
-- **Flexible Sorting**: Sort your library by Recently Added, Alphabetical order, or Duration.
-- **Shuffle & Play All**: One-click buttons to start a random video or play your entire filtered collection in sequence.
+***
 
-### 🛠️ Under-the-Hood
-- **Optimized Queries**: Video fetching now includes real-time progress data from the database.
-- **Cleaner Search**: Improved search bar with a quick-clear option.
-- **Better Empty States**: more helpful guidance when no videos match your current filters.
+# MyCinema v1.15.2 🚀
+
+Focused patch release for updater visibility and install reliability.
+
+### 🔄 Auto Update Fixes
+- **Visible Update Progress Restored**: The in-app update panel now clearly shows when a new version is available, when it is downloading, and when it is ready to install.
+- **Explicit Restart & Install Flow**: Updates no longer silently try to install on app quit. Users now get a clear restart-and-install action after download completes.
+- **Safer Update Relaunch**: The install path now avoids getting blocked by unrelated quit prompts during the final restart step.
+
+***
+
+# MyCinema v1.15.1 🚀
+
+A massive performance and feature update focused on playback fidelity and system integration.
+
+### 📂 Native System Integration
+- **External Playback Support**: You can now open any video file directly with MyCinema from your File Explorer. The app handles single-instance locking and transitions seamlessly to the player.
+- **Smart Path Guard**: Improved security whitelisting for external files and ad-hoc media loading.
+
+### 🎥 AI & Hardware Enhancements
+- **FPS Boost & AI Enhance**: Experience smoother motion and sharper details with integrated real-time frame interpolation and quality boost renderers.
+- **GPU-Accelerated Audio**: Faster and smoother playback for videos with external audio tracks using D3D11 hardware acceleration.
+
+### 🕒 Pro Subtitle Suite
+- **Online Subtitle Search**: Directly search and download subtitles from OpenSubtitles within the player interface.
+- **Precise Subtitle Sync**: New timing controls to fix out-of-sync subtitles with millisecond precision (±ms).
+
+### 🛠️ Performance & Maintenance
+- **Chunked Media Protocol**: Optimized 5MB chunk-based streaming for zero-lag seeking and improved I/O performance.
+- **Library Auto-Pruning**: Automatically cleans up library entries for files that have been moved or deleted from your system.
+- **Hindi Content Detection**: Improved heuristics for detecting and tagging Hindi language content in the library.
+
+***
+
+# MyCinema v1.14.0 🚀
+
+A massive update introducing collaborative watching, real-time trends, and high-fidelity audio processing.
+
+### 🤝 Watch Together (BETA)
+- **Synchronized Playback**: Host a room and invite friends to watch the same video in perfect sync. Controls (play/pause/seek) are shared across all participants in real-time.
+- **Room Discovery**: Simple room ID system for quick connections without complex setup.
+
+### 🎥 Enhanced YouTube & Media Engine
+- **YouTube Deep Linking**: Integrated native URI schemes to automatically open and resume YouTube content in the official application.
+- **Audio Boost Engine**: Professional-grade Web Audio API implementation with Bass Boost, Clarity Filters, and Dynamic Compression for a cinematic soundstage.
+
+### 📈 Smart Dashboard & Trends
+- **TMDB Integration**: The Home screen now features real-time "Trending This Week" sections for both Movies and Web Series.
+- **Rich Metadata**: High-fidelity posters, ratings, and genre tags automatically fetched for your entire library.
+
+### 🕒 Pro Navigation
+- **Subtitle Sync**: Added precise timing controls (±ms) to fix out-of-sync subtitles on the fly.
+- **Online Subtitle Search**: Directly search and download subtitles from OpenSubtitles within the player.
+
+***
+
+# MyCinema v1.13.1 🚀
+
+- **Magnet Discovery Fixed**: Restored stable magnet fetching logic for high reliability.
+- **Download Stability**: Enabled DHT for faster peer discovery and improved download speeds.
 
 ***
 

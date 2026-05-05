@@ -40,7 +40,7 @@ interface ActiveDownload {
   progress: number
   downloadSpeed: string
   timeRemaining: string
-  status: 'downloading' | 'done' | 'error' | 'paused'
+  status: 'downloading' | 'done' | 'error' | 'paused' | 'connecting'
   size: string
   downloaded: string
   tmdbId?: number
@@ -502,6 +502,11 @@ const Download: React.FC<DownloadProps> = ({ onShowDetail }) => {
                           <span className="text-xs text-muted">{dl.timeRemaining}</span>
                         </>
                       )}
+                      {dl.status === 'connecting' && (
+                        <span className="flex items-center gap-1.5 text-xs text-amber-400">
+                          <Loader2 size={12} className="animate-spin" /> Resolving Metadata...
+                        </span>
+                      )}
                       {dl.status === 'done' && (
                         <span className="flex items-center gap-1 text-xs text-green-400">
                           <CheckCircle2 size={14} /> Complete
@@ -520,13 +525,14 @@ const Download: React.FC<DownloadProps> = ({ onShowDetail }) => {
                         className={`h-full rounded-full transition-[width] duration-500 ${
                           dl.status === 'done' ? 'bg-green-400' :
                           dl.status === 'error' ? 'bg-red-400' :
+                          dl.status === 'connecting' ? 'bg-amber-400' :
                           'bg-primary'
                         }`}
                         style={{ width: `${Math.max(0, Math.min(100, dl.progress || 0))}%` }}
                       />
                     </div>
                     <span className="text-xs text-muted w-10 text-right">{Math.round(dl.progress)}%</span>
-                    {(dl.status === 'downloading' || dl.status === 'paused') && (
+                    {(dl.status === 'downloading' || dl.status === 'paused' || dl.status === 'connecting') && (
                       <div className="flex items-center gap-1">
                         <button
                           onClick={() => handlePauseResume(dl.id)}
@@ -541,7 +547,7 @@ const Download: React.FC<DownloadProps> = ({ onShowDetail }) => {
                       id={`dl-btn-${dl.id}`}
                       onClick={() => setDownloadToRemove(dl.id)}
                       className="p-1 rounded-lg text-muted hover:text-red-400 hover:bg-red-400/10 transition-colors"
-                      title={dl.status === 'downloading' ? 'Cancel & Remove' : 'Remove from List'}
+                      title={(dl.status === 'downloading' || dl.status === 'connecting') ? 'Cancel & Remove' : 'Remove from List'}
                     >
                       <X size={14} />
                     </button>
@@ -791,9 +797,9 @@ const Download: React.FC<DownloadProps> = ({ onShowDetail }) => {
                         onChange={(e) => { setSelectedSeason(e.target.value); setSelectedEpisode('all'); }}
                         className="bg-surface border border-secondary text-text text-[11px] font-medium rounded px-2 py-1 outline-none hover:bg-white/[0.03] transition-colors cursor-pointer"
                       >
-                        <option value="all">All Seasons</option>
-                        <option value="packs">Full Season Packs (1080p+)</option>
-                        {availableSeasons.map(s => <option key={`season-${s}`} value={s.toString()}>Season {s}</option>)}
+                        <option className="bg-surface text-text" value="all">All Seasons</option>
+                        <option className="bg-surface text-text" value="packs">Full Season Packs (1080p+)</option>
+                        {availableSeasons.map(s => <option className="bg-surface text-text" key={`season-${s}`} value={s.toString()}>Season {s}</option>)}
                       </select>
                       
                       {selectedSeason !== 'all' && selectedSeason !== 'packs' && availableEpisodes.length > 0 && (
@@ -802,8 +808,8 @@ const Download: React.FC<DownloadProps> = ({ onShowDetail }) => {
                           onChange={(e) => setSelectedEpisode(e.target.value)}
                           className="bg-surface border border-secondary text-text text-[11px] font-medium rounded px-2 py-1 outline-none hover:bg-white/[0.03] transition-colors cursor-pointer"
                         >
-                          <option value="all">Any Episode</option>
-                          {availableEpisodes.map(ep => <option key={`ep-${ep}`} value={ep.toString()}>Episode {ep}</option>)}
+                          <option className="bg-surface text-text" value="all">Any Episode</option>
+                          {availableEpisodes.map(ep => <option className="bg-surface text-text" key={`ep-${ep}`} value={ep.toString()}>Episode {ep}</option>)}
                         </select>
                       )}
                     </div>

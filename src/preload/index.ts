@@ -27,6 +27,13 @@ const api = {
   getFolders: () => ipcRenderer.invoke('get-folders'),
   removeFolder: (folderPath: string) => ipcRenderer.invoke('remove-folder', folderPath),
   clearAllData: () => ipcRenderer.invoke('clear-all-data'),
+  fetchTrending: (type: 'movie' | 'series') => ipcRenderer.invoke('fetch-trending', type),
+  toggleFavorite: (id: number) => ipcRenderer.invoke('toggle-favorite', id),
+  toggleWatchlist: (id: number) => ipcRenderer.invoke('toggle-watchlist', id),
+  addToWatchlistExternal: (item: any) => ipcRenderer.invoke('add-to-watchlist-external', item),
+  removeFromWatchlistExternal: (tmdbId: number) => ipcRenderer.invoke('remove-from-watchlist-external', tmdbId),
+  getWatchlist: () => ipcRenderer.invoke('get-watchlist'),
+  getFavorites: () => ipcRenderer.invoke('get-favorites'),
   // Auto-update
   onUpdateAvailable: (callback: (info: { version: string }) => void) => ipcRenderer.on('update-available', (_e, info) => callback(info)),
   onUpdateProgress: (callback: (info: { percent: number }) => void) => ipcRenderer.on('update-progress', (_e, info) => callback(info)),

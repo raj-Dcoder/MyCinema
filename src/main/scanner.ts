@@ -1,6 +1,6 @@
 import fs from 'fs'
 import path from 'path'
-import { addVideo, getVideos, updateVideoMetadata, deleteVideo } from './db'
+import { addVideo, getVideos, updateVideoMetadata, deleteVideo, getDownloadByTorrentName } from './db'
 import { fetchTmdbMetadata } from './tmdb'
 import ffmpeg from 'fluent-ffmpeg'
 import ffmpegStatic from 'ffmpeg-static'
@@ -47,11 +47,23 @@ interface VideoMetadata {
 }
 
 async function getAllFiles(dirPath: string, fileList: string[] = []): Promise<string[]> {
-  const files = await fs.promises.readdir(dirPath)
+  let files: string[]
+  try {
+    files = await fs.promises.readdir(dirPath)
+  } catch (err: any) {
+    console.warn(`[Scanner] Skipping unreadable folder "${dirPath}": ${err.message}`)
+    return fileList
+  }
 
   for (const file of files) {
     const filePath = path.join(dirPath, file)
-    const stat = await fs.promises.stat(filePath)
+    let stat: fs.Stats
+    try {
+      stat = await fs.promises.stat(filePath)
+    } catch (err: any) {
+      console.warn(`[Scanner] Skipping inaccessible path "${filePath}": ${err.message}`)
+      continue
+    }
 
     if (stat.isDirectory()) {
       await getAllFiles(filePath, fileList)
@@ -158,11 +170,33 @@ export async function scanFolder(rootPath: string) {
     const duration = await getVideoDuration(filePath)
     const localPoster = await findLocalPoster(filePath)
     
+    // ─── Link with Download ──────────────────────────────────────────────────
+    // If the file is inside the MyCinema downloads folder, try to find a matching 
+    // download record to inherit its TMDB ID (prevents metadata mismatch)
+    let tmdbIdFromDownload = null
+    try {
+      const dlPath = path.normalize(path.join(app.getPath('downloads'), 'MyCinema'))
+      const normFilePath = path.normalize(filePath)
+      
+      if (normFilePath.toLowerCase().startsWith(dlPath.toLowerCase())) {
+        const relative = path.relative(dlPath, normFilePath)
+        const torrentName = relative.split(path.sep)[0]
+        const download = getDownloadByTorrentName(torrentName)
+        if (download && download.tmdb_id) {
+          tmdbIdFromDownload = download.tmdb_id
+          console.log(`[Scanner] Linked file to download: "${torrentName}" -> TMDB ID: ${tmdbIdFromDownload}`)
+        }
+      }
+    } catch (e) {
+      console.warn('[Scanner] Failed to link download:', e)
+    }
+
     const result = addVideo({
       ...metadata,
       file_path: filePath,
       duration: duration,
-      poster_path: localPoster
+      poster_path: localPoster,
+      tmdb_id: tmdbIdFromDownload
     })
 
     const allVideos = getVideos()
@@ -395,6 +429,10 @@ function parseFilename(filePath: string): VideoMetadata {
 
       let seriesName = match[1].trim()
       
+      // Clean seriesName of "Season X" suffixes
+      seriesName = seriesName.replace(/[._\s]season[._\s]\d+$/i, '').trim()
+      seriesName = seriesName.replace(/[._\s]s\d+$/i, '').trim()
+
       // Clean seriesName of year and noise
       const seriesYearMatch = seriesName.match(/[._\s(](19|20)\d{2}([._\s)]|$)/)
       if (seriesYearMatch) {

@@ -1,29 +1,38 @@
 import React, { useState, useEffect } from 'react'
-import { Home as HomeIcon, Film, Tv, Settings as SettingsIcon, Video as VideoIcon, Download as DownloadIcon, ChevronLeft, Menu } from 'lucide-react'
+import { Home as HomeIcon, Film, Tv, Settings as SettingsIcon, Video as VideoIcon, Download as DownloadIcon, ChevronLeft, Menu, Bookmark, Clock, Heart, User, Search as SearchIcon, Bell, Settings } from 'lucide-react'
 import { Video } from './types'
 import Home from './pages/Home'
 import Videos from './pages/Videos'
 import Movies from './pages/Movies'
 import Series from './pages/Series'
-import Settings from './pages/Settings'
+import Watchlist from './pages/Watchlist'
+import Favorites from './pages/Favorites'
+import History from './pages/History'
+import SettingsPage from './pages/Settings'
 import VideoPlayer from './components/VideoPlayer'
 import DetailScreen from './components/DetailScreen'
 import Download from './pages/Download'
+import appLogo from './assets/mycinema-logo.png'
 
 const App: React.FC = () => {
-  const [activeTab, setActiveTab] = useState<'home' | 'videos' | 'movies' | 'series' | 'download' | 'settings'>('home')
-  const [isSidebarExpanded, setIsSidebarExpanded] = useState(() => {
-    const saved = localStorage.getItem('sidebar_expanded')
-    return saved === null ? true : saved === 'true'
-  })
+  const [activeTab, setActiveTab] = useState<'home' | 'videos' | 'movies' | 'series' | 'download' | 'settings' | 'watchlist' | 'history' | 'favorites'>('home')
+  const [isSidebarExpanded, setIsSidebarExpanded] = useState(true)
 
-  useEffect(() => {
-    localStorage.setItem('sidebar_expanded', isSidebarExpanded.toString())
-  }, [isSidebarExpanded])
+  const [showWhatsNew, setShowWhatsNew] = useState(() => localStorage.getItem('v1.15.3_whatsnew') !== 'true')
 
   const [playingVideo, setPlayingVideo] = useState<Video | null>(null)
   const [selectedVideo, setSelectedVideo] = useState<Video | null>(null)
   const [homeRefreshKey, setHomeRefreshKey] = useState(0)
+  const [userName, setUserName] = useState(() => localStorage.getItem('mycinema_user_name') || 'User')
+
+  useEffect(() => {
+    const handleNameUpdate = () => {
+      setUserName(localStorage.getItem('mycinema_user_name') || 'User')
+    }
+    window.addEventListener('mycinema_name_updated', handleNameUpdate)
+    return () => window.removeEventListener('mycinema_name_updated', handleNameUpdate)
+  }, [])
+
   const [updateState, setUpdateState] = useState<{
     status: 'idle' | 'available' | 'downloading' | 'ready'
     version?: string
@@ -53,7 +62,6 @@ const App: React.FC = () => {
       })
     }
 
-    // Check if there was a file clicked before the app was ready
     window.api.getPendingExternalFile().then((filePath) => {
       if (filePath) playExternalFile(filePath)
     })
@@ -67,20 +75,18 @@ const App: React.FC = () => {
     }
   }, [])
 
-  const handleSelectFolder = async () => {
-    const path = await window.api.selectFolder()
-    if (path) {
-      await window.api.scanFolder(path)
-      // Trigger refresh (simple way for now)
-      window.location.reload()
-    }
-  }
-
   const navItems = [
-    { id: 'home' as const,   label: 'Home',     icon: <HomeIcon size={20} /> },
-    { id: 'videos' as const, label: 'Videos',   icon: <VideoIcon size={20} /> },
-    { id: 'movies' as const, label: 'Movies',   icon: <Film size={20} /> },
-    { id: 'series' as const, label: 'Web Series', icon: <Tv size={20} /> },
+    { id: 'home' as const,     label: 'Home',         icon: <HomeIcon size={20} /> },
+    { id: 'movies' as const,   label: 'Movies',       icon: <Film size={20} /> },
+    { id: 'series' as const,   label: 'Web Series',   icon: <Tv size={20} /> },
+    { id: 'videos' as const,   label: 'Videos',       icon: <VideoIcon size={20} /> },
+    { id: 'watchlist' as const, label: 'Watchlist',    icon: <Bookmark size={20} /> },
+    { id: 'download' as const,  label: 'Downloads',    icon: <DownloadIcon size={20} /> },
+  ]
+
+  const libraryItems = [
+    { id: 'history' as const,   label: 'History',      icon: <Clock size={20} /> },
+    { id: 'favorites' as const, label: 'Favorites',    icon: <Heart size={20} /> },
   ]
 
   const handlePlayVideo = (video: Video) => {
@@ -89,110 +95,152 @@ const App: React.FC = () => {
   }
 
   return (
-    <div className="flex h-screen bg-background text-text">
+    <div className="flex h-screen bg-[#05080d] text-text font-sans overflow-hidden">
       {/* Sidebar */}
-      <div className={`bg-surface flex flex-col border-r border-secondary transition-all duration-300 ease-in-out ${isSidebarExpanded ? 'w-64' : 'w-20'}`}>
-        <div className="flex items-center justify-between p-6 transition-all duration-300">
-          <div className={`overflow-hidden transition-all duration-300 ${isSidebarExpanded ? 'w-[150px] opacity-100' : 'w-0 opacity-0'}`}>
-            <h1 className="text-2xl font-bold text-primary tracking-tighter uppercase italic whitespace-nowrap">MyCinema</h1>
+      <div className={`bg-[#0a0f18] flex flex-col border-r border-white/5 transition-all duration-300 ease-in-out ${isSidebarExpanded ? 'w-64' : 'w-20'}`}>
+        <div className="flex items-center justify-between p-6">
+          <div className={`flex items-center gap-3 overflow-hidden transition-all duration-300 ${isSidebarExpanded ? 'w-[160px] opacity-100' : 'w-0 opacity-0'}`}>
+            <img src={appLogo} alt="MyCinema" className="h-12 w-12 rounded-full object-cover shadow-lg shadow-blue-500/10" />
+            <span className="text-xl font-black text-white tracking-tight whitespace-nowrap">MyCinema</span>
           </div>
           <button 
             onClick={() => setIsSidebarExpanded(!isSidebarExpanded)}
-            className="p-2 rounded-lg hover:bg-secondary text-text transition-colors flex-shrink-0"
-            title={isSidebarExpanded ? "Collapse Sidebar" : "Expand Sidebar"}
+            className="p-2 rounded-lg hover:bg-white/5 text-white/40 hover:text-white transition-colors flex-shrink-0"
           >
-            {isSidebarExpanded ? <ChevronLeft size={20} /> : <Menu size={20} />}
+            <Menu size={20} />
           </button>
         </div>
         
-        <nav className="flex-1 space-y-2 px-4 transition-all duration-300">
-          {navItems.map(item => (
-            <button
-              key={item.id}
-              onClick={() => setActiveTab(item.id)}
-              title={!isSidebarExpanded ? item.label : undefined}
-              className={`w-full flex items-center py-3 px-3 rounded-lg transition-colors ${
-                activeTab === item.id ? 'bg-primary/10 text-primary' : 'hover:bg-secondary'
-              }`}
-            >
-              <div className={`flex-shrink-0 transition-all duration-300 ${isSidebarExpanded ? 'mr-3' : 'mr-0'}`}>
-                {item.icon}
-              </div>
-              <div className={`overflow-hidden transition-all duration-300 whitespace-nowrap text-left ${isSidebarExpanded ? 'max-w-[150px] opacity-100' : 'max-w-0 opacity-0'}`}>
-                <span className="font-medium">{item.label}</span>
-              </div>
-            </button>
-          ))}
-        </nav>
+        <div className="flex-1 overflow-y-auto scrollbar-hide px-4 space-y-8">
+          {/* Main Nav */}
+          <nav className="space-y-1">
+            {navItems.map(item => (
+              <button
+                key={item.id}
+                onClick={() => setActiveTab(item.id)}
+                className={`w-full flex items-center py-3 px-4 rounded-xl transition-all duration-200 group ${
+                  activeTab === item.id ? 'bg-primary/10 text-primary' : 'text-white/40 hover:bg-white/5 hover:text-white'
+                }`}
+              >
+                <div className="flex-shrink-0">{item.icon}</div>
+                <div className={`ml-4 overflow-hidden transition-all duration-300 whitespace-nowrap text-sm font-bold ${isSidebarExpanded ? 'max-w-[150px] opacity-100' : 'max-w-0 opacity-0'}`}>
+                  {item.label}
+                </div>
+              </button>
+            ))}
+          </nav>
 
-        {/* Update Banner */}
-        <div className={`transition-all duration-300 overflow-hidden ${isSidebarExpanded ? 'max-h-40 opacity-100 mb-3 mx-3' : 'max-h-0 opacity-0 mb-0 mx-3'}`}>
-          {updateState.status !== 'idle' && (
-            <div className="rounded-xl bg-primary/10 border border-primary/30 p-3 text-sm">
-              {updateState.status === 'available' && (
-                <p className="text-primary font-semibold">v{updateState.version} available — downloading...</p>
-              )}
-              {updateState.status === 'downloading' && (
-                <>
-                  <p className="text-primary font-semibold mb-1.5">Downloading update... {updateState.percent}%</p>
-                  <div className="h-1.5 bg-white/10 rounded-full overflow-hidden">
-                    <div className="h-full bg-primary rounded-full transition-all duration-300" style={{ width: `${updateState.percent}%` }} />
+          {/* Library Section */}
+          <div className="space-y-3">
+            <h3 className={`px-4 text-[10px] font-black uppercase tracking-[0.2em] text-white/20 transition-opacity duration-300 ${isSidebarExpanded ? 'opacity-100' : 'opacity-0'}`}>
+              Library
+            </h3>
+            <nav className="space-y-1">
+              {libraryItems.map(item => (
+                <button
+                  key={item.id}
+                  onClick={() => setActiveTab(item.id)}
+                  className={`w-full flex items-center py-3 px-4 rounded-xl transition-all duration-200 group ${
+                    activeTab === item.id ? 'bg-primary/10 text-primary' : 'text-white/40 hover:bg-white/5 hover:text-white'
+                  }`}
+                >
+                  <div className="flex-shrink-0">{item.icon}</div>
+                  <div className={`ml-4 overflow-hidden transition-all duration-300 whitespace-nowrap text-sm font-bold ${isSidebarExpanded ? 'max-w-[150px] opacity-100' : 'max-w-0 opacity-0'}`}>
+                    {item.label}
                   </div>
-                </>
-              )}
-              {updateState.status === 'ready' && (
-                <>
-                  <p className="text-white font-semibold mb-2">✓ Update ready to install</p>
-                  <button
-                    onClick={() => window.api.installUpdate()}
-                    className="w-full bg-primary hover:bg-primary/80 text-white font-bold py-1.5 rounded-lg transition-colors text-xs tracking-wide"
-                  >
-                    Restart &amp; Install
-                  </button>
-                </>
-              )}
-            </div>
-          )}
+                </button>
+              ))}
+            </nav>
+          </div>
         </div>
 
-        <div className="p-4 border-t border-secondary space-y-2 px-4 transition-all duration-300">
-          <button 
-            onClick={() => setActiveTab('download')}
-            title={!isSidebarExpanded ? 'Download' : undefined}
-            className={`w-full flex items-center px-3 py-3 rounded-lg transition-colors ${activeTab === 'download' ? 'bg-primary/10 text-primary' : 'hover:bg-secondary'}`}
-          >
-            <div className={`flex-shrink-0 transition-all duration-300 ${isSidebarExpanded ? 'mr-3' : 'mr-0'}`}>
-              <DownloadIcon size={20} />
-            </div>
-            <div className={`overflow-hidden transition-all duration-300 whitespace-nowrap text-left ${isSidebarExpanded ? 'max-w-[150px] opacity-100' : 'max-w-0 opacity-0'}`}>
-              <span className="font-medium">Download</span>
-            </div>
-          </button>
-          <button 
-            onClick={() => setActiveTab('settings')}
-            title={!isSidebarExpanded ? 'Library' : undefined}
-            className={`w-full flex items-center px-3 py-3 rounded-lg transition-colors ${activeTab === 'settings' ? 'bg-primary/10 text-primary' : 'hover:bg-secondary'}`}
-          >
-            <div className={`flex-shrink-0 transition-all duration-300 ${isSidebarExpanded ? 'mr-3' : 'mr-0'}`}>
-              <SettingsIcon size={20} />
-            </div>
-            <div className={`overflow-hidden transition-all duration-300 whitespace-nowrap text-left ${isSidebarExpanded ? 'max-w-[150px] opacity-100' : 'max-w-0 opacity-0'}`}>
-              <span className="font-medium">Library</span>
-            </div>
-          </button>
+        <div className={`overflow-hidden px-4 transition-all duration-300 ${isSidebarExpanded && updateState.status !== 'idle' ? 'max-h-40 pb-4 opacity-100' : 'max-h-0 pb-0 opacity-0'}`}>
+          <div className="rounded-2xl border border-cyan-400/20 bg-cyan-400/10 p-4">
+            {updateState.status === 'available' && (
+              <div className="space-y-2">
+                <p className="text-sm font-bold text-white">
+                  Update available{updateState.version ? `: v${updateState.version}` : ''}
+                </p>
+                <p className="text-xs font-medium text-white/60">
+                  Downloading has started in the background.
+                </p>
+              </div>
+            )}
+
+            {updateState.status === 'downloading' && (
+              <div className="space-y-3">
+                <div className="flex items-center justify-between gap-3">
+                  <p className="text-sm font-bold text-white">Downloading update</p>
+                  <span className="text-xs font-black text-cyan-300">{updateState.percent ?? 0}%</span>
+                </div>
+                <div className="h-2 overflow-hidden rounded-full bg-white/10">
+                  <div
+                    className="h-full rounded-full bg-gradient-to-r from-cyan-400 to-emerald-400 transition-all duration-300"
+                    style={{ width: `${updateState.percent ?? 0}%` }}
+                  />
+                </div>
+              </div>
+            )}
+
+            {updateState.status === 'ready' && (
+              <div className="space-y-3">
+                <p className="text-sm font-bold text-white">
+                  Update ready{updateState.version ? `: v${updateState.version}` : ''}
+                </p>
+                <button
+                  onClick={() => window.api.installUpdate()}
+                  className="w-full rounded-xl bg-cyan-400 px-4 py-3 text-sm font-black text-slate-950 transition-colors hover:bg-cyan-300"
+                >
+                  Restart and Install
+                </button>
+              </div>
+            )}
+          </div>
         </div>
 
+        {/* User Profile */}
+        <div className="p-4 mt-auto">
+          <div className={`flex items-center gap-4 p-3 bg-white/5 rounded-2xl border border-white/5 transition-all duration-300 ${isSidebarExpanded ? 'w-full' : 'w-12 justify-center'}`}>
+            <div 
+              className={`w-10 h-10 rounded-xl bg-red-600 flex items-center justify-center text-white font-black text-lg shadow-lg italic flex-shrink-0 cursor-pointer hover:scale-105 transition-transform`}
+              onClick={() => !isSidebarExpanded && setActiveTab('settings')}
+              title={!isSidebarExpanded ? `Settings (${userName})` : undefined}
+            >
+              {userName.charAt(0).toUpperCase()}
+            </div>
+            
+            {isSidebarExpanded && (
+              <>
+                <div className="flex-1 min-w-0">
+                  <h4 className="text-sm font-bold text-white truncate italic">{userName}</h4>
+                  <p className="text-[10px] font-black text-amber-500 uppercase tracking-widest flex items-center gap-1">
+                    Premium <span className="text-[8px]">👑</span>
+                  </p>
+                </div>
+                <button 
+                  onClick={() => setActiveTab('settings')}
+                  className="p-2 text-white/40 hover:text-white transition-colors"
+                >
+                  <SettingsIcon size={18} />
+                </button>
+              </>
+            )}
+          </div>
+        </div>
       </div>
 
       {/* Main Content */}
-      <main className="flex-1 overflow-y-auto bg-background">
-        <div className="p-8">
+      <main className="flex-1 overflow-y-auto scrollbar-hide relative">
+        <div className="p-10 pb-20 max-w-[1600px] mx-auto">
           {activeTab === 'home'    && <Home onPlay={handlePlayVideo} onShowDetail={setSelectedVideo} refreshKey={homeRefreshKey} />}
           {activeTab === 'videos'  && <Videos onPlay={handlePlayVideo} />}
           {activeTab === 'movies'  && <Movies onPlay={handlePlayVideo} onShowDetail={setSelectedVideo} />}
           {activeTab === 'series'  && <Series onPlay={handlePlayVideo} onShowDetail={setSelectedVideo} />}
+          {activeTab === 'watchlist' && <Watchlist onPlay={handlePlayVideo} onShowDetail={setSelectedVideo} />}
+          {activeTab === 'history' && <History onPlay={handlePlayVideo} onShowDetail={setSelectedVideo} />}
+          {activeTab === 'favorites' && <Favorites onPlay={handlePlayVideo} onShowDetail={setSelectedVideo} />}
           {activeTab === 'download' && <Download onShowDetail={setSelectedVideo} />}
-          {activeTab === 'settings' && <Settings />}
+          {activeTab === 'settings' && <SettingsPage />}
         </div>
       </main>
 
@@ -214,6 +262,76 @@ const App: React.FC = () => {
             setHomeRefreshKey(k => k + 1)
           }} 
         />
+      )}
+
+      {/* What's New Modal */}
+      {showWhatsNew && (
+        <div className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-300">
+          <div className="w-full max-w-xl bg-surface border border-secondary rounded-3xl shadow-2xl overflow-hidden animate-in zoom-in-95 duration-300">
+            <div className="relative h-40 bg-primary/20 flex items-center justify-center overflow-hidden">
+              <div className="absolute inset-0 bg-gradient-to-t from-surface to-transparent" />
+              <div className="relative z-10 text-center mt-4">
+                <span className="px-3 py-1 bg-red-600 text-white text-[10px] font-black tracking-[0.2em] uppercase rounded-full mb-3 inline-block animate-pulse">Update Complete</span>
+                <h2 className="text-3xl font-black text-white italic tracking-tighter">MyCinema v1.15.3</h2>
+              </div>
+            </div>
+            
+            <div className="p-8 space-y-6 max-h-[60vh] overflow-y-auto scrollbar-hide">
+              <div className="space-y-2 group">
+                <h3 className="text-base font-black text-primary flex items-center gap-2 italic">
+                  <span className="w-2 h-2 rounded-full bg-primary" />
+                  Fresh MyCinema Identity 🎬
+                </h3>
+                <p className="text-sm text-white/60 leading-relaxed pl-4 font-bold">
+                  The new gradient film-mark logo now appears in the sidebar, browser favicon, packaged app resources, and Windows app icon.
+                </p>
+              </div>
+
+              <div className="space-y-2 group">
+                <h3 className="text-base font-black text-amber-400 flex items-center gap-2 italic">
+                  <span className="w-2 h-2 rounded-full bg-amber-400" />
+                  Sharper App Icon 🛠️
+                </h3>
+                <p className="text-sm text-white/60 leading-relaxed pl-4 font-bold">
+                  Installer and desktop branding now use a regenerated Windows icon built from the supplied transparent PNG.
+                </p>
+              </div>
+
+              <div className="space-y-2 group">
+                <h3 className="text-base font-black text-emerald-400 flex items-center gap-2 italic">
+                  <span className="w-2 h-2 rounded-full bg-emerald-400" />
+                  Consistent Logo Assets 📂
+                </h3>
+                <p className="text-sm text-white/60 leading-relaxed pl-4 font-bold">
+                  Renderer assets, public favicon assets, and packaged build resources now point to the same final logo artwork.
+                </p>
+              </div>
+
+              <div className="space-y-2 group">
+                <h3 className="text-base font-black text-purple-400 flex items-center gap-2 italic">
+                  <span className="w-2 h-2 rounded-full bg-purple-400" />
+                  Release Maintenance 🛠️
+                </h3>
+                <p className="text-sm text-white/60 leading-relaxed pl-4 font-bold">
+                  Version metadata and release notes were updated so auto-updater users get a clean one-time update summary.
+                </p>
+              </div>
+            </div>
+            
+            <div className="p-6 bg-white/5 border-t border-white/5 flex justify-between items-center">
+              <p className="text-[10px] font-black text-white/20 uppercase tracking-[0.2em]">Check RELEASE_NOTES.md for full diff</p>
+              <button
+                onClick={() => {
+                  localStorage.setItem('v1.15.3_whatsnew', 'true')
+                  setShowWhatsNew(false)
+                }}
+                className="px-8 py-3 bg-red-600 text-white font-black rounded-xl hover:bg-red-700 transition-all hover:scale-105 active:scale-95 shadow-lg shadow-red-600/20 italic"
+              >
+                Let's Go!
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   )

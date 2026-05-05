@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react'
-import { X, Play, Info, Calendar, Clock, Star, FolderOpen, Film, Music, Subtitles, HardDrive, ChevronDown, ChevronUp } from 'lucide-react'
+import { X, Play, Info, Calendar, Clock, Star, FolderOpen, Film, Music, Subtitles, HardDrive, ChevronDown, ChevronUp, Heart, Bookmark, Share2, Search, Zap, Users, Download, AlertTriangle } from 'lucide-react'
 import { Video } from '../types'
 
 interface DetailScreenProps {
@@ -37,6 +37,61 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, onClose, onPlay }) =
   const [mediaInfo, setMediaInfo] = useState<any>(null)
   const [infoLoading, setInfoLoading] = useState(false)
   const [showAllAudio, setShowAllAudio] = useState(false)
+  const [selectedSeason, setSelectedSeason] = useState<number | null>(null)
+  const [isFavorite, setIsFavorite] = useState(video.is_favorite)
+  const [isWatchlist, setIsWatchlist] = useState(video.is_watchlist)
+
+  // Torrent Search State
+  const [sources, setSources] = useState<any[]>([])
+  const [searching, setSearching] = useState(false)
+  const [hasSearched, setHasSearched] = useState(false)
+
+  const handleToggleFavorite = async () => {
+    const newValue = await window.api.toggleFavorite(video.id)
+    setIsFavorite(!!newValue)
+    video.is_favorite = !!newValue // Sync local object
+  }
+
+  const handleToggleWatchlist = async () => {
+    if (video.isExternal) {
+      if (isWatchlist) {
+        await window.api.removeFromWatchlistExternal(video.tmdb_id!)
+        setIsWatchlist(false)
+      } else {
+        await window.api.addToWatchlistExternal(video)
+        setIsWatchlist(true)
+      }
+    } else {
+      const newValue = await window.api.toggleWatchlist(video.id)
+      setIsWatchlist(!!newValue)
+      video.is_watchlist = !!newValue // Sync local object
+    }
+  }
+
+  const handleSearchSources = async () => {
+    setSearching(true)
+    setHasSearched(true)
+    try {
+      const results = await window.api.searchTorrentSources(
+        video.title, 
+        video.release_year?.toString() || '', 
+        video.type === 'series' ? 'tv' : 'movie', 
+        video.tmdb_id!
+      )
+      setSources(results)
+    } catch (err) {
+      console.error('Failed to search sources:', err)
+    } finally {
+      setSearching(false)
+    }
+  }
+
+  const handleDownloadSource = async (source: any) => {
+    const torrentId = await window.api.startTorrentDownload(source.magnet, video.title, video.tmdb_id)
+    if (torrentId) {
+      alert('Download started! Check the Downloads tab.')
+    }
+  }
 
   const handleOpenFolder = () => {
     window.api.openFolder(video.file_path)
@@ -58,9 +113,27 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, onClose, onPlay }) =
       window.api.getSeriesInfo(video.series_name).then(data => {
         setEpisodes(data)
         setLoading(false)
+        
+        // Auto-select the season of the current video, or the first available season
+        if (data.length > 0) {
+          const seasons = [...new Set(data.map(ep => ep.season || 1))].sort((a, b) => a - b)
+          setSelectedSeason(video.season || seasons[0])
+        }
       })
     }
   }, [video])
+
+  // Group episodes by season
+  const episodesBySeason = episodes.reduce((acc, ep) => {
+    const s = ep.season || 1
+    if (!acc[s]) acc[s] = []
+    acc[s].push(ep)
+    return acc
+  }, {} as Record<number, Video[]>)
+
+  const seasons = Object.keys(episodesBySeason)
+    .map(Number)
+    .sort((a, b) => a - b)
 
   useEffect(() => {
     const handleGlobalMouseDown = (e: MouseEvent) => {
@@ -185,31 +258,141 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, onClose, onPlay }) =
             </div>
 
             {/* Actions */}
-            <div className="flex flex-wrap gap-4 pt-4">
-              <button 
-                onClick={() => onPlay(video)}
-                className="flex items-center gap-3 bg-red-600 hover:bg-red-700 text-white px-10 py-4 rounded-2xl font-black text-sm tracking-widest transition-all shadow-[0_10px_30px_rgba(220,38,38,0.4)] hover:scale-105 active:scale-95 group uppercase italic"
-              >
-                <Play fill="white" size={20} className="group-hover:scale-110 transition-transform" />
-                Play Now
-              </button>
-              <button
-                onClick={handleOpenFolder}
-                className="flex items-center gap-3 bg-white/10 hover:bg-white/20 text-white px-8 py-4 rounded-2xl font-black text-sm tracking-widest transition-all border border-white/10 hover:scale-105 active:scale-95 uppercase italic glass-effect"
-                title="Open containing folder in Explorer"
-              >
-                <FolderOpen size={20} />
-                Open Folder
-              </button>
-              <button
-                onClick={handleShowInfo}
-                className="flex items-center gap-3 bg-white/10 hover:bg-blue-500/20 text-white hover:text-blue-300 px-6 py-4 rounded-2xl font-black text-sm tracking-widest transition-all border border-white/10 hover:border-blue-500/30 hover:scale-105 active:scale-95 uppercase italic glass-effect"
-                title="View media file info"
-              >
-                <Info size={20} />
-                Info
-              </button>
+            <div className="flex flex-wrap items-center gap-4 pt-4">
+              {!video.isExternal ? (
+                <button 
+                  onClick={() => onPlay(video)}
+                  className="flex items-center gap-3 bg-red-600 hover:bg-red-700 text-white px-10 py-4 rounded-2xl font-black text-sm tracking-widest transition-all shadow-[0_10px_30px_rgba(220,38,38,0.4)] hover:scale-105 active:scale-95 group uppercase italic"
+                >
+                  <Play fill="white" size={20} className="group-hover:scale-110 transition-transform" />
+                  Play Now
+                </button>
+              ) : (
+                <button 
+                  onClick={handleSearchSources}
+                  disabled={searching}
+                  className="flex items-center gap-3 bg-primary hover:bg-primary/80 text-white px-10 py-4 rounded-2xl font-black text-sm tracking-widest transition-all shadow-[0_10px_30px_rgba(229,9,20,0.4)] hover:scale-105 active:scale-95 group uppercase italic disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {searching ? (
+                    <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                  ) : (
+                    <Search size={20} className="group-hover:scale-110 transition-transform" />
+                  )}
+                  {searching ? 'Finding Best Sources...' : 'Find & Watch Now'}
+                </button>
+              )}
+              
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={handleToggleWatchlist}
+                  className={`p-4 rounded-2xl border transition-all hover:scale-105 active:scale-95 glass-effect ${
+                    isWatchlist ? 'bg-primary/20 border-primary text-primary' : 'bg-white/5 border-white/10 text-white/40 hover:text-white'
+                  }`}
+                  title="Add to Watchlist"
+                >
+                  <Bookmark size={20} fill={isWatchlist ? "currentColor" : "none"} />
+                </button>
+                <button
+                  onClick={handleToggleFavorite}
+                  className={`p-4 rounded-2xl border transition-all hover:scale-105 active:scale-95 glass-effect ${
+                    isFavorite ? 'bg-red-500/20 border-red-500 text-red-500' : 'bg-white/5 border-white/10 text-white/40 hover:text-white'
+                  }`}
+                  title="Mark as Favorite"
+                >
+                  <Heart size={20} fill={isFavorite ? "currentColor" : "none"} />
+                </button>
+                <button
+                  onClick={handleShowInfo}
+                  className="p-4 bg-white/5 border border-white/10 rounded-2xl text-white/40 hover:text-white transition-all hover:scale-105 active:scale-95 glass-effect"
+                  title="View Media Info"
+                >
+                  <Info size={20} />
+                </button>
+                {!video.isExternal && (
+                  <button
+                    onClick={handleOpenFolder}
+                    className="p-4 bg-white/5 border border-white/10 rounded-2xl text-white/40 hover:text-white transition-all hover:scale-105 active:scale-95 glass-effect"
+                    title="Open Folder"
+                  >
+                    <FolderOpen size={20} />
+                  </button>
+                )}
+              </div>
             </div>
+
+            {/* Torrent Sources Section */}
+            {hasSearched && (
+              <div className="pt-10 space-y-6 animate-in slide-in-from-bottom-4 duration-500">
+                <div className="flex items-center justify-between border-b border-white/5 pb-4">
+                  <h3 className="text-2xl font-black text-white italic uppercase tracking-tighter flex items-center gap-3">
+                    Available Sources
+                    <span className="text-[10px] font-black uppercase tracking-widest bg-green-500/10 text-green-400 px-2 py-0.5 rounded border border-green-500/20">Free</span>
+                  </h3>
+                  <div className="text-[10px] text-muted font-black uppercase tracking-widest">
+                    {sources.length} Sources Found
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 gap-3 max-h-[400px] overflow-y-auto pr-2 scrollbar-thin">
+                  {searching ? (
+                    <div className="py-20 text-center space-y-4">
+                      <div className="inline-block w-12 h-12 border-4 border-primary/20 border-t-primary rounded-full animate-spin" />
+                      <div className="text-muted font-black uppercase tracking-widest text-xs animate-pulse">Scanning high-quality mirrors...</div>
+                    </div>
+                  ) : sources.length > 0 ? (
+                    sources.map((src, idx) => (
+                      <div 
+                        key={idx}
+                        className="flex items-center justify-between p-4 bg-white/5 border border-white/5 rounded-2xl hover:bg-white/10 hover:border-white/10 transition-all group"
+                      >
+                        <div className="flex-1 min-w-0 pr-4">
+                          <div className="flex items-center gap-2 mb-1">
+                            <span className={`px-2 py-0.5 rounded text-[9px] font-black uppercase ${
+                              src.quality.includes('2160') ? 'bg-amber-500/20 text-amber-400 border border-amber-500/30' :
+                              src.quality.includes('1080') ? 'bg-blue-500/20 text-blue-400 border border-blue-500/30' :
+                              'bg-white/10 text-white/60 border border-white/10'
+                            }`}>
+                              {src.quality}
+                            </span>
+                            {src.isHindi && (
+                              <span className="px-2 py-0.5 bg-red-500/20 text-red-400 border border-red-500/30 rounded text-[9px] font-black uppercase">
+                                Hindi
+                              </span>
+                            )}
+                            <span className="text-[10px] text-white/30 font-bold uppercase tracking-wider">{src.size}</span>
+                          </div>
+                          <div className="text-sm font-bold text-white truncate group-hover:text-primary transition-colors">
+                            {src.title}
+                          </div>
+                          <div className="flex items-center gap-4 mt-2">
+                            <div className="flex items-center gap-1 text-[10px] font-black text-green-500 uppercase tracking-widest">
+                              <Zap size={10} fill="currentColor" />
+                              {src.seeds} Seeds
+                            </div>
+                            <div className="flex items-center gap-1 text-[10px] font-black text-white/30 uppercase tracking-widest">
+                              <Users size={10} />
+                              {src.peers} Peers
+                            </div>
+                          </div>
+                        </div>
+                        <button 
+                          onClick={() => handleDownloadSource(src)}
+                          className="bg-white/5 hover:bg-primary text-white p-3 rounded-xl transition-all border border-white/10 hover:border-primary group-hover:scale-105 active:scale-95 flex items-center gap-2 px-5"
+                        >
+                          <Download size={18} />
+                          <span className="text-[10px] font-black uppercase tracking-widest">Download</span>
+                        </button>
+                      </div>
+                    ))
+                  ) : (
+                    <div className="py-16 text-center border-2 border-dashed border-white/5 rounded-3xl">
+                      <AlertTriangle className="mx-auto text-amber-500/50 mb-3" size={32} />
+                      <p className="text-muted font-black uppercase tracking-widest text-xs">No sources found for this title.</p>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
 
             {/* Media Info Modal */}
             {showInfoModal && (
@@ -308,13 +491,33 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, onClose, onPlay }) =
             {/* Episodes Section (for Series) */}
             {video.type === 'series' && (
               <div className="pt-10 space-y-6">
-                <div className="flex items-center justify-between border-b border-white/5 pb-4">
+                <div className="flex flex-col md:flex-row md:items-center justify-between border-b border-white/5 pb-4 gap-4">
                   <h3 className="text-2xl font-black text-white italic uppercase tracking-tighter">
                     Episodes
                   </h3>
+                  
+                  {/* Season Selector */}
+                  {seasons.length > 1 && (
+                    <div className="flex flex-wrap gap-2">
+                      {seasons.map(s => (
+                        <button
+                          key={s}
+                          onClick={() => setSelectedSeason(s)}
+                          className={`px-4 py-1.5 rounded-full text-[10px] font-black uppercase tracking-widest transition-all border ${
+                            selectedSeason === s 
+                              ? 'bg-red-600 border-red-600 text-white shadow-[0_0_15px_rgba(220,38,38,0.4)]' 
+                              : 'bg-white/5 border-white/10 text-muted hover:bg-white/10 hover:text-white'
+                          }`}
+                        >
+                          Season {s}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+
                   <div className="flex items-center gap-4">
                     <span className="text-[10px] text-muted font-black uppercase tracking-widest bg-white/5 px-3 py-1.5 rounded-full border border-white/5">
-                      {episodes.length} Episodes
+                      {episodesBySeason[selectedSeason || 1]?.length || 0} Episodes
                     </span>
                   </div>
                 </div>
@@ -326,7 +529,7 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, onClose, onPlay }) =
                       <div className="text-muted font-black uppercase tracking-widest text-[10px]">Fetching episodes...</div>
                     </div>
                   ) : (
-                    episodes.map((ep, idx) => (
+                    (episodesBySeason[selectedSeason || 1] || []).map((ep, idx) => (
                       <button
                         key={ep.id}
                         onClick={() => onPlay(ep)}

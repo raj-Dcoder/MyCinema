@@ -3,6 +3,11 @@ productName: MyCinema
 directories:
   output: dist
   buildResources: build
+extraResources:
+  - from: build/icon.ico
+    to: icon.ico
+  - from: build/icon.png
+    to: icon.png
 files:
   - out/**/*
   - package.json
@@ -21,6 +26,7 @@ fileAssociations:
     name: Video File
     role: Viewer
 win:
+  icon: build/icon.ico
   target: nsis
 nsis:
   oneClick: false

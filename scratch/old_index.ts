@@ -1,9 +1,8 @@
-import { app, shell, BrowserWindow, ipcMain, dialog, protocol, net, session } from 'electron'
+﻿import { app, shell, BrowserWindow, ipcMain, dialog, protocol, net, session } from 'electron'
 import { join } from 'path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import * as db from './db'
 import { scanFolder, getEmbeddedSubtitles, getEmbeddedAudio } from './scanner'
-import * as tmdb from './tmdb'
 import fs from 'fs'
 import crypto from 'crypto'
 import ffmpeg from 'fluent-ffmpeg'
@@ -57,7 +56,7 @@ function nodeHttpGet(url: string, timeoutMs: number = 10000): Promise<any> {
           'User-Agent': 'MyCinema/1.5',
           'Host': parsed.hostname
         },
-        servername: parsed.hostname, // TLS SNI — required for HTTPS to IP
+        servername: parsed.hostname, // TLS SNI ΓÇö required for HTTPS to IP
       }
 
       req = https.get(options, (res) => {
@@ -78,7 +77,7 @@ function nodeHttpGet(url: string, timeoutMs: number = 10000): Promise<any> {
   })
 }
 
-// Generic HTTPS request helper — supports GET/POST + custom headers (needed for OpenSubtitles API)
+// Generic HTTPS request helper ΓÇö supports GET/POST + custom headers (needed for OpenSubtitles API)
 function nodeHttpRequest(
   url: string,
   opts: { method?: string; headers?: Record<string, string>; body?: string; timeoutMs?: number } = {}
@@ -133,12 +132,12 @@ function nodeHttpRequest(
   })
 }
 
-// ─── File-system Watcher Registry ────────────────────────────────────────────
+// ΓöÇΓöÇΓöÇ File-system Watcher Registry ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
 const VIDEO_EXTS = new Set(['.mp4', '.mkv', '.avi', '.mov', '.webm'])
 const folderWatchers = new Map<string, fs.FSWatcher>()
 
 /**
- * Debounce helper — collapses rapid fire events (e.g. file still being copied)
+ * Debounce helper ΓÇö collapses rapid fire events (e.g. file still being copied)
  * into a single scan kick-off after `delay` ms of silence.
  */
 function debounce<T extends (...args: any[]) => void>(fn: T, delay: number): T {
@@ -154,7 +153,7 @@ function attachFolderWatcher(folderPath: string): void {
   if (!fs.existsSync(folderPath)) return
 
   const triggerRescan = debounce(async () => {
-    console.log(`[Watcher] Change detected in "${folderPath}" — rescanning…`)
+    console.log(`[Watcher] Change detected in "${folderPath}" ΓÇö rescanningΓÇª`)
     try {
       await scanFolder(folderPath)
       BrowserWindow.getAllWindows().forEach(w => w.webContents.send('library-updated'))
@@ -173,7 +172,7 @@ function attachFolderWatcher(folderPath: string): void {
       }
     })
     watcher.on('error', (err) => {
-      console.warn(`[Watcher] Error watching "${folderPath}": ${err.message} — removing watcher`)
+      console.warn(`[Watcher] Error watching "${folderPath}": ${err.message} ΓÇö removing watcher`)
       folderWatchers.delete(folderPath)
     })
     folderWatchers.set(folderPath, watcher)
@@ -192,7 +191,7 @@ function detachFolderWatcher(folderPath: string): void {
   }
 }
 
-// ─── File Path Security Guard ─────────────────────────────────────────────────
+// ΓöÇΓöÇΓöÇ File Path Security Guard ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
 /**
  * Validates that a file path is within one of the user's registered library
  * folders, the MyCinema downloads folder, or the app userData directory.
@@ -202,39 +201,26 @@ function detachFolderWatcher(folderPath: string): void {
  */
 function isSafeFilePath(inputPath: string): boolean {
   try {
-    const normalized = path.normalize(inputPath).toLowerCase()
+    const normalized = path.normalize(inputPath)
     const allowedRoots = [
       // User's registered library folders (dynamically checked each call)
-      ...(db.getFolders() as any[]).map((f: any) => path.normalize(f.path).toLowerCase()),
-      // The MyCinema torrent download destination
-      path.normalize(path.join(app.getPath('downloads'), 'MyCinema')).toLowerCase(),
+      ...(db.getFolders() as any[]).map((f: any) => path.normalize(f.path)),
+      // The MyCinema torrent download destination ΓÇö must match getDownloadPath() exactly
+      path.normalize(path.join(app.getPath('downloads'), 'MyCinema')),
       // App userData: poster cache, subtitle cache, window state, db
-      path.normalize(app.getPath('userData')).toLowerCase(),
+      path.normalize(app.getPath('userData')),
       // Temp dir used by subtitle pre-conversion
-      path.normalize(app.getPath('temp')).toLowerCase(),
-      // Dirs implicitly allowed by user opening a file from the shell
-      ...Array.from(allowedExternalDirs).map(d => d.toLowerCase())
+      path.normalize(app.getPath('temp')),
     ]
-    
-    return allowedRoots.some(root => {
-      // Direct match
-      if (normalized === root) return true;
-      // Is inside directory (ensure trailing slash comparison to avoid partial name matches)
-      const rootWithSep = root.endsWith(path.sep) ? root : root + path.sep;
-      return normalized.startsWith(rootWithSep);
-    })
+    // Use case-insensitive prefix matching (handles Windows drive letter casing)
+    return allowedRoots.some(root =>
+      normalized.toLowerCase().startsWith(root.toLowerCase() + path.sep) ||
+      normalized.toLowerCase() === root.toLowerCase()
+    )
   } catch {
     return false
   }
 }
-
-function isPathInsideRoot(candidatePath: string, rootPath: string): boolean {
-  const resolvedCandidate = path.resolve(candidatePath).toLowerCase()
-  const resolvedRoot = path.resolve(rootPath).toLowerCase()
-  const rootWithSep = resolvedRoot.endsWith(path.sep) ? resolvedRoot : `${resolvedRoot}${path.sep}`
-  return resolvedCandidate === resolvedRoot || resolvedCandidate.startsWith(rootWithSep)
-}
-
 
 /**
  * Startup scan: silently rescan every saved folder in the background.
@@ -243,7 +229,7 @@ function isPathInsideRoot(candidatePath: string, rootPath: string): boolean {
 async function runStartupScan(): Promise<void> {
   const folders = db.getFolders() as any[]
   if (folders.length === 0) return
-  console.log(`[Startup] Auto-scanning ${folders.length} saved folder(s)…`)
+  console.log(`[Startup] Auto-scanning ${folders.length} saved folder(s)ΓÇª`)
   for (const folder of folders) {
     try {
       await scanFolder(folder.path)
@@ -255,10 +241,6 @@ async function runStartupScan(): Promise<void> {
 }
 
 const isDev = !app.isPackaged
-const appIconPath = isDev
-  ? join(app.getAppPath(), 'build', 'icon.png')
-  : join(process.resourcesPath, 'icon.ico')
-
 const ffmpegExecPath = isDev 
   ? path.join(app.getAppPath(), 'node_modules', 'ffmpeg-static', 'ffmpeg.exe') 
   : path.join(process.resourcesPath, 'app.asar.unpacked', 'node_modules', 'ffmpeg-static', 'ffmpeg.exe')
@@ -311,7 +293,7 @@ protocol.registerSchemesAsPrivileged([
   }
 ])
 
-// ─── Window State Management ─────────────────────────────────────────────────
+// ΓöÇΓöÇΓöÇ Window State Management ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
 function loadWindowState() {
   try {
     const raw = fs.readFileSync(join(app.getPath('userData'), 'window-state.json'), 'utf8')
@@ -345,7 +327,6 @@ function createWindow(): void {
     y: state.y,
     show: false,
     autoHideMenuBar: true,
-    icon: appIconPath,
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
       sandbox: false,
@@ -353,8 +334,7 @@ function createWindow(): void {
       // protection is the isSafeFilePath() whitelist guard on every IPC handler and
       // protocol handler. Enabling webSecurity caused cross-origin CSP rejections
       // for the custom media:// / subtitle:// / audio:// schemes in some Electron builds.
-      webSecurity: false,
-      backgroundThrottling: false
+      webSecurity: false
     }
   })
 
@@ -383,11 +363,10 @@ function createWindow(): void {
       runStartupScan().catch(err => console.error('[Startup] Scan error:', err))
       autoResumeDownloads().catch(err => console.error('[Startup] Auto-resume error:', err))
     })
-    handleCommandLine(process.argv, null)
   })
 
   mainWindow.webContents.setWindowOpenHandler((details) => {
-    // Only allow safe external URLs — block javascript:, file:, data: etc.
+    // Only allow safe external URLs ΓÇö block javascript:, file:, data: etc.
     if (details.url.startsWith('https://') || details.url.startsWith('http://')) {
       shell.openExternal(details.url)
     } else {
@@ -397,10 +376,6 @@ function createWindow(): void {
   })
 
   mainWindow.on('close', (e) => {
-    if (isInstallingUpdate) {
-      return
-    }
-
     if (activeTorrents.size > 0) {
       const choice = dialog.showMessageBoxSync(mainWindow, {
         type: 'warning',
@@ -437,7 +412,7 @@ function registerMediaProtocol(): void {
         normalizedPath = normalizedPath.slice(1)
       }
 
-      // Security: block path traversal — only serve files within allowed roots
+      // Security: block path traversal ΓÇö only serve files within allowed roots
       if (!isSafeFilePath(normalizedPath)) {
         console.error(`[Protocol] 403 Forbidden path: ${normalizedPath}`)
         return new Response('Forbidden', { status: 403 })
@@ -592,7 +567,7 @@ function registerAudioProtocol(): void {
         ])
         .on('error', (err) => {
           if (!err.message.includes('Output stream closed') && !err.message.includes('SIGKILL') && !err.message.includes('The operation was aborted')) {
-            // Gracefully fall back — d3d11va may not be supported on all machines
+            // Gracefully fall back ΓÇö d3d11va may not be supported on all machines
             // so we silently swallow init errors and let the stream naturally fall back
             if (!err.message.includes('Cannot load d3d11') && !err.message.includes('No device available')) {
               console.error('FFmpeg audio extr error:', err.message)
@@ -624,44 +599,6 @@ function registerAudioProtocol(): void {
 app.commandLine.appendSwitch('enable-blink-features', 'AudioVideoTracks')
 // Prevent Chromium's hardware decoder from artifacting (producing grey glitchy soup) on specific high-bitrate MKV frames
 app.commandLine.appendSwitch('disable-features', 'D3D11VideoDecoder') 
-
-const gotTheLock = app.requestSingleInstanceLock()
-
-if (!gotTheLock) {
-  app.quit()
-  process.exit(0)
-}
-
-let pendingExternalFilePath: string | null = null;
-const allowedExternalDirs = new Set<string>();
-
-app.on('second-instance', (event, commandLine, workingDirectory) => {
-  const mainWindow = BrowserWindow.getAllWindows()[0]
-  if (mainWindow) {
-    if (mainWindow.isMinimized()) mainWindow.restore()
-    mainWindow.focus()
-    handleCommandLine(commandLine, mainWindow)
-  }
-})
-
-function handleCommandLine(argv: string[], mainWindow: BrowserWindow | null) {
-  const filePath = argv.find(arg => 
-    !arg.startsWith('--') && 
-    arg !== process.execPath &&
-    arg !== app.getAppPath() &&
-    ['.mp4', '.mkv', '.avi', '.mov', '.webm'].includes(path.extname(arg).toLowerCase())
-  );
-  if (filePath) {
-    const normalizedDir = path.normalize(path.dirname(filePath))
-    allowedExternalDirs.add(normalizedDir)
-    pendingExternalFilePath = filePath;
-    if (mainWindow && mainWindow.webContents && !mainWindow.webContents.isLoading()) {
-      mainWindow.webContents.send('open-external-file', filePath)
-    }
-  }
-}
-
-
 
 app.whenReady().then(() => {
   // Register media protocol
@@ -742,8 +679,7 @@ ipcMain.handle('get-video-progress', (_, videoId) => {
 })
 
 ipcMain.on('update-video-progress', (_, videoId, time, completed, isClosing) => {
-  if (videoId === -1) return; // Don't save progress for ad-hoc external files (crashes DB FK constraint)
-  db.updateVideoProgress(videoId, time, completed, Boolean(isClosing))
+  db.updateVideoProgress(videoId, time, completed)
   if (isClosing) {
     BrowserWindow.getAllWindows().forEach(w => w.webContents.send('library-updated'))
   }
@@ -799,12 +735,6 @@ ipcMain.handle('get-embedded-audio', async (_, filePath: string) => {
     return []
   }
   return await getEmbeddedAudio(filePath)
-})
-
-ipcMain.handle('get-pending-external-file', () => {
-  const file = pendingExternalFilePath;
-  pendingExternalFilePath = null;
-  return file;
 })
 
 function tokenizeSubtitleName(value: string): string[] {
@@ -949,17 +879,9 @@ ipcMain.handle('pre-convert-subtitle', async (_, filePath: string, trackIndex: n
 
 
 
-// ─── Open Folder in Explorer ─────────────────────────────────────────────────
+// ΓöÇΓöÇΓöÇ Open Folder in Explorer ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
 ipcMain.handle('open-folder', (_event, filePath: string) => {
-  if (!isSafeFilePath(filePath)) {
-    console.error(`[IPC] 403 Forbidden path in open-folder: ${filePath}`)
-    return false
-  }
-  if (!fs.existsSync(filePath)) {
-    return false
-  }
   shell.showItemInFolder(filePath)
-  return true
 })
 
 ipcMain.handle('open-downloads-folder', () => {
@@ -968,7 +890,7 @@ ipcMain.handle('open-downloads-folder', () => {
   shell.openPath(dlPath)
 })
 
-// ─── Get Media Info via ffprobe ───────────────────────────────────────────────
+// ΓöÇΓöÇΓöÇ Get Media Info via ffprobe ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
 ipcMain.handle('get-media-info', (_event, filePath: string): Promise<any> => {
   return new Promise((resolve) => {
     if (!isSafeFilePath(filePath)) {
@@ -1046,7 +968,7 @@ ipcMain.handle('get-media-info', (_event, filePath: string): Promise<any> => {
           codecLong: videoStream.codec_long_name || null,
           width: videoStream.width || null,
           height: videoStream.height || null,
-          resolution: videoStream.width && videoStream.height ? `${videoStream.width}×${videoStream.height}` : null,
+          resolution: videoStream.width && videoStream.height ? `${videoStream.width}├ù${videoStream.height}` : null,
           frameRate: parseFrameRate(videoStream.r_frame_rate),
           bitDepth: videoStream.bits_per_raw_sample ? `${videoStream.bits_per_raw_sample}-bit` : null,
           colorSpace: videoStream.color_space || null,
@@ -1133,13 +1055,10 @@ ipcMain.handle('clear-all-data', async () => {
   }
 })
 
-// ─── Auto Updater Setup ──────────────────────────────────────────────────────
-
-let isInstallingUpdate = false
+// ΓöÇΓöÇΓöÇ Auto Updater Setup ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
 
 ipcMain.on('install-update', () => {
-  isInstallingUpdate = true
-  autoUpdater.quitAndInstall(false, true)
+  autoUpdater.quitAndInstall()
 })
 
 function setupAutoUpdater(win: BrowserWindow): void {
@@ -1147,9 +1066,7 @@ function setupAutoUpdater(win: BrowserWindow): void {
   if (!app.isPackaged) return
 
   autoUpdater.autoDownload = true
-  // Keep installation explicit so the renderer can always show progress
-  // and the user can choose when to restart into the new version.
-  autoUpdater.autoInstallOnAppQuit = false
+  autoUpdater.autoInstallOnAppQuit = true
 
   autoUpdater.on('update-available', (info) => {
     win.webContents.send('update-available', { version: info.version })
@@ -1172,7 +1089,7 @@ function setupAutoUpdater(win: BrowserWindow): void {
   setInterval(() => autoUpdater.checkForUpdates().catch(() => {}), 2 * 60 * 60 * 1000)
 }
 
-// ─── WebTorrent Download Engine ──────────────────────────────────────────────
+// ΓöÇΓöÇΓöÇ WebTorrent Download Engine ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
 let webtorrentClient: any = null
 const activeTorrents = new Map<string, any>() // id -> torrent instance
 
@@ -1184,11 +1101,16 @@ async function getWebTorrentClient(): Promise<any> {
     const WebTorrent = mod.default || mod
     
     webtorrentClient = new WebTorrent({
-      // Privacy: DHT enabled for better magnet resolution, but with privacy caution
-      dht: true,
-      // Privacy: LSD disabled by default
+      // Privacy: DHT disabled by default ΓÇö DHT broadcasts your real public IP
+      // to the global distributed hash table network, where it can be logged by
+      // copyright enforcement agencies and ISP monitoring systems.
+      dht: false,
+      // Privacy: LSD disabled by default ΓÇö Local Service Discovery announces
+      // your download activity on the LAN, visible to network admins on
+      // corporate/university/public Wi-Fi.
       lsd: false,
       // Reduced from 1000: extreme connection counts can crash home routers
+      // and trigger ISP throttling. 200 is a good balance of speed vs stability.
       maxConns: 200,
     })
     
@@ -1207,7 +1129,7 @@ function getDownloadPath(): string {
 
 function formatBytes(bytes: any): string {
   if (typeof bytes === 'string') return bytes
-  if (typeof bytes !== 'number' || isNaN(bytes)) return '—'
+  if (typeof bytes !== 'number' || isNaN(bytes)) return 'ΓÇö'
   if (bytes === 0) return '0 B'
   const k = 1024
   const sizes = ['B', 'KB', 'MB', 'GB', 'TB']
@@ -1217,7 +1139,7 @@ function formatBytes(bytes: any): string {
 
 function formatTime(seconds: any): string {
   if (typeof seconds === 'string') return seconds
-  if (!isFinite(seconds) || seconds <= 0) return '—'
+  if (!isFinite(seconds) || seconds <= 0) return 'ΓÇö'
   const h = Math.floor(seconds / 3600)
   const m = Math.floor((seconds % 3600) / 60)
   const s = Math.floor(seconds % 60)
@@ -1241,12 +1163,6 @@ function broadcastProgress(id: string, torrent: any, status: string, errorMessag
     }
   }
 
-  // Determine actual status - if it's "downloading" but has no size, it's resolving metadata
-  let displayStatus = status
-  if (status === 'downloading' && (!torrent.length || torrent.length === 0)) {
-    displayStatus = 'connecting'
-  }
-
   const data: any = {
     id,
     title: (torrent as any)._myCinemaTitle || torrent.name || existing?.title || 'Download',
@@ -1257,12 +1173,12 @@ function broadcastProgress(id: string, torrent: any, status: string, errorMessag
       : (existing?.downloadSpeed || '0 B/s'),
     timeRemaining: torrent.timeRemaining !== undefined 
       ? formatTime(torrent.timeRemaining ? torrent.timeRemaining / 1000 : Infinity) 
-      : (existing?.timeRemaining || '—'),
-    status: displayStatus,
+      : (existing?.timeRemaining || 'ΓÇö'),
+    status,
     // Only update size/downloaded if they are greater than 0, or if we don't have existing data
     size: (torrent.length && torrent.length > 0) 
       ? formatBytes(torrent.length) 
-      : (existing?.size || '—'),
+      : (existing?.size || 'ΓÇö'),
     downloaded: (torrent.downloaded && torrent.downloaded > 0) 
       ? formatBytes(torrent.downloaded) 
       : (existing?.downloaded || '0 B'),
@@ -1274,7 +1190,7 @@ function broadcastProgress(id: string, torrent: any, status: string, errorMessag
   BrowserWindow.getAllWindows().forEach(w => w.webContents.send('torrent-progress', data))
 }
 
-// ─── IPC: Search TMDB ────────────────────────────────────────────────────────
+// ΓöÇΓöÇΓöÇ IPC: Search TMDB ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
 // Read the key from the environment (injected by electron-vite from .env at build time).
 // Never hardcode API keys in source files.
 const TMDB_API_KEY = process.env.MAIN_VITE_TMDB_API_KEY || (import.meta as any).env?.MAIN_VITE_TMDB_API_KEY || ''
@@ -1352,44 +1268,12 @@ ipcMain.handle('search-tmdb', async (_, query: string) => {
   }
 })
 
-ipcMain.handle('fetch-trending', async (_, type: 'movie' | 'series') => {
-  return await tmdb.fetchTrending(type)
-})
-
-ipcMain.handle('toggle-favorite', (_, id: number) => {
-  return db.toggleFavorite(id)
-})
-
-ipcMain.handle('toggle-watchlist', (_, id: number) => {
-  return db.toggleWatchlist(id)
-})
-
-ipcMain.handle('add-to-watchlist-external', (_, item: any) => {
-  return db.addToWatchlistExternal(item)
-})
-
-ipcMain.handle('remove-from-watchlist-external', (_, tmdbId: number) => {
-  return db.removeFromWatchlistExternal(tmdbId)
-})
-
-ipcMain.handle('get-watchlist', () => {
-  return db.getWatchlist()
-})
-
-ipcMain.handle('get-favorites', () => {
-  return db.getFavorites()
-})
-
-ipcMain.handle('find-video-by-tmdb-id', (_, tmdbId: number) => {
-  return db.findVideoByTmdbId(tmdbId)
-})
-
-// ─── Hindi Detection & Ranking Helpers ────────────────────────────────────────
+// ΓöÇΓöÇΓöÇ Hindi Detection & Ranking Helpers ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
 function isHindiContent(title: string): boolean {
   const lower = title.toLowerCase()
   return (
     lower.includes('hindi') ||
-    lower.includes('हिंदी') ||
+    lower.includes('αñ╣αñ┐αñéαñªαÑÇ') ||
     lower.includes('audio:hindi') ||
     lower.includes('audio hindi') ||
     lower.includes('dual audio') ||
@@ -1469,7 +1353,7 @@ function getHindiScore(title: string): number {
   return score
 }
 
-// ─── Torrentio Stream Parser Helper ──────────────────────────────────────────
+// ΓöÇΓöÇΓöÇ Torrentio Stream Parser Helper ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
 const TORRENTIO_BASE = 'https://torrentio.strem.fun/sort=seeders|qualityfilter=cam,screener'
 
 function parseTorrentioStream(stream: any, fallbackTitle: string): any | null {
@@ -1480,12 +1364,12 @@ function parseTorrentioStream(stream: any, fallbackTitle: string): any | null {
   const qualityMatch = streamTitle.match(/(2160p|1080p|720p|480p)/i)
   const quality = qualityMatch ? qualityMatch[1] : (stream.name?.includes('1080p') ? '1080p' : 'HD')
   
-  // Parse size e.g. "💾 2.34 GB" or "💾 980 MB"
+  // Parse size e.g. "≡ƒÆ╛ 2.34 GB" or "≡ƒÆ╛ 980 MB"
   const sizeMatch = streamTitle.match(/([0-9.]+\s*(GB|MB|KB|GiB|MiB))/i)
-  const size = sizeMatch ? sizeMatch[1] : '—'
+  const size = sizeMatch ? sizeMatch[1] : 'ΓÇö'
 
-  // Parse seeds e.g. "👤 123"
-  const seedMatch = streamTitle.match(/(?:👤|Seeders:)\s*([0-9]+)/i)
+  // Parse seeds e.g. "≡ƒæñ 123"
+  const seedMatch = streamTitle.match(/(?:≡ƒæñ|Seeders:)\s*([0-9]+)/i)
   const seeds = seedMatch ? parseInt(seedMatch[1]) : 0
   if (seeds === 0) return null // Skip dead torrents
   
@@ -1506,20 +1390,25 @@ function parseTorrentioStream(stream: any, fallbackTitle: string): any | null {
   }
 }
 
-// ─── Shared Tracker List & Magnet Enrichment ─────────────────────────────────
+// ΓöÇΓöÇΓöÇ Shared Tracker List & Magnet Enrichment ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
 const EXTRA_TRACKERS = [
   'udp://tracker.opentrackr.org:1337/announce',
-  'udp://open.stealth.si:80/announce',
   'udp://tracker.torrent.eu.org:451/announce',
   'udp://exodus.desync.com:6969/announce',
+  'udp://tracker.cyberia.is:6969/announce',
+  'udp://tracker.tiny-vps.com:6969/announce',
+  'udp://open.stealth.si:80/announce',
   'udp://tracker.moeking.me:6969/announce',
   'udp://tracker.bitsearch.to:1337/announce',
   'udp://tracker.dler.org:6969/announce',
   'udp://9.rarbg.com:2810/announce',
   'udp://p4p.arenabg.com:1337',
   'udp://open.tracker.cl:1337/announce',
-  'wss://tracker.openwebtorrent.com',
-  'wss://tracker.btorrent.xyz',
+  'udp://explodie.org:6969/announce',
+  'udp://tracker.opentrackr.org:1337/announce',
+  'https://tracker.nanoha.org:443/announce',
+  'udp://tracker.openbittorrent.com:6969/announce',
+  'udp://tracker.pomf.se:80/announce',
 ]
 
 function isRelevanceMatch(resultTitle: string, searchTitle: string, mediaType: string, year: string): boolean {
@@ -1553,25 +1442,16 @@ function isRelevanceMatch(resultTitle: string, searchTitle: string, mediaType: s
 }
 
 function enrichMagnetWithTrackers(magnetUrl: string): string {
-  if (!magnetUrl || !magnetUrl.startsWith('magnet:')) return magnetUrl
-  
   let enriched = magnetUrl
-  // Ensure we have a query separator
-  if (!enriched.includes('?')) enriched += '?'
-  
   for (const tr of EXTRA_TRACKERS) {
-    const encodedTr = encodeURIComponent(tr)
-    // Check both encoded and unencoded to avoid duplicates
-    if (!enriched.includes(encodedTr) && !enriched.includes(tr)) {
-      // Use & if we already have parameters, otherwise ? (though xt is usually first)
-      const separator = enriched.endsWith('?') ? '' : '&'
-      enriched += `${separator}tr=${encodedTr}`
+    if (!enriched.includes(encodeURIComponent(tr))) {
+      enriched += `&tr=${encodeURIComponent(tr)}`
     }
   }
   return enriched
 }
 
-// ─── IPC: Search Torrent Sources ─────────────────────────────────────────────
+// ΓöÇΓöÇΓöÇ IPC: Search Torrent Sources ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
 ipcMain.handle('search-torrent-sources', async (_, title: string, year: string, mediaType: string, tmdbId: number) => {
   try {
     console.log(`[Torrent] Searching sources for: "${title}" (${year}) type=${mediaType} tmdbId=${tmdbId}`)
@@ -2032,6 +1912,8 @@ ipcMain.handle('search-torrent-sources', async (_, title: string, year: string, 
     }
 
     return uniqueSources
+      .map(src => ({ ...src, magnet: enrichMagnetWithTrackers(src.magnet) }))
+
   } catch (err) {
     console.error('[Torrent] Source search error:', err)
     return []
@@ -2049,11 +1931,11 @@ async function startWebTorrent(torrentId: string, magnetUrl: string, title: stri
 
   broadcastProgress(torrentId, { downloadSpeed: 0, timeRemaining: 0, length: 0, downloaded: 0, progress: initialProgress / 100, name: title } as any, 'downloading')
 
-  const torrent = client.add(magnetUrl, { 
-    path: downloadPath,
-    announce: EXTRA_TRACKERS
-  })
-  console.log(`[Torrent] Added to client. infoHash: ${torrent.infoHash}`)
+  // Re-use the shared tracker list (magnets are already enriched at search time,
+  // but downloads from the DB may not be, so enrich again just in case)
+  let enrichedMagnet = enrichMagnetWithTrackers(magnetUrl)
+
+  const torrent = client.add(enrichedMagnet, { path: downloadPath })
   
   torrent._myCinemaTitle = title
   
@@ -2067,7 +1949,6 @@ async function startWebTorrent(torrentId: string, magnetUrl: string, title: stri
 
   torrent.on('ready', () => {
     console.log(`[Torrent] Metadata resolved: ${torrent.name} (${formatBytes(torrent.length)})`)
-    console.log(`[Torrent] Peers: ${torrent.numPeers}`)
     torrent._myCinemaName = torrent.name
     broadcastProgress(torrentId, torrent, torrent.paused ? 'paused' : 'downloading')
   })
@@ -2104,7 +1985,7 @@ async function startWebTorrent(torrentId: string, magnetUrl: string, title: stri
 async function autoResumeDownloads() {
   const downloads = db.getDownloads()
   for (const dl of downloads) {
-    if (dl.status === 'downloading' || dl.status === 'connecting') {
+    if (dl.status === 'downloading') {
       console.log(`[AutoResume] Resuming incomplete download: ${dl.title}`)
       try {
         await startWebTorrent(dl.id, dl.magnet, dl.title, dl.progress || 0)
@@ -2135,7 +2016,7 @@ ipcMain.handle('start-torrent-download', async (_, magnetUrl: string, title: str
   }
 })
 
-// ─── IPC: Cancel Torrent ─────────────────────────────────────────────────────
+// ΓöÇΓöÇΓöÇ IPC: Cancel Torrent ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
 ipcMain.handle('cancel-torrent-download', async (_, id: string) => {
   try {
     const torrent = activeTorrents.get(id)
@@ -2171,7 +2052,7 @@ ipcMain.handle('cancel-torrent-download', async (_, id: string) => {
   }
 })
 
-// ─── IPC: Pause / Resume Torrent ─────────────────────────────────────────────
+// ΓöÇΓöÇΓöÇ IPC: Pause / Resume Torrent ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
 ipcMain.handle('pause-resume-torrent', async (_, id: string) => {
   try {
     const torrent = activeTorrents.get(id)
@@ -2219,12 +2100,12 @@ ipcMain.handle('pause-resume-torrent', async (_, id: string) => {
   }
 })
 
-// ─── IPC: Get Active Downloads ───────────────────────────────────────────────
+// ΓöÇΓöÇΓöÇ IPC: Get Active Downloads ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
 ipcMain.handle('get-active-downloads', async () => {
   return db.getDownloads()
 })
 
-// ─── IPC: Remove Download ────────────────────────────────────────────────────
+// ΓöÇΓöÇΓöÇ IPC: Remove Download ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
 ipcMain.handle('remove-download', async (_, id: string, deleteFile: boolean = false) => {
   try {
     const torrent = activeTorrents.get(id)
@@ -2255,12 +2136,7 @@ ipcMain.handle('remove-download', async (_, id: string, deleteFile: boolean = fa
       // We also wait a tiny bit to allow WebTorrent to release file handles
       setTimeout(() => {
         try {
-          const downloadRoot = getDownloadPath()
-          const dlPath = path.resolve(downloadRoot, folderName)
-          if (!isPathInsideRoot(dlPath, downloadRoot) || dlPath === path.resolve(downloadRoot)) {
-            console.warn(`[Torrent] Refusing unsafe delete path: ${dlPath}`)
-            return
-          }
+          const dlPath = path.join(getDownloadPath(), folderName)
           if (fs.existsSync(dlPath)) {
             console.log(`[Torrent] Deleting physical files at: ${dlPath}`)
             fs.rmSync(dlPath, { recursive: true, force: true })
@@ -2270,9 +2146,7 @@ ipcMain.handle('remove-download', async (_, id: string, deleteFile: boolean = fa
           // Retry once more after 2 seconds if it failed (likely due to file lock)
           setTimeout(() => {
             try {
-              const downloadRoot = getDownloadPath()
-              const dlPath = path.resolve(downloadRoot, folderName)
-              if (!isPathInsideRoot(dlPath, downloadRoot) || dlPath === path.resolve(downloadRoot)) return
+              const dlPath = path.join(getDownloadPath(), folderName)
               if (fs.existsSync(dlPath)) fs.rmSync(dlPath, { recursive: true, force: true })
             } catch (e) {}
           }, 2000)
@@ -2287,7 +2161,7 @@ ipcMain.handle('remove-download', async (_, id: string, deleteFile: boolean = fa
   }
 })
 
-// ─── OpenSubtitles: Search Subtitles ─────────────────────────────────────────
+// ΓöÇΓöÇΓöÇ OpenSubtitles: Search Subtitles ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
 ipcMain.handle('search-opensubtitles', async (_, params: {
   query?: string
   tmdbId?: number
@@ -2386,7 +2260,7 @@ ipcMain.handle('search-opensubtitles', async (_, params: {
   }
 })
 
-// ─── OpenSubtitles: Download Subtitle ────────────────────────────────────────
+// ΓöÇΓöÇΓöÇ OpenSubtitles: Download Subtitle ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
 ipcMain.handle('download-opensubtitle', async (_, params: {
   fileId: number
   videoFilePath: string

@@ -18,7 +18,7 @@ const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState<'home' | 'videos' | 'movies' | 'series' | 'download' | 'settings' | 'watchlist' | 'history' | 'favorites'>('home')
   const [isSidebarExpanded, setIsSidebarExpanded] = useState(true)
 
-  const [showWhatsNew, setShowWhatsNew] = useState(() => localStorage.getItem('v1.15.3_whatsnew') !== 'true')
+  const [showWhatsNew, setShowWhatsNew] = useState(() => localStorage.getItem('v1.15.4_whatsnew') !== 'true')
 
   const [playingVideo, setPlayingVideo] = useState<Video | null>(null)
   const [selectedVideo, setSelectedVideo] = useState<Video | null>(null)
@@ -272,7 +272,7 @@ const App: React.FC = () => {
               <div className="absolute inset-0 bg-gradient-to-t from-surface to-transparent" />
               <div className="relative z-10 text-center mt-4">
                 <span className="px-3 py-1 bg-red-600 text-white text-[10px] font-black tracking-[0.2em] uppercase rounded-full mb-3 inline-block animate-pulse">Update Complete</span>
-                <h2 className="text-3xl font-black text-white italic tracking-tighter">MyCinema v1.15.3</h2>
+                <h2 className="text-3xl font-black text-white italic tracking-tighter">MyCinema v1.15.4</h2>
               </div>
             </div>
             
@@ -280,40 +280,40 @@ const App: React.FC = () => {
               <div className="space-y-2 group">
                 <h3 className="text-base font-black text-primary flex items-center gap-2 italic">
                   <span className="w-2 h-2 rounded-full bg-primary" />
-                  Fresh MyCinema Identity 🎬
+                  Separate AI Boost Controls 🎬
                 </h3>
                 <p className="text-sm text-white/60 leading-relaxed pl-4 font-bold">
-                  The new gradient film-mark logo now appears in the sidebar, browser favicon, packaged app resources, and Windows app icon.
+                  AI Boost now gives you independent toggles for sharpness and vibrance, so each video can use only the enhancement it needs.
                 </p>
               </div>
 
               <div className="space-y-2 group">
                 <h3 className="text-base font-black text-amber-400 flex items-center gap-2 italic">
                   <span className="w-2 h-2 rounded-full bg-amber-400" />
-                  Sharper App Icon 🛠️
+                  Smarter Playback Controls 🛠️
                 </h3>
                 <p className="text-sm text-white/60 leading-relaxed pl-4 font-bold">
-                  Installer and desktop branding now use a regenerated Windows icon built from the supplied transparent PNG.
+                  Opening the AI Boost menu no longer accidentally pauses a playing video or starts a paused one.
                 </p>
               </div>
 
               <div className="space-y-2 group">
                 <h3 className="text-base font-black text-emerald-400 flex items-center gap-2 italic">
                   <span className="w-2 h-2 rounded-full bg-emerald-400" />
-                  Consistent Logo Assets 📂
+                  Better Enhancement Memory 📂
                 </h3>
                 <p className="text-sm text-white/60 leading-relaxed pl-4 font-bold">
-                  Renderer assets, public favicon assets, and packaged build resources now point to the same final logo artwork.
+                  The old combined AI Enhance preference is migrated cleanly, then sharpness and vibrance remember their own choices.
                 </p>
               </div>
 
               <div className="space-y-2 group">
                 <h3 className="text-base font-black text-purple-400 flex items-center gap-2 italic">
                   <span className="w-2 h-2 rounded-full bg-purple-400" />
-                  Release Maintenance 🛠️
+                  Renderer Maintenance 🛠️
                 </h3>
                 <p className="text-sm text-white/60 leading-relaxed pl-4 font-bold">
-                  Version metadata and release notes were updated so auto-updater users get a clean one-time update summary.
+                  The quality renderer now passes separate shader controls for detail and color processing while keeping the existing look.
                 </p>
               </div>
             </div>
@@ -322,7 +322,7 @@ const App: React.FC = () => {
               <p className="text-[10px] font-black text-white/20 uppercase tracking-[0.2em]">Check RELEASE_NOTES.md for full diff</p>
               <button
                 onClick={() => {
-                  localStorage.setItem('v1.15.3_whatsnew', 'true')
+                  localStorage.setItem('v1.15.4_whatsnew', 'true')
                   setShowWhatsNew(false)
                 }}
                 className="px-8 py-3 bg-red-600 text-white font-black rounded-xl hover:bg-red-700 transition-all hover:scale-105 active:scale-95 shadow-lg shadow-red-600/20 italic"

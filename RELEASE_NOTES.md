@@ -1,3 +1,18 @@
+# MyCinema v1.15.4 🚀
+
+Focused patch release for AI Boost control and player interaction polish.
+
+### 🎥 AI Boost
+- **Separate Sharpness & Vibrance Controls**: AI Boost now lets users turn sharpness and vibrance on independently for different video situations.
+- **Persisted Individual Preferences**: Sharpness and vibrance each save their own setting, with a clean migration from the older combined AI Enhance preference.
+- **Shader-Level Control**: The quality renderer now passes separate uniforms for sharpening and vibrance/color processing while preserving the existing enhancement strength.
+
+### 🛠️ Player Fixes
+- **AI Boost Menu No Longer Toggles Playback**: Opening the AI Boost pop-up or tapping its controls no longer pauses a playing video or starts a paused one.
+- **Updated What's New Pop-up**: First launch after installing v1.15.4 shows a one-time summary of these AI Boost and playback improvements.
+
+***
+
 # MyCinema v1.15.3 🚀
 
 Focused patch release for refreshed app branding.

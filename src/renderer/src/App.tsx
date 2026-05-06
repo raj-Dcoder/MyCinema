@@ -1,5 +1,7 @@
-import React, { useState, useEffect } from 'react'
-import { Home as HomeIcon, Film, Tv, Settings as SettingsIcon, Video as VideoIcon, Download as DownloadIcon, ChevronLeft, Menu, Bookmark, Clock, Heart, User, Search as SearchIcon, Bell, Settings, RefreshCw } from 'lucide-react'
+import React, { useState, useEffect, useRef } from 'react'
+import { motion, AnimatePresence } from 'framer-motion'
+import clsx from 'clsx'
+import { Home as HomeIcon, Film, Tv, Settings as SettingsIcon, Video as VideoIcon, Download as DownloadIcon, ChevronLeft, ChevronRight, Menu, Bookmark, Clock, Heart, User, Search as SearchIcon, Bell, Settings, RefreshCw, Maximize2, Sparkles, Zap, ShieldCheck, Wrench, Check } from 'lucide-react'
 import { Video } from './types'
 import Home from './pages/Home'
 import Videos from './pages/Videos'
@@ -14,16 +16,66 @@ import DetailScreen from './components/DetailScreen'
 import Download from './pages/Download'
 import appLogo from './assets/mycinema-logo.png'
 
+const LATEST_RELEASE = {
+  version: '1.18.0',
+  eyebrow: 'What\'s New',
+  headline: 'Fullscreen launch, safer cleanup.',
+  summary: 'A focused update for immersive startup, cleaner source browsing, and safer external media handling.',
+  steps: [
+    {
+      icon: Sparkles,
+      title: 'Immersive App',
+      description: 'MyCinema now opens straight into a more cinematic fullscreen experience.',
+      color: 'from-blue-500 to-cyan-400',
+      iconColor: 'text-cyan-400',
+      items: [
+        'Launch fullscreen is now a saved setting with a quick control at the top edge.',
+        'The Settings page includes an Open in Fullscreen switch for changing the startup behavior.'
+      ]
+    },
+    {
+      icon: Zap,
+      title: 'Source Browsing',
+      description: 'Download discovery is easier to scan before choosing a source.',
+      color: 'from-emerald-400 to-teal-500',
+      iconColor: 'text-emerald-400',
+      items: [
+        'Detail pages can filter sources by Hindi audio, season packs, and specific seasons.',
+        'Source results are sorted by seed health, with clearer empty states when filters hide matches.'
+      ]
+    },
+    {
+      icon: ShieldCheck,
+      title: 'Security & Privacy',
+      description: 'External embeds and file cleanup now use tighter, more predictable boundaries.',
+      color: 'from-amber-400 to-orange-500',
+      iconColor: 'text-amber-400',
+      items: [
+        'YouTube trailers send a strict origin/referrer posture for embedded playback.',
+        'Deleting paused downloads now targets normalized paths and refreshes the local library after file removal.'
+      ]
+    }
+  ]
+}
+
+const getWhatsNewStorageKey = (version: string) => `mycinema_whats_new_seen_${version}`
+const isDevPreview = import.meta.env.DEV
+
 const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState<'home' | 'videos' | 'movies' | 'series' | 'download' | 'settings' | 'watchlist' | 'history' | 'favorites'>('home')
   const [isSidebarExpanded, setIsSidebarExpanded] = useState(true)
 
-  const [showWhatsNew, setShowWhatsNew] = useState(() => localStorage.getItem('v1.17.0_whatsnew') !== 'true')
+  const [showWhatsNew, setShowWhatsNew] = useState(() => isDevPreview || localStorage.getItem(getWhatsNewStorageKey(LATEST_RELEASE.version)) !== 'true')
+  const [whatsNewStep, setWhatsNewStep] = useState(0)
 
   const [playingVideo, setPlayingVideo] = useState<Video | null>(null)
   const [selectedVideo, setSelectedVideo] = useState<Video | null>(null)
   const [homeRefreshKey, setHomeRefreshKey] = useState(0)
   const [userName, setUserName] = useState(() => localStorage.getItem('mycinema_user_name') || 'User')
+  const [isFullscreen, setIsFullscreen] = useState(true)
+  const [launchFullscreen, setLaunchFullscreen] = useState(true)
+  const [showWindowControls, setShowWindowControls] = useState(false)
+  const windowControlsHideTimerRef = useRef<number | null>(null)
 
   useEffect(() => {
     const handleNameUpdate = () => {
@@ -31,6 +83,24 @@ const App: React.FC = () => {
     }
     window.addEventListener('mycinema_name_updated', handleNameUpdate)
     return () => window.removeEventListener('mycinema_name_updated', handleNameUpdate)
+  }, [])
+
+  useEffect(() => {
+    window.api.isFullscreen().then(setIsFullscreen).catch(() => {})
+    return window.api.onFullscreenChanged(setIsFullscreen)
+  }, [])
+
+  useEffect(() => {
+    window.api.getAppSettings().then(settings => {
+      setLaunchFullscreen(settings.launchFullscreen)
+    }).catch(() => {})
+
+    return window.api.onAppSettingsChanged(settings => {
+      setLaunchFullscreen(settings.launchFullscreen)
+      if (!settings.launchFullscreen) {
+        setShowWindowControls(false)
+      }
+    })
   }, [])
 
   const [updateState, setUpdateState] = useState<{
@@ -104,8 +174,82 @@ const App: React.FC = () => {
     }
   }
 
+  const closeWhatsNew = () => {
+    if (!isDevPreview) {
+      localStorage.setItem(getWhatsNewStorageKey(LATEST_RELEASE.version), 'true')
+    }
+    setShowWhatsNew(false)
+    setWhatsNewStep(0)
+  }
+
+  const handleWhatsNewNext = () => {
+    if (whatsNewStep < LATEST_RELEASE.steps.length - 1) {
+      setWhatsNewStep(step => step + 1)
+      return
+    }
+
+    closeWhatsNew()
+  }
+
+  const clearWindowControlsHideTimer = () => {
+    if (windowControlsHideTimerRef.current) {
+      window.clearTimeout(windowControlsHideTimerRef.current)
+      windowControlsHideTimerRef.current = null
+    }
+  }
+
+  const revealWindowControls = () => {
+    clearWindowControlsHideTimer()
+    setShowWindowControls(true)
+  }
+
+  const hideWindowControlsSoon = () => {
+    clearWindowControlsHideTimer()
+    windowControlsHideTimerRef.current = window.setTimeout(() => {
+      setShowWindowControls(false)
+      windowControlsHideTimerRef.current = null
+    }, 500)
+  }
+
+  const WindowControls = () => (
+    <>
+      {launchFullscreen && (
+        <>
+          <div
+            className="fixed right-0 top-0 z-[259] h-2 w-16"
+            onMouseEnter={revealWindowControls}
+            onMouseLeave={hideWindowControlsSoon}
+          />
+          <div
+            className={`fixed right-1.5 top-1 z-[260] flex items-center rounded-lg border border-white/8 bg-black/45 p-1 shadow-[0_10px_32px_rgba(0,0,0,0.42)] backdrop-blur-xl transition-all duration-200 ease-out ${
+              showWindowControls ? 'translate-y-0 opacity-100' : '-translate-y-9 opacity-0 pointer-events-none'
+            }`}
+            onMouseEnter={revealWindowControls}
+            onMouseLeave={hideWindowControlsSoon}
+          >
+            <button
+              type="button"
+              title={isFullscreen ? 'Exit fullscreen' : 'Enter fullscreen'}
+              aria-label={isFullscreen ? 'Exit fullscreen' : 'Enter fullscreen'}
+              onClick={async () => {
+                const nextState = await window.api.toggleFullscreen()
+                setIsFullscreen(nextState)
+                hideWindowControlsSoon()
+              }}
+              className="flex h-5 w-5 items-center justify-center rounded-md text-white/55 transition-colors hover:bg-white/10 hover:text-white"
+            >
+              <Maximize2 size={10} />
+            </button>
+          </div>
+        </>
+      )}
+    </>
+  )
+
   return (
     <div className="flex h-screen bg-[#05080d] text-text font-sans overflow-hidden">
+      <WindowControls />
+
       {/* Sidebar */}
       <div className={`bg-[#0a0f18] flex flex-col border-r border-white/5 transition-all duration-300 ease-in-out ${isSidebarExpanded ? 'w-64' : 'w-20'}`}>
         <div className="flex items-center justify-between p-6">
@@ -321,54 +465,132 @@ const App: React.FC = () => {
       )}
 
       {/* What's New Modal */}
-      {showWhatsNew && (
-        <div className="fixed inset-0 z-[200] flex items-center justify-center p-5 bg-black/78 backdrop-blur-md animate-in fade-in duration-250">
-          <div className="w-full max-w-lg overflow-hidden rounded-3xl border border-white/10 bg-[#090d14] shadow-[0_30px_85px_rgba(0,0,0,0.65)] animate-in zoom-in-95 duration-250">
-            <div className="border-b border-white/10 bg-[linear-gradient(135deg,_rgba(229,9,20,0.18),_rgba(255,255,255,0.03)_42%,_rgba(34,211,238,0.08))] px-6 py-5">
-              <div className="mb-4 flex items-center justify-between gap-3">
-                <span className="rounded-full border border-red-400/30 bg-red-500/15 px-3 py-1 text-[10px] font-black uppercase tracking-[0.22em] text-red-100">
-                  What's New
-                </span>
-                <span className="rounded-full border border-white/10 bg-black/25 px-3 py-1 text-[10px] font-black uppercase tracking-[0.22em] text-white/45">
-                  v1.17.0
-                </span>
-              </div>
-              <h2 className="text-2xl font-black tracking-tight text-white">Smarter discovery, cleaner playback.</h2>
-              <p className="mt-2 text-sm font-medium leading-6 text-white/62">
-                A compact update focused on search, trailers, detail pages, and player polish.
-              </p>
-            </div>
+      <AnimatePresence>
+        {showWhatsNew && (() => {
+          const step = LATEST_RELEASE.steps[whatsNewStep]
+          const StepIcon = step.icon
+          const isLastStep = whatsNewStep === LATEST_RELEASE.steps.length - 1
 
-            <div className="space-y-3 px-6 py-5">
-              {[
-                'Search now expands on Home and shows live movie/series results while you type.',
-                'Detail pages now show title logos, sharper posters, trailers, Moctale links, and faster first loading.',
-                'Season trailers are smarter: blocked, wrong, or episode-specific YouTube videos are avoided.',
-                'Player fixes include upside-down video fixes, better popup click behavior, subtitle selection cleanup, and richer audio boost.',
-                'The release popup is now smaller, centered, and easier to read.'
-              ].map(item => (
-                <div key={item} className="flex gap-3 rounded-2xl border border-white/6 bg-white/[0.03] px-4 py-3">
-                  <span className="mt-1 h-2 w-2 shrink-0 rounded-full bg-red-500 shadow-[0_0_12px_rgba(239,68,68,0.65)]" />
-                  <p className="text-sm font-semibold leading-6 text-white/70">{item}</p>
-                </div>
-              ))}
-            </div>
+          return (
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="fixed inset-0 z-[200] flex items-center justify-center p-4 sm:p-6"
+            >
+              <div className="absolute inset-0 bg-black/90 backdrop-blur-md" onClick={closeWhatsNew} />
 
-            <div className="flex items-center justify-between gap-4 border-t border-white/10 bg-white/[0.025] px-6 py-4">
-              <p className="text-[10px] font-black uppercase tracking-[0.2em] text-white/25">Shown once after update</p>
-              <button
-                onClick={() => {
-                  localStorage.setItem('v1.17.0_whatsnew', 'true')
-                  setShowWhatsNew(false)
-                }}
-                className="rounded-2xl bg-red-600 px-6 py-3 text-sm font-black text-white transition-all hover:scale-105 hover:bg-red-700 active:scale-95 shadow-lg shadow-red-600/20"
+              <motion.div
+                initial={{ scale: 0.9, y: 20, opacity: 0 }}
+                animate={{ scale: 1, y: 0, opacity: 1 }}
+                exit={{ scale: 0.95, y: 10, opacity: 0 }}
+                transition={{ type: 'spring', stiffness: 300, damping: 30 }}
+                className="relative w-full max-w-xl overflow-hidden rounded-2xl border border-white/10 bg-[#090d14] shadow-2xl"
               >
-                Got It
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+                <div className="pointer-events-none absolute inset-0 overflow-hidden">
+                  <AnimatePresence mode="wait">
+                    <motion.div
+                      key={whatsNewStep}
+                      initial={{ opacity: 0, scale: 0.8 }}
+                      animate={{ opacity: 0.08, scale: 1.25 }}
+                      exit={{ opacity: 0 }}
+                      transition={{ duration: 1 }}
+                      className={clsx(
+                        'absolute right-0 top-0 h-80 w-80 -translate-y-1/2 translate-x-1/3 rounded-full bg-gradient-to-br blur-[100px]',
+                        step.color
+                      )}
+                    />
+                  </AnimatePresence>
+                </div>
+
+                <div className="relative p-6 sm:p-8">
+                  <div className="mb-5 flex items-start justify-between gap-4">
+                    <div>
+                      <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-white/35">
+                        {LATEST_RELEASE.eyebrow} / v{LATEST_RELEASE.version}
+                      </p>
+                      <h2 className="mt-2 text-lg font-semibold tracking-tight text-white">{LATEST_RELEASE.headline}</h2>
+                    </div>
+                    <button
+                      onClick={closeWhatsNew}
+                      className="rounded-lg px-2 py-1 text-xs font-semibold uppercase tracking-wider text-zinc-500 transition-colors hover:bg-white/5 hover:text-white"
+                    >
+                      Skip
+                    </button>
+                  </div>
+
+                  <div className="mb-6 flex gap-1.5">
+                    {LATEST_RELEASE.steps.map((_, idx) => (
+                      <div key={idx} className="h-1 w-10 overflow-hidden rounded-full bg-white/10">
+                        {idx <= whatsNewStep && (
+                          <motion.div
+                            layoutId="whatsNewProgressIndicator"
+                            className={clsx('h-full bg-gradient-to-r', step.color)}
+                            initial={{ width: idx < whatsNewStep ? '100%' : '0%' }}
+                            animate={{ width: '100%' }}
+                            transition={{ duration: 0.4 }}
+                          />
+                        )}
+                      </div>
+                    ))}
+                  </div>
+
+                  <div className="min-h-[215px]">
+                    <AnimatePresence mode="wait">
+                      <motion.div
+                        key={whatsNewStep}
+                        initial={{ opacity: 0, x: 20 }}
+                        animate={{ opacity: 1, x: 0 }}
+                        exit={{ opacity: 0, x: -20 }}
+                        transition={{ duration: 0.3 }}
+                        className="flex flex-col items-start gap-4"
+                      >
+                        <div className={clsx('rounded-xl border border-white/10 bg-white/[0.04] p-3', step.iconColor)}>
+                          <StepIcon size={26} strokeWidth={1.6} />
+                        </div>
+                        <div>
+                          <h3 className="mb-2 text-2xl font-semibold tracking-tight text-white">{step.title}</h3>
+                          <p className="max-w-lg text-sm leading-6 text-zinc-400">{step.description}</p>
+                        </div>
+                        <div className="w-full space-y-2 border-t border-white/10 pt-3">
+                          {step.items.map(item => (
+                            <div key={item} className="flex gap-3">
+                              <span className={clsx('mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-current', step.iconColor)} />
+                              <p className="text-[13px] leading-5 text-white/68">{item}</p>
+                            </div>
+                          ))}
+                        </div>
+                      </motion.div>
+                    </AnimatePresence>
+                  </div>
+
+                  <div className="mt-7 flex items-center justify-between">
+                    <div className="text-xs text-zinc-500">
+                      Step {whatsNewStep + 1} of {LATEST_RELEASE.steps.length}
+                    </div>
+                    <button
+                      onClick={handleWhatsNewNext}
+                      className={clsx(
+                        'group relative inline-flex items-center gap-2 overflow-hidden rounded-full px-5 py-2.5 text-sm transition-all duration-300',
+                        isLastStep
+                          ? 'bg-white text-black shadow-[0_0_20px_rgba(255,255,255,0.3)] hover:bg-zinc-200'
+                          : 'border border-white/10 bg-white/10 text-white hover:border-white/30 hover:bg-white/20'
+                      )}
+                    >
+                      <span className="font-medium">{isLastStep ? 'Get Started' : 'Next'}</span>
+                      {isLastStep ? (
+                        <Check size={18} className="transition-transform group-hover:scale-110" />
+                      ) : (
+                        <ChevronRight size={18} className="transition-transform group-hover:translate-x-1" />
+                      )}
+                    </button>
+                  </div>
+                </div>
+              </motion.div>
+            </motion.div>
+          )
+        })()}
+      </AnimatePresence>
     </div>
   )
 }

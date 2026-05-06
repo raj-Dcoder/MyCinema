@@ -1,3 +1,24 @@
+# MyCinema v1.18.0
+
+Focused feature and safety release for immersive fullscreen startup, cleaner source filtering, trailer reliability, and safer download cleanup.
+
+### Immersive App
+- **Launch Fullscreen Setting**: MyCinema can now start directly in fullscreen, with the preference saved in app settings.
+- **Top-Edge Fullscreen Control**: A compact fullscreen control appears at the top edge when launch fullscreen is enabled.
+- **Settings Toggle**: The Settings page now includes an Open in Fullscreen switch so users can change startup behavior without editing files.
+
+### Source Browsing
+- **Hindi Audio Filter**: Detail page source results can now be filtered to Hindi-only releases.
+- **Season Filters**: Series source results can be narrowed to season packs or a specific season.
+- **Seed Health Sorting**: Source results are sorted by seed health, and filtered empty states now explain when no source matches the active filters.
+
+### Security & Privacy
+- **Stricter YouTube Embed Posture**: Trailer embeds now use an explicit origin and strict referrer behavior for more predictable browser navigation.
+- **Safer Download Cleanup**: Paused download deletion now normalizes paths, narrows file targets, and falls back to matching top-level download folders instead of broad removal.
+- **Library Refresh After Delete**: Removing downloaded files refreshes local library entries so stale videos disappear more reliably.
+
+***
+
 # MyCinema v1.17.0 🚀
 
 Focused feature release for faster discovery, smarter trailers, cleaner detail pages, and playback polish.

@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react'
-import { FolderOpen, Trash2, Plus, HardDrive, AlertTriangle, User, Check, X as CloseIcon } from 'lucide-react'
+import { FolderOpen, Trash2, Plus, HardDrive, AlertTriangle, Check, X as CloseIcon, Maximize2 } from 'lucide-react'
 
 const Settings: React.FC = () => {
   const [folders, setFolders] = useState<any[]>([])
@@ -7,6 +7,7 @@ const Settings: React.FC = () => {
   const [userName, setUserName] = useState(() => localStorage.getItem('mycinema_user_name') || 'User')
   const [isEditingName, setIsEditingName] = useState(false)
   const [tempName, setTempName] = useState(userName)
+  const [launchFullscreen, setLaunchFullscreen] = useState(true)
 
   const fetchFolders = async () => {
     const f = await window.api.getFolders()
@@ -24,7 +25,21 @@ const Settings: React.FC = () => {
 
   useEffect(() => {
     fetchFolders()
+    window.api.getAppSettings().then(settings => {
+      setLaunchFullscreen(settings.launchFullscreen)
+    }).catch(() => {})
   }, [])
+
+  const handleLaunchFullscreenChange = async (enabled: boolean) => {
+    setLaunchFullscreen(enabled)
+    try {
+      const settings = await window.api.setLaunchFullscreen(enabled)
+      setLaunchFullscreen(settings.launchFullscreen)
+    } catch (err) {
+      console.error('Failed to update fullscreen launch setting:', err)
+      setLaunchFullscreen(!enabled)
+    }
+  }
 
   const handleAddFolder = async () => {
     const path = await window.api.selectFolder()
@@ -101,6 +116,40 @@ const Settings: React.FC = () => {
                 Premium Member <span className="text-[8px]">👑</span>
               </p>
             </div>
+          </div>
+        </section>
+
+        <section className="space-y-6">
+          <h3 className="text-xl font-black text-white uppercase italic tracking-tight">Application</h3>
+          <div className="bg-[#0a0f18] border border-white/5 rounded-3xl p-6 flex items-center justify-between gap-6">
+            <div className="flex items-center gap-4 min-w-0">
+              <div className="p-3 bg-white/5 rounded-xl text-white/40">
+                <Maximize2 size={20} />
+              </div>
+              <div className="min-w-0">
+                <h4 className="text-sm font-black text-white uppercase italic tracking-tight">Open in Fullscreen</h4>
+                <p className="mt-1 text-xs font-medium leading-5 text-white/35">
+                  Launch MyCinema in the immersive F11-style fullscreen mode and show the top-edge fullscreen control.
+                </p>
+              </div>
+            </div>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={launchFullscreen}
+              onClick={() => handleLaunchFullscreenChange(!launchFullscreen)}
+              className={`relative h-7 w-12 flex-shrink-0 rounded-full border transition-all ${
+                launchFullscreen
+                  ? 'border-red-500/50 bg-red-600 shadow-lg shadow-red-950/30'
+                  : 'border-white/10 bg-white/5'
+              }`}
+            >
+              <span
+                className={`absolute top-1 h-5 w-5 rounded-full bg-white shadow-lg transition-all ${
+                  launchFullscreen ? 'left-6' : 'left-1'
+                }`}
+              />
+            </button>
           </div>
         </section>
 

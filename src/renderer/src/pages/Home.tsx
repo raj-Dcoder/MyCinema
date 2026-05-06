@@ -233,6 +233,8 @@ const Home: React.FC<HomeProps> = ({ onPlay, onShowDetail, onNavigate, refreshKe
   const searchInputRef = useRef<HTMLInputElement>(null)
   const searchBoxRef = useRef<HTMLDivElement>(null)
   const searchCacheRef = useRef<Map<string, Video[]>>(new Map())
+  const isSearchOpenRef = useRef(false)
+  const suppressContentClickUntilRef = useRef(0)
 
   const fetchData = async () => {
     try {
@@ -277,6 +279,25 @@ const Home: React.FC<HomeProps> = ({ onPlay, onShowDetail, onNavigate, refreshKe
   }, [refreshKey])
 
   useEffect(() => {
+    isSearchOpenRef.current = isSearchOpen
+  }, [isSearchOpen])
+
+  const suppressNextHomeClick = () => {
+    suppressContentClickUntilRef.current = Date.now() + 350
+    setSuppressNextContentClick(true)
+  }
+
+  const shouldSuppressHomeClick = () => {
+    return suppressNextContentClick || Date.now() < suppressContentClickUntilRef.current
+  }
+
+  const closeSearchFromOutside = () => {
+    suppressNextHomeClick()
+    searchInputRef.current?.blur()
+    setIsSearchOpen(false)
+  }
+
+  useEffect(() => {
     if (!isSearchOpen) return
     const timer = window.setTimeout(() => searchInputRef.current?.focus(), 80)
     return () => window.clearTimeout(timer)
@@ -284,14 +305,16 @@ const Home: React.FC<HomeProps> = ({ onPlay, onShowDetail, onNavigate, refreshKe
 
   useEffect(() => {
     const handlePointerDown = (event: MouseEvent) => {
-      if (!isSearchOpen) return
+      if (!isSearchOpenRef.current) return
       if (searchBoxRef.current?.contains(event.target as Node)) return
-      setSuppressNextContentClick(searchQuery.trim().length > 0)
-      setIsSearchOpen(false)
+      closeSearchFromOutside()
     }
 
     const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') setIsSearchOpen(false)
+      if (event.key === 'Escape') {
+        searchInputRef.current?.blur()
+        setIsSearchOpen(false)
+      }
     }
 
     window.addEventListener('mousedown', handlePointerDown)
@@ -300,16 +323,37 @@ const Home: React.FC<HomeProps> = ({ onPlay, onShowDetail, onNavigate, refreshKe
       window.removeEventListener('mousedown', handlePointerDown)
       window.removeEventListener('keydown', handleKeyDown)
     }
-  }, [isSearchOpen, searchQuery])
+  }, [])
 
   useEffect(() => {
     if (!suppressNextContentClick) return
-    const timer = window.setTimeout(() => setSuppressNextContentClick(false), 250)
+    const timer = window.setTimeout(() => setSuppressNextContentClick(false), 350)
     return () => window.clearTimeout(timer)
   }, [suppressNextContentClick])
 
+  const handleHomeClickCapture = (event: React.MouseEvent<HTMLDivElement>) => {
+    const clickedInsideSearch = searchBoxRef.current?.contains(event.target as Node)
+
+    if (isSearchOpenRef.current && !clickedInsideSearch) {
+      event.preventDefault()
+      event.stopPropagation()
+      closeSearchFromOutside()
+      return
+    }
+
+    if (Date.now() < suppressContentClickUntilRef.current && !clickedInsideSearch) {
+      event.preventDefault()
+      event.stopPropagation()
+    }
+  }
+
+  const handlePlayFromHome = (video: Video) => {
+    if (shouldSuppressHomeClick()) return
+    onPlay(video)
+  }
+
   const handleShowDetailFromHome = (video: Video) => {
-    if (suppressNextContentClick) return
+    if (shouldSuppressHomeClick()) return
     onShowDetail(video)
   }
 
@@ -419,7 +463,7 @@ const Home: React.FC<HomeProps> = ({ onPlay, onShowDetail, onNavigate, refreshKe
   }
 
   return (
-    <div>
+    <div onClickCapture={handleHomeClickCapture}>
       <section className="-mt-6 mb-8">
         <div className="relative">
           {/* Top Bar */}
@@ -536,7 +580,7 @@ const Home: React.FC<HomeProps> = ({ onPlay, onShowDetail, onNavigate, refreshKe
             </div>
           </div>
 
-          <HeroCarousel items={featured} onPlay={onPlay} onShowDetail={handleShowDetailFromHome} />
+          <HeroCarousel items={featured} onPlay={handlePlayFromHome} onShowDetail={handleShowDetailFromHome} />
         </div>
       </section>
 
@@ -581,7 +625,7 @@ const Home: React.FC<HomeProps> = ({ onPlay, onShowDetail, onNavigate, refreshKe
                   <div key={video.id} className="w-[340px] md:w-[400px] xl:w-[440px] flex-shrink-0">
                     <ContinueWatchingCard
                       video={video}
-                      onPlay={onPlay}
+                      onPlay={handlePlayFromHome}
                       onShowDetail={handleShowDetailFromHome}
                     />
                   </div>
@@ -616,7 +660,7 @@ const Home: React.FC<HomeProps> = ({ onPlay, onShowDetail, onNavigate, refreshKe
         </div>
         <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-5">
           {trendingMovies.slice(0, 6).map(video => (
-            <VideoCard key={video.tmdb_id || video.id} video={video} onPlay={onPlay} onShowDetail={handleShowDetailFromHome} />
+            <VideoCard key={video.tmdb_id || video.id} video={video} onPlay={handlePlayFromHome} onShowDetail={handleShowDetailFromHome} />
           ))}
         </div>
       </section>
@@ -630,7 +674,7 @@ const Home: React.FC<HomeProps> = ({ onPlay, onShowDetail, onNavigate, refreshKe
         </div>
         <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-5">
           {trendingIndia.slice(0, 6).map(video => (
-            <VideoCard key={video.tmdb_id || video.id} video={video} onPlay={onPlay} onShowDetail={handleShowDetailFromHome} />
+            <VideoCard key={video.tmdb_id || video.id} video={video} onPlay={handlePlayFromHome} onShowDetail={handleShowDetailFromHome} />
           ))}
           {trendingIndia.length === 0 && [1,2,3,4,5,6].map(i => (
             <div key={i} className="aspect-[2/3] bg-white/5 rounded-2xl animate-pulse" />
@@ -651,7 +695,7 @@ const Home: React.FC<HomeProps> = ({ onPlay, onShowDetail, onNavigate, refreshKe
         </div>
         <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-5">
           {recentMovies.slice(0, 6).map(video => (
-            <VideoCard key={video.id} video={video} onPlay={onPlay} onShowDetail={handleShowDetailFromHome} />
+            <VideoCard key={video.id} video={video} onPlay={handlePlayFromHome} onShowDetail={handleShowDetailFromHome} />
           ))}
           {recentMovies.length === 0 && [1,2,3,4,5,6].map(i => (
             <div key={i} className="aspect-[2/3] bg-white/5 rounded-2xl animate-pulse" />
@@ -672,7 +716,7 @@ const Home: React.FC<HomeProps> = ({ onPlay, onShowDetail, onNavigate, refreshKe
         </div>
         <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-5">
           {recentSeries.slice(0, 6).map(video => (
-            <VideoCard key={video.id} video={video} onPlay={onPlay} onShowDetail={handleShowDetailFromHome} />
+            <VideoCard key={video.id} video={video} onPlay={handlePlayFromHome} onShowDetail={handleShowDetailFromHome} />
           ))}
           {recentSeries.length === 0 && [1,2,3,4,5,6].map(i => (
             <div key={i} className="aspect-[2/3] bg-white/5 rounded-2xl animate-pulse" />

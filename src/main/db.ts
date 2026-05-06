@@ -395,6 +395,47 @@ export function removeDownloadRow(id: string) {
   return db.prepare('DELETE FROM downloads WHERE id = ?').run(id)
 }
 
+export function removeVideosUnderPath(targetPath: string) {
+  const normalizedTargetPath = path.normalize(targetPath)
+  const targetPrefix = normalizedTargetPath.endsWith(path.sep)
+    ? normalizedTargetPath
+    : `${normalizedTargetPath}${path.sep}`
+
+  const videos = db.prepare(`
+    SELECT id FROM videos
+    WHERE file_path = ? OR file_path LIKE ?
+  `).all(normalizedTargetPath, `${targetPrefix}%`) as any[]
+
+  const deleteProgress = db.prepare('DELETE FROM progress WHERE video_id = ?')
+  const deleteVideo = db.prepare('DELETE FROM videos WHERE id = ?')
+
+  const tx = db.transaction(() => {
+    for (const video of videos) {
+      deleteProgress.run(video.id)
+      deleteVideo.run(video.id)
+    }
+  })
+
+  tx()
+  return videos.length
+}
+
+export function removeVideosByTmdbId(tmdbId: number) {
+  const videos = db.prepare('SELECT id FROM videos WHERE tmdb_id = ?').all(tmdbId) as any[]
+  const deleteProgress = db.prepare('DELETE FROM progress WHERE video_id = ?')
+  const deleteVideo = db.prepare('DELETE FROM videos WHERE id = ?')
+
+  const tx = db.transaction(() => {
+    for (const video of videos) {
+      deleteProgress.run(video.id)
+      deleteVideo.run(video.id)
+    }
+  })
+
+  tx()
+  return videos.length
+}
+
 export function getDownloadByTorrentName(name: string) {
   return db.prepare('SELECT * FROM downloads WHERE name = ?').get(name) as any
 }

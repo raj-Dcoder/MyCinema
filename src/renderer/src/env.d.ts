@@ -52,6 +52,14 @@ interface Api {
   // OpenSubtitles API
   searchOnlineSubtitles: (params: { query?: string; tmdbId?: number; season?: number; episode?: number; languages?: string; mediaType?: string }) => Promise<any>
   downloadOnlineSubtitle: (params: { fileId: number; videoFilePath: string; fileName?: string }) => Promise<any>
+  minimizeWindow: () => Promise<void>
+  toggleFullscreen: () => Promise<boolean>
+  isFullscreen: () => Promise<boolean>
+  closeWindow: () => Promise<void>
+  onFullscreenChanged: (callback: (isFullscreen: boolean) => void) => () => void
+  getAppSettings: () => Promise<{ launchFullscreen: boolean }>
+  setLaunchFullscreen: (launchFullscreen: boolean) => Promise<{ launchFullscreen: boolean }>
+  onAppSettingsChanged: (callback: (settings: { launchFullscreen: boolean }) => void) => () => void
 }
 
 declare global {

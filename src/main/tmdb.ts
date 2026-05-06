@@ -920,7 +920,7 @@ export async function fetchTmdbTrailer(params: {
       publishedAt: selected.published_at || null,
       thumbnailUrl: `https://img.youtube.com/vi/${selected.key}/hqdefault.jpg`,
       watchUrl: `https://www.youtube.com/watch?v=${selected.key}`,
-      embedUrl: `https://www.youtube-nocookie.com/embed/${selected.key}?autoplay=1&rel=0&modestbranding=1`,
+      embedUrl: `https://www.youtube.com/embed/${selected.key}?autoplay=1&rel=0&modestbranding=1&origin=${encodeURIComponent('https://mycinema.app')}`,
       source,
       label,
       seasonNumber: selectedSeason,

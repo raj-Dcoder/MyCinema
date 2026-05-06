@@ -270,6 +270,29 @@ const ffprobeExecPath = isDev
 ffmpeg.setFfmpegPath(ffmpegExecPath)
 ffmpeg.setFfprobePath(ffprobeExecPath)
 
+const YOUTUBE_EMBED_ORIGIN = 'https://mycinema.app'
+
+function setupYoutubeEmbedHeaders(): void {
+  const filter = {
+    urls: [
+      'https://www.youtube.com/embed/*',
+      'https://www.youtube.com/youtubei/*',
+      'https://www.youtube-nocookie.com/embed/*',
+      'https://www.youtube-nocookie.com/youtubei/*'
+    ]
+  }
+
+  session.defaultSession.webRequest.onBeforeSendHeaders(filter, (details, callback) => {
+    const requestHeaders = {
+      ...details.requestHeaders,
+      Referer: `${YOUTUBE_EMBED_ORIGIN}/`,
+      Origin: YOUTUBE_EMBED_ORIGIN
+    }
+
+    callback({ requestHeaders })
+  })
+}
+
 // Register custom protocol as privileged
 // This MUST be called before app is ready
 protocol.registerSchemesAsPrivileged([
@@ -335,8 +358,34 @@ function saveWindowState(win: BrowserWindow) {
   }
 }
 
+type AppSettings = {
+  launchFullscreen: boolean
+}
+
+const defaultAppSettings: AppSettings = {
+  launchFullscreen: true
+}
+
+function getAppSettingsPath() {
+  return join(app.getPath('userData'), 'app-settings.json')
+}
+
+function loadAppSettings(): AppSettings {
+  try {
+    const raw = fs.readFileSync(getAppSettingsPath(), 'utf8')
+    return { ...defaultAppSettings, ...JSON.parse(raw) }
+  } catch {
+    return defaultAppSettings
+  }
+}
+
+function saveAppSettings(settings: AppSettings) {
+  fs.writeFileSync(getAppSettingsPath(), JSON.stringify(settings))
+}
+
 function createWindow(): void {
   const state = loadWindowState()
+  const settings = loadAppSettings()
 
   const mainWindow = new BrowserWindow({
     width: state.width || 1200,
@@ -344,6 +393,7 @@ function createWindow(): void {
     x: state.x,
     y: state.y,
     show: false,
+    fullScreen: settings.launchFullscreen,
     autoHideMenuBar: true,
     icon: appIconPath,
     webPreferences: {
@@ -359,7 +409,7 @@ function createWindow(): void {
   })
 
   // Apply maximized state after creation
-  if (state.isMaximized) {
+  if (state.isMaximized && !mainWindow.isFullScreen()) {
     mainWindow.maximize()
   }
 
@@ -374,9 +424,19 @@ function createWindow(): void {
   mainWindow.on('move', scheduleSave)
   mainWindow.on('maximize', scheduleSave)
   mainWindow.on('unmaximize', scheduleSave)
+  mainWindow.on('enter-full-screen', () => mainWindow.webContents.send('window-fullscreen-changed', true))
+  mainWindow.on('leave-full-screen', () => mainWindow.webContents.send('window-fullscreen-changed', false))
 
   mainWindow.on('ready-to-show', () => {
     mainWindow.show()
+    if (settings.launchFullscreen) {
+      mainWindow.setFullScreen(true)
+      setTimeout(() => {
+        if (!mainWindow.isDestroyed() && !mainWindow.isFullScreen()) {
+          mainWindow.setFullScreen(true)
+        }
+      }, 250)
+    }
     setupAutoUpdater(mainWindow)
     // Kick off startup scan after window is visible (non-blocking)
     setImmediate(() => {
@@ -668,6 +728,7 @@ app.whenReady().then(() => {
   registerMediaProtocol()
   registerSubtitleProtocol()
   registerAudioProtocol()
+  setupYoutubeEmbedHeaders()
   
   db.initDb()
   electronApp.setAppUserModelId('com.electron')
@@ -706,6 +767,47 @@ app.on('window-all-closed', () => {
 ipcMain.on('log-to-main', (_event, message) => {
   const timestamp = new Date().toLocaleTimeString();
   console.log(`[Renderer Log][${timestamp}] ${message}`);
+})
+
+ipcMain.handle('window-minimize', (event) => {
+  BrowserWindow.fromWebContents(event.sender)?.minimize()
+})
+
+ipcMain.handle('window-toggle-fullscreen', (event) => {
+  const win = BrowserWindow.fromWebContents(event.sender)
+  if (!win) return false
+
+  const nextState = !win.isFullScreen()
+  win.setFullScreen(nextState)
+  return nextState
+})
+
+ipcMain.handle('window-is-fullscreen', (event) => {
+  return BrowserWindow.fromWebContents(event.sender)?.isFullScreen() ?? false
+})
+
+ipcMain.handle('window-close', (event) => {
+  BrowserWindow.fromWebContents(event.sender)?.close()
+})
+
+ipcMain.handle('get-app-settings', () => {
+  return loadAppSettings()
+})
+
+ipcMain.handle('set-launch-fullscreen', (event, launchFullscreen: boolean) => {
+  const settings = { ...loadAppSettings(), launchFullscreen }
+  saveAppSettings(settings)
+
+  const win = BrowserWindow.fromWebContents(event.sender)
+  if (win) {
+    win.setFullScreen(launchFullscreen)
+  }
+
+  BrowserWindow.getAllWindows().forEach(window => {
+    window.webContents.send('app-settings-changed', settings)
+  })
+
+  return settings
 })
 
 ipcMain.handle('select-folder', async () => {
@@ -1103,6 +1205,7 @@ ipcMain.handle('clear-all-data', async () => {
       join(userData, 'posters'),
       join(userData, 'subtitles'),
       join(userData, 'window-state.json'),
+      join(userData, 'app-settings.json'),
       join(userData, 'Local Storage'),
       join(userData, 'Session Storage'),
       join(userData, 'Cache'),
@@ -2173,7 +2276,7 @@ ipcMain.handle('cancel-torrent-download', async (_, id: string) => {
         length: finalLength || 0, 
         downloaded: finalDownloaded || 0, 
         progress: finalProgress !== null ? finalProgress : (dlDbData.progress / 100), 
-        name: dlDbData.title 
+        name: dlDbData.name || getMagnetDisplayName(dlDbData.magnet) || dlDbData.title
       } as any, 'paused')
     }
     return true
@@ -2220,7 +2323,7 @@ ipcMain.handle('pause-resume-torrent', async (_, id: string) => {
         length: finalLength || 0, 
         downloaded: finalDownloaded || 0, 
         progress: finalProgress, 
-        name: dlDbData.title 
+        name: dlDbData.name || getMagnetDisplayName(dlDbData.magnet) || dlDbData.title
       } as any, 'paused')
     }
     
@@ -2236,60 +2339,197 @@ ipcMain.handle('get-active-downloads', async () => {
   return db.getDownloads()
 })
 
+function normalizeTorrentRelativePath(relativePath: string): string {
+  return path.normalize(relativePath).replace(/^(\.\.(\\|\/|$))+/, '')
+}
+
+function getTopLevelDownloadTarget(downloadRoot: string, relativePath: string): string | null {
+  const normalized = normalizeTorrentRelativePath(relativePath)
+  const firstSegment = normalized.split(/[\\/]/).filter(Boolean)[0]
+  if (!firstSegment) return null
+  return path.resolve(downloadRoot, firstSegment)
+}
+
+function getMagnetDisplayName(magnet?: string | null): string | null {
+  if (!magnet) return null
+  try {
+    const params = new URLSearchParams(magnet.split('?')[1] || '')
+    return params.get('dn')
+  } catch {
+    return null
+  }
+}
+
+function normalizeSearchName(value?: string | null): string {
+  return (value || '')
+    .replace(/\([^)]*\)/g, ' ')
+    .replace(/\[[^\]]*\]/g, ' ')
+    .replace(/\b(480p|720p|1080p|2160p|4k|hdrip|webrip|web-dl|bluray|x264|x265|hevc|hindi|dual|audio)\b/gi, ' ')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim()
+}
+
+function collectMatchingDownloadRootTargets(downloadRoot: string, download: any): string[] {
+  const targets: string[] = []
+  const searchNames = [
+    normalizeSearchName(download?.title),
+    normalizeSearchName(download?.name),
+    normalizeSearchName(getMagnetDisplayName(download?.magnet))
+  ].filter(name => name.length >= 3)
+
+  if (searchNames.length === 0 || !fs.existsSync(downloadRoot)) return targets
+
+  try {
+    const entries = fs.readdirSync(downloadRoot, { withFileTypes: true })
+    for (const entry of entries) {
+      const entryName = normalizeSearchName(entry.name)
+      if (!entryName) continue
+
+      const isMatch = searchNames.some(searchName =>
+        entryName.includes(searchName) || searchName.includes(entryName)
+      )
+      if (isMatch) {
+        targets.push(path.resolve(downloadRoot, entry.name))
+      }
+    }
+  } catch (err: any) {
+    console.warn('[Torrent] Could not scan download root for paused delete fallback:', err.message)
+  }
+
+  return targets
+}
+
+function collectDownloadDeleteTargets(id: string, torrent: any, download: any): string[] {
+  const downloadRoot = getDownloadPath()
+  const targets = new Set<string>()
+
+  const addTarget = (candidate?: string | null) => {
+    if (!candidate) return
+    const resolved = path.resolve(downloadRoot, candidate)
+    if (isPathInsideRoot(resolved, downloadRoot) && resolved !== path.resolve(downloadRoot)) {
+      targets.add(resolved)
+    }
+  }
+
+  const addAbsoluteTarget = (candidate?: string | null) => {
+    if (!candidate) return
+    const resolved = path.resolve(candidate)
+    if (isPathInsideRoot(resolved, downloadRoot) && resolved !== path.resolve(downloadRoot)) {
+      targets.add(resolved)
+    }
+  }
+
+  addTarget(torrent?.name)
+  addTarget(torrent?._myCinemaName)
+  addTarget(download?.name)
+  addTarget(getMagnetDisplayName(download?.magnet))
+
+  if (Array.isArray(torrent?.files)) {
+    for (const file of torrent.files) {
+      const relativeFilePath = file?.path || file?.name
+      if (!relativeFilePath) continue
+
+      addTarget(relativeFilePath)
+      addAbsoluteTarget(getTopLevelDownloadTarget(downloadRoot, relativeFilePath))
+    }
+  }
+
+  if (download?.tmdbId) {
+    const videos = db.getVideos() as any[]
+    for (const video of videos) {
+      if (video.tmdb_id === download.tmdbId && isPathInsideRoot(video.file_path, downloadRoot)) {
+        addAbsoluteTarget(video.file_path)
+        addAbsoluteTarget(getTopLevelDownloadTarget(downloadRoot, path.relative(downloadRoot, video.file_path)))
+      }
+    }
+  }
+
+  if (targets.size === 0) {
+    for (const target of collectMatchingDownloadRootTargets(downloadRoot, download)) {
+      addAbsoluteTarget(target)
+    }
+  }
+
+  if (targets.size === 0) {
+    const fallbackName = download?.name || torrent?.name || torrent?._myCinemaName || download?.title || id
+    addTarget(fallbackName)
+  }
+
+  return Array.from(targets).sort((a, b) => a.length - b.length)
+}
+
+function destroyTorrentForDelete(torrent: any): Promise<void> {
+  if (!torrent || torrent.destroyed) return Promise.resolve()
+
+  return new Promise(resolve => {
+    let settled = false
+    const done = () => {
+      if (settled) return
+      settled = true
+      resolve()
+    }
+
+    try {
+      torrent.destroy(done)
+      setTimeout(done, 1000)
+    } catch {
+      done()
+    }
+  })
+}
+
+async function hardDeletePaths(pathsToDelete: string[]) {
+  const downloadRoot = getDownloadPath()
+  const uniquePaths = Array.from(new Set(pathsToDelete))
+    .filter(target => isPathInsideRoot(target, downloadRoot) && path.resolve(target) !== path.resolve(downloadRoot))
+    .sort((a, b) => b.length - a.length)
+
+  for (const target of uniquePaths) {
+    for (const delay of [0, 500, 1500]) {
+      if (delay > 0) {
+        await new Promise(resolve => setTimeout(resolve, delay))
+      }
+
+      try {
+        if (fs.existsSync(target)) {
+          console.log(`[Torrent] Hard deleting from disk: ${target}`)
+          fs.rmSync(target, { recursive: true, force: true, maxRetries: 3, retryDelay: 250 })
+        }
+        break
+      } catch (err: any) {
+        if (delay === 1500) {
+          console.error(`[Torrent] Hard delete failed for ${target}:`, err.message)
+        }
+      }
+    }
+  }
+
+  for (const target of uniquePaths) {
+    db.removeVideosUnderPath(target)
+  }
+}
+
 // ─── IPC: Remove Download ────────────────────────────────────────────────────
 ipcMain.handle('remove-download', async (_, id: string, deleteFile: boolean = false) => {
   try {
     const torrent = activeTorrents.get(id)
-    let folderName = ''
-    
-    // 1. Get folder name if possible
-    if (torrent) {
-      folderName = torrent.name
-    } else {
-      const dbDl = db.getDownloads().find((d: any) => d.id === id)
-      if (dbDl) folderName = dbDl.name
-    }
+    const download = db.getDownloads().find((d: any) => d.id === id)
+    const deleteTargets = deleteFile ? collectDownloadDeleteTargets(id, torrent, download) : []
 
-    // 2. Stop and remove from memory
+    // 1. Stop and remove from memory
     if (torrent) {
-      if (!torrent.destroyed) {
-        torrent.destroy()
-      }
+      await destroyTorrentForDelete(torrent)
       activeTorrents.delete(id)
     }
     
-    // 3. Delete from DB
+    // 2. Delete download row from DB
     db.removeDownloadRow(id)
 
-    // 4. Optionally delete physical files
-    if (deleteFile && folderName) {
-      // Run deletion in background and don't let it block success of UI removal
-      // We also wait a tiny bit to allow WebTorrent to release file handles
-      setTimeout(() => {
-        try {
-          const downloadRoot = getDownloadPath()
-          const dlPath = path.resolve(downloadRoot, folderName)
-          if (!isPathInsideRoot(dlPath, downloadRoot) || dlPath === path.resolve(downloadRoot)) {
-            console.warn(`[Torrent] Refusing unsafe delete path: ${dlPath}`)
-            return
-          }
-          if (fs.existsSync(dlPath)) {
-            console.log(`[Torrent] Deleting physical files at: ${dlPath}`)
-            fs.rmSync(dlPath, { recursive: true, force: true })
-          }
-        } catch (err: any) {
-          console.error(`[Torrent] Physical file deletion failed for ${folderName}:`, err.message)
-          // Retry once more after 2 seconds if it failed (likely due to file lock)
-          setTimeout(() => {
-            try {
-              const downloadRoot = getDownloadPath()
-              const dlPath = path.resolve(downloadRoot, folderName)
-              if (!isPathInsideRoot(dlPath, downloadRoot) || dlPath === path.resolve(downloadRoot)) return
-              if (fs.existsSync(dlPath)) fs.rmSync(dlPath, { recursive: true, force: true })
-            } catch (e) {}
-          }, 2000)
-        }
-      }, 200)
+    // 3. Optionally hard delete physical files and related library metadata
+    if (deleteFile) {
+      await hardDeletePaths(deleteTargets)
+      BrowserWindow.getAllWindows().forEach(w => w.webContents.send('library-updated'))
     }
     
     return true

@@ -71,6 +71,22 @@ const api = {
     ipcRenderer.invoke('search-opensubtitles', params),
   downloadOnlineSubtitle: (params: { fileId: number; videoFilePath: string; fileName?: string }) =>
     ipcRenderer.invoke('download-opensubtitle', params),
+  minimizeWindow: () => ipcRenderer.invoke('window-minimize'),
+  toggleFullscreen: () => ipcRenderer.invoke('window-toggle-fullscreen'),
+  isFullscreen: () => ipcRenderer.invoke('window-is-fullscreen'),
+  closeWindow: () => ipcRenderer.invoke('window-close'),
+  onFullscreenChanged: (callback: (isFullscreen: boolean) => void) => {
+    const handler = (_event: any, isFullscreen: boolean) => callback(isFullscreen)
+    ipcRenderer.on('window-fullscreen-changed', handler)
+    return () => ipcRenderer.removeListener('window-fullscreen-changed', handler)
+  },
+  getAppSettings: () => ipcRenderer.invoke('get-app-settings'),
+  setLaunchFullscreen: (launchFullscreen: boolean) => ipcRenderer.invoke('set-launch-fullscreen', launchFullscreen),
+  onAppSettingsChanged: (callback: (settings: { launchFullscreen: boolean }) => void) => {
+    const handler = (_event: any, settings: { launchFullscreen: boolean }) => callback(settings)
+    ipcRenderer.on('app-settings-changed', handler)
+    return () => ipcRenderer.removeListener('app-settings-changed', handler)
+  },
   log: (message: string) => ipcRenderer.send('log-to-main', message),
 }
 

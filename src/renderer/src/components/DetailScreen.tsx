@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react'
-import { X, Play, Info, Calendar, Clock, Star, FolderOpen, Film, Music, Subtitles, HardDrive, ChevronDown, ChevronUp, Heart, Bookmark, Share2, Search, Zap, Users, Download, AlertTriangle, Clapperboard, Loader2, ExternalLink } from 'lucide-react'
+import { X, Play, Info, Calendar, Clock, Star, FolderOpen, Film, Music, Subtitles, HardDrive, ChevronDown, ChevronUp, Heart, Bookmark, Share2, Search, Zap, Users, Download, AlertTriangle, Clapperboard, Loader2, ExternalLink, Languages } from 'lucide-react'
 import { Video } from '../types'
 
 interface DetailScreenProps {
@@ -64,6 +64,8 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, onClose, onPlay }) =
   const [sources, setSources] = useState<any[]>([])
   const [searching, setSearching] = useState(false)
   const [hasSearched, setHasSearched] = useState(false)
+  const [sourceSeasonFilter, setSourceSeasonFilter] = useState('all')
+  const [hindiOnly, setHindiOnly] = useState(false)
 
   const handleToggleFavorite = async () => {
     const newValue = await window.api.toggleFavorite(video.id)
@@ -90,6 +92,8 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, onClose, onPlay }) =
   const handleSearchSources = async () => {
     setSearching(true)
     setHasSearched(true)
+    setHindiOnly(false)
+    setSourceSeasonFilter('all')
     try {
       const results = await window.api.searchTorrentSources(
         video.title, 
@@ -250,6 +254,38 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, onClose, onPlay }) =
   const seasons = Object.keys(episodesBySeason)
     .map(Number)
     .sort((a, b) => a - b)
+
+  const sourceSeasons = React.useMemo(() => {
+    const values = new Set<number>()
+    sources.forEach(source => {
+      if (typeof source.parsedSeason === 'number') values.add(source.parsedSeason)
+    })
+    return Array.from(values).sort((a, b) => a - b)
+  }, [sources])
+
+  const filteredSources = React.useMemo(() => {
+    const getSourceHealthScore = (source: any) => {
+      const seeds = Number(source.seeds) || 0
+      const peers = Number(source.peers) || 0
+      const seedPeerRatio = seeds / Math.max(1, peers)
+      return (seeds * 10) + seedPeerRatio - (peers * 0.05)
+    }
+
+    return sources
+      .filter(source => {
+        if (hindiOnly && !source.isHindi) return false
+
+        if (video.type === 'series') {
+          if (sourceSeasonFilter === 'packs') return Boolean(source.isSeasonPack)
+          if (sourceSeasonFilter !== 'all') {
+            return source.parsedSeason === Number(sourceSeasonFilter) && !source.isSeasonPack
+          }
+        }
+
+        return true
+      })
+      .sort((a, b) => getSourceHealthScore(b) - getSourceHealthScore(a))
+  }, [sources, hindiOnly, sourceSeasonFilter, video.type])
 
   const trailerSeasonOptions = video.type === 'series'
     ? [...new Set([...seasons, ...trailerSeasons])].sort((a, b) => a - b)
@@ -529,9 +565,45 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, onClose, onPlay }) =
                     <span className="text-[10px] font-black uppercase tracking-widest bg-green-500/10 text-green-400 px-2 py-0.5 rounded border border-green-500/20">Free</span>
                   </h3>
                   <div className="text-[10px] text-muted font-black uppercase tracking-widest">
-                    {sources.length} Sources Found
+                    {filteredSources.length} / {sources.length} Sources
                   </div>
                 </div>
+
+                {sources.length > 0 && (
+                  <div className="flex flex-wrap items-center gap-2">
+                    <button
+                      onClick={() => setHindiOnly(value => !value)}
+                      className={`flex items-center gap-1.5 rounded-lg border px-3 py-2 text-[10px] font-black uppercase tracking-widest transition-all ${
+                        hindiOnly
+                          ? 'border-[#FF9933]/35 bg-[#FF9933]/18 text-[#FFB76B]'
+                          : 'border-white/10 bg-white/[0.04] text-white/45 hover:bg-white/[0.08] hover:text-white/70'
+                      }`}
+                    >
+                      <Languages size={12} />
+                      {hindiOnly ? 'Hindi Only' : 'All Audio'}
+                    </button>
+
+                    {video.type === 'series' && (
+                      <select
+                        value={sourceSeasonFilter}
+                        onChange={(event) => setSourceSeasonFilter(event.target.value)}
+                        className="rounded-lg border border-white/10 bg-[#10141d] px-3 py-2 text-[10px] font-black uppercase tracking-widest text-white/65 outline-none transition-colors hover:bg-white/[0.08]"
+                      >
+                        <option className="bg-[#10141d] text-white" value="all">All Seasons</option>
+                        <option className="bg-[#10141d] text-white" value="packs">Season Packs</option>
+                        {sourceSeasons.map(season => (
+                          <option className="bg-[#10141d] text-white" key={season} value={season.toString()}>
+                            Season {season}
+                          </option>
+                        ))}
+                      </select>
+                    )}
+
+                    <span className="text-[10px] font-black uppercase tracking-widest text-white/25">
+                      Sorted by seed health
+                    </span>
+                  </div>
+                )}
 
                 <div className="grid grid-cols-1 gap-3 max-h-[400px] overflow-y-auto pr-2 scrollbar-thin">
                   {searching ? (
@@ -539,8 +611,8 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, onClose, onPlay }) =
                       <div className="inline-block w-12 h-12 border-4 border-primary/20 border-t-primary rounded-full animate-spin" />
                       <div className="text-muted font-black uppercase tracking-widest text-xs animate-pulse">Scanning high-quality mirrors...</div>
                     </div>
-                  ) : sources.length > 0 ? (
-                    sources.map((src, idx) => (
+                  ) : filteredSources.length > 0 ? (
+                    filteredSources.map((src, idx) => (
                       <div 
                         key={idx}
                         className="flex items-center justify-between p-4 bg-white/5 border border-white/5 rounded-2xl hover:bg-white/10 hover:border-white/10 transition-all group"
@@ -587,7 +659,9 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, onClose, onPlay }) =
                   ) : (
                     <div className="py-16 text-center border-2 border-dashed border-white/5 rounded-3xl">
                       <AlertTriangle className="mx-auto text-amber-500/50 mb-3" size={32} />
-                      <p className="text-muted font-black uppercase tracking-widest text-xs">No sources found for this title.</p>
+                      <p className="text-muted font-black uppercase tracking-widest text-xs">
+                        {sources.length > 0 ? 'No sources match these filters.' : 'No sources found for this title.'}
+                      </p>
                     </div>
                   )}
                 </div>
@@ -770,6 +844,7 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, onClose, onPlay }) =
                         title={trailer.name || 'Trailer'}
                         className="absolute inset-0 h-full w-full"
                         allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+                        referrerPolicy="strict-origin-when-cross-origin"
                         allowFullScreen
                       />
                     ) : trailerLoading ? (

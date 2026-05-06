@@ -253,6 +253,8 @@ const Download: React.FC<DownloadProps> = ({ onShowDetail }) => {
         // For now, just log and allow the user to try again if it reappears on refresh
         console.error('[Download] Remove failed in main process')
         removedIdsRef.current.delete(targetId)
+      } else if (deleteFile) {
+        fetchVideos()
       }
     } catch (err) {
       console.error('[Download] Remove error:', err)

@@ -1,6 +1,7 @@
 import React, { useEffect, useState, useRef } from 'react'
 import { Video } from '../types'
 import VideoCard from '../components/VideoCard'
+import { groupSeriesCards } from '../utils/seriesCards'
 import { Tv } from 'lucide-react'
 
 interface SeriesProps {
@@ -22,25 +23,7 @@ const Series: React.FC<SeriesProps> = ({ onPlay, onShowDetail }) => {
     try {
       const allVideos: Video[] = await window.api.getVideos()
       
-      // Group by series name
-      const grouped: Video[] = []
-      const seen = new Set<string>()
-      const seriesVideos = allVideos.filter(v => v.type === 'series')
-      
-      // Count episodes
-      const counts: Record<string, number> = {}
-      seriesVideos.forEach(v => {
-        if (v.series_name) counts[v.series_name] = (counts[v.series_name] || 0) + 1
-      })
-
-      for (const v of seriesVideos) {
-        if (v.series_name && !seen.has(v.series_name)) {
-          grouped.push({ ...v, episode_count: counts[v.series_name] })
-          seen.add(v.series_name)
-        }
-      }
-      
-      setSeries(grouped)
+      setSeries(groupSeriesCards(allVideos))
     } finally {
       setLoading(false)
       isInitialLoad.current = false

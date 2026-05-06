@@ -1,6 +1,7 @@
 import React from 'react'
-import { Play } from 'lucide-react'
+import { Play, Star } from 'lucide-react'
 import { Video } from '../types'
+import { groupSeriesCards } from '../utils/seriesCards'
 
 interface VideoCardProps {
   video: Video
@@ -38,12 +39,40 @@ const VideoCard: React.FC<VideoCardProps> = ({ video, onPlay, onShowDetail, isCo
      ? video.genres.split(',').map(g => g.trim()).filter(g => g.length > 0) 
      : []
 
-  const handleClick = () => {
-    if (onShowDetail) {
-      onShowDetail(video)
-    } else {
-      onPlay(video)
+  const resolveCardTarget = async () => {
+    if (video.isExternal || video.type !== 'series' || !video.series_name) return video
+
+    try {
+      const allVideos: Video[] = await window.api.getVideos()
+      const seriesCard = groupSeriesCards(allVideos).find(item =>
+        item.series_name?.trim().toLowerCase() === video.series_name?.trim().toLowerCase()
+      )
+      return seriesCard || video
+    } catch (error) {
+      console.error('Failed to resolve series resume target:', error)
+      return video
     }
+  }
+
+  const handleClick = async () => {
+    const target = await resolveCardTarget()
+    if (onShowDetail) {
+      onShowDetail(target)
+    } else {
+      onPlay(target)
+    }
+  }
+
+  const title = video.type === 'series' && video.series_name ? video.series_name : video.title
+  const tagline = video.tagline || video.overview
+  const category = genres.length > 0 ? genres[0] : (video.type === 'series' ? 'Web Series' : 'Movie')
+  const handleWatchNow = async () => {
+    if (video.isExternal && onShowDetail) {
+      onShowDetail(video)
+      return
+    }
+
+    onPlay(await resolveCardTarget())
   }
 
   // "Continue Watching" style (Side Panel)
@@ -53,7 +82,7 @@ const VideoCard: React.FC<VideoCardProps> = ({ video, onPlay, onShowDetail, isCo
         className="group flex items-center gap-4 p-2 rounded-2xl hover:bg-white/5 transition-all cursor-pointer"
         onClick={() => onPlay(video)}
       >
-        <div className="relative w-24 aspect-video rounded-xl overflow-hidden bg-secondary flex-shrink-0">
+        <div className="relative w-24 aspect-video rounded-xl overflow-hidden bg-secondary flex-shrink-0 isolate transform-gpu [clip-path:inset(0_round_0.75rem)]">
           {backdropUrl || posterUrl ? (
             <img src={backdropUrl || posterUrl || ''} className="w-full h-full object-cover" alt="" />
           ) : (
@@ -83,55 +112,74 @@ const VideoCard: React.FC<VideoCardProps> = ({ video, onPlay, onShowDetail, isCo
   // Standard Poster Style (Home/Grid)
   return (
     <div 
-      className="group flex flex-col gap-3 cursor-pointer"
+      className="group cursor-pointer"
       onClick={handleClick}
+      tabIndex={0}
+      role="button"
+      onKeyDown={(event) => {
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault()
+          void handleClick()
+        }
+      }}
     >
-      <div className="relative aspect-[2/3] w-full rounded-2xl overflow-hidden bg-secondary shadow-lg ring-1 ring-white/5 group-hover:ring-red-600/50 transition-all duration-300 group-hover:-translate-y-2">
+      <div className="relative aspect-[2/3] w-full overflow-hidden rounded-2xl bg-secondary shadow-lg ring-1 ring-white/5 isolate transform-gpu transition-[transform,box-shadow] duration-300 will-change-transform [backface-visibility:hidden] [clip-path:inset(0_round_1rem)] group-hover:-translate-y-2 group-hover:scale-[1.03] group-hover:shadow-2xl group-hover:shadow-red-950/30 group-hover:ring-red-600/60 group-focus-visible:-translate-y-2 group-focus-visible:scale-[1.03] group-focus-visible:outline-none group-focus-visible:ring-2 group-focus-visible:ring-red-600/80">
         {posterUrl ? (
           <img 
             src={posterUrl} 
-            alt={video.title} 
-            className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-110"
+            alt={title}
+            className="block h-full w-full object-cover transform-gpu transition-transform duration-500 [backface-visibility:hidden] group-hover:scale-110"
           />
         ) : (
           <div className="h-full w-full flex items-center justify-center p-4 text-center">
-            <span className="text-xs text-muted font-bold uppercase tracking-widest opacity-50">{video.title}</span>
+            <span className="text-xs text-muted font-bold uppercase tracking-widest opacity-50">{title}</span>
           </div>
         )}
 
-        {/* Rating Badge */}
-        {video.vote_average && video.vote_average > 0 && (
-          <div className="absolute top-3 right-3 z-10 px-1.5 py-0.5 bg-black/60 backdrop-blur-md rounded-lg border border-white/10 flex items-center gap-1">
-            <span className="text-yellow-400 text-[10px]">★</span>
-            <span className="text-white text-[10px] font-black">{video.vote_average.toFixed(1)}</span>
+        <div className="absolute inset-0 flex flex-col justify-end bg-gradient-to-t from-black via-black/75 to-black/10 p-3 opacity-0 transition-opacity duration-300 group-hover:opacity-100 group-focus-visible:opacity-100">
+          <div className="mb-auto flex items-start justify-between gap-2">
+            {video.isExternal ? (
+              <span className="rounded-md border border-red-500/30 bg-red-600/25 px-2 py-1 text-[8px] font-black uppercase tracking-widest text-white backdrop-blur-md">
+                Trending
+              </span>
+            ) : <span />}
+            {video.vote_average && video.vote_average > 0 && (
+              <span className="inline-flex items-center gap-1 rounded-md border border-white/10 bg-black/55 px-2 py-1 text-[10px] font-black text-white backdrop-blur-md">
+                <Star size={11} fill="#facc15" className="text-yellow-400" />
+                {video.vote_average.toFixed(1)}
+              </span>
+            )}
           </div>
-        )}
 
-        {/* Trending Badge */}
-        {video.isExternal && (
-          <div className="absolute top-3 left-3 z-10 px-2 py-0.5 bg-primary/20 backdrop-blur-md border border-primary/30 rounded-lg flex items-center gap-1.5">
-            <div className="w-1 h-1 bg-primary rounded-full animate-pulse" />
-            <span className="text-[8px] font-black text-white uppercase tracking-widest italic">Trending</span>
+          <div className="space-y-2">
+            <div>
+              <h3 className="line-clamp-2 text-sm font-black leading-tight text-white">
+                {title}
+              </h3>
+              <div className="mt-1 flex items-center gap-2 text-[9px] font-black uppercase tracking-wider text-white/65">
+                {video.release_year && <span>{video.release_year}</span>}
+                {video.release_year && <span className="h-1 w-1 rounded-full bg-white/35" />}
+                <span className="truncate">{category}</span>
+              </div>
+            </div>
+
+            {tagline && (
+              <p className="line-clamp-2 text-[11px] font-medium leading-snug text-white/75">
+                {tagline}
+              </p>
+            )}
+
+            <button
+              className="flex w-full items-center justify-center gap-2 rounded-lg bg-red-600 px-3 py-2 text-[10px] font-black uppercase tracking-widest text-white shadow-lg shadow-red-950/40 transition-colors hover:bg-red-500"
+              onClick={(event) => {
+                event.stopPropagation()
+                void handleWatchNow()
+              }}
+            >
+              <Play fill="white" size={14} />
+              Watch Now
+            </button>
           </div>
-        )}
-
-        {/* Play Overlay */}
-        <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
-          <div className="w-12 h-12 bg-red-600 rounded-full flex items-center justify-center shadow-xl transform scale-75 group-hover:scale-100 transition-transform duration-300">
-            <Play fill="white" size={24} className="text-white ml-1" />
-          </div>
-        </div>
-      </div>
-
-      {/* Info Below */}
-      <div className="space-y-1 px-1">
-        <h3 className="text-sm font-bold text-white truncate leading-tight group-hover:text-primary transition-colors">
-          {video.type === 'series' && video.series_name ? video.series_name : video.title}
-        </h3>
-        <div className="flex items-center gap-2 text-[10px] font-bold text-muted uppercase tracking-wider">
-          {video.release_year && <span>{video.release_year}</span>}
-          <span>•</span>
-          <span className="truncate">{genres.length > 0 ? genres[0] : (video.type === 'series' ? 'Web Series' : 'Movie')}</span>
         </div>
       </div>
     </div>

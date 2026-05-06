@@ -65,6 +65,7 @@ function getTmdbApiKey(): string {
 const TMDB_BASE    = 'https://api.themoviedb.org/3'
 const TMDB_IMG     = 'https://image.tmdb.org/t/p/w500'
 const TMDB_BACKDROP = 'https://image.tmdb.org/t/p/w1280'
+const TMDB_ORIGINAL = 'https://image.tmdb.org/t/p/original'
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -95,6 +96,95 @@ function cacheKey(title: string, type: 'movie' | 'series'): string {
 
 const trendingCache: Record<string, { data: any[], timestamp: number }> = {}
 const TRENDING_CACHE_TTL = 1000 * 60 * 60 * 4 // 4 hours
+
+const INDIA_OTT_PROVIDER_NAMES = [
+  'Netflix',
+  'Amazon Prime Video',
+  'Prime Video',
+  'JioHotstar',
+  'Hotstar',
+  'Disney+ Hotstar'
+]
+
+let indiaOttProviderIdsCache: { ids: number[], timestamp: number } | null = null
+
+function formatTmdbDate(date: Date): string {
+  return date.toISOString().substring(0, 10)
+}
+
+function normalizeProviderName(name: string): string {
+  return name.toLowerCase().replace(/[^a-z0-9]/g, '')
+}
+
+async function fetchIndiaOttProviderIds(apiKey: string): Promise<number[]> {
+  const now = Date.now()
+  if (indiaOttProviderIdsCache && (now - indiaOttProviderIdsCache.timestamp) < TRENDING_CACHE_TTL) {
+    return indiaOttProviderIdsCache.ids
+  }
+
+  if (!cachedTmdbIp) {
+    await resolveDnsDoH('api.themoviedb.org')
+  }
+
+  const url = `${TMDB_BASE}/watch/providers/movie?api_key=${apiKey}&watch_region=IN`
+  const response = await fetch(url, {
+    dispatcher: tmdbDispatcher,
+    headers: {
+      'User-Agent': 'MyCinema/1.3.0',
+      'Accept': 'application/json'
+    }
+  })
+
+  if (!response.ok) throw new Error(`HTTP ${response.status}`)
+  const data = await response.json() as any
+  const targetNames = INDIA_OTT_PROVIDER_NAMES.map(normalizeProviderName)
+  const ids = (data.results || [])
+    .filter((provider: any) => targetNames.includes(normalizeProviderName(provider.provider_name || '')))
+    .map((provider: any) => provider.provider_id)
+    .filter((id: any): id is number => typeof id === 'number')
+
+  console.log(`[TMDB] India OTT provider ids: ${ids.join(', ') || 'none found'}`)
+  indiaOttProviderIdsCache = { ids, timestamp: Date.now() }
+  return ids
+}
+
+async function fetchTitleLogo(
+  endpoint: 'movie' | 'tv',
+  tmdbId: number,
+  apiKey: string
+): Promise<string | null> {
+  try {
+    const params = new URLSearchParams({
+      api_key: apiKey,
+      include_image_language: 'en,null'
+    })
+    const url = `${TMDB_BASE}/${endpoint}/${tmdbId}/images?${params.toString()}`
+    const response = await fetch(url, {
+      dispatcher: tmdbDispatcher,
+      headers: {
+        'User-Agent': 'MyCinema/1.3.0',
+        'Accept': 'application/json'
+      }
+    })
+
+    if (!response.ok) throw new Error(`HTTP ${response.status}`)
+    const data = await response.json() as any
+    const logos = Array.isArray(data.logos) ? data.logos : []
+    const selected = logos
+      .filter((logo: any) => logo.file_path)
+      .sort((a: any, b: any) => {
+        const aEnglish = a.iso_639_1 === 'en' ? 1 : 0
+        const bEnglish = b.iso_639_1 === 'en' ? 1 : 0
+        if (aEnglish !== bEnglish) return bEnglish - aEnglish
+        return (b.vote_average || 0) - (a.vote_average || 0) || (b.width || 0) - (a.width || 0)
+      })[0]
+
+    return selected ? `${TMDB_ORIGINAL}${selected.file_path}` : null
+  } catch (err: any) {
+    console.warn(`[TMDB] Logo fetch failed for ${endpoint}/${tmdbId}: ${err.message}`)
+    return null
+  }
+}
 
 // ─── Public API ──────────────────────────────────────────────────────────────
 
@@ -134,18 +224,19 @@ export async function fetchTrending(type: 'movie' | 'series'): Promise<any[]> {
     
     console.log(`[TMDB] Successfully fetched ${data.results?.length || 0} trending ${type}`)
     
-    const results = (data.results || []).map((item: any) => ({
+    const results = await Promise.all((data.results || []).map(async (item: any) => ({
       id: item.id,
       tmdb_id: item.id,
       title: item.title || item.name,
       overview: item.overview,
       poster_path: item.poster_path ? `${TMDB_IMG}${item.poster_path}` : null,
       backdrop_path: item.backdrop_path ? `${TMDB_BACKDROP}${item.backdrop_path}` : null,
+      logo_path: item.id ? await fetchTitleLogo(endpoint, item.id, apiKey) : null,
       vote_average: item.vote_average,
       release_year: (item.release_date || item.first_air_date || '').substring(0, 4),
       type: type,
       isExternal: true
-    }))
+    })))
 
     // Save to cache
     trendingCache[type] = {
@@ -156,6 +247,91 @@ export async function fetchTrending(type: 'movie' | 'series'): Promise<any[]> {
     return results
   } catch (err) {
     console.error(`[TMDB] Error fetching trending ${type}:`, err)
+    return []
+  }
+}
+
+export async function fetchTrendingInIndia(): Promise<any[]> {
+  const apiKey = getTmdbApiKey()
+  if (!apiKey) {
+    console.warn('[TMDB] TMDB_API_KEY is not set — skipping India trending fetch')
+    return []
+  }
+
+  const cacheKey = 'movie:IN:ott-recent'
+  const now = Date.now()
+  if (trendingCache[cacheKey] && (now - trendingCache[cacheKey].timestamp) < TRENDING_CACHE_TTL) {
+    console.log(`[TMDB] Serving India OTT trending movies from memory cache (age: ${Math.round((now - trendingCache[cacheKey].timestamp)/1000/60)} mins)`)
+    return trendingCache[cacheKey].data
+  }
+
+  try {
+    const providerIds = await fetchIndiaOttProviderIds(apiKey)
+    if (providerIds.length === 0) {
+      console.warn('[TMDB] No India OTT provider ids found — skipping India trending fetch')
+      return []
+    }
+
+    const today = new Date()
+    const recentCutoff = new Date(today)
+    recentCutoff.setMonth(recentCutoff.getMonth() - 18)
+
+    const params = new URLSearchParams({
+      api_key: apiKey,
+      include_adult: 'false',
+      include_video: 'false',
+      language: 'en-US',
+      page: '1',
+      'primary_release_date.gte': formatTmdbDate(recentCutoff),
+      'primary_release_date.lte': formatTmdbDate(today),
+      region: 'IN',
+      sort_by: 'popularity.desc',
+      watch_region: 'IN',
+      with_origin_country: 'IN',
+      with_watch_monetization_types: 'flatrate',
+      with_watch_providers: providerIds.join('|')
+    })
+    const url = `${TMDB_BASE}/discover/movie?${params.toString()}`
+    console.log(`[TMDB] Fetching India OTT trending movies from: ${url.replace(apiKey, 'REDACTED')}`)
+
+    if (!cachedTmdbIp) {
+      await resolveDnsDoH('api.themoviedb.org')
+    }
+
+    const response = await fetch(url, {
+      dispatcher: tmdbDispatcher,
+      headers: {
+        'User-Agent': 'MyCinema/1.3.0',
+        'Accept': 'application/json'
+      }
+    })
+
+    if (!response.ok) throw new Error(`HTTP ${response.status}`)
+    const data = await response.json() as any
+
+    console.log(`[TMDB] Successfully fetched ${data.results?.length || 0} India OTT trending movies`)
+
+    const results = (data.results || []).map((item: any) => ({
+      id: item.id,
+      tmdb_id: item.id,
+      title: item.title || item.name,
+      overview: item.overview,
+      poster_path: item.poster_path ? `${TMDB_IMG}${item.poster_path}` : null,
+      backdrop_path: item.backdrop_path ? `${TMDB_BACKDROP}${item.backdrop_path}` : null,
+      vote_average: item.vote_average,
+      release_year: (item.release_date || '').substring(0, 4),
+      type: 'movie',
+      isExternal: true
+    }))
+
+    trendingCache[cacheKey] = {
+      data: results,
+      timestamp: Date.now()
+    }
+
+    return results
+  } catch (err) {
+    console.error('[TMDB] Error fetching India OTT trending movies:', err)
     return []
   }
 }

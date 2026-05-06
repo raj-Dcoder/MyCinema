@@ -23,6 +23,7 @@ interface Api {
   removeFolder: (folderPath: string) => Promise<boolean>
   clearAllData: () => Promise<boolean>
   fetchTrending: (type: 'movie' | 'series') => Promise<any[]>
+  fetchTrendingIndia: () => Promise<any[]>
   toggleFavorite: (id: number) => Promise<number | null>
   toggleWatchlist: (id: number) => Promise<number | null>
   addToWatchlistExternal: (item: any) => Promise<any>
@@ -32,6 +33,7 @@ interface Api {
   onUpdateAvailable: (callback: (info: { version: string }) => void) => void
   onUpdateProgress: (callback: (info: { percent: number }) => void) => void
   onUpdateDownloaded: (callback: () => void) => void
+  startUpdateDownload: () => Promise<any>
   installUpdate: () => void
   // Torrent download APIs
   searchTMDB: (query: string) => Promise<any[]>

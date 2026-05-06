@@ -16,6 +16,13 @@
     -ms-overflow-style: none;
     scrollbar-width: none;
   }
+  .continue-watch-scroll {
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+  }
+  .continue-watch-scroll::-webkit-scrollbar {
+    display: none;
+  }
 }
 
 ::-webkit-scrollbar {

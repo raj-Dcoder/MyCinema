@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react'
-import { Home as HomeIcon, Film, Tv, Settings as SettingsIcon, Video as VideoIcon, Download as DownloadIcon, ChevronLeft, Menu, Bookmark, Clock, Heart, User, Search as SearchIcon, Bell, Settings } from 'lucide-react'
+import { Home as HomeIcon, Film, Tv, Settings as SettingsIcon, Video as VideoIcon, Download as DownloadIcon, ChevronLeft, Menu, Bookmark, Clock, Heart, User, Search as SearchIcon, Bell, Settings, RefreshCw } from 'lucide-react'
 import { Video } from './types'
 import Home from './pages/Home'
 import Videos from './pages/Videos'
@@ -94,6 +94,16 @@ const App: React.FC = () => {
     setSelectedVideo(null)
   }
 
+  const handleStartUpdateDownload = async () => {
+    setUpdateState(prev => ({ ...prev, status: 'downloading', percent: 0 }))
+    try {
+      await window.api.startUpdateDownload()
+    } catch (err) {
+      console.error('Update download failed:', err)
+      setUpdateState(prev => ({ ...prev, status: 'available' }))
+    }
+  }
+
   return (
     <div className="flex h-screen bg-[#05080d] text-text font-sans overflow-hidden">
       {/* Sidebar */}
@@ -154,16 +164,62 @@ const App: React.FC = () => {
           </div>
         </div>
 
-        <div className={`overflow-hidden px-4 transition-all duration-300 ${isSidebarExpanded && updateState.status !== 'idle' ? 'max-h-40 pb-4 opacity-100' : 'max-h-0 pb-0 opacity-0'}`}>
+        <div className={`overflow-hidden px-4 transition-all duration-300 ${!isSidebarExpanded && updateState.status !== 'idle' ? 'max-h-20 pb-4 opacity-100' : 'max-h-0 pb-0 opacity-0'}`}>
+          <button
+            className={`relative mx-auto flex h-12 w-12 items-center justify-center rounded-2xl border transition-all ${
+              updateState.status === 'ready'
+                ? 'border-emerald-300/35 bg-emerald-400/15 text-emerald-200 shadow-lg shadow-emerald-950/30'
+                : updateState.status === 'downloading'
+                  ? 'border-cyan-300/35 bg-cyan-400/15 text-cyan-200 shadow-lg shadow-cyan-950/30'
+                  : 'border-cyan-300/25 bg-cyan-400/10 text-cyan-200 shadow-lg shadow-cyan-950/20 hover:bg-cyan-400/20'
+            }`}
+            title={
+              updateState.status === 'ready'
+                ? 'Update ready to install'
+                : updateState.status === 'downloading'
+                  ? `Downloading update ${updateState.percent ?? 0}%`
+                  : `New update available${updateState.version ? `: v${updateState.version}` : ''}`
+            }
+            onClick={() => {
+              if (updateState.status === 'available') handleStartUpdateDownload()
+              if (updateState.status === 'ready') window.api.installUpdate()
+            }}
+          >
+            {updateState.status === 'downloading' ? (
+              <>
+                <RefreshCw size={20} className="animate-spin" />
+                <span className="absolute -bottom-1 rounded-md bg-cyan-300 px-1.5 py-0.5 text-[8px] font-black text-slate-950">
+                  {updateState.percent ?? 0}%
+                </span>
+              </>
+            ) : (
+              <DownloadIcon size={21} />
+            )}
+            {updateState.status === 'available' && (
+              <span className="absolute right-2 top-2 h-2.5 w-2.5 rounded-full bg-cyan-300 shadow-[0_0_12px_rgba(103,232,249,0.85)]" />
+            )}
+            {updateState.status === 'ready' && (
+              <span className="absolute right-2 top-2 h-2.5 w-2.5 rounded-full bg-emerald-300 shadow-[0_0_12px_rgba(110,231,183,0.85)]" />
+            )}
+          </button>
+        </div>
+
+        <div className={`overflow-hidden px-4 transition-all duration-300 ${isSidebarExpanded && updateState.status !== 'idle' ? 'max-h-56 pb-4 opacity-100' : 'max-h-0 pb-0 opacity-0'}`}>
           <div className="rounded-2xl border border-cyan-400/20 bg-cyan-400/10 p-4">
             {updateState.status === 'available' && (
-              <div className="space-y-2">
+              <div className="space-y-3">
                 <p className="text-sm font-bold text-white">
-                  Update available{updateState.version ? `: v${updateState.version}` : ''}
+                  New update available{updateState.version ? `: v${updateState.version}` : ''}
                 </p>
                 <p className="text-xs font-medium text-white/60">
-                  Downloading has started in the background.
+                  Download it when you're ready.
                 </p>
+                <button
+                  onClick={handleStartUpdateDownload}
+                  className="w-full rounded-xl bg-cyan-400 px-4 py-3 text-sm font-black text-slate-950 transition-colors hover:bg-cyan-300"
+                >
+                  Download Update
+                </button>
               </div>
             )}
 
@@ -231,8 +287,8 @@ const App: React.FC = () => {
 
       {/* Main Content */}
       <main className="flex-1 overflow-y-auto scrollbar-hide relative">
-        <div className="p-10 pb-20 max-w-[1600px] mx-auto">
-          {activeTab === 'home'    && <Home onPlay={handlePlayVideo} onShowDetail={setSelectedVideo} refreshKey={homeRefreshKey} />}
+        <div className={activeTab === 'home' ? 'pt-6 pb-14' : 'px-8 pt-6 pb-14 max-w-[1600px] mx-auto'}>
+          {activeTab === 'home'    && <Home onPlay={handlePlayVideo} onShowDetail={setSelectedVideo} onNavigate={setActiveTab} refreshKey={homeRefreshKey} />}
           {activeTab === 'videos'  && <Videos onPlay={handlePlayVideo} />}
           {activeTab === 'movies'  && <Movies onPlay={handlePlayVideo} onShowDetail={setSelectedVideo} />}
           {activeTab === 'series'  && <Series onPlay={handlePlayVideo} onShowDetail={setSelectedVideo} />}

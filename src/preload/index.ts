@@ -28,6 +28,7 @@ const api = {
   removeFolder: (folderPath: string) => ipcRenderer.invoke('remove-folder', folderPath),
   clearAllData: () => ipcRenderer.invoke('clear-all-data'),
   fetchTrending: (type: 'movie' | 'series') => ipcRenderer.invoke('fetch-trending', type),
+  fetchTrendingIndia: () => ipcRenderer.invoke('fetch-trending-india'),
   toggleFavorite: (id: number) => ipcRenderer.invoke('toggle-favorite', id),
   toggleWatchlist: (id: number) => ipcRenderer.invoke('toggle-watchlist', id),
   addToWatchlistExternal: (item: any) => ipcRenderer.invoke('add-to-watchlist-external', item),
@@ -38,6 +39,7 @@ const api = {
   onUpdateAvailable: (callback: (info: { version: string }) => void) => ipcRenderer.on('update-available', (_e, info) => callback(info)),
   onUpdateProgress: (callback: (info: { percent: number }) => void) => ipcRenderer.on('update-progress', (_e, info) => callback(info)),
   onUpdateDownloaded: (callback: () => void) => ipcRenderer.on('update-downloaded', () => callback()),
+  startUpdateDownload: () => ipcRenderer.invoke('start-update-download'),
   installUpdate: () => ipcRenderer.send('install-update'),
   // Torrent download APIs
   searchTMDB: (query: string) => ipcRenderer.invoke('search-tmdb', query),

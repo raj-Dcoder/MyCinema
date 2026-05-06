@@ -9,6 +9,65 @@ interface QualityBoostRendererProps {
   isPlaying: boolean;
 }
 
+const syncCanvasSize = (canvas: HTMLCanvasElement) => {
+  const dpr = window.devicePixelRatio || 1;
+  const width = Math.max(1, Math.round(canvas.clientWidth * dpr));
+  const height = Math.max(1, Math.round(canvas.clientHeight * dpr));
+
+  if (canvas.width !== width || canvas.height !== height) {
+    canvas.width = width;
+    canvas.height = height;
+    return true;
+  }
+
+  return false;
+};
+
+const getAspectGeometry = (
+  video: HTMLVideoElement,
+  canvas: HTMLCanvasElement,
+  aspectMode: 'contain' | 'cover' | 'fill'
+) => {
+  const videoAspect = video.videoWidth && video.videoHeight ? video.videoWidth / video.videoHeight : 16 / 9;
+  const canvasAspect = canvas.width / canvas.height;
+
+  let positionWidth = 1;
+  let positionHeight = 1;
+  let texLeft = 0;
+  let texRight = 1;
+  let texTop = 0;
+  let texBottom = 1;
+
+  if (aspectMode === 'contain') {
+    if (canvasAspect > videoAspect) {
+      positionWidth = videoAspect / canvasAspect;
+    } else {
+      positionHeight = canvasAspect / videoAspect;
+    }
+  } else if (aspectMode === 'cover') {
+    if (canvasAspect > videoAspect) {
+      const visibleHeight = videoAspect / canvasAspect;
+      texTop = (1 - visibleHeight) / 2;
+      texBottom = texTop + visibleHeight;
+    } else {
+      const visibleWidth = canvasAspect / videoAspect;
+      texLeft = (1 - visibleWidth) / 2;
+      texRight = texLeft + visibleWidth;
+    }
+  }
+
+  return {
+    positions: new Float32Array([
+      -positionWidth, -positionHeight,  positionWidth, -positionHeight, -positionWidth,  positionHeight,
+      -positionWidth,  positionHeight,  positionWidth, -positionHeight,  positionWidth,  positionHeight,
+    ]),
+    texCoords: new Float32Array([
+      texLeft, texBottom,  texRight, texBottom,  texLeft, texTop,
+      texLeft, texTop,     texRight, texBottom,  texRight, texTop,
+    ])
+  };
+};
+
 const QualityBoostRenderer: React.FC<QualityBoostRendererProps> = ({ videoRef, enabled, sharpnessEnabled, vibranceEnabled, aspectMode, isPlaying }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const requestRef = useRef<number>();
@@ -204,13 +263,16 @@ const QualityBoostRenderer: React.FC<QualityBoostRendererProps> = ({ videoRef, e
       const gl = glRef.current;
       
       if (video.readyState >= 2) {
-        if (canvas.width !== video.videoWidth || canvas.height !== video.videoHeight) {
-          canvas.width = video.videoWidth;
-          canvas.height = video.videoHeight;
-          gl.viewport(0, 0, canvas.width, canvas.height);
-        }
+        syncCanvasSize(canvas);
+        gl.viewport(0, 0, canvas.width, canvas.height);
 
         gl.useProgram(program);
+
+        const geometry = getAspectGeometry(video, canvas, aspectMode);
+        gl.bindBuffer(gl.ARRAY_BUFFER, positionBufferRef.current);
+        gl.bufferData(gl.ARRAY_BUFFER, geometry.positions, gl.DYNAMIC_DRAW);
+        gl.bindBuffer(gl.ARRAY_BUFFER, texCoordBufferRef.current);
+        gl.bufferData(gl.ARRAY_BUFFER, geometry.texCoords, gl.DYNAMIC_DRAW);
 
         // Position attribute
         gl.enableVertexAttribArray(locations.position);
@@ -223,7 +285,7 @@ const QualityBoostRenderer: React.FC<QualityBoostRendererProps> = ({ videoRef, e
         gl.vertexAttribPointer(locations.texCoord, 2, gl.FLOAT, false, 0, 0);
 
         // Resolution uniform
-        gl.uniform2f(locations.uResolution, canvas.width, canvas.height);
+        gl.uniform2f(locations.uResolution, video.videoWidth || canvas.width, video.videoHeight || canvas.height);
         gl.uniform1f(locations.uSharpenAmount, sharpnessEnabled ? 0.35 : 0.0);
         gl.uniform1f(locations.uVibranceAmount, vibranceEnabled ? 0.25 : 0.0);
 
@@ -251,7 +313,7 @@ const QualityBoostRenderer: React.FC<QualityBoostRendererProps> = ({ videoRef, e
     return () => {
       if (requestRef.current) cancelAnimationFrame(requestRef.current);
     };
-  }, [enabled, sharpnessEnabled, vibranceEnabled, videoRef, isPlaying]);
+  }, [enabled, sharpnessEnabled, vibranceEnabled, videoRef, isPlaying, aspectMode]);
 
   return (
     <div className="absolute inset-0 pointer-events-none">
@@ -261,7 +323,6 @@ const QualityBoostRenderer: React.FC<QualityBoostRendererProps> = ({ videoRef, e
           enabled ? 'opacity-100' : 'opacity-0'
         }`}
         style={{
-          objectFit: aspectMode,
           width: '100%',
           height: '100%',
         }}

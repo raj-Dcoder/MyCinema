@@ -8,6 +8,14 @@ interface HeroCarouselProps {
   onShowDetail: (video: Video) => void
 }
 
+const getHeroImageUrl = (path?: string | null) => {
+  if (!path) return ''
+  if (path.startsWith('https://image.tmdb.org/t/p/')) {
+    return path.replace(/\/t\/p\/[^/]+\//, '/t/p/original/')
+  }
+  return path.startsWith('http') ? path : `media://file/${encodeURIComponent(path)}`
+}
+
 const HeroCarousel: React.FC<HeroCarouselProps> = ({ items, onPlay, onShowDetail }) => {
   const [currentIndex, setCurrentIndex] = useState(0)
   const [isAutoPlaying, setIsAutoPlaying] = useState(true)
@@ -22,7 +30,7 @@ const HeroCarousel: React.FC<HeroCarouselProps> = ({ items, onPlay, onShowDetail
 
   if (items.length === 0) {
     return (
-      <div className="w-full aspect-[2.4/1] bg-white/5 rounded-3xl animate-pulse flex items-center justify-center">
+      <div className="w-full min-h-[570px] h-[73vh] max-h-[800px] bg-white/5 animate-pulse flex items-center justify-center">
         <div className="text-white/10 font-black text-4xl uppercase italic">Loading Featured Content...</div>
       </div>
     )
@@ -41,7 +49,7 @@ const HeroCarousel: React.FC<HeroCarouselProps> = ({ items, onPlay, onShowDetail
   }
 
   return (
-    <div className="relative w-full aspect-[2.4/1] rounded-3xl overflow-hidden group shadow-2xl">
+    <div className="relative w-full min-h-[570px] h-[73vh] max-h-[800px] overflow-hidden bg-black group">
       {/* Background Backdrops */}
       {items.map((item, idx) => (
         <div
@@ -51,50 +59,69 @@ const HeroCarousel: React.FC<HeroCarouselProps> = ({ items, onPlay, onShowDetail
           }`}
         >
           <img
-            src={item.backdrop_path || item.poster_path || ''}
-            className="w-full h-full object-cover"
+            src={getHeroImageUrl(item.backdrop_path || item.poster_path)}
+            className="absolute inset-0 h-full w-full scale-110 object-cover object-center blur-2xl opacity-70"
             alt=""
+            decoding="async"
+            fetchPriority={idx === currentIndex ? 'high' : 'auto'}
+          />
+          <img
+            src={getHeroImageUrl(item.backdrop_path || item.poster_path)}
+            className="relative z-10 h-full w-full object-cover object-[center_28%]"
+            alt=""
+            decoding="async"
+            fetchPriority={idx === currentIndex ? 'high' : 'auto'}
           />
           {/* Overlays */}
-          <div className="absolute inset-0 bg-gradient-to-r from-black/80 via-black/40 to-transparent" />
-          <div className="absolute inset-0 bg-gradient-to-t from-[#05080d] via-transparent to-transparent" />
+          <div className="absolute inset-0 z-20 bg-gradient-to-r from-black/88 via-black/42 to-black/5" />
+          <div className="absolute inset-0 z-20 bg-gradient-to-t from-[#05080d] via-transparent to-black/20" />
+          <div className="absolute inset-y-0 right-0 z-20 w-1/4 bg-gradient-to-l from-black/55 to-transparent" />
         </div>
       ))}
 
       {/* Content */}
-      <div className="absolute inset-0 flex flex-col justify-center px-12 md:px-20 space-y-6">
-        <div className="flex items-center gap-3 animate-in fade-in slide-in-from-left-4 duration-700">
-          <div className="px-3 py-1 bg-black/40 backdrop-blur-md rounded-lg border border-white/10 flex items-center gap-2">
-            <Star size={16} className="text-yellow-400 fill-yellow-400" />
-            <span className="text-white font-black text-sm">{current.vote_average?.toFixed(1) || '8.5'}</span>
+      <div className="absolute inset-0 flex flex-col justify-end px-8 pb-16 pt-24 md:px-16 md:pb-20 md:pt-20 space-y-3">
+        {/* <div className="flex items-center gap-3 animate-in fade-in slide-in-from-left-4 duration-700">
+          <div className="px-2.5 py-1 bg-black/40 backdrop-blur-md rounded-lg border border-white/10 flex items-center gap-1.5">
+            <Star size={14} className="text-yellow-400 fill-yellow-400" />
+            <span className="text-white font-black text-xs">{current.vote_average?.toFixed(1) || '8.5'}</span>
           </div>
           {current.isExternal && (
-            <span className="text-[10px] font-black uppercase tracking-widest bg-primary/20 text-primary px-2 py-1 rounded-md border border-primary/30 italic">Trending</span>
+            <span className="text-[9px] font-black uppercase tracking-widest bg-primary/20 text-primary px-2 py-1 rounded-md border border-primary/30 italic">Trending</span>
           )}
-        </div>
+        </div> */}
 
-        <h2 className="text-5xl md:text-7xl font-black text-white tracking-tighter uppercase italic leading-[0.9] max-w-2xl animate-in fade-in slide-in-from-left-8 duration-700 delay-100">
-          {current.title}
-        </h2>
+        {current.logo_path ? (
+          <img
+            src={getHeroImageUrl(current.logo_path)}
+            alt={current.title}
+            className="max-h-28 w-auto max-w-[min(620px,74vw)] object-contain object-left drop-shadow-[0_8px_28px_rgba(0,0,0,0.8)] animate-in fade-in slide-in-from-left-8 duration-700 delay-100"
+            decoding="async"
+          />
+        ) : (
+          <h2 className="text-4xl md:text-5xl font-black text-white tracking-tighter uppercase italic leading-[0.9] max-w-2xl animate-in fade-in slide-in-from-left-8 duration-700 delay-100">
+            {current.title}
+          </h2>
+        )}
 
-        <div className="flex items-center gap-4 text-white/60 font-bold text-sm animate-in fade-in slide-in-from-left-12 duration-700 delay-200">
+        <div className="flex items-center gap-3 text-white/60 font-bold text-xs animate-in fade-in slide-in-from-left-12 duration-700 delay-200">
           <span>{current.release_year || '2024'}</span>
           <span className="w-1 h-1 bg-white/20 rounded-full" />
           <span className="uppercase tracking-widest">{current.type === 'series' ? 'Web Series' : 'Action • Movie'}</span>
-          <span className="w-1 h-1 bg-white/20 rounded-full" />
-          <span className="px-2 py-0.5 border border-white/20 rounded text-[10px] font-black">U/A 13+</span>
+          {/* <span className="w-1 h-1 bg-white/20 rounded-full" />
+          <span className="px-2 py-0.5 border border-white/20 rounded text-[9px] font-black">U/A 13+</span> */}
         </div>
 
-        <p className="text-white/40 text-sm md:text-base font-medium max-w-xl line-clamp-2 animate-in fade-in slide-in-from-left-16 duration-700 delay-300">
+        <p className="text-white/45 text-xs md:text-sm font-medium max-w-lg line-clamp-2 animate-in fade-in slide-in-from-left-16 duration-700 delay-300">
           {current.overview || "Loading description..."}
         </p>
 
-        <div className="flex items-center gap-4 pt-4 animate-in fade-in slide-in-from-left-20 duration-700 delay-500">
+        <div className="flex items-center gap-4 pt-1 animate-in fade-in slide-in-from-left-20 duration-700 delay-500">
           <button
             onClick={() => onShowDetail(current)}
-            className="flex items-center gap-3 bg-red-600 hover:bg-red-700 text-white px-8 py-4 rounded-2xl font-black text-sm tracking-widest transition-all shadow-lg hover:scale-105 active:scale-95 group/btn uppercase italic"
+            className="flex items-center gap-2.5 bg-red-600 hover:bg-red-700 text-white px-7 py-3.5 rounded-2xl font-black text-xs tracking-widest transition-all shadow-lg hover:scale-105 active:scale-95 group/btn uppercase italic"
           >
-            <Play fill="white" size={20} className="group-hover/btn:scale-110 transition-transform" />
+            <Play fill="white" size={18} className="group-hover/btn:scale-110 transition-transform" />
             Play Now
           </button>
           <button
@@ -107,16 +134,16 @@ const HeroCarousel: React.FC<HeroCarouselProps> = ({ items, onPlay, onShowDetail
               }
               alert('Added to Watchlist!')
             }}
-            className="flex items-center gap-3 bg-white/10 hover:bg-white/20 text-white px-8 py-4 rounded-2xl font-black text-sm tracking-widest transition-all border border-white/10 hover:scale-105 active:scale-95 uppercase italic glass-effect"
+            className="flex items-center gap-2.5 bg-white/30 hover:bg-white/40 text-white px-7 py-3.5 rounded-2xl font-black text-xs tracking-widest transition-all border border-white/10 hover:scale-105 active:scale-95 uppercase italic glass-effect"
           >
-            <Bookmark size={20} />
+            <Bookmark size={18} />
             Watchlist
           </button>
         </div>
       </div>
 
       {/* Navigation Controls */}
-      <div className="absolute bottom-10 right-12 flex items-center gap-4">
+      <div className="absolute bottom-8 right-8 md:right-12 flex items-center gap-4">
         <button
           onClick={prev}
           className="p-3 rounded-full bg-white/5 hover:bg-white/10 text-white/40 hover:text-white transition-all border border-white/5 hover:scale-110"

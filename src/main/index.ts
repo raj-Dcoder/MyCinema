@@ -1142,13 +1142,17 @@ ipcMain.on('install-update', () => {
   autoUpdater.quitAndInstall(false, true)
 })
 
+ipcMain.handle('start-update-download', async () => {
+  return await autoUpdater.downloadUpdate()
+})
+
 function setupAutoUpdater(win: BrowserWindow): void {
   // Only run auto-update in packaged (production) builds
   if (!app.isPackaged) return
 
-  autoUpdater.autoDownload = true
-  // Keep installation explicit so the renderer can always show progress
-  // and the user can choose when to restart into the new version.
+  // Keep both download and installation explicit so the user controls when
+  // network download starts and when the app restarts into the new version.
+  autoUpdater.autoDownload = false
   autoUpdater.autoInstallOnAppQuit = false
 
   autoUpdater.on('update-available', (info) => {
@@ -1354,6 +1358,10 @@ ipcMain.handle('search-tmdb', async (_, query: string) => {
 
 ipcMain.handle('fetch-trending', async (_, type: 'movie' | 'series') => {
   return await tmdb.fetchTrending(type)
+})
+
+ipcMain.handle('fetch-trending-india', async () => {
+  return await tmdb.fetchTrendingInIndia()
 })
 
 ipcMain.handle('toggle-favorite', (_, id: number) => {

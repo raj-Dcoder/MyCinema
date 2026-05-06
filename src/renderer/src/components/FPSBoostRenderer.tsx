@@ -7,6 +7,65 @@ interface FPSBoostRendererProps {
   isPlaying: boolean;
 }
 
+const syncCanvasSize = (canvas: HTMLCanvasElement) => {
+  const dpr = window.devicePixelRatio || 1;
+  const width = Math.max(1, Math.round(canvas.clientWidth * dpr));
+  const height = Math.max(1, Math.round(canvas.clientHeight * dpr));
+
+  if (canvas.width !== width || canvas.height !== height) {
+    canvas.width = width;
+    canvas.height = height;
+    return true;
+  }
+
+  return false;
+};
+
+const getAspectGeometry = (
+  video: HTMLVideoElement,
+  canvas: HTMLCanvasElement,
+  aspectMode: 'contain' | 'cover' | 'fill'
+) => {
+  const videoAspect = video.videoWidth && video.videoHeight ? video.videoWidth / video.videoHeight : 16 / 9;
+  const canvasAspect = canvas.width / canvas.height;
+
+  let positionWidth = 1;
+  let positionHeight = 1;
+  let texLeft = 0;
+  let texRight = 1;
+  let texTop = 0;
+  let texBottom = 1;
+
+  if (aspectMode === 'contain') {
+    if (canvasAspect > videoAspect) {
+      positionWidth = videoAspect / canvasAspect;
+    } else {
+      positionHeight = canvasAspect / videoAspect;
+    }
+  } else if (aspectMode === 'cover') {
+    if (canvasAspect > videoAspect) {
+      const visibleHeight = videoAspect / canvasAspect;
+      texTop = (1 - visibleHeight) / 2;
+      texBottom = texTop + visibleHeight;
+    } else {
+      const visibleWidth = canvasAspect / videoAspect;
+      texLeft = (1 - visibleWidth) / 2;
+      texRight = texLeft + visibleWidth;
+    }
+  }
+
+  return {
+    positions: new Float32Array([
+      -positionWidth, -positionHeight,  positionWidth, -positionHeight, -positionWidth,  positionHeight,
+      -positionWidth,  positionHeight,  positionWidth, -positionHeight,  positionWidth,  positionHeight,
+    ]),
+    texCoords: new Float32Array([
+      texLeft, texBottom,  texRight, texBottom,  texLeft, texTop,
+      texLeft, texTop,     texRight, texBottom,  texRight, texTop,
+    ])
+  };
+};
+
 const FPSBoostRenderer: React.FC<FPSBoostRendererProps> = ({ videoRef, enabled, aspectMode, isPlaying }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const requestRef = useRef<number>();
@@ -242,13 +301,16 @@ const FPSBoostRenderer: React.FC<FPSBoostRendererProps> = ({ videoRef, enabled, 
           fpsRef.current.lastTime = now;
         }
 
-        if (canvas.width !== video.videoWidth || canvas.height !== video.videoHeight) {
-          canvas.width = video.videoWidth;
-          canvas.height = video.videoHeight;
-          gl.viewport(0, 0, canvas.width, canvas.height);
-        }
+        syncCanvasSize(canvas);
+        gl.viewport(0, 0, canvas.width, canvas.height);
 
         gl.useProgram(program);
+
+        const geometry = getAspectGeometry(video, canvas, aspectMode);
+        gl.bindBuffer(gl.ARRAY_BUFFER, positionBufferRef.current);
+        gl.bufferData(gl.ARRAY_BUFFER, geometry.positions, gl.DYNAMIC_DRAW);
+        gl.bindBuffer(gl.ARRAY_BUFFER, texCoordBufferRef.current);
+        gl.bufferData(gl.ARRAY_BUFFER, geometry.texCoords, gl.DYNAMIC_DRAW);
 
         // Attributes setup (using cached locations)
         gl.enableVertexAttribArray(locations.position);
@@ -294,8 +356,17 @@ const FPSBoostRenderer: React.FC<FPSBoostRendererProps> = ({ videoRef, enabled, 
 
         gl.drawArrays(gl.TRIANGLES, 0, 6);
       } else if (video.readyState >= 2 && framesReceivedRef.current < 2) {
+        syncCanvasSize(canvas);
+        gl.viewport(0, 0, canvas.width, canvas.height);
+
         // Just draw the current frame if we don't have enough for interpolation yet
         gl.useProgram(program);
+        const geometry = getAspectGeometry(video, canvas, aspectMode);
+        gl.bindBuffer(gl.ARRAY_BUFFER, positionBufferRef.current);
+        gl.bufferData(gl.ARRAY_BUFFER, geometry.positions, gl.DYNAMIC_DRAW);
+        gl.bindBuffer(gl.ARRAY_BUFFER, texCoordBufferRef.current);
+        gl.bufferData(gl.ARRAY_BUFFER, geometry.texCoords, gl.DYNAMIC_DRAW);
+
         gl.enableVertexAttribArray(locations.position);
         gl.bindBuffer(gl.ARRAY_BUFFER, positionBufferRef.current);
         gl.vertexAttribPointer(locations.position, 2, gl.FLOAT, false, 0, 0);
@@ -330,7 +401,7 @@ const FPSBoostRenderer: React.FC<FPSBoostRendererProps> = ({ videoRef, enabled, 
         video.removeEventListener('play', resetFrames);
       }
     };
-  }, [enabled, videoRef, isPlaying]);
+  }, [enabled, videoRef, isPlaying, aspectMode]);
 
   return (
     <div className="absolute inset-0 pointer-events-none">
@@ -340,7 +411,6 @@ const FPSBoostRenderer: React.FC<FPSBoostRendererProps> = ({ videoRef, enabled, 
           enabled ? 'opacity-100' : 'opacity-0'
         }`}
         style={{
-          objectFit: aspectMode,
           width: '100%',
           height: '100%',
         }}

@@ -9,11 +9,13 @@ export interface Video {
   duration?: number
   poster_path?: string
   backdrop_path?: string
+  logo_path?: string
   overview?: string
   tagline?: string
   genres?: string
   last_watched_time?: number
   completed?: boolean
+  updated_at?: string
   episode_count?: number
   vote_average?: number
   release_year?: number

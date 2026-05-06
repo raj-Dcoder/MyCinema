@@ -18,7 +18,7 @@ const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState<'home' | 'videos' | 'movies' | 'series' | 'download' | 'settings' | 'watchlist' | 'history' | 'favorites'>('home')
   const [isSidebarExpanded, setIsSidebarExpanded] = useState(true)
 
-  const [showWhatsNew, setShowWhatsNew] = useState(() => localStorage.getItem('v1.15.4_whatsnew') !== 'true')
+  const [showWhatsNew, setShowWhatsNew] = useState(() => localStorage.getItem('v1.16.0_whatsnew') !== 'true')
 
   const [playingVideo, setPlayingVideo] = useState<Video | null>(null)
   const [selectedVideo, setSelectedVideo] = useState<Video | null>(null)
@@ -323,67 +323,71 @@ const App: React.FC = () => {
       {/* What's New Modal */}
       {showWhatsNew && (
         <div className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-300">
-          <div className="w-full max-w-xl bg-surface border border-secondary rounded-3xl shadow-2xl overflow-hidden animate-in zoom-in-95 duration-300">
-            <div className="relative h-40 bg-primary/20 flex items-center justify-center overflow-hidden">
-              <div className="absolute inset-0 bg-gradient-to-t from-surface to-transparent" />
-              <div className="relative z-10 text-center mt-4">
-                <span className="px-3 py-1 bg-red-600 text-white text-[10px] font-black tracking-[0.2em] uppercase rounded-full mb-3 inline-block animate-pulse">Update Complete</span>
-                <h2 className="text-3xl font-black text-white italic tracking-tighter">MyCinema v1.15.4</h2>
+          <div className="w-full max-w-3xl overflow-hidden rounded-[32px] border border-white/10 bg-[#0b1118] shadow-[0_30px_80px_rgba(0,0,0,0.55)] animate-in zoom-in-95 duration-300">
+            <div className="relative overflow-hidden border-b border-white/10 bg-[radial-gradient(circle_at_top_left,_rgba(229,9,20,0.32),_transparent_38%),radial-gradient(circle_at_top_right,_rgba(34,211,238,0.18),_transparent_32%),linear-gradient(180deg,_rgba(255,255,255,0.03),_rgba(255,255,255,0))] px-8 pb-8 pt-10">
+              <div className="absolute inset-0 opacity-40 [background-image:linear-gradient(rgba(255,255,255,0.06)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.04)_1px,transparent_1px)] [background-size:36px_36px]" />
+              <div className="relative z-10 flex flex-col gap-5">
+                <div className="flex items-center gap-3">
+                  <span className="rounded-full border border-red-400/30 bg-red-500/15 px-3 py-1 text-[10px] font-black uppercase tracking-[0.24em] text-red-100">
+                    What's New
+                  </span>
+                  <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-[10px] font-black uppercase tracking-[0.24em] text-white/50">
+                    v1.16.0
+                  </span>
+                </div>
+                <div className="max-w-2xl space-y-3">
+                  <h2 className="text-4xl font-black tracking-tight text-white">Home got a full cinematic refresh.</h2>
+                  <p className="text-sm font-medium leading-7 text-white/70">
+                    This release sharpens the first-run experience with a rebuilt hero, cleaner update controls, stronger playback behavior, and richer discovery across the library.
+                  </p>
+                </div>
               </div>
             </div>
-            
-            <div className="p-8 space-y-6 max-h-[60vh] overflow-y-auto scrollbar-hide">
-              <div className="space-y-2 group">
-                <h3 className="text-base font-black text-primary flex items-center gap-2 italic">
-                  <span className="w-2 h-2 rounded-full bg-primary" />
-                  Separate AI Boost Controls 🎬
-                </h3>
-                <p className="text-sm text-white/60 leading-relaxed pl-4 font-bold">
-                  AI Boost now gives you independent toggles for sharpness and vibrance, so each video can use only the enhancement it needs.
+
+            <div className="grid gap-4 p-8 md:grid-cols-2">
+              <div className="rounded-2xl border border-white/8 bg-white/[0.03] p-5">
+                <p className="mb-3 text-[11px] font-black uppercase tracking-[0.22em] text-cyan-300">Home Experience</p>
+                <h3 className="mb-2 text-lg font-black text-white">Cinematic hero and smarter discovery</h3>
+                <p className="text-sm leading-7 text-white/65">
+                  The Home screen now uses full-bleed hero artwork, official TMDB title logos when available, a tighter content layout, India OTT trending picks, and more informative Continue Watching cards.
                 </p>
               </div>
 
-              <div className="space-y-2 group">
-                <h3 className="text-base font-black text-amber-400 flex items-center gap-2 italic">
-                  <span className="w-2 h-2 rounded-full bg-amber-400" />
-                  Smarter Playback Controls 🛠️
-                </h3>
-                <p className="text-sm text-white/60 leading-relaxed pl-4 font-bold">
-                  Opening the AI Boost menu no longer accidentally pauses a playing video or starts a paused one.
+              <div className="rounded-2xl border border-white/8 bg-white/[0.03] p-5">
+                <p className="mb-3 text-[11px] font-black uppercase tracking-[0.22em] text-emerald-300">Updates</p>
+                <h3 className="mb-2 text-lg font-black text-white">Manual update download control</h3>
+                <p className="text-sm leading-7 text-white/65">
+                  New app updates no longer start downloading automatically. Users can now choose when to download, and the collapsed sidebar shows a compact update status icon.
                 </p>
               </div>
 
-              <div className="space-y-2 group">
-                <h3 className="text-base font-black text-emerald-400 flex items-center gap-2 italic">
-                  <span className="w-2 h-2 rounded-full bg-emerald-400" />
-                  Better Enhancement Memory 📂
-                </h3>
-                <p className="text-sm text-white/60 leading-relaxed pl-4 font-bold">
-                  The old combined AI Enhance preference is migrated cleanly, then sharpness and vibrance remember their own choices.
+              <div className="rounded-2xl border border-white/8 bg-white/[0.03] p-5">
+                <p className="mb-3 text-[11px] font-black uppercase tracking-[0.22em] text-amber-300">Playback</p>
+                <h3 className="mb-2 text-lg font-black text-white">Cleaner rendering and sync behavior</h3>
+                <p className="text-sm leading-7 text-white/65">
+                  Video rendering now respects aspect behavior more reliably, external audio track handling is more stable, and subtitle updates stay in sync more consistently during playback.
                 </p>
               </div>
 
-              <div className="space-y-2 group">
-                <h3 className="text-base font-black text-purple-400 flex items-center gap-2 italic">
-                  <span className="w-2 h-2 rounded-full bg-purple-400" />
-                  Renderer Maintenance 🛠️
-                </h3>
-                <p className="text-sm text-white/60 leading-relaxed pl-4 font-bold">
-                  The quality renderer now passes separate shader controls for detail and color processing while keeping the existing look.
+              <div className="rounded-2xl border border-white/8 bg-white/[0.03] p-5">
+                <p className="mb-3 text-[11px] font-black uppercase tracking-[0.22em] text-rose-300">Library</p>
+                <h3 className="mb-2 text-lg font-black text-white">Better series grouping and card detail</h3>
+                <p className="text-sm leading-7 text-white/65">
+                  Series cards now group more cleanly around the most relevant episode state, and media cards surface stronger details without feeling cluttered.
                 </p>
               </div>
             </div>
-            
-            <div className="p-6 bg-white/5 border-t border-white/5 flex justify-between items-center">
-              <p className="text-[10px] font-black text-white/20 uppercase tracking-[0.2em]">Check RELEASE_NOTES.md for full diff</p>
+
+            <div className="flex items-center justify-between gap-4 border-t border-white/10 bg-white/[0.03] px-8 py-6">
+              <p className="text-[10px] font-black uppercase tracking-[0.22em] text-white/28">Release notes updated for v1.16.0</p>
               <button
                 onClick={() => {
-                  localStorage.setItem('v1.15.4_whatsnew', 'true')
+                  localStorage.setItem('v1.16.0_whatsnew', 'true')
                   setShowWhatsNew(false)
                 }}
-                className="px-8 py-3 bg-red-600 text-white font-black rounded-xl hover:bg-red-700 transition-all hover:scale-105 active:scale-95 shadow-lg shadow-red-600/20 italic"
+                className="rounded-2xl bg-red-600 px-8 py-3 text-sm font-black text-white transition-all hover:scale-105 hover:bg-red-700 active:scale-95 shadow-lg shadow-red-600/20"
               >
-                Let's Go!
+                Start Watching
               </button>
             </div>
           </div>

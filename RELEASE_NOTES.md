@@ -1,3 +1,30 @@
+# MyCinema v1.16.0 🚀
+
+Feature release focused on a cinematic Home experience, cleaner update control, and stronger playback polish.
+
+### 🎬 Home & Discovery
+- **Cinematic Home Hero**: Rebuilt the Home hero into a full-bleed visual experience with tuned image framing and a more polished content layout.
+- **Official TMDB Title Logos**: Hero titles now prefer TMDB logo artwork when available instead of plain text headings.
+- **India OTT Trending Row**: Added a dedicated trending rail for popular India OTT releases.
+- **Richer Continue Watching Cards**: Cards now surface more useful watch details by default while keeping quick actions clean.
+- **Smarter Series Grouping**: Series cards now resolve around the most relevant in-progress episode state more consistently.
+
+### 🔄 Update Experience
+- **Manual Update Downloads**: New app updates are detected without auto-downloading, giving users explicit control over when downloads begin.
+- **Collapsed Sidebar Update Signal**: Even with the sidebar collapsed, users now see a compact update icon that reflects available, downloading, and ready states.
+- **Refined What's New Modal**: First launch after installing v1.16.0 now shows a cleaner, more polished release summary modal built specifically for this version.
+
+### 🎥 Playback & Rendering
+- **Aspect-Aware Boost Renderers**: FPS Boost and Quality Boost renderers now handle contain and cover modes more reliably across canvas sizing changes.
+- **Improved External Audio Sync**: External audio tracks re-prime and re-sync more cleanly around seeks, resumes, and playback transitions.
+- **Subtitle Refresh Stability**: Subtitle rendering now updates more consistently during active playback.
+
+### 🛠️ UI Polish
+- **Refined Media Cards**: Poster and library cards now expose stronger visual detail and action clarity.
+- **Hero Search Simplification**: The oversized hero search field was reduced to a compact icon treatment to preserve visual space.
+
+***
+
 # MyCinema v1.15.4 🚀
 
 Focused patch release for AI Boost control and player interaction polish.

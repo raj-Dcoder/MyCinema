@@ -3,7 +3,7 @@ import { Video } from '../types'
 import VideoCard from '../components/VideoCard'
 import HeroCarousel from '../components/HeroCarousel'
 import { groupSeriesCards } from '../utils/seriesCards'
-import { Search as SearchIcon, Bell, ChevronLeft, ChevronRight, Play } from 'lucide-react'
+import { Search as SearchIcon, Bell, ChevronLeft, ChevronRight, Play, X, Loader2, Star, Film, Tv } from 'lucide-react'
 
 interface HomeProps {
   onPlay: (video: Video) => void
@@ -15,6 +15,33 @@ interface HomeProps {
 const getImageUrl = (path?: string | null) => {
   if (!path) return null
   return path.startsWith('http') ? path : `media://file/${encodeURIComponent(path)}`
+}
+
+const getTmdbImageUrl = (path?: string | null, size: 'w342' | 'w500' | 'w780' | 'w1280' = 'w500') => {
+  if (!path) return null
+  return path.startsWith('http') ? path : `https://image.tmdb.org/t/p/${size}${path}`
+}
+
+const mapTmdbSearchResult = (item: any): Video => {
+  const isSeries = item.media_type === 'tv'
+  const title = isSeries ? item.name : item.title
+  const releaseDate = isSeries ? item.first_air_date : item.release_date
+  const releaseYear = releaseDate ? Number(String(releaseDate).slice(0, 4)) : undefined
+
+  return {
+    id: -Number(item.id || Date.now()),
+    title: title || 'Untitled',
+    file_path: '',
+    type: isSeries ? 'series' : 'movie',
+    series_name: isSeries ? title : undefined,
+    poster_path: getTmdbImageUrl(item.poster_path, 'w500') || undefined,
+    backdrop_path: getTmdbImageUrl(item.backdrop_path, 'w1280') || undefined,
+    overview: item.overview || undefined,
+    vote_average: typeof item.vote_average === 'number' ? item.vote_average : undefined,
+    release_year: releaseYear,
+    tmdb_id: item.id,
+    isExternal: true
+  }
 }
 
 const formatDuration = (seconds?: number) => {
@@ -135,6 +162,55 @@ const ContinueWatchingCard: React.FC<{
   )
 }
 
+const SearchResultCard: React.FC<{
+  video: Video
+  onSelect: (video: Video) => void
+  onWarm: (video: Video) => void
+}> = ({ video, onSelect, onWarm }) => {
+  const poster = getImageUrl(video.poster_path)
+  const title = video.type === 'series' && video.series_name ? video.series_name : video.title
+
+  return (
+    <button
+      className="group/result flex w-full items-center gap-3 rounded-2xl border border-white/5 bg-white/[0.035] p-2.5 text-left transition-all duration-200 hover:border-red-500/35 hover:bg-white/[0.07] active:scale-[0.99]"
+      onClick={() => onSelect(video)}
+      onMouseEnter={() => onWarm(video)}
+      onFocus={() => onWarm(video)}
+    >
+      <div className="h-[92px] w-[62px] shrink-0 overflow-hidden rounded-xl bg-white/5 ring-1 ring-white/8">
+        {poster ? (
+          <img src={poster} alt="" className="h-full w-full object-cover transition-transform duration-300 group-hover/result:scale-105" />
+        ) : (
+          <div className="flex h-full w-full items-center justify-center text-white/20">
+            {video.type === 'series' ? <Tv size={20} /> : <Film size={20} />}
+          </div>
+        )}
+      </div>
+
+      <div className="min-w-0 flex-1">
+        <div className="mb-1 flex items-center gap-2">
+          <span className="rounded-md border border-white/10 bg-black/25 px-2 py-0.5 text-[8px] font-black uppercase tracking-widest text-white/45">
+            {video.type === 'series' ? 'Series' : 'Movie'}
+          </span>
+          {video.release_year && (
+            <span className="text-[10px] font-black text-white/30">{video.release_year}</span>
+          )}
+          {video.vote_average ? (
+            <span className="ml-auto inline-flex items-center gap-1 text-[10px] font-black text-yellow-400">
+              <Star size={10} fill="currentColor" />
+              {video.vote_average.toFixed(1)}
+            </span>
+          ) : null}
+        </div>
+        <h4 className="truncate text-sm font-black text-white transition-colors group-hover/result:text-red-100">{title}</h4>
+        <p className="mt-1 line-clamp-2 text-[11px] font-medium leading-5 text-white/45">
+          {video.overview || 'Open details to explore this title.'}
+        </p>
+      </div>
+    </button>
+  )
+}
+
 const Home: React.FC<HomeProps> = ({ onPlay, onShowDetail, onNavigate, refreshKey }) => {
   const [continueWatching, setContinueWatching] = useState<Video[]>([])
   const [recentMovies, setRecentMovies] = useState<Video[]>([])
@@ -148,6 +224,15 @@ const Home: React.FC<HomeProps> = ({ onPlay, onShowDetail, onNavigate, refreshKe
   const [showContinueLeft, setShowContinueLeft] = useState(false)
   const [showContinueRight, setShowContinueRight] = useState(false)
   const [isContinueHovered, setIsContinueHovered] = useState(false)
+  const [isSearchOpen, setIsSearchOpen] = useState(false)
+  const [searchQuery, setSearchQuery] = useState('')
+  const [suppressNextContentClick, setSuppressNextContentClick] = useState(false)
+  const [searchResults, setSearchResults] = useState<Video[]>([])
+  const [isSearching, setIsSearching] = useState(false)
+  const [searchError, setSearchError] = useState<string | null>(null)
+  const searchInputRef = useRef<HTMLInputElement>(null)
+  const searchBoxRef = useRef<HTMLDivElement>(null)
+  const searchCacheRef = useRef<Map<string, Video[]>>(new Map())
 
   const fetchData = async () => {
     try {
@@ -190,6 +275,112 @@ const Home: React.FC<HomeProps> = ({ onPlay, onShowDetail, onNavigate, refreshKe
       window.removeEventListener('mycinema_name_updated', handleNameUpdate)
     }
   }, [refreshKey])
+
+  useEffect(() => {
+    if (!isSearchOpen) return
+    const timer = window.setTimeout(() => searchInputRef.current?.focus(), 80)
+    return () => window.clearTimeout(timer)
+  }, [isSearchOpen, searchQuery])
+
+  useEffect(() => {
+    const handlePointerDown = (event: MouseEvent) => {
+      if (!isSearchOpen) return
+      if (searchBoxRef.current?.contains(event.target as Node)) return
+      setSuppressNextContentClick(searchQuery.trim().length > 0)
+      setIsSearchOpen(false)
+    }
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setIsSearchOpen(false)
+    }
+
+    window.addEventListener('mousedown', handlePointerDown)
+    window.addEventListener('keydown', handleKeyDown)
+    return () => {
+      window.removeEventListener('mousedown', handlePointerDown)
+      window.removeEventListener('keydown', handleKeyDown)
+    }
+  }, [isSearchOpen, searchQuery])
+
+  useEffect(() => {
+    if (!suppressNextContentClick) return
+    const timer = window.setTimeout(() => setSuppressNextContentClick(false), 250)
+    return () => window.clearTimeout(timer)
+  }, [suppressNextContentClick])
+
+  const handleShowDetailFromHome = (video: Video) => {
+    if (suppressNextContentClick) return
+    onShowDetail(video)
+  }
+
+  useEffect(() => {
+    const query = searchQuery.trim()
+
+    if (!isSearchOpen || query.length < 2) {
+      setSearchResults([])
+      setIsSearching(false)
+      setSearchError(null)
+      return
+    }
+
+    const normalizedQuery = query.toLowerCase()
+    const cached = searchCacheRef.current.get(normalizedQuery)
+    if (cached) {
+      setSearchResults(cached)
+      setIsSearching(false)
+      setSearchError(null)
+      return
+    }
+
+    let cancelled = false
+    setIsSearching(true)
+    setSearchError(null)
+
+    const timer = window.setTimeout(async () => {
+      try {
+        const rawResults = await window.api.searchTMDB(query)
+        if (cancelled) return
+
+        const mapped = rawResults
+          .filter((item: any) => item.media_type === 'movie' || item.media_type === 'tv')
+          .map(mapTmdbSearchResult)
+          .filter((video: Video) => Boolean(video.title && video.tmdb_id))
+          .slice(0, 8)
+
+        searchCacheRef.current.set(normalizedQuery, mapped)
+        setSearchResults(mapped)
+      } catch (err) {
+        console.error('Home search error:', err)
+        if (!cancelled) {
+          setSearchError('Search is unavailable right now.')
+          setSearchResults([])
+        }
+      } finally {
+        if (!cancelled) setIsSearching(false)
+      }
+    }, 180)
+
+    return () => {
+      cancelled = true
+      window.clearTimeout(timer)
+    }
+  }, [searchQuery, isSearchOpen])
+
+  const warmSearchResult = (video: Video) => {
+    const poster = getImageUrl(video.poster_path)
+    const backdrop = getImageUrl(video.backdrop_path)
+    for (const src of [poster, backdrop]) {
+      if (!src) continue
+      const image = new Image()
+      image.src = src
+    }
+  }
+
+  const openSearchResult = (video: Video) => {
+    warmSearchResult(video)
+    setIsSearchOpen(false)
+    onShowDetail(video)
+  }
 
   const checkContinueScroll = useCallback(() => {
     const rail = continueWatchingRef.current
@@ -238,13 +429,105 @@ const Home: React.FC<HomeProps> = ({ onPlay, onShowDetail, onNavigate, refreshKe
                 <h2 className="text-2xl font-black text-white tracking-tighter italic drop-shadow-[0_2px_14px_rgba(0,0,0,0.9)]">{getTimeGreeting()}, {userName}</h2>
               </div>
 
-              <div className="flex items-center gap-4">
-                <button
-                  aria-label="Search movies and series"
-                  className="p-2.5 text-white drop-shadow-[0_2px_12px_rgba(0,0,0,0.9)] transition-all hover:scale-110 hover:text-primary active:scale-95"
+              <div className="relative flex items-center gap-4" ref={searchBoxRef}>
+                <div
+                  className={`relative transition-all duration-300 ease-out ${
+                    isSearchOpen ? 'w-[420px]' : 'w-12'
+                  }`}
                 >
-                  <SearchIcon size={24} strokeWidth={3} />
-                </button>
+                  <div
+                    className={`flex h-12 items-center overflow-hidden rounded-2xl border backdrop-blur-xl transition-all duration-300 ${
+                      isSearchOpen
+                        ? 'border-white/15 bg-black/45 shadow-[0_18px_55px_rgba(0,0,0,0.45)]'
+                        : 'border-transparent bg-transparent'
+                    }`}
+                  >
+                    <button
+                      aria-label="Search movies and series"
+                      className={`flex h-12 w-12 shrink-0 items-center justify-center text-white drop-shadow-[0_2px_12px_rgba(0,0,0,0.9)] transition-all hover:text-primary active:scale-95 ${
+                        isSearchOpen ? 'scale-95' : 'hover:scale-110'
+                      }`}
+                      onClick={() => setIsSearchOpen(true)}
+                    >
+                      <SearchIcon size={24} strokeWidth={3} />
+                    </button>
+
+                    <input
+                      ref={searchInputRef}
+                      value={searchQuery}
+                      onChange={(event) => setSearchQuery(event.target.value)}
+                      placeholder="Search movies or series"
+                      className={`min-w-0 flex-1 bg-transparent pr-2 text-sm font-bold text-white outline-none placeholder:text-white/28 ${
+                        isSearchOpen ? 'opacity-100' : 'pointer-events-none opacity-0'
+                      }`}
+                    />
+
+                    {isSearchOpen && searchQuery && (
+                      <button
+                        aria-label="Clear search"
+                        className="mr-2 flex h-8 w-8 shrink-0 items-center justify-center rounded-xl text-white/45 transition-all hover:bg-white/10 hover:text-white"
+                        onClick={() => {
+                          setSearchQuery('')
+                          setSearchResults([])
+                          searchInputRef.current?.focus()
+                        }}
+                      >
+                        <X size={16} />
+                      </button>
+                    )}
+                  </div>
+
+                  {isSearchOpen && searchQuery.trim().length > 0 && (
+                    <div className="absolute right-0 top-14 z-40 w-[420px] overflow-hidden rounded-3xl border border-white/10 bg-[#070a0f]/95 shadow-[0_28px_90px_rgba(0,0,0,0.72)] backdrop-blur-2xl animate-in fade-in slide-in-from-top-2 duration-200">
+                      <div className="border-b border-white/6 px-4 py-3">
+                        <div className="flex items-center justify-between gap-3">
+                          <p className="text-[10px] font-black uppercase tracking-[0.22em] text-white/35">Search</p>
+                          {isSearching && <Loader2 size={15} className="animate-spin text-red-500" />}
+                        </div>
+                      </div>
+
+                      <div className="max-h-[520px] overflow-y-auto p-2.5 scrollbar-thin">
+                        {searchQuery.trim().length < 2 ? (
+                          <div className="flex min-h-[150px] items-center justify-center px-6 text-center">
+                            <p className="text-xs font-black uppercase tracking-[0.18em] text-white/20">
+                              Start typing to find a movie or series
+                            </p>
+                          </div>
+                        ) : searchResults.length > 0 ? (
+                          <div className="space-y-2">
+                            {searchResults.map(result => (
+                              <SearchResultCard
+                                key={`${result.type}-${result.tmdb_id}`}
+                                video={result}
+                                onSelect={openSearchResult}
+                                onWarm={warmSearchResult}
+                              />
+                            ))}
+                          </div>
+                        ) : isSearching ? (
+                          <div className="space-y-2">
+                            {[1, 2, 3].map(item => (
+                              <div key={item} className="flex items-center gap-3 rounded-2xl border border-white/5 bg-white/[0.03] p-2.5">
+                                <div className="h-[92px] w-[62px] rounded-xl bg-white/5 animate-pulse" />
+                                <div className="flex-1 space-y-3">
+                                  <div className="h-3 w-24 rounded-full bg-white/8 animate-pulse" />
+                                  <div className="h-4 w-44 rounded-full bg-white/8 animate-pulse" />
+                                  <div className="h-3 w-full rounded-full bg-white/5 animate-pulse" />
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        ) : (
+                          <div className="flex min-h-[150px] items-center justify-center px-6 text-center">
+                            <p className="text-xs font-black uppercase tracking-[0.18em] text-white/24">
+                              {searchError || 'No matching titles found'}
+                            </p>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                </div>
                 {/* <button className="relative p-3 rounded-2xl bg-black/30 hover:bg-black/45 text-white/60 hover:text-white transition-all border border-white/10 backdrop-blur-xl">
                   <Bell size={19} />
                   <div className="absolute top-3 right-3 w-2 h-2 bg-red-600 rounded-full border-2 border-[#05080d]" />
@@ -253,7 +536,7 @@ const Home: React.FC<HomeProps> = ({ onPlay, onShowDetail, onNavigate, refreshKe
             </div>
           </div>
 
-          <HeroCarousel items={featured} onPlay={onPlay} onShowDetail={onShowDetail} />
+          <HeroCarousel items={featured} onPlay={onPlay} onShowDetail={handleShowDetailFromHome} />
         </div>
       </section>
 
@@ -299,7 +582,7 @@ const Home: React.FC<HomeProps> = ({ onPlay, onShowDetail, onNavigate, refreshKe
                     <ContinueWatchingCard
                       video={video}
                       onPlay={onPlay}
-                      onShowDetail={onShowDetail}
+                      onShowDetail={handleShowDetailFromHome}
                     />
                   </div>
                 ))}
@@ -333,7 +616,7 @@ const Home: React.FC<HomeProps> = ({ onPlay, onShowDetail, onNavigate, refreshKe
         </div>
         <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-5">
           {trendingMovies.slice(0, 6).map(video => (
-            <VideoCard key={video.tmdb_id || video.id} video={video} onPlay={onPlay} onShowDetail={onShowDetail} />
+            <VideoCard key={video.tmdb_id || video.id} video={video} onPlay={onPlay} onShowDetail={handleShowDetailFromHome} />
           ))}
         </div>
       </section>
@@ -347,7 +630,7 @@ const Home: React.FC<HomeProps> = ({ onPlay, onShowDetail, onNavigate, refreshKe
         </div>
         <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-5">
           {trendingIndia.slice(0, 6).map(video => (
-            <VideoCard key={video.tmdb_id || video.id} video={video} onPlay={onPlay} onShowDetail={onShowDetail} />
+            <VideoCard key={video.tmdb_id || video.id} video={video} onPlay={onPlay} onShowDetail={handleShowDetailFromHome} />
           ))}
           {trendingIndia.length === 0 && [1,2,3,4,5,6].map(i => (
             <div key={i} className="aspect-[2/3] bg-white/5 rounded-2xl animate-pulse" />
@@ -368,7 +651,7 @@ const Home: React.FC<HomeProps> = ({ onPlay, onShowDetail, onNavigate, refreshKe
         </div>
         <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-5">
           {recentMovies.slice(0, 6).map(video => (
-            <VideoCard key={video.id} video={video} onPlay={onPlay} onShowDetail={onShowDetail} />
+            <VideoCard key={video.id} video={video} onPlay={onPlay} onShowDetail={handleShowDetailFromHome} />
           ))}
           {recentMovies.length === 0 && [1,2,3,4,5,6].map(i => (
             <div key={i} className="aspect-[2/3] bg-white/5 rounded-2xl animate-pulse" />
@@ -389,7 +672,7 @@ const Home: React.FC<HomeProps> = ({ onPlay, onShowDetail, onNavigate, refreshKe
         </div>
         <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-5">
           {recentSeries.slice(0, 6).map(video => (
-            <VideoCard key={video.id} video={video} onPlay={onPlay} onShowDetail={onShowDetail} />
+            <VideoCard key={video.id} video={video} onPlay={onPlay} onShowDetail={handleShowDetailFromHome} />
           ))}
           {recentSeries.length === 0 && [1,2,3,4,5,6].map(i => (
             <div key={i} className="aspect-[2/3] bg-white/5 rounded-2xl animate-pulse" />

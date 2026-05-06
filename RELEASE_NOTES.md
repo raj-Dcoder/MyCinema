@@ -1,3 +1,34 @@
+# MyCinema v1.17.0 🚀
+
+Focused feature release for faster discovery, smarter trailers, cleaner detail pages, and playback polish.
+
+### 🔎 Faster Search
+- **Live Home Search**: The Home search button now expands into a search bar and shows movie/series results while the user types.
+- **Quick Detail Opening**: Search results already carry poster, overview, rating, year, and TMDB ID so detail pages open with useful information immediately.
+- **Safer Dismissal**: Clicking outside the search panel now closes it first instead of accidentally opening the hero or a card behind it.
+
+### 🎬 Better Detail Pages
+- **Title Logos**: Detail pages now prefer official TMDB logo artwork instead of plain text titles when a logo exists.
+- **Sharper Posters, Faster Load**: Posters use a high-quality but lighter TMDB image size, improving load time without changing the vertical poster layout.
+- **Moctale Shortcut**: Added a Moctale button that opens the matching movie/series page in the browser for public reviews and discussion.
+- **Cleaner Badges**: Removed hardcoded 4K and audio labels that were shown on every title.
+
+### ▶️ Smarter Trailers
+- **Season-Aware Trailers**: Series trailers can switch by season from the trailer player.
+- **Wrong Video Protection**: Trailer picking now avoids blocked videos, unrelated YouTube results, vertical episode clips, and episode-specific trailers.
+- **Faster Trailer Switching**: Trailer results are cached and the old YouTube player is removed immediately while a new season trailer loads.
+
+### 🎧 Playback Fixes
+- **Upside-Down Video Fix**: Corrected boosted rendering paths that could display some videos upside down.
+- **Popup Click Fix**: Clicking outside player menus now closes the menu without toggling play/pause.
+- **Subtitle Selection Fix**: Fixed a UI glitch where subtitle Off and an external subtitle could both appear selected.
+- **Better Audio Boost**: Reworked audio boost into richer profiles with bass, dialogue, air, compression, and limiting.
+
+### 🪟 Release UI
+- **Compact What's New Popup**: The first-launch release popup is now smaller, centered, cleaner, and written in plain language.
+
+***
+
 # MyCinema v1.16.0 🚀
 
 Feature release focused on a cinematic Home experience, cleaner update control, and stronger playback polish.

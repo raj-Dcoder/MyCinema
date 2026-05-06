@@ -29,6 +29,8 @@ const api = {
   clearAllData: () => ipcRenderer.invoke('clear-all-data'),
   fetchTrending: (type: 'movie' | 'series') => ipcRenderer.invoke('fetch-trending', type),
   fetchTrendingIndia: () => ipcRenderer.invoke('fetch-trending-india'),
+  getTmdbTrailer: (params: { tmdbId?: number | null; title: string; type: 'movie' | 'series'; year?: number | null; seasonNumber?: number | null; preferLatestSeason?: boolean }) =>
+    ipcRenderer.invoke('get-tmdb-trailer', params),
   toggleFavorite: (id: number) => ipcRenderer.invoke('toggle-favorite', id),
   toggleWatchlist: (id: number) => ipcRenderer.invoke('toggle-watchlist', id),
   addToWatchlistExternal: (item: any) => ipcRenderer.invoke('add-to-watchlist-external', item),

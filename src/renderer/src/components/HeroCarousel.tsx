@@ -49,7 +49,18 @@ const HeroCarousel: React.FC<HeroCarouselProps> = ({ items, onPlay, onShowDetail
   }
 
   return (
-    <div className="relative w-full min-h-[570px] h-[73vh] max-h-[800px] overflow-hidden bg-black group">
+    <div
+      className="relative w-full min-h-[570px] h-[73vh] max-h-[800px] overflow-hidden bg-black group cursor-pointer"
+      onClick={() => onShowDetail(current)}
+      role="button"
+      tabIndex={0}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault()
+          onShowDetail(current)
+        }
+      }}
+    >
       {/* Background Backdrops */}
       {items.map((item, idx) => (
         <div
@@ -118,14 +129,18 @@ const HeroCarousel: React.FC<HeroCarouselProps> = ({ items, onPlay, onShowDetail
 
         <div className="flex items-center gap-4 pt-1 animate-in fade-in slide-in-from-left-20 duration-700 delay-500">
           <button
-            onClick={() => onShowDetail(current)}
+            onClick={(e) => {
+              e.stopPropagation()
+              onShowDetail(current)
+            }}
             className="flex items-center gap-2.5 bg-red-600 hover:bg-red-700 text-white px-7 py-3.5 rounded-2xl font-black text-xs tracking-widest transition-all shadow-lg hover:scale-105 active:scale-95 group/btn uppercase italic"
           >
             <Play fill="white" size={18} className="group-hover/btn:scale-110 transition-transform" />
             Play Now
           </button>
           <button
-            onClick={() => {
+            onClick={(e) => {
+              e.stopPropagation()
               // Add to watchlist logic
               if (current.isExternal) {
                 window.api.addToWatchlistExternal(current)
@@ -145,7 +160,10 @@ const HeroCarousel: React.FC<HeroCarouselProps> = ({ items, onPlay, onShowDetail
       {/* Navigation Controls */}
       <div className="absolute bottom-8 right-8 md:right-12 flex items-center gap-4">
         <button
-          onClick={prev}
+          onClick={(e) => {
+            e.stopPropagation()
+            prev()
+          }}
           className="p-3 rounded-full bg-white/5 hover:bg-white/10 text-white/40 hover:text-white transition-all border border-white/5 hover:scale-110"
         >
           <ChevronLeft size={24} />
@@ -161,7 +179,10 @@ const HeroCarousel: React.FC<HeroCarouselProps> = ({ items, onPlay, onShowDetail
           ))}
         </div>
         <button
-          onClick={next}
+          onClick={(e) => {
+            e.stopPropagation()
+            next()
+          }}
           className="p-3 rounded-full bg-white/5 hover:bg-white/10 text-white/40 hover:text-white transition-all border border-white/5 hover:scale-110"
         >
           <ChevronRight size={24} />

@@ -1364,6 +1364,10 @@ ipcMain.handle('fetch-trending-india', async () => {
   return await tmdb.fetchTrendingInIndia()
 })
 
+ipcMain.handle('get-tmdb-trailer', async (_, params: { tmdbId?: number | null; title: string; type: 'movie' | 'series'; year?: number | null; seasonNumber?: number | null; preferLatestSeason?: boolean }) => {
+  return await tmdb.fetchTmdbTrailer(params)
+})
+
 ipcMain.handle('toggle-favorite', (_, id: number) => {
   return db.toggleFavorite(id)
 })

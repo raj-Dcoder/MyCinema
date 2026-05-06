@@ -1,6 +1,6 @@
 {
   "name": "mycinema",
-  "version": "1.16.0",
+  "version": "1.17.0",
   "main": "./out/main/index.js",
   "scripts": {
     "dev": "electron-vite dev",
@@ -14,7 +14,7 @@
   "author": "",
   "license": "ISC",
   "type": "commonjs",
-  "description": "",
+  "description": "A cinematic desktop media library and player for movies, series, trailers, subtitles, discovery, and local playback.",
   "dependencies": {
     "better-sqlite3": "^12.8.0",
     "clsx": "^2.1.1",

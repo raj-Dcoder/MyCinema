@@ -213,8 +213,9 @@ const QualityBoostRenderer: React.FC<QualityBoostRendererProps> = ({ videoRef, e
       0, 1,  1, 0,  1, 1,
     ]), gl.STATIC_DRAW);
     
-    // Set up textures
-    gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
+    // Keep the texture upload orientation aligned with the inverted texture
+    // coordinates below. Flipping here as well turns boosted playback upside down.
+    gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
     
     const texture = gl.createTexture()!;
     gl.bindTexture(gl.TEXTURE_2D, texture);

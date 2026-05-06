@@ -24,6 +24,7 @@ interface Api {
   clearAllData: () => Promise<boolean>
   fetchTrending: (type: 'movie' | 'series') => Promise<any[]>
   fetchTrendingIndia: () => Promise<any[]>
+  getTmdbTrailer: (params: { tmdbId?: number | null; title: string; type: 'movie' | 'series'; year?: number | null; seasonNumber?: number | null; preferLatestSeason?: boolean }) => Promise<any | null>
   toggleFavorite: (id: number) => Promise<number | null>
   toggleWatchlist: (id: number) => Promise<number | null>
   addToWatchlistExternal: (item: any) => Promise<any>

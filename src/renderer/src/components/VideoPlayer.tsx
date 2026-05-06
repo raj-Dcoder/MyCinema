@@ -18,6 +18,54 @@ import {
   type SubCue
 } from '../utils/subtitleSync'
 
+type AudioBoostProfile = 'balanced' | 'rich' | 'night'
+
+const AUDIO_BOOST_PROFILES: Record<AudioBoostProfile, {
+  label: string
+  detail: string
+  bassGain: number
+  dialogGain: number
+  airGain: number
+  compressorThreshold: number
+  compressorKnee: number
+  compressorRatio: number
+  outputGain: number
+}> = {
+  balanced: {
+    label: 'Cinema',
+    detail: 'Warm bass, clear voices',
+    bassGain: 3.5,
+    dialogGain: 2.5,
+    airGain: 1.8,
+    compressorThreshold: -22,
+    compressorKnee: 24,
+    compressorRatio: 3.2,
+    outputGain: 1.08
+  },
+  rich: {
+    label: 'Rich',
+    detail: 'Fuller bass and detail',
+    bassGain: 5.5,
+    dialogGain: 2.0,
+    airGain: 2.4,
+    compressorThreshold: -20,
+    compressorKnee: 22,
+    compressorRatio: 3.5,
+    outputGain: 1.12
+  },
+  night: {
+    label: 'Night',
+    detail: 'Level volume, lift dialogue',
+    bassGain: 1.5,
+    dialogGain: 4.2,
+    airGain: 1.0,
+    compressorThreshold: -28,
+    compressorKnee: 30,
+    compressorRatio: 5.0,
+    outputGain: 1.0
+  }
+}
+
 // ── VTT Parser (runs once per track selection, no React state) ──────────────
 function parseVTTTime(s: string): number {
   const clean = s.split(' ')[0]
@@ -124,7 +172,6 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
   const [selectedAudioId, setSelectedAudioId] = useState<string>('')
   const [showMediaMenu, setShowMediaMenu] = useState(false)
   const [showAdvancedMenu, setShowAdvancedMenu] = useState(false)
-  const [currentSubtitle, setCurrentSubtitle] = useState<number | null>(null)
   const [playbackRate, setPlaybackRate] = useState<number>(1)
   const [showSpeedMenu, setShowSpeedMenu] = useState(false)
   const [seekPopup, setSeekPopup] = useState<{ show: boolean, text: string, id: number }>({ show: false, text: '', id: 0 })
@@ -183,6 +230,10 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
   const [audioBoostEnabled, setAudioBoostEnabled] = useState(() => {
     return localStorage.getItem('mycinema_audio_boost') === 'true'
   })
+  const [audioBoostProfile, setAudioBoostProfile] = useState<AudioBoostProfile>(() => {
+    const stored = localStorage.getItem('mycinema_audio_boost_profile')
+    return stored === 'rich' || stored === 'night' ? stored : 'balanced'
+  })
   const [showInfoPanel, setShowInfoPanel] = useState(false)
   const [showEpisodesPanel, setShowEpisodesPanel] = useState(false)
   const [seriesEpisodes, setSeriesEpisodes] = useState<Video[]>([])
@@ -228,16 +279,27 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
     localStorage.setItem('mycinema_audio_boost', audioBoostEnabled.toString())
   }, [audioBoostEnabled])
 
+  useEffect(() => {
+    localStorage.setItem('mycinema_audio_boost_profile', audioBoostProfile)
+  }, [audioBoostProfile])
+
   // ─── Audio Boost Logic (Web Audio API) ──────────────────────────────────────
   const audioCtxRef = useRef<AudioContext | null>(null)
   const videoSourceNodeRef = useRef<MediaElementAudioSourceNode | null>(null)
   const audioSourceNodeRef = useRef<MediaElementAudioSourceNode | null>(null)
   const bassFilterRef = useRef<BiquadFilterNode | null>(null)
   const clarityFilterRef = useRef<BiquadFilterNode | null>(null)
+  const airFilterRef = useRef<BiquadFilterNode | null>(null)
   const compressorRef = useRef<DynamicsCompressorNode | null>(null)
+  const limiterRef = useRef<DynamicsCompressorNode | null>(null)
   const boostGainRef = useRef<GainNode | null>(null)
+  const audioBoostChainConnectedRef = useRef(false)
 
   useEffect(() => {
+    const setParam = (param: AudioParam, value: number, time: number, ramp = 0.08) => {
+      param.setTargetAtTime(value, time, ramp)
+    }
+
     const initAudio = () => {
       try {
         if (!audioCtxRef.current) {
@@ -249,22 +311,35 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
         if (!bassFilterRef.current) {
           bassFilterRef.current = ctx.createBiquadFilter()
           bassFilterRef.current.type = 'lowshelf'
-          bassFilterRef.current.frequency.value = 150 
+          bassFilterRef.current.frequency.value = 115
         }
         
         if (!clarityFilterRef.current) {
           clarityFilterRef.current = ctx.createBiquadFilter()
-          clarityFilterRef.current.type = 'highshelf'
-          clarityFilterRef.current.frequency.value = 3000
+          clarityFilterRef.current.type = 'peaking'
+          clarityFilterRef.current.frequency.value = 2600
+          clarityFilterRef.current.Q.value = 1.1
+        }
+
+        if (!airFilterRef.current) {
+          airFilterRef.current = ctx.createBiquadFilter()
+          airFilterRef.current.type = 'highshelf'
+          airFilterRef.current.frequency.value = 8500
         }
 
         if (!compressorRef.current) {
           compressorRef.current = ctx.createDynamicsCompressor()
-          compressorRef.current.threshold.value = -24
-          compressorRef.current.knee.value = 30
-          compressorRef.current.ratio.value = 12
-          compressorRef.current.attack.value = 0.003
-          compressorRef.current.release.value = 0.25
+          compressorRef.current.attack.value = 0.008
+          compressorRef.current.release.value = 0.18
+        }
+
+        if (!limiterRef.current) {
+          limiterRef.current = ctx.createDynamicsCompressor()
+          limiterRef.current.threshold.value = -3
+          limiterRef.current.knee.value = 0
+          limiterRef.current.ratio.value = 14
+          limiterRef.current.attack.value = 0.002
+          limiterRef.current.release.value = 0.08
         }
 
         if (!boostGainRef.current) {
@@ -283,11 +358,16 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
           audioSourceNodeRef.current.connect(bassFilterRef.current)
         }
 
-        // Chain: Bass -> Clarity -> Compressor -> Gain -> Destination
-        bassFilterRef.current.connect(clarityFilterRef.current)
-        clarityFilterRef.current.connect(compressorRef.current)
-        compressorRef.current.connect(boostGainRef.current)
-        boostGainRef.current.connect(ctx.destination)
+        if (!audioBoostChainConnectedRef.current) {
+          // Chain: bass warmth -> dialogue presence -> air/detail -> leveler -> limiter -> output.
+          bassFilterRef.current.connect(clarityFilterRef.current)
+          clarityFilterRef.current.connect(airFilterRef.current)
+          airFilterRef.current.connect(compressorRef.current)
+          compressorRef.current.connect(limiterRef.current)
+          limiterRef.current.connect(boostGainRef.current)
+          boostGainRef.current.connect(ctx.destination)
+          audioBoostChainConnectedRef.current = true
+        }
 
         if (ctx.state === 'suspended') {
           ctx.resume()
@@ -301,15 +381,32 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
       initAudio()
     }
 
-    // Update values based on enabled state
-    if (bassFilterRef.current) {
-      bassFilterRef.current.gain.setTargetAtTime(audioBoostEnabled ? 7 : 0, audioCtxRef.current?.currentTime || 0, 0.1)
-    }
-    if (clarityFilterRef.current) {
-      clarityFilterRef.current.gain.setTargetAtTime(audioBoostEnabled ? 5 : 0, audioCtxRef.current?.currentTime || 0, 0.1)
-    }
-    if (boostGainRef.current) {
-      boostGainRef.current.gain.setTargetAtTime(audioBoostEnabled ? 1.6 : 1.0, audioCtxRef.current?.currentTime || 0, 0.1)
+    if (audioCtxRef.current) {
+      const now = audioCtxRef.current.currentTime
+      const profile = AUDIO_BOOST_PROFILES[audioBoostProfile]
+      const active = audioBoostEnabled
+
+      if (bassFilterRef.current) {
+        setParam(bassFilterRef.current.gain, active ? profile.bassGain : 0, now)
+      }
+      if (clarityFilterRef.current) {
+        setParam(clarityFilterRef.current.gain, active ? profile.dialogGain : 0, now)
+      }
+      if (airFilterRef.current) {
+        setParam(airFilterRef.current.gain, active ? profile.airGain : 0, now)
+      }
+      if (compressorRef.current) {
+        setParam(compressorRef.current.threshold, active ? profile.compressorThreshold : 0, now)
+        setParam(compressorRef.current.knee, active ? profile.compressorKnee : 0, now)
+        setParam(compressorRef.current.ratio, active ? profile.compressorRatio : 1, now)
+      }
+      if (limiterRef.current) {
+        setParam(limiterRef.current.threshold, active ? -3 : 0, now)
+        setParam(limiterRef.current.ratio, active ? 14 : 1, now)
+      }
+      if (boostGainRef.current) {
+        setParam(boostGainRef.current.gain, active ? profile.outputGain : 1.0, now)
+      }
     }
 
     return () => {
@@ -319,7 +416,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
         audioCtxRef.current.suspend()
       }
     }
-  }, [audioBoostEnabled, isPlaying])
+  }, [audioBoostEnabled, audioBoostProfile, isPlaying])
 
   useEffect(() => {
     return () => {
@@ -884,7 +981,6 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
   const clearActiveSubtitleSelection = (closeMenu = true) => {
     activeSubKeyRef.current = null
     setActiveSubKey(null)
-    setCurrentSubtitle(null)
     setSubtitleLoading(false)
     setShowSubtitleSyncPanel(false)
     subtitleCuesRef.current = []
@@ -1348,10 +1444,31 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
       return
     }
 
-    setShowMediaMenu(false)
-    setShowSpeedMenu(false)
-    setShowAdvancedMenu(false)
-    setShowEpisodesPanel(false)
+    const hadOpenPopup =
+      showMediaMenu ||
+      showOnlineSearch ||
+      showSubtitleSyncPanel ||
+      showSpeedMenu ||
+      showAdvancedMenu ||
+      showEpisodesPanel ||
+      showInfoPanel ||
+      showWatchTogetherState
+
+    if (hadOpenPopup) {
+      if (clickTimeoutRef.current) {
+        clearTimeout(clickTimeoutRef.current)
+        clickTimeoutRef.current = null
+      }
+      setShowMediaMenu(false)
+      setShowOnlineSearch(false)
+      setShowSubtitleSyncPanel(false)
+      setShowSpeedMenu(false)
+      setShowAdvancedMenu(false)
+      setShowEpisodesPanel(false)
+      setShowInfoPanel(false)
+      setShowWatchTogetherState(false)
+      return
+    }
 
     if (clickTimeoutRef.current) {
       // It's a double click!
@@ -1476,7 +1593,6 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
     }
 
     setActiveSubKey(key)
-    setCurrentSubtitle(trackObj?.idx ?? null)
     setSubtitleLoading(true)
     if (closeMenu) setShowMediaMenu(false)
     activeSubKeyRef.current = key
@@ -2222,10 +2338,10 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
                           <div className="max-h-[232px] overflow-y-auto custom-scrollbar">
                             <button
                               onClick={(e) => { e.stopPropagation(); selectSubtitleTrack(null); }}
-                              className={`w-full flex items-center space-x-3 px-3 py-2.5 rounded-xl text-left transition-all duration-200 group ${currentSubtitle === null ? 'bg-primary/15 text-primary' : 'text-white/60 hover:bg-white/5 hover:text-white'}`}
+                              className={`w-full flex items-center space-x-3 px-3 py-2.5 rounded-xl text-left transition-all duration-200 group ${activeSubKey === null ? 'bg-primary/15 text-primary' : 'text-white/60 hover:bg-white/5 hover:text-white'}`}
                             >
-                              <div className={`flex-shrink-0 w-5 h-5 rounded-full border-2 flex items-center justify-center transition-colors ${currentSubtitle === null ? 'border-primary bg-primary' : 'border-white/20 group-hover:border-white/40'}`}>
-                                {currentSubtitle === null && <Check size={12} strokeWidth={4} className="text-white" />}
+                              <div className={`flex-shrink-0 w-5 h-5 rounded-full border-2 flex items-center justify-center transition-colors ${activeSubKey === null ? 'border-primary bg-primary' : 'border-white/20 group-hover:border-white/40'}`}>
+                                {activeSubKey === null && <Check size={12} strokeWidth={4} className="text-white" />}
                               </div>
                               <span className="text-[14px] font-semibold truncate tracking-tight">
                                 Off
@@ -2489,6 +2605,29 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
                         <div className={`absolute top-0.75 left-0.75 w-3 h-3 rounded-full bg-white transition-transform duration-300 ${audioBoostEnabled ? 'translate-x-3.5' : 'translate-x-0'}`} />
                       </div>
                     </button>
+
+                    {audioBoostEnabled && (
+                      <div className="grid grid-cols-3 gap-1.5 px-1 pb-2">
+                        {(Object.entries(AUDIO_BOOST_PROFILES) as [AudioBoostProfile, typeof AUDIO_BOOST_PROFILES[AudioBoostProfile]][]).map(([profileKey, profile]) => (
+                          <button
+                            key={profileKey}
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              setAudioBoostProfile(profileKey)
+                            }}
+                            className={`min-w-0 rounded-lg px-2 py-2 text-left transition-all duration-200 ${
+                              audioBoostProfile === profileKey
+                                ? 'bg-primary/15 text-primary ring-1 ring-primary/30'
+                                : 'bg-white/5 text-white/55 hover:bg-white/10 hover:text-white'
+                            }`}
+                            title={profile.detail}
+                          >
+                            <p className="truncate text-[11px] font-black uppercase tracking-wide">{profile.label}</p>
+                            <p className="truncate text-[9px] font-semibold opacity-55">{profile.detail}</p>
+                          </button>
+                        ))}
+                      </div>
+                    )}
 
                     {/* AI Sharpness Toggle */}
                     <button

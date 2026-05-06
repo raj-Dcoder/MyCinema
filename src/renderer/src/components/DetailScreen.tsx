@@ -1,5 +1,5 @@
-import React, { useEffect, useState } from 'react'
-import { X, Play, Info, Calendar, Clock, Star, FolderOpen, Film, Music, Subtitles, HardDrive, ChevronDown, ChevronUp, Heart, Bookmark, Share2, Search, Zap, Users, Download, AlertTriangle } from 'lucide-react'
+import React, { useEffect, useRef, useState } from 'react'
+import { X, Play, Info, Calendar, Clock, Star, FolderOpen, Film, Music, Subtitles, HardDrive, ChevronDown, ChevronUp, Heart, Bookmark, Share2, Search, Zap, Users, Download, AlertTriangle, Clapperboard, Loader2, ExternalLink } from 'lucide-react'
 import { Video } from '../types'
 
 interface DetailScreenProps {
@@ -30,12 +30,31 @@ const InfoRow: React.FC<{ label: string; value: string | null | undefined }> = (
 }
 // ─────────────────────────────────────────────────────────────────────────────
 
+type TrailerSeasonSelection = 'latest' | 'series' | number
+
+const getMoctaleUrl = (video: Video) => {
+  const title = video.type === 'series' && video.series_name ? video.series_name : video.title
+  const slug = title
+    .toLowerCase()
+    .replace(/&/g, ' and ')
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+  return `https://www.moctale.in/content/${slug}${video.release_year ? `-${video.release_year}` : ''}`
+}
+
 const DetailScreen: React.FC<DetailScreenProps> = ({ video, onClose, onPlay }) => {
   const [episodes, setEpisodes] = useState<Video[]>([])
   const [loading, setLoading] = useState(false)
   const [showInfoModal, setShowInfoModal] = useState(false)
+  const [showTrailerModal, setShowTrailerModal] = useState(false)
   const [mediaInfo, setMediaInfo] = useState<any>(null)
   const [infoLoading, setInfoLoading] = useState(false)
+  const [trailer, setTrailer] = useState<any>(null)
+  const [trailerLoading, setTrailerLoading] = useState(false)
+  const [trailerSeasonSelection, setTrailerSeasonSelection] = useState<TrailerSeasonSelection>('latest')
+  const [trailerSeasons, setTrailerSeasons] = useState<number[]>([])
+  const [shouldLoadTrailer, setShouldLoadTrailer] = useState(false)
+  const trailerCacheRef = useRef<Map<string, any>>(new Map())
   const [showAllAudio, setShowAllAudio] = useState(false)
   const [selectedSeason, setSelectedSeason] = useState<number | null>(null)
   const [isFavorite, setIsFavorite] = useState(video.is_favorite)
@@ -97,6 +116,10 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, onClose, onPlay }) =
     window.api.openFolder(video.file_path)
   }
 
+  const handleOpenMoctale = () => {
+    window.open(getMoctaleUrl(video), '_blank')
+  }
+
   const handleShowInfo = async () => {
     setShowInfoModal(true)
     if (!mediaInfo) {
@@ -107,10 +130,46 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, onClose, onPlay }) =
     }
   }
 
+  const getTrailerCacheKey = (selection: TrailerSeasonSelection) => [
+    video.tmdb_id || video.title,
+    video.type,
+    typeof selection === 'number' ? `season-${selection}` : selection
+  ].join(':')
+
+  const handleTrailerSeasonSelect = (seasonNumber: number) => {
+    const key = getTrailerCacheKey(seasonNumber)
+    const cachedTrailer = trailerCacheRef.current.get(key)
+    setTrailerSeasonSelection(seasonNumber)
+
+    if (cachedTrailer) {
+      setTrailer(cachedTrailer)
+      setTrailerLoading(false)
+      return
+    }
+
+    setShouldLoadTrailer(true)
+    setTrailer(null)
+    setTrailerLoading(true)
+  }
+
   useEffect(() => {
+    let cancelled = false
+
+    setTrailer(null)
+    setShowTrailerModal(false)
+    setTrailerSeasons([])
+    setShouldLoadTrailer(false)
+    trailerCacheRef.current.clear()
+    setTrailerSeasonSelection(video.type === 'series' ? 'latest' : 'series')
+
+    const trailerTimer = window.setTimeout(() => {
+      if (!cancelled) setShouldLoadTrailer(true)
+    }, 650)
+
     if (video.type === 'series' && video.series_name) {
       setLoading(true)
       window.api.getSeriesInfo(video.series_name).then(data => {
+        if (cancelled) return
         setEpisodes(data)
         setLoading(false)
         
@@ -120,8 +179,65 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, onClose, onPlay }) =
           setSelectedSeason(video.season || seasons[0])
         }
       })
+    } else {
+      setEpisodes([])
+      setSelectedSeason(null)
+      setLoading(false)
+    }
+
+    return () => {
+      cancelled = true
+      window.clearTimeout(trailerTimer)
     }
   }, [video])
+
+  useEffect(() => {
+    let cancelled = false
+    if (!shouldLoadTrailer) {
+      setTrailerLoading(false)
+      return () => {
+        cancelled = true
+      }
+    }
+
+    const cacheKey = getTrailerCacheKey(trailerSeasonSelection)
+    const cachedTrailer = trailerCacheRef.current.get(cacheKey)
+
+    if (cachedTrailer) {
+      setTrailer(cachedTrailer)
+      setTrailerLoading(false)
+      return () => {
+        cancelled = true
+      }
+    }
+
+    setTrailerLoading(true)
+
+    window.api.getTmdbTrailer({
+      tmdbId: video.tmdb_id,
+      title: video.type === 'series' && video.series_name ? video.series_name : video.title,
+      type: video.type,
+      year: video.release_year,
+      seasonNumber: typeof trailerSeasonSelection === 'number' ? trailerSeasonSelection : null,
+      preferLatestSeason: video.type === 'series' && trailerSeasonSelection === 'latest'
+    }).then(result => {
+      if (cancelled) return
+      setTrailer(result)
+      if (result) trailerCacheRef.current.set(cacheKey, result)
+      if (video.type === 'series' && Array.isArray(result?.availableSeasons)) {
+        setTrailerSeasons(result.availableSeasons)
+      }
+    }).catch(err => {
+      console.error('Failed to fetch trailer:', err)
+      if (!cancelled) setTrailer(null)
+    }).finally(() => {
+      if (!cancelled) setTrailerLoading(false)
+    })
+
+    return () => {
+      cancelled = true
+    }
+  }, [video, trailerSeasonSelection, shouldLoadTrailer])
 
   // Group episodes by season
   const episodesBySeason = episodes.reduce((acc, ep) => {
@@ -135,6 +251,13 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, onClose, onPlay }) =
     .map(Number)
     .sort((a, b) => a - b)
 
+  const trailerSeasonOptions = video.type === 'series'
+    ? [...new Set([...seasons, ...trailerSeasons])].sort((a, b) => a - b)
+    : []
+  const activeTrailerSeason = typeof trailerSeasonSelection === 'number'
+    ? trailerSeasonSelection
+    : trailer?.seasonNumber || null
+
   useEffect(() => {
     const handleGlobalMouseDown = (e: MouseEvent) => {
       // Mouse button 3 is the standard "Back" button, 4 is "Forward"
@@ -147,11 +270,17 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, onClose, onPlay }) =
   }, [onClose])
 
 
-  const posterUrl = video.poster_path 
-    ? (video.poster_path.startsWith('http') 
-        ? video.poster_path 
-        : `media://file/${encodeURIComponent(video.poster_path)}`)
-    : null
+  const getArtworkUrl = (artworkPath?: string, remoteSize: 'w780' | 'original' = 'w780') => {
+    if (!artworkPath) return null
+    if (artworkPath.startsWith('http')) {
+      return artworkPath
+        .replace(/\/t\/p\/(w342|w500|w780|w1280|original)\//, `/t/p/${remoteSize}/`)
+    }
+    return `media://file/${encodeURIComponent(artworkPath)}`
+  }
+
+  const posterUrl = getArtworkUrl(video.poster_path, 'w780')
+  const logoUrl = getArtworkUrl(video.logo_path, 'original')
 
   const formatDuration = (seconds?: number) => {
     if (!seconds) return null
@@ -167,7 +296,7 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, onClose, onPlay }) =
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 md:p-8 bg-black/90 backdrop-blur-md animate-in fade-in duration-300">
-      <div className="relative w-full max-w-6xl max-h-[90vh] bg-surface rounded-3xl overflow-hidden shadow-[0_0_50px_rgba(0,0,0,0.5)] border border-white/10 flex flex-col md:flex-row">
+      <div className="relative w-full max-w-6xl h-[90vh] bg-surface rounded-3xl overflow-hidden shadow-[0_0_50px_rgba(0,0,0,0.5)] border border-white/10 flex flex-col md:flex-row">
         {/* Close Button */}
         <button 
           onClick={onClose}
@@ -182,6 +311,8 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, onClose, onPlay }) =
             <img 
               src={posterUrl} 
               alt={video.title} 
+              loading="eager"
+              decoding="async"
               className="h-full w-full object-cover"
             />
           ) : (
@@ -202,9 +333,19 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, onClose, onPlay }) =
           <div className="space-y-8">
             {/* Title & Tagline */}
             <div className="space-y-2">
-              <h2 className="text-4xl md:text-6xl font-black tracking-tighter text-white uppercase italic leading-[0.9] drop-shadow-lg">
-                {video.type === 'series' && video.series_name ? video.series_name : video.title}
-              </h2>
+              {logoUrl ? (
+                <img
+                  src={logoUrl}
+                  alt={video.type === 'series' && video.series_name ? video.series_name : video.title}
+                  loading="eager"
+                  decoding="async"
+                  className="max-h-24 w-auto max-w-[min(100%,420px)] object-contain object-left drop-shadow-[0_10px_28px_rgba(0,0,0,0.75)]"
+                />
+              ) : (
+                <h2 className="text-4xl md:text-6xl font-black tracking-tighter text-white uppercase italic leading-[0.9] drop-shadow-lg">
+                  {video.type === 'series' && video.series_name ? video.series_name : video.title}
+                </h2>
+              )}
               {video.tagline && (
                 <p className="text-primary font-black italic tracking-[0.2em] text-xs md:text-sm uppercase opacity-90 pl-1">
                   {video.tagline}
@@ -232,10 +373,6 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, onClose, onPlay }) =
                   <span>{formatDuration(video.duration)}</span>
                 </div>
               )}
-              <div className="flex items-center gap-2">
-                <span className="px-2 py-0.5 border border-white/20 rounded text-[9px] font-black">4K Ultra HD</span>
-                <span className="px-2 py-0.5 border border-white/20 rounded text-[9px] font-black">5.1 Audio</span>
-              </div>
             </div>
 
             {/* Genres */}
@@ -256,6 +393,61 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, onClose, onPlay }) =
                 {video.overview || 'No overview available for this title.'}
               </p>
             </div>
+
+            {(trailerLoading || trailer) && (
+              <div className="max-w-2xl">
+                {trailerLoading ? (
+                  <div className="h-28 rounded-2xl border border-white/8 bg-white/[0.03] overflow-hidden flex items-center gap-4 px-4">
+                    <div className="h-20 w-32 rounded-xl bg-white/5 animate-pulse" />
+                    <div className="min-w-0 flex-1 space-y-2">
+                      <div className="h-3 w-28 rounded-full bg-white/8 animate-pulse" />
+                      <div className="h-4 w-56 max-w-full rounded-full bg-white/8 animate-pulse" />
+                      <div className="h-3 w-36 rounded-full bg-white/5 animate-pulse" />
+                    </div>
+                    <Loader2 size={20} className="text-primary animate-spin" />
+                  </div>
+                ) : (
+                  <button
+                    onClick={() => setShowTrailerModal(true)}
+                    className="group/trailer relative w-full overflow-hidden rounded-2xl border border-white/10 bg-white/[0.04] text-left transition-all duration-300 hover:border-red-500/35 hover:bg-white/[0.07] hover:-translate-y-0.5 hover:shadow-[0_18px_45px_rgba(0,0,0,0.35)]"
+                  >
+                    <div className="flex items-stretch">
+                      <div className="relative h-28 w-40 shrink-0 overflow-hidden bg-black">
+                        <img
+                          src={trailer.thumbnailUrl}
+                          alt=""
+                          className="h-full w-full object-cover opacity-80 transition-transform duration-500 group-hover/trailer:scale-105"
+                        />
+                        <div className="absolute inset-0 bg-gradient-to-r from-black/10 to-black/55" />
+                        <div className="absolute inset-0 flex items-center justify-center">
+                          <div className="flex h-11 w-11 items-center justify-center rounded-full bg-red-600 text-white shadow-[0_10px_30px_rgba(220,38,38,0.45)] transition-transform duration-300 group-hover/trailer:scale-110">
+                            <Play size={18} fill="currentColor" />
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="min-w-0 flex-1 p-4 flex items-center justify-between gap-4">
+                        <div className="min-w-0">
+                          <div className="mb-1.5 flex items-center gap-2 text-[9px] font-black uppercase tracking-[0.18em] text-red-400">
+                            <Clapperboard size={14} />
+                            <span>{trailer.label || `${trailer.official ? 'Official' : 'YouTube'} ${trailer.type || 'Trailer'}`}</span>
+                          </div>
+                          <h3 className="truncate text-sm md:text-base font-black text-white tracking-tight">
+                            {trailer.name || 'Watch Trailer'}
+                          </h3>
+                          <p className="mt-1 line-clamp-1 text-[11px] font-semibold text-white/35">
+                            {video.type === 'series' && trailer.seasonNumber ? `${video.series_name || video.title} • Season ${trailer.seasonNumber}` : video.type === 'series' && video.series_name ? video.series_name : video.title}
+                          </p>
+                        </div>
+                        <div className="hidden sm:flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-white/10 bg-black/25 text-white/45 transition-all group-hover/trailer:text-white group-hover/trailer:border-red-500/30 group-hover/trailer:bg-red-600/15">
+                          <Play size={16} fill="currentColor" />
+                        </div>
+                      </div>
+                    </div>
+                  </button>
+                )}
+              </div>
+            )}
 
             {/* Actions */}
             <div className="flex flex-wrap items-center gap-4 pt-4">
@@ -307,6 +499,14 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, onClose, onPlay }) =
                   title="View Media Info"
                 >
                   <Info size={20} />
+                </button>
+                <button
+                  onClick={handleOpenMoctale}
+                  className="flex items-center gap-2 px-4 py-4 bg-white/5 border border-white/10 rounded-2xl text-white/45 hover:text-white hover:border-red-500/30 hover:bg-red-600/10 transition-all hover:scale-105 active:scale-95 glass-effect"
+                  title="Open reviews on Moctale"
+                >
+                  <ExternalLink size={18} />
+                  <span className="text-[10px] font-black uppercase tracking-widest">Moctale</span>
                 </button>
                 {!video.isExternal && (
                   <button
@@ -483,6 +683,109 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, onClose, onPlay }) =
                         )}
                       </>
                     ) : null}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {showTrailerModal && (
+              <div
+                className="fixed inset-0 z-[65] flex items-center justify-center p-4 md:p-8 bg-black/80 backdrop-blur-md animate-in fade-in duration-200"
+                onClick={() => setShowTrailerModal(false)}
+              >
+                <div
+                  className="relative w-full max-w-5xl overflow-hidden rounded-3xl border border-white/10 bg-[#080808] shadow-[0_30px_90px_rgba(0,0,0,0.75)] animate-in zoom-in-95 slide-in-from-bottom-4 duration-300"
+                  onClick={e => e.stopPropagation()}
+                >
+                  <div className="flex items-center justify-between gap-4 border-b border-white/8 bg-white/[0.03] px-5 py-4">
+                    <div className="min-w-0 flex items-center gap-3">
+                      <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-red-600/15 text-red-500 ring-1 ring-red-500/20">
+                        <Clapperboard size={20} />
+                      </div>
+                      <div className="min-w-0">
+                        <h3 className="truncate text-sm font-black uppercase tracking-[0.16em] text-white">
+                          {trailer?.label || (activeTrailerSeason ? `Season ${activeTrailerSeason} Trailer` : 'Trailer')} {trailerLoading ? 'Loading' : 'Playing'}
+                        </h3>
+                        <p className="truncate text-[12px] font-semibold text-white/35">{trailer?.name || 'Finding the best playable trailer...'}</p>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                      {video.type === 'series' && trailerSeasonOptions.length > 0 && (
+                        <div className="hidden md:flex max-w-[520px] items-center gap-1 overflow-x-auto rounded-xl border border-white/10 bg-black/25 p-1 scrollbar-thin">
+                          {trailerSeasonOptions.map(seasonNumber => (
+                            <button
+                              key={seasonNumber}
+                              onClick={() => handleTrailerSeasonSelect(seasonNumber)}
+                              className={`h-7 shrink-0 rounded-lg px-3 text-[9px] font-black uppercase tracking-widest transition-all ${
+                                activeTrailerSeason === seasonNumber
+                                  ? 'bg-red-600 text-white'
+                                  : 'text-white/45 hover:bg-white/8 hover:text-white'
+                              }`}
+                            >
+                              Season {seasonNumber}
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                      <button
+                        onClick={() => trailer?.watchUrl && window.open(trailer.watchUrl, '_blank')}
+                        disabled={!trailer?.watchUrl}
+                        className="hidden sm:flex h-9 items-center gap-2 rounded-xl border border-white/10 bg-white/[0.04] px-3 text-[10px] font-black uppercase tracking-widest text-white/45 transition-all hover:text-white hover:bg-white/[0.08]"
+                      >
+                        <ExternalLink size={13} />
+                        YouTube
+                      </button>
+                      <button
+                        onClick={() => setShowTrailerModal(false)}
+                        className="flex h-9 w-9 items-center justify-center rounded-xl border border-white/10 bg-white/[0.04] text-white/50 transition-all hover:bg-red-600 hover:text-white hover:border-red-600"
+                      >
+                        <X size={17} />
+                      </button>
+                    </div>
+                  </div>
+
+                  {video.type === 'series' && trailerSeasonOptions.length > 0 && (
+                    <div className="flex md:hidden gap-1 overflow-x-auto border-b border-white/8 bg-black/30 px-4 py-3 scrollbar-thin">
+                      {trailerSeasonOptions.map(seasonNumber => (
+                        <button
+                          key={seasonNumber}
+                          onClick={() => handleTrailerSeasonSelect(seasonNumber)}
+                          className={`h-8 shrink-0 rounded-lg px-3 text-[9px] font-black uppercase tracking-widest transition-all ${
+                            activeTrailerSeason === seasonNumber
+                              ? 'bg-red-600 text-white'
+                              : 'border border-white/10 bg-white/[0.04] text-white/45'
+                          }`}
+                        >
+                          Season {seasonNumber}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+
+                  <div className="relative aspect-video bg-black">
+                    {trailer && !trailerLoading ? (
+                      <iframe
+                        src={trailer.embedUrl}
+                        title={trailer.name || 'Trailer'}
+                        className="absolute inset-0 h-full w-full"
+                        allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+                        allowFullScreen
+                      />
+                    ) : trailerLoading ? (
+                      <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 text-white/45">
+                        <Loader2 size={28} className="animate-spin text-red-500" />
+                        <span className="text-[10px] font-black uppercase tracking-[0.22em]">Loading Trailer</span>
+                      </div>
+                    ) : (
+                      <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 px-6 text-center text-white/45">
+                        <Clapperboard size={30} className="text-white/25" />
+                        <span className="text-[11px] font-black uppercase tracking-[0.22em]">No playable trailer found</span>
+                        <p className="max-w-sm text-[12px] font-semibold text-white/30">
+                          This season does not have a trusted playable trailer available right now.
+                        </p>
+                      </div>
+                    )}
                   </div>
                 </div>
               </div>

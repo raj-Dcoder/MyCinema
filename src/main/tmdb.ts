@@ -80,6 +80,22 @@ export interface TmdbResult {
   release_year: number | null
 }
 
+export interface TmdbTrailer {
+  key: string
+  name: string
+  site: 'YouTube'
+  type: string
+  official: boolean
+  publishedAt: string | null
+  thumbnailUrl: string
+  watchUrl: string
+  embedUrl: string
+  source: 'movie' | 'series' | 'season'
+  label: string
+  seasonNumber: number | null
+  availableSeasons: number[]
+}
+
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 function getCacheDir(): string {
@@ -107,6 +123,10 @@ const INDIA_OTT_PROVIDER_NAMES = [
 ]
 
 let indiaOttProviderIdsCache: { ids: number[], timestamp: number } | null = null
+const youtubePlayableCache = new Map<string, { playable: boolean, timestamp: number }>()
+const YOUTUBE_PLAYABLE_CACHE_TTL = 1000 * 60 * 60 * 12
+const tmdbTrailerCache = new Map<string, { trailer: TmdbTrailer | null, timestamp: number }>()
+const TMDB_TRAILER_CACHE_TTL = 1000 * 60 * 30
 
 function formatTmdbDate(date: Date): string {
   return date.toISOString().substring(0, 10)
@@ -114,6 +134,63 @@ function formatTmdbDate(date: Date): string {
 
 function normalizeProviderName(name: string): string {
   return name.toLowerCase().replace(/[^a-z0-9]/g, '')
+}
+
+async function isYoutubeVideoPlayable(videoKey: string): Promise<boolean> {
+  const cached = youtubePlayableCache.get(videoKey)
+  if (cached && Date.now() - cached.timestamp < YOUTUBE_PLAYABLE_CACHE_TTL) {
+    return cached.playable
+  }
+
+  try {
+    const watchUrl = `https://www.youtube.com/watch?v=${encodeURIComponent(videoKey)}&hl=en`
+    const response = await fetch(watchUrl, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36',
+        'Accept-Language': 'en-US,en;q=0.9'
+      }
+    })
+
+    if (!response.ok) return true
+
+    const html = await response.text()
+    const statusMatch = html.match(/"playabilityStatus":\{"status":"([^"]+)"/)
+    const embedMatch = html.match(/"playableInEmbed":(true|false)/)
+    const status = statusMatch?.[1] || ''
+    const playable = status === 'OK' && embedMatch?.[1] !== 'false'
+
+    if (status) {
+      youtubePlayableCache.set(videoKey, { playable, timestamp: Date.now() })
+      return playable
+    }
+  } catch (err: any) {
+    console.warn(`[YouTube] Could not verify trailer "${videoKey}": ${err.message}`)
+  }
+
+  return true
+}
+
+function decodeHtmlEntities(value: string): string {
+  return value
+    .replace(/\\u0026/g, '&')
+    .replace(/&amp;/g, '&')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+}
+
+function normalizeYoutubeMatchText(value: string): string {
+  return decodeHtmlEntities(value)
+    .toLowerCase()
+    .replace(/\+/g, ' plus ')
+    .replace(/&/g, ' and ')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim()
+    .replace(/\s+/g, ' ')
+}
+
+function isEpisodeSpecificTrailerName(value: string): boolean {
+  const normalized = normalizeYoutubeMatchText(value)
+  return /\b(episode|ep)\s*\d+\b/.test(normalized) || /\be\d{1,2}\b/.test(normalized) || /\bs\d{1,2}\s*e\d{1,2}\b/.test(normalized)
 }
 
 async function fetchIndiaOttProviderIds(apiKey: string): Promise<number[]> {
@@ -522,5 +599,338 @@ export async function fetchTmdbMetadata(
   } catch (err: any) {
     console.error(`[TMDB] Error for "${title}" ${year ? `(${year})` : ''}:`, err.message)
     return empty
+  }
+}
+
+export async function fetchTmdbTrailer(params: {
+  tmdbId?: number | null
+  title: string
+  type: 'movie' | 'series'
+  year?: number | null
+  seasonNumber?: number | null
+  preferLatestSeason?: boolean
+}): Promise<TmdbTrailer | null> {
+  const cacheKey = JSON.stringify({
+    tmdbId: params.tmdbId || null,
+    title: params.title,
+    type: params.type,
+    year: params.year || null,
+    seasonNumber: params.seasonNumber || null,
+    preferLatestSeason: Boolean(params.preferLatestSeason)
+  })
+  const cachedTrailer = tmdbTrailerCache.get(cacheKey)
+  if (cachedTrailer && Date.now() - cachedTrailer.timestamp < TMDB_TRAILER_CACHE_TTL) {
+    return cachedTrailer.trailer
+  }
+
+  const apiKey = getTmdbApiKey()
+  if (!apiKey) {
+    console.warn('[TMDB] TMDB_API_KEY is not set — skipping trailer fetch')
+    return null
+  }
+
+  try {
+    if (!cachedTmdbIp) {
+      await resolveDnsDoH('api.themoviedb.org')
+    }
+
+    const endpoint = params.type === 'series' ? 'tv' : 'movie'
+    let tmdbId = params.tmdbId || null
+
+    if (!tmdbId) {
+      const queryParams = new URLSearchParams({
+        api_key: apiKey,
+        query: params.title,
+        language: 'en-US',
+        page: '1'
+      })
+      if (params.year) {
+        queryParams.set(params.type === 'series' ? 'first_air_date_year' : 'year', String(params.year))
+      }
+
+      const searchUrl = `${TMDB_BASE}/search/${endpoint}?${queryParams.toString()}`
+      const searchResponse = await fetch(searchUrl, {
+        dispatcher: tmdbDispatcher,
+        headers: {
+          'User-Agent': 'MyCinema/1.16.0',
+          'Accept': 'application/json'
+        }
+      })
+
+      if (!searchResponse.ok) throw new Error(`HTTP ${searchResponse.status}`)
+      const searchData = await searchResponse.json() as any
+      tmdbId = searchData.results?.[0]?.id || null
+    }
+
+    if (!tmdbId) return null
+
+    let tvNetworkNames: string[] = []
+
+    const fetchTvSeasons = async () => {
+      if (params.type !== 'series') return []
+      try {
+        const detailsParams = new URLSearchParams({
+          api_key: apiKey,
+          language: 'en-US'
+        })
+        const detailsUrl = `${TMDB_BASE}/tv/${tmdbId}?${detailsParams.toString()}`
+        const response = await fetch(detailsUrl, {
+          dispatcher: tmdbDispatcher,
+          headers: {
+            'User-Agent': 'MyCinema/1.16.0',
+            'Accept': 'application/json'
+          }
+        })
+
+        if (!response.ok) return []
+        const data = await response.json() as any
+        const today = Date.now()
+        tvNetworkNames = (Array.isArray(data.networks) ? data.networks : [])
+          .map((network: any) => String(network?.name || '').trim())
+          .filter(Boolean)
+
+        return (Array.isArray(data.seasons) ? data.seasons : [])
+          .filter((season: any) => {
+            if (!season || season.season_number <= 0) return false
+            if (season.air_date && new Date(season.air_date).getTime() > today) return false
+            return true
+          })
+          .map((season: any) => Number(season.season_number))
+          .filter((seasonNumber: number) => Number.isFinite(seasonNumber))
+          .sort((a: number, b: number) => a - b)
+      } catch (err: any) {
+        console.warn(`[TMDB] Season list fetch failed for "${params.title}": ${err.message}`)
+        return []
+      }
+    }
+
+    const availableSeasons = await fetchTvSeasons()
+    const preferredSeason = params.type === 'series'
+      ? (params.seasonNumber || (params.preferLatestSeason ? availableSeasons[availableSeasons.length - 1] : null) || null)
+      : null
+
+    const fetchVideos = async (language?: string, seasonNumber?: number | null) => {
+      const videoParams = new URLSearchParams({ api_key: apiKey })
+      if (language) videoParams.set('language', language)
+      const seasonPath = params.type === 'series' && seasonNumber ? `/season/${seasonNumber}` : ''
+      const videosUrl = `${TMDB_BASE}/${endpoint}/${tmdbId}${seasonPath}/videos?${videoParams.toString()}`
+      const response = await fetch(videosUrl, {
+        dispatcher: tmdbDispatcher,
+        headers: {
+          'User-Agent': 'MyCinema/1.16.0',
+          'Accept': 'application/json'
+        }
+      })
+
+      if (!response.ok) return []
+      const data = await response.json() as any
+      return Array.isArray(data.results) ? data.results : []
+    }
+
+    const searchYoutubeTrailer = async (seasonNumber?: number | null) => {
+      const primaryNetwork = tvNetworkNames[0] || ''
+      const query = [
+        `"${params.title}"`,
+        params.type === 'series' && seasonNumber ? `season ${seasonNumber}` : '',
+        params.type === 'series' ? primaryNetwork : '',
+        'official trailer'
+      ].filter(Boolean).join(' ')
+      const searchUrl = `https://www.youtube.com/results?search_query=${encodeURIComponent(query)}&hl=en`
+
+      const exactTitle = normalizeYoutubeMatchText(params.title)
+      const normalizedNetworks = tvNetworkNames.map(normalizeYoutubeMatchText).filter(Boolean)
+      const isShortOrGenericTitle = exactTitle.length <= 5
+
+      const belongsToRequestedTitle = (name: string, channelName?: string) => {
+        const normalizedName = normalizeYoutubeMatchText(name)
+        const normalizedChannel = normalizeYoutubeMatchText(channelName || '')
+        const seasonPattern = seasonNumber
+          ? new RegExp(`\\b(season\\s*${seasonNumber}|s0?${seasonNumber})\\b`)
+          : null
+
+        if (isEpisodeSpecificTrailerName(name)) return false
+        if (seasonPattern && !seasonPattern.test(normalizedName)) return false
+        if (!/\b(trailer|teaser)\b/.test(normalizedName)) return false
+
+        const startsWithTitle = normalizedName === exactTitle || normalizedName.startsWith(`${exactTitle} `)
+        const containsTitlePhrase = normalizedName.includes(` ${exactTitle} `)
+        const hasNetworkHint = normalizedNetworks.some(network => normalizedName.includes(network))
+        const hasTrustedChannel = normalizedNetworks.some(network => normalizedChannel.includes(network)) ||
+          /\b(mgm|mgm plus|epix|prime video|amazon prime video|netflix|hbo|max|disney|hulu|apple tv|paramount plus|peacock)\b/.test(normalizedChannel)
+
+        // Short names like "FROM" are too ambiguous unless the result is title-led and from a trusted channel.
+        if (isShortOrGenericTitle) {
+          return startsWithTitle && (hasTrustedChannel || hasNetworkHint)
+        }
+
+        return startsWithTitle || containsTitlePhrase || hasNetworkHint
+      }
+
+      try {
+        const response = await fetch(searchUrl, {
+          headers: {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36',
+            'Accept-Language': 'en-US,en;q=0.9'
+          }
+        })
+
+        if (!response.ok) return null
+
+        const html = await response.text()
+        const videos = new Map<string, any>()
+        const videoRendererPattern = /"videoRenderer":\{"videoId":"([^"]+)".*?"title":\{"runs":\[\{"text":"([^"]+)"/gs
+        let match: RegExpExecArray | null
+
+        while ((match = videoRendererPattern.exec(html)) !== null && videos.size < 12) {
+          const key = match[1]
+          const name = decodeHtmlEntities(match[2])
+          const rendererChunk = html.slice(match.index, match.index + 4500)
+          const channelMatch = rendererChunk.match(/"ownerText":\{"runs":\[\{"text":"([^"]+)"/)
+          const channelName = channelMatch ? decodeHtmlEntities(channelMatch[1]) : ''
+          if (!videos.has(key)) {
+            videos.set(key, {
+              key,
+              name,
+              channelName,
+              site: 'YouTube',
+              type: /\bteaser\b/i.test(name) ? 'Teaser' : 'Trailer',
+              official: /\bofficial\b/i.test(name),
+              iso_639_1: 'en',
+              published_at: null
+            })
+          }
+        }
+
+        const candidates = Array.from(videos.values())
+          .filter((video: any) => belongsToRequestedTitle(video.name, video.channelName))
+          .map((video: any) => ({ video, score: scoreTrailer(video) }))
+          .filter(({ score }) => score > 120)
+          .sort((a, b) => b.score - a.score)
+
+        for (const candidate of candidates.slice(0, 6)) {
+          if (await isYoutubeVideoPlayable(candidate.video.key)) {
+            console.log(`[YouTube] Using search fallback trailer "${candidate.video.name}"`)
+            return candidate.video
+          }
+        }
+      } catch (err: any) {
+        console.warn(`[YouTube] Search fallback failed for "${query}": ${err.message}`)
+      }
+
+      return null
+    }
+
+    const pickBestVideo = async (seasonNumber?: number | null) => {
+      const englishVideos = await fetchVideos('en-US', seasonNumber)
+      const allLanguageVideos = await fetchVideos(undefined, seasonNumber)
+      const videosByKey = new Map<string, any>()
+      for (const video of [...allLanguageVideos, ...englishVideos]) {
+        if (video?.key) videosByKey.set(video.key, video)
+      }
+
+      const candidates = Array.from(videosByKey.values())
+        .filter((video: any) => video.site === 'YouTube' && video.key)
+        .filter((video: any) => !isEpisodeSpecificTrailerName(video.name || ''))
+        .map((video: any) => ({ video, score: scoreTrailer(video) }))
+        .sort((a, b) => b.score - a.score)
+
+      for (const candidate of candidates.slice(0, 8)) {
+        const playable = await isYoutubeVideoPlayable(candidate.video.key)
+        if (playable) return candidate.video
+        console.log(`[YouTube] Skipping blocked/unplayable trailer "${candidate.video.name || candidate.video.key}"`)
+      }
+
+      return await searchYoutubeTrailer(seasonNumber)
+    }
+
+    const scoreTrailer = (video: any) => {
+      const name = String(video.name || '').toLowerCase()
+      const type = String(video.type || '').toLowerCase()
+      const publishedAt = video.published_at ? new Date(video.published_at).getTime() : 0
+      let score = 0
+
+      if (isEpisodeSpecificTrailerName(name)) score -= 300
+      if (video.site === 'YouTube' && video.key) score += 100
+      if (type === 'trailer') score += 80
+      if (type === 'teaser') score -= 70
+      if (type === 'clip') score -= 100
+      if (video.official) score += 35
+      if (video.iso_639_1 === 'en') score += 20
+
+      if (/\bofficial\s+trailer\b/.test(name)) score += 80
+      if (/\b(final|main|full|theatrical)\s+trailer\b/.test(name)) score += 55
+      if (/\btrailer\b/.test(name)) score += 25
+      if (/\bteaser\b|\bpromo\b|\bspot\b|\bannouncement\b|\bdate announcement\b|\bclip\b|\bsneak peek\b|\bsong\b|\blyrical\b|\bbehind the scenes\b|\bfeaturette\b/.test(name)) score -= 120
+      if (/\btrailer\s*#?\s*2\b|\bofficial trailer 2\b/.test(name)) score += 10
+
+      // Tiny tiebreaker for recency without letting new teasers beat real trailers.
+      score += Math.min(10, publishedAt / 1000 / 60 / 60 / 24 / 365 / 10)
+
+      return score
+    }
+
+    let selected = preferredSeason ? await pickBestVideo(preferredSeason) : null
+    let selectedSeason = selected ? preferredSeason : null
+    let source: TmdbTrailer['source'] = params.type === 'movie' ? 'movie' : 'series'
+
+    if (!selected) {
+      selected = await pickBestVideo(null)
+      selectedSeason = null
+      source = params.type === 'movie' ? 'movie' : 'series'
+    } else {
+      source = 'season'
+    }
+
+    if (!selected && preferredSeason) {
+      for (const seasonNumber of [...availableSeasons].reverse()) {
+        if (seasonNumber === preferredSeason) continue
+        selected = await pickBestVideo(seasonNumber)
+        if (selected) {
+          selectedSeason = seasonNumber
+          source = 'season'
+          break
+        }
+      }
+    }
+
+    if (!selected) {
+      tmdbTrailerCache.set(cacheKey, { trailer: null, timestamp: Date.now() })
+      return null
+    }
+
+    const selectedLooksLikeFallback = String(selected.type || '').toLowerCase() !== 'trailer' ||
+      /\bteaser\b|\bpromo\b|\bspot\b|\bannouncement\b|\bclip\b/.test(String(selected.name || '').toLowerCase())
+
+    if (selectedLooksLikeFallback) {
+      console.log(`[TMDB] No full trailer found for "${params.title}" — using best available video: ${selected.name || selected.type}`)
+    }
+
+    const label = source === 'season' && selectedSeason
+      ? `Season ${selectedSeason} Trailer`
+      : params.type === 'series'
+        ? 'Series Trailer'
+        : 'Movie Trailer'
+
+    const trailerResult: TmdbTrailer = {
+      key: selected.key,
+      name: selected.name || 'Official Trailer',
+      site: 'YouTube',
+      type: selected.type || 'Trailer',
+      official: Boolean(selected.official),
+      publishedAt: selected.published_at || null,
+      thumbnailUrl: `https://img.youtube.com/vi/${selected.key}/hqdefault.jpg`,
+      watchUrl: `https://www.youtube.com/watch?v=${selected.key}`,
+      embedUrl: `https://www.youtube-nocookie.com/embed/${selected.key}?autoplay=1&rel=0&modestbranding=1`,
+      source,
+      label,
+      seasonNumber: selectedSeason,
+      availableSeasons
+    }
+
+    tmdbTrailerCache.set(cacheKey, { trailer: trailerResult, timestamp: Date.now() })
+    return trailerResult
+  } catch (err: any) {
+    console.warn(`[TMDB] Trailer fetch failed for "${params.title}": ${err.message}`)
+    return null
   }
 }

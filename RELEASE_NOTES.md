@@ -1,3 +1,28 @@
+# MyCinema v1.19.0
+
+Feature release focused on user data portability, a unified categorized watchlist, and a more compact settings experience.
+
+### Backup & Restore
+- **JSON Backup Export**: Users can export watched folders, watchlist entries, watchlist categories, and favorites to a local JSON backup file.
+- **Backup Import**: Import restores saved folders, rescans existing paths, and brings back watchlist items, categories, and favorites after a reset.
+- **Local-Only Control**: Backup files are written only to the location selected by the user.
+
+### Unified Watchlist
+- **One Watchlist System**: Download-page saved lists now migrate into the main Watchlist tab instead of living separately.
+- **Category Rows**: The Watchlist tab now displays saved titles in category-based horizontal rows.
+- **Save From Anywhere**: Home search, hero actions, Download search, and Watchlist search all save into the same categorized watchlist.
+
+### Settings Polish
+- **Compact Settings Layout**: Settings now uses smaller rows, buttons, folder entries, and headings for easier scanning.
+- **Clear Backup Actions**: Import and export controls now use directionally correct icons and clearer status messages.
+
+### Security & Privacy
+- **Backup Validation**: Imports verify the MyCinema backup format before changing app data.
+- **Path-Aware Restore**: Folder imports skip missing paths safely and report them instead of failing the whole restore.
+- **No Media Copying**: Backups store app metadata only; movie and show files remain on the user’s drives.
+
+***
+
 # MyCinema v1.18.0
 
 Focused feature and safety release for immersive fullscreen startup, cleaner source filtering, trailer reliability, and safer download cleanup.

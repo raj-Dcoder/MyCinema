@@ -17,42 +17,42 @@ import Download from './pages/Download'
 import appLogo from './assets/mycinema-logo.png'
 
 const LATEST_RELEASE = {
-  version: '1.18.0',
+  version: '1.19.0',
   eyebrow: 'What\'s New',
-  headline: 'Fullscreen launch, safer cleanup.',
-  summary: 'A focused update for immersive startup, cleaner source browsing, and safer external media handling.',
+  headline: 'Backups and one smarter watchlist.',
+  summary: 'Save your lists, folders, categories, and favorites before resetting or moving devices.',
   steps: [
     {
       icon: Sparkles,
-      title: 'Immersive App',
-      description: 'MyCinema now opens straight into a more cinematic fullscreen experience.',
+      title: 'Backup & Restore',
+      description: 'Your library setup can now travel with you.',
       color: 'from-blue-500 to-cyan-400',
       iconColor: 'text-cyan-400',
       items: [
-        'Launch fullscreen is now a saved setting with a quick control at the top edge.',
-        'The Settings page includes an Open in Fullscreen switch for changing the startup behavior.'
+        'Export watched folders, watchlist items, categories, and favorites to a JSON backup.',
+        'Import the backup later to resync folders and restore saved lists after a reset.'
       ]
     },
     {
       icon: Zap,
-      title: 'Source Browsing',
-      description: 'Download discovery is easier to scan before choosing a source.',
+      title: 'Unified Watchlist',
+      description: 'Saved titles now live in one clear place.',
       color: 'from-emerald-400 to-teal-500',
       iconColor: 'text-emerald-400',
       items: [
-        'Detail pages can filter sources by Hindi audio, season packs, and specific seasons.',
-        'Source results are sorted by seed health, with clearer empty states when filters hide matches.'
+        'The Watchlist tab now supports custom category rows.',
+        'Home, Download, search, and hero actions save into the same categorized watchlist.'
       ]
     },
     {
       icon: ShieldCheck,
       title: 'Security & Privacy',
-      description: 'External embeds and file cleanup now use tighter, more predictable boundaries.',
+      description: 'Backup files stay local and user-controlled.',
       color: 'from-amber-400 to-orange-500',
       iconColor: 'text-amber-400',
       items: [
-        'YouTube trailers send a strict origin/referrer posture for embedded playback.',
-        'Deleting paused downloads now targets normalized paths and refreshes the local library after file removal.'
+        'Exports are written only to the location you choose.',
+        'Imports validate the MyCinema backup format before changing app data.'
       ]
     }
   ]

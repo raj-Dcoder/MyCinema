@@ -112,7 +112,7 @@ function cacheKey(title: string, type: 'movie' | 'series'): string {
 // ─── Trending Cache ──────────────────────────────────────────────────────────
 
 const trendingCache: Record<string, { data: any[], timestamp: number }> = {}
-const TRENDING_CACHE_TTL = 1000 * 60 * 60 * 4 // 4 hours
+const TRENDING_CACHE_TTL = 1000 * 60 * 60 * 6 // 6 hours
 
 const INDIA_OTT_PROVIDER_NAMES = [
   'Netflix',
@@ -128,6 +128,58 @@ const youtubePlayableCache = new Map<string, { playable: boolean, timestamp: num
 const YOUTUBE_PLAYABLE_CACHE_TTL = 1000 * 60 * 60 * 12
 const tmdbTrailerCache = new Map<string, { trailer: TmdbTrailer | null, timestamp: number }>()
 const TMDB_TRAILER_CACHE_TTL = 1000 * 60 * 30
+
+function getTmdbListCacheDir(): string {
+  const dir = path.join(app.getPath('userData'), 'tmdb_list_cache')
+  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true })
+  return dir
+}
+
+function getTmdbListCachePath(key: string): string {
+  const safeKey = crypto.createHash('sha1').update(key).digest('hex')
+  return path.join(getTmdbListCacheDir(), `${safeKey}.json`)
+}
+
+function readTmdbListCache(key: string, label: string): any[] | null {
+  const now = Date.now()
+  const memoryHit = trendingCache[key]
+  if (memoryHit && (now - memoryHit.timestamp) < TRENDING_CACHE_TTL) {
+    console.log(`[TMDB] Serving ${label} from memory cache (age: ${Math.round((now - memoryHit.timestamp) / 1000 / 60)} mins)`)
+    return memoryHit.data
+  }
+
+  const cachePath = getTmdbListCachePath(key)
+  if (!fs.existsSync(cachePath)) return null
+
+  try {
+    const cached = JSON.parse(fs.readFileSync(cachePath, 'utf8')) as { data?: unknown; timestamp?: unknown }
+    if (!Array.isArray(cached.data) || typeof cached.timestamp !== 'number') return null
+
+    const age = now - cached.timestamp
+    if (age >= TRENDING_CACHE_TTL) {
+      console.log(`[TMDB] ${label} disk cache expired (age: ${Math.round(age / 1000 / 60)} mins)`)
+      return null
+    }
+
+    trendingCache[key] = { data: cached.data, timestamp: cached.timestamp }
+    console.log(`[TMDB] Serving ${label} from disk cache (age: ${Math.round(age / 1000 / 60)} mins)`)
+    return cached.data
+  } catch (err: any) {
+    console.warn(`[TMDB] Failed to read ${label} disk cache: ${err.message}`)
+    return null
+  }
+}
+
+function writeTmdbListCache(key: string, label: string, data: any[]): void {
+  const entry = { data, timestamp: Date.now() }
+  trendingCache[key] = entry
+
+  try {
+    fs.writeFileSync(getTmdbListCachePath(key), JSON.stringify(entry))
+  } catch (err: any) {
+    console.warn(`[TMDB] Failed to write ${label} disk cache: ${err.message}`)
+  }
+}
 
 function formatTmdbDate(date: Date): string {
   return date.toISOString().substring(0, 10)
@@ -196,8 +248,18 @@ function isEpisodeSpecificTrailerName(value: string): boolean {
 
 async function fetchIndiaOttProviderIds(apiKey: string): Promise<number[]> {
   const now = Date.now()
+  const providerCacheKey = 'providers:IN:movie:ott'
   if (indiaOttProviderIdsCache && (now - indiaOttProviderIdsCache.timestamp) < TRENDING_CACHE_TTL) {
     return indiaOttProviderIdsCache.ids
+  }
+
+  const cachedProviderIds = readTmdbListCache(providerCacheKey, 'India OTT provider ids')
+  if (cachedProviderIds && cachedProviderIds.every((id) => typeof id === 'number')) {
+    indiaOttProviderIdsCache = {
+      ids: cachedProviderIds,
+      timestamp: trendingCache[providerCacheKey]?.timestamp || now
+    }
+    return cachedProviderIds
   }
 
   if (!cachedTmdbIp) {
@@ -223,6 +285,7 @@ async function fetchIndiaOttProviderIds(apiKey: string): Promise<number[]> {
 
   console.log(`[TMDB] India OTT provider ids: ${ids.join(', ') || 'none found'}`)
   indiaOttProviderIdsCache = { ids, timestamp: Date.now() }
+  writeTmdbListCache(providerCacheKey, 'India OTT provider ids', ids)
   return ids
 }
 
@@ -267,17 +330,14 @@ async function fetchTitleLogo(
 // ─── Public API ──────────────────────────────────────────────────────────────
 
 export async function fetchTrending(type: 'movie' | 'series'): Promise<any[]> {
+  const cacheKey = `trending:${type}:week`
+  const cached = readTmdbListCache(cacheKey, `trending ${type}`)
+  if (cached) return cached
+
   const apiKey = getTmdbApiKey()
   if (!apiKey) {
     console.warn('[TMDB] TMDB_API_KEY is not set — skipping trending fetch')
     return []
-  }
-
-  // Check Cache
-  const now = Date.now()
-  if (trendingCache[type] && (now - trendingCache[type].timestamp) < TRENDING_CACHE_TTL) {
-    console.log(`[TMDB] Serving trending ${type} from memory cache (age: ${Math.round((now - trendingCache[type].timestamp)/1000/60)} mins)`)
-    return trendingCache[type].data
   }
 
   try {
@@ -316,11 +376,7 @@ export async function fetchTrending(type: 'movie' | 'series'): Promise<any[]> {
       isExternal: true
     })))
 
-    // Save to cache
-    trendingCache[type] = {
-      data: results,
-      timestamp: Date.now()
-    }
+    writeTmdbListCache(cacheKey, `trending ${type}`, results)
 
     return results
   } catch (err) {
@@ -330,17 +386,14 @@ export async function fetchTrending(type: 'movie' | 'series'): Promise<any[]> {
 }
 
 export async function fetchTrendingInIndia(): Promise<any[]> {
+  const cacheKey = 'trending:movie:IN:ott-recent'
+  const cached = readTmdbListCache(cacheKey, 'India OTT trending movies')
+  if (cached) return cached
+
   const apiKey = getTmdbApiKey()
   if (!apiKey) {
     console.warn('[TMDB] TMDB_API_KEY is not set — skipping India trending fetch')
     return []
-  }
-
-  const cacheKey = 'movie:IN:ott-recent'
-  const now = Date.now()
-  if (trendingCache[cacheKey] && (now - trendingCache[cacheKey].timestamp) < TRENDING_CACHE_TTL) {
-    console.log(`[TMDB] Serving India OTT trending movies from memory cache (age: ${Math.round((now - trendingCache[cacheKey].timestamp)/1000/60)} mins)`)
-    return trendingCache[cacheKey].data
   }
 
   try {
@@ -402,10 +455,7 @@ export async function fetchTrendingInIndia(): Promise<any[]> {
       isExternal: true
     }))
 
-    trendingCache[cacheKey] = {
-      data: results,
-      timestamp: Date.now()
-    }
+    writeTmdbListCache(cacheKey, 'India OTT trending movies', results)
 
     return results
   } catch (err) {

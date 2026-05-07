@@ -33,6 +33,10 @@ export function WatchTogetherModal({
 
   if (!isOpen) return null;
 
+  const stopPlayerInteraction = (event: React.SyntheticEvent) => {
+    event.stopPropagation();
+  };
+
   const handleCopy = () => {
     if (roomId) {
       navigator.clipboard.writeText(roomId);
@@ -44,7 +48,13 @@ export function WatchTogetherModal({
   const activeSession = roomId !== null;
 
   return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
+    <div
+      className="fixed inset-0 z-[100] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4"
+      onClick={stopPlayerInteraction}
+      onPointerDown={stopPlayerInteraction}
+      onPointerUp={stopPlayerInteraction}
+      onPointerCancel={stopPlayerInteraction}
+    >
       <div className="bg-[#121212] border border-white/10 rounded-xl shadow-2xl w-full max-w-md overflow-hidden flex flex-col">
         <div className="flex items-center justify-between p-5 border-b border-white/10 bg-white/[0.02]">
           <h2 className="text-xl flex items-center gap-2 font-medium">

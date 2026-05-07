@@ -17,42 +17,42 @@ import Download from './pages/Download'
 import appLogo from './assets/mycinema-logo.png'
 
 const LATEST_RELEASE = {
-  version: '1.19.2',
+  version: '1.19.3',
   eyebrow: 'What\'s New',
-  headline: 'Trailer playback is steadier.',
-  summary: 'YouTube trailer embeds now load with a clearer app context inside MyCinema.',
+  headline: 'Watch Together and Home load cleaner.',
+  summary: 'This patch keeps watch parties open and reduces repeated TMDB traffic on launch.',
   steps: [
     {
-      icon: Sparkles,
-      title: 'Trailer Playback',
-      description: 'Trailer windows handle YouTube embeds more reliably.',
+      icon: Wrench,
+      title: 'Watch Together',
+      description: 'The watch party popup now stays open while you use it.',
       color: 'from-blue-500 to-cyan-400',
       iconColor: 'text-cyan-400',
       items: [
-        'Fixed YouTube trailers that could show an error screen or stay stuck at 0:00.',
-        'Trailer switches now reload the embedded player cleanly when the video URL changes.'
+        'Host Party, Join, copy, and code entry no longer dismiss the popup.',
+        'Player clicks and watch party controls now stay separated.'
       ]
     },
     {
-      icon: Zap,
-      title: 'Open On YouTube',
-      description: 'The fallback path remains simple when a trailer refuses to embed.',
+      icon: Sparkles,
+      title: 'Home Discovery',
+      description: 'Home discovery data is reused between app launches.',
       color: 'from-emerald-400 to-teal-500',
       iconColor: 'text-emerald-400',
       items: [
-        'The YouTube button still opens the selected trailer externally.',
-        'Blocked or restricted embeds no longer leave the app without a direct viewing option.'
+        'Trending movies, trending series, and India OTT rows now use a 6-hour cache.',
+        'Restarting the app no longer refetches those TMDB lists immediately.'
       ]
     },
     {
       icon: ShieldCheck,
       title: 'Security & Privacy',
-      description: 'Trailer requests use a consistent app identity.',
+      description: 'Networking stays quieter and more predictable.',
       color: 'from-amber-400 to-orange-500',
       iconColor: 'text-amber-400',
       items: [
-        'YouTube embed pages now get matching origin and referrer details.',
-        'Internal YouTube playback calls keep their own headers so video startup can complete.'
+        'Successful TMDB list responses are cached locally in the app data folder.',
+        'The cache refreshes after 6 hours or if the saved data cannot be read.'
       ]
     }
   ]

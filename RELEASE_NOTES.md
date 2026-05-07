@@ -1,3 +1,21 @@
+# MyCinema v1.19.3
+
+Patch release focused on Watch Together stability and lower TMDB usage on app launch.
+
+### Watch Together
+- **Popup Dismissal Fix**: Host Party, Join, copy, disconnect, and room-code input clicks no longer bubble into the video player and close the Watch Together popup.
+- **Safer Player Interaction**: Watch party controls now stay isolated from the player click handler that closes other player popups.
+
+### Home Discovery
+- **Persistent TMDB Cache**: Trending movies, trending series, India OTT rows, and India OTT provider IDs now cache to disk for 6 hours.
+- **Lower Startup Traffic**: Reopening MyCinema from the shortcut reuses fresh cached TMDB lists instead of refetching them every launch.
+
+### Security & Privacy
+- **Local Cache Only**: TMDB list caches are stored in the app's local user data folder and refresh automatically after expiry or unreadable cache data.
+- **Quota Protection**: Successful discovery responses are reused across restarts to reduce unnecessary TMDB API calls.
+
+***
+
 # MyCinema v1.19.2
 
 Patch release focused on YouTube trailer reliability inside the desktop app.

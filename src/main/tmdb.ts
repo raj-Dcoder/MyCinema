@@ -66,6 +66,7 @@ const TMDB_BASE    = 'https://api.themoviedb.org/3'
 const TMDB_IMG     = 'https://image.tmdb.org/t/p/w500'
 const TMDB_BACKDROP = 'https://image.tmdb.org/t/p/w1280'
 const TMDB_ORIGINAL = 'https://image.tmdb.org/t/p/original'
+const YOUTUBE_EMBED_ORIGIN = 'https://mycinema.app'
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -911,6 +912,15 @@ export async function fetchTmdbTrailer(params: {
         ? 'Series Trailer'
         : 'Movie Trailer'
 
+    const embedParams = new URLSearchParams({
+      autoplay: '1',
+      rel: '0',
+      modestbranding: '1',
+      playsinline: '1',
+      origin: YOUTUBE_EMBED_ORIGIN,
+      widget_referrer: `${YOUTUBE_EMBED_ORIGIN}/`
+    })
+
     const trailerResult: TmdbTrailer = {
       key: selected.key,
       name: selected.name || 'Official Trailer',
@@ -920,7 +930,7 @@ export async function fetchTmdbTrailer(params: {
       publishedAt: selected.published_at || null,
       thumbnailUrl: `https://img.youtube.com/vi/${selected.key}/hqdefault.jpg`,
       watchUrl: `https://www.youtube.com/watch?v=${selected.key}`,
-      embedUrl: `https://www.youtube.com/embed/${selected.key}?autoplay=1&rel=0&modestbranding=1&origin=${encodeURIComponent('https://mycinema.app')}`,
+      embedUrl: `https://www.youtube.com/embed/${selected.key}?${embedParams.toString()}`,
       source,
       label,
       seasonNumber: selectedSeason,

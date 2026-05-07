@@ -840,11 +840,12 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, onClose, onPlay }) =
                   <div className="relative aspect-video bg-black">
                     {trailer && !trailerLoading ? (
                       <iframe
+                        key={trailer.embedUrl}
                         src={trailer.embedUrl}
                         title={trailer.name || 'Trailer'}
                         className="absolute inset-0 h-full w-full"
                         allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
-                        referrerPolicy="strict-origin-when-cross-origin"
+                        referrerPolicy="no-referrer-when-downgrade"
                         allowFullScreen
                       />
                     ) : trailerLoading ? (

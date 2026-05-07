@@ -17,42 +17,42 @@ import Download from './pages/Download'
 import appLogo from './assets/mycinema-logo.png'
 
 const LATEST_RELEASE = {
-  version: '1.19.0',
+  version: '1.19.1',
   eyebrow: 'What\'s New',
-  headline: 'Backups and one smarter watchlist.',
-  summary: 'Save your lists, folders, categories, and favorites before resetting or moving devices.',
+  headline: 'Trailer playback is steadier.',
+  summary: 'YouTube trailer embeds now load with a clearer app context inside MyCinema.',
   steps: [
     {
       icon: Sparkles,
-      title: 'Backup & Restore',
-      description: 'Your library setup can now travel with you.',
+      title: 'Trailer Playback',
+      description: 'Trailer windows handle YouTube embeds more reliably.',
       color: 'from-blue-500 to-cyan-400',
       iconColor: 'text-cyan-400',
       items: [
-        'Export watched folders, watchlist items, categories, and favorites to a JSON backup.',
-        'Import the backup later to resync folders and restore saved lists after a reset.'
+        'Fixed YouTube trailers that could show an error screen or stay stuck at 0:00.',
+        'Trailer switches now reload the embedded player cleanly when the video URL changes.'
       ]
     },
     {
       icon: Zap,
-      title: 'Unified Watchlist',
-      description: 'Saved titles now live in one clear place.',
+      title: 'Open On YouTube',
+      description: 'The fallback path remains simple when a trailer refuses to embed.',
       color: 'from-emerald-400 to-teal-500',
       iconColor: 'text-emerald-400',
       items: [
-        'The Watchlist tab now supports custom category rows.',
-        'Home, Download, search, and hero actions save into the same categorized watchlist.'
+        'The YouTube button still opens the selected trailer externally.',
+        'Blocked or restricted embeds no longer leave the app without a direct viewing option.'
       ]
     },
     {
       icon: ShieldCheck,
       title: 'Security & Privacy',
-      description: 'Backup files stay local and user-controlled.',
+      description: 'Trailer requests use a consistent app identity.',
       color: 'from-amber-400 to-orange-500',
       iconColor: 'text-amber-400',
       items: [
-        'Exports are written only to the location you choose.',
-        'Imports validate the MyCinema backup format before changing app data.'
+        'YouTube embed pages now get matching origin and referrer details.',
+        'Internal YouTube playback calls keep their own headers so video startup can complete.'
       ]
     }
   ]

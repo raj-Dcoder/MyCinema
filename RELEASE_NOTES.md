@@ -1,3 +1,18 @@
+# MyCinema v1.19.1
+
+Patch release focused on YouTube trailer reliability inside the desktop app.
+
+### Trailer Playback
+- **YouTube Error 153 Fix**: Trailer embeds now include a consistent app origin and referrer context to prevent the YouTube player configuration error screen.
+- **Stuck Spinner Fix**: YouTube player API calls now keep their natural headers, preventing trailers from loading the correct title while staying stuck at `0:00`.
+- **Cleaner Trailer Reloads**: The trailer iframe now remounts when the selected embed URL changes, avoiding stale player state after switching trailers.
+
+### Security & Privacy
+- **Scoped Embed Headers**: Only YouTube embed page requests get app `Origin` and `Referer` details; internal playback calls are no longer rewritten.
+- **Safe External Fallback**: The existing YouTube button remains the external viewing path when a trailer cannot play in-app.
+
+***
+
 # MyCinema v1.19.0
 
 Feature release focused on user data portability, a unified categorized watchlist, and a more compact settings experience.

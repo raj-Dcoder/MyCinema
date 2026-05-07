@@ -276,9 +276,7 @@ function setupYoutubeEmbedHeaders(): void {
   const filter = {
     urls: [
       'https://www.youtube.com/embed/*',
-      'https://www.youtube.com/youtubei/*',
-      'https://www.youtube-nocookie.com/embed/*',
-      'https://www.youtube-nocookie.com/youtubei/*'
+      'https://www.youtube-nocookie.com/embed/*'
     ]
   }
 

@@ -17,7 +17,7 @@ import Download from './pages/Download'
 import appLogo from './assets/mycinema-logo.png'
 
 const LATEST_RELEASE = {
-  version: '1.19.1',
+  version: '1.19.2',
   eyebrow: 'What\'s New',
   headline: 'Trailer playback is steadier.',
   summary: 'YouTube trailer embeds now load with a clearer app context inside MyCinema.',

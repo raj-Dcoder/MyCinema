@@ -1,4 +1,4 @@
-# MyCinema v1.19.1
+# MyCinema v1.19.2
 
 Patch release focused on YouTube trailer reliability inside the desktop app.
 

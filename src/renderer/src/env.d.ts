@@ -21,12 +21,35 @@ interface Api {
   removeAllLibraryUpdateListeners: () => void
   getFolders: () => Promise<any[]>
   removeFolder: (folderPath: string) => Promise<boolean>
+  exportUserBackup: () => Promise<{
+    exported: boolean
+    canceled?: boolean
+    filePath?: string
+    folders?: number
+    externalWatchlist?: number
+    localWatchlist?: number
+    favorites?: number
+    error?: string
+  }>
+  importUserBackup: () => Promise<{
+    imported: boolean
+    canceled?: boolean
+    filePath?: string
+    foldersAdded?: number
+    foldersScanned?: number
+    foldersMissing?: number
+    externalWatchlistImported?: number
+    localWatchlistRestored?: number
+    favoritesRestored?: number
+    error?: string
+  }>
   clearAllData: () => Promise<boolean>
   fetchTrending: (type: 'movie' | 'series') => Promise<any[]>
   fetchTrendingIndia: () => Promise<any[]>
   getTmdbTrailer: (params: { tmdbId?: number | null; title: string; type: 'movie' | 'series'; year?: number | null; seasonNumber?: number | null; preferLatestSeason?: boolean }) => Promise<any | null>
   toggleFavorite: (id: number) => Promise<number | null>
   toggleWatchlist: (id: number) => Promise<number | null>
+  addLocalToWatchlist: (id: number, category: string) => Promise<any>
   addToWatchlistExternal: (item: any) => Promise<any>
   removeFromWatchlistExternal: (tmdbId: number) => Promise<any>
   getWatchlist: () => Promise<any[]>

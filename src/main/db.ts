@@ -34,6 +34,7 @@ export function initDb() {
       release_year INTEGER,
       is_favorite BOOLEAN DEFAULT 0,
       is_watchlist BOOLEAN DEFAULT 0,
+      watchlist_category TEXT DEFAULT 'Watchlist',
       added_at DATETIME DEFAULT CURRENT_TIMESTAMP
     );
 
@@ -47,6 +48,7 @@ export function initDb() {
       overview TEXT,
       vote_average REAL,
       release_year INTEGER,
+      category TEXT DEFAULT 'Watchlist',
       added_at DATETIME DEFAULT CURRENT_TIMESTAMP
     );
 
@@ -78,6 +80,15 @@ export function initDb() {
   }
   if (!columnNames.includes('is_watchlist')) {
     db.exec("ALTER TABLE videos ADD COLUMN is_watchlist BOOLEAN DEFAULT 0")
+  }
+  if (!columnNames.includes('watchlist_category')) {
+    db.exec("ALTER TABLE videos ADD COLUMN watchlist_category TEXT DEFAULT 'Watchlist'")
+  }
+
+  const watchlistColumns = db.prepare("PRAGMA table_info(watchlist)").all()
+  const watchlistColumnNames = watchlistColumns.map((c: any) => c.name)
+  if (!watchlistColumnNames.includes('category')) {
+    db.exec("ALTER TABLE watchlist ADD COLUMN category TEXT DEFAULT 'Watchlist'")
   }
 
   db.exec(`
@@ -286,15 +297,37 @@ export function toggleWatchlist(id: number) {
   const current = db.prepare('SELECT is_watchlist FROM videos WHERE id = ?').get(id) as any
   if (!current) return null
   const newValue = current.is_watchlist ? 0 : 1
-  db.prepare('UPDATE videos SET is_watchlist = ? WHERE id = ?').run(newValue, id)
+  db.prepare(`
+    UPDATE videos
+    SET is_watchlist = ?,
+        watchlist_category = CASE WHEN ? = 1 THEN COALESCE(watchlist_category, 'Watchlist') ELSE watchlist_category END
+    WHERE id = ?
+  `).run(newValue, newValue, id)
   return newValue
+}
+
+export function addLocalVideoToWatchlist(id: number, category: string = 'Watchlist') {
+  return db.prepare(`
+    UPDATE videos
+    SET is_watchlist = 1,
+        watchlist_category = ?
+    WHERE id = ?
+  `).run(category || 'Watchlist', id)
 }
 
 export function addToWatchlistExternal(item: any) {
   const stmt = db.prepare(`
-    INSERT INTO watchlist (tmdb_id, title, type, poster_path, backdrop_path, overview, vote_average, release_year)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-    ON CONFLICT(tmdb_id) DO NOTHING
+    INSERT INTO watchlist (tmdb_id, title, type, poster_path, backdrop_path, overview, vote_average, release_year, category)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(tmdb_id) DO UPDATE SET
+      title = excluded.title,
+      type = excluded.type,
+      poster_path = excluded.poster_path,
+      backdrop_path = excluded.backdrop_path,
+      overview = excluded.overview,
+      vote_average = excluded.vote_average,
+      release_year = excluded.release_year,
+      category = excluded.category
   `)
   return stmt.run(
     item.tmdb_id,
@@ -304,7 +337,8 @@ export function addToWatchlistExternal(item: any) {
     item.backdrop_path,
     item.overview,
     item.vote_average,
-    item.release_year
+    item.release_year,
+    item.category || 'Watchlist'
   )
 }
 
@@ -315,11 +349,168 @@ export function removeFromWatchlistExternal(tmdbId: number) {
 export function getWatchlist() {
   const external = db.prepare('SELECT *, 1 as isExternal, 1 as is_watchlist FROM watchlist').all()
   const internal = db.prepare(`
-    SELECT v.*, 0 as isExternal 
+    SELECT v.*, COALESCE(v.watchlist_category, 'Watchlist') as category, 0 as isExternal
     FROM videos v 
     WHERE v.is_watchlist = 1
   `).all()
   return [...external, ...internal].sort((a, b) => new Date(b.added_at).getTime() - new Date(a.added_at).getTime())
+}
+
+export function getBackupData() {
+  const folders = db.prepare(`
+    SELECT path, added_at
+    FROM watched_folders
+    ORDER BY added_at ASC
+  `).all()
+
+  const externalWatchlist = db.prepare(`
+    SELECT tmdb_id, title, type, poster_path, backdrop_path, overview, vote_average, release_year, category, added_at
+    FROM watchlist
+    ORDER BY added_at DESC
+  `).all()
+
+  const localWatchlist = db.prepare(`
+    SELECT file_path, tmdb_id, title, type, series_name, season, episode, watchlist_category as category, added_at
+    FROM videos
+    WHERE is_watchlist = 1
+    ORDER BY added_at DESC
+  `).all()
+
+  const favorites = db.prepare(`
+    SELECT file_path, tmdb_id, title, type, series_name, season, episode, added_at
+    FROM videos
+    WHERE is_favorite = 1
+    ORDER BY added_at DESC
+  `).all()
+
+  return {
+    folders,
+    watchlist: {
+      external: externalWatchlist,
+      local: localWatchlist
+    },
+    favorites
+  }
+}
+
+export function importExternalWatchlistItem(item: any) {
+  const stmt = db.prepare(`
+    INSERT INTO watchlist (tmdb_id, title, type, poster_path, backdrop_path, overview, vote_average, release_year, category)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(tmdb_id) DO UPDATE SET
+      title = excluded.title,
+      type = excluded.type,
+      poster_path = excluded.poster_path,
+      backdrop_path = excluded.backdrop_path,
+      overview = excluded.overview,
+      vote_average = excluded.vote_average,
+      release_year = excluded.release_year,
+      category = excluded.category
+  `)
+
+  return stmt.run(
+    item.tmdb_id,
+    item.title,
+    item.type,
+    item.poster_path || null,
+    item.backdrop_path || null,
+    item.overview || null,
+    item.vote_average || null,
+    item.release_year || null,
+    item.category || 'Watchlist'
+  )
+}
+
+export function restoreLocalWatchlistItem(item: any) {
+  if (item.file_path) {
+    const byPath = db.prepare(`
+      UPDATE videos
+      SET is_watchlist = 1,
+          watchlist_category = ?
+      WHERE file_path = ?
+    `).run(item.category || 'Watchlist', path.normalize(item.file_path))
+
+    if (byPath.changes > 0) return byPath
+  }
+
+  if (item.tmdb_id) {
+    const byTmdb = db.prepare(`
+      UPDATE videos
+      SET is_watchlist = 1,
+          watchlist_category = ?
+      WHERE tmdb_id = ?
+    `).run(item.category || 'Watchlist', item.tmdb_id)
+
+    if (byTmdb.changes > 0) return byTmdb
+  }
+
+  if (item.type === 'series' && item.series_name) {
+    return db.prepare(`
+      UPDATE videos
+      SET is_watchlist = 1,
+          watchlist_category = ?
+      WHERE type = 'series'
+        AND series_name = ?
+        AND COALESCE(season, -1) = COALESCE(?, -1)
+        AND COALESCE(episode, -1) = COALESCE(?, -1)
+    `).run(item.category || 'Watchlist', item.series_name, item.season ?? null, item.episode ?? null)
+  }
+
+  if (item.title && item.type) {
+    return db.prepare(`
+      UPDATE videos
+      SET is_watchlist = 1,
+          watchlist_category = ?
+      WHERE title = ?
+        AND type = ?
+    `).run(item.category || 'Watchlist', item.title, item.type)
+  }
+
+  return { changes: 0 }
+}
+
+export function restoreFavoriteItem(item: any) {
+  if (item.file_path) {
+    const byPath = db.prepare(`
+      UPDATE videos
+      SET is_favorite = 1
+      WHERE file_path = ?
+    `).run(path.normalize(item.file_path))
+
+    if (byPath.changes > 0) return byPath
+  }
+
+  if (item.tmdb_id) {
+    const byTmdb = db.prepare(`
+      UPDATE videos
+      SET is_favorite = 1
+      WHERE tmdb_id = ?
+    `).run(item.tmdb_id)
+
+    if (byTmdb.changes > 0) return byTmdb
+  }
+
+  if (item.type === 'series' && item.series_name) {
+    return db.prepare(`
+      UPDATE videos
+      SET is_favorite = 1
+      WHERE type = 'series'
+        AND series_name = ?
+        AND COALESCE(season, -1) = COALESCE(?, -1)
+        AND COALESCE(episode, -1) = COALESCE(?, -1)
+    `).run(item.series_name, item.season ?? null, item.episode ?? null)
+  }
+
+  if (item.title && item.type) {
+    return db.prepare(`
+      UPDATE videos
+      SET is_favorite = 1
+      WHERE title = ?
+        AND type = ?
+    `).run(item.title, item.type)
+  }
+
+  return { changes: 0 }
 }
 
 export function getFavorites() {

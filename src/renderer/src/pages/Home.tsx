@@ -3,7 +3,7 @@ import { Video } from '../types'
 import VideoCard from '../components/VideoCard'
 import HeroCarousel from '../components/HeroCarousel'
 import { groupSeriesCards } from '../utils/seriesCards'
-import { Search as SearchIcon, Bell, ChevronLeft, ChevronRight, Play, X, Loader2, Star, Film, Tv } from 'lucide-react'
+import { Search as SearchIcon, Bell, Bookmark, ChevronLeft, ChevronRight, Play, X, Loader2, Star, Film, Tv } from 'lucide-react'
 
 interface HomeProps {
   onPlay: (video: Video) => void
@@ -166,16 +166,25 @@ const SearchResultCard: React.FC<{
   video: Video
   onSelect: (video: Video) => void
   onWarm: (video: Video) => void
-}> = ({ video, onSelect, onWarm }) => {
+  onAddToWatchlist: (video: Video) => void
+}> = ({ video, onSelect, onWarm, onAddToWatchlist }) => {
   const poster = getImageUrl(video.poster_path)
   const title = video.type === 'series' && video.series_name ? video.series_name : video.title
 
   return (
-    <button
+    <div
       className="group/result flex w-full items-center gap-3 rounded-2xl border border-white/5 bg-white/[0.035] p-2.5 text-left transition-all duration-200 hover:border-red-500/35 hover:bg-white/[0.07] active:scale-[0.99]"
       onClick={() => onSelect(video)}
       onMouseEnter={() => onWarm(video)}
       onFocus={() => onWarm(video)}
+      role="button"
+      tabIndex={0}
+      onKeyDown={(event) => {
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault()
+          onSelect(video)
+        }
+      }}
     >
       <div className="h-[92px] w-[62px] shrink-0 overflow-hidden rounded-xl bg-white/5 ring-1 ring-white/8">
         {poster ? (
@@ -207,7 +216,17 @@ const SearchResultCard: React.FC<{
           {video.overview || 'Open details to explore this title.'}
         </p>
       </div>
-    </button>
+      <button
+        onClick={(event) => {
+          event.stopPropagation()
+          onAddToWatchlist(video)
+        }}
+        className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-white/5 text-white/45 transition-all hover:bg-amber-500/15 hover:text-amber-400"
+        title="Add to Watchlist"
+      >
+        <Bookmark size={16} />
+      </button>
+    </div>
   )
 }
 
@@ -230,6 +249,11 @@ const Home: React.FC<HomeProps> = ({ onPlay, onShowDetail, onNavigate, refreshKe
   const [searchResults, setSearchResults] = useState<Video[]>([])
   const [isSearching, setIsSearching] = useState(false)
   const [searchError, setSearchError] = useState<string | null>(null)
+  const [watchlistItems, setWatchlistItems] = useState<Video[]>([])
+  const [categorizingItem, setCategorizingItem] = useState<Video | null>(null)
+  const [newCategoryName, setNewCategoryName] = useState('')
+  const [isCreatingCategory, setIsCreatingCategory] = useState(false)
+  const [savingWatchlist, setSavingWatchlist] = useState(false)
   const searchInputRef = useRef<HTMLInputElement>(null)
   const searchBoxRef = useRef<HTMLDivElement>(null)
   const searchCacheRef = useRef<Map<string, Video[]>>(new Map())
@@ -257,6 +281,7 @@ const Home: React.FC<HomeProps> = ({ onPlay, onShowDetail, onNavigate, refreshKe
       setRecentMovies(moviesOnly.slice(0, 10))
 
       setRecentSeries(groupSeriesCards(allVideos).slice(0, 10))
+      window.api.getWatchlist().then(setWatchlistItems).catch(console.error)
       
     } catch (err) {
       console.error('Home fetchData error:', err)
@@ -426,6 +451,40 @@ const Home: React.FC<HomeProps> = ({ onPlay, onShowDetail, onNavigate, refreshKe
     onShowDetail(video)
   }
 
+  const watchlistCategories = Array.from(new Set(watchlistItems.map(item => item.category || 'Watchlist'))).sort((a, b) => {
+    if (a === 'Watchlist') return -1
+    if (b === 'Watchlist') return 1
+    return a.localeCompare(b)
+  })
+
+  const openWatchlistCategoryPicker = (video: Video) => {
+    setCategorizingItem(video)
+    setNewCategoryName('')
+    setIsCreatingCategory(false)
+  }
+
+  const saveToWatchlist = async (video: Video, category: string = 'Watchlist') => {
+    setSavingWatchlist(true)
+    try {
+      if (video.isExternal || video.id < 0) {
+        await window.api.addToWatchlistExternal({ ...video, category })
+      } else {
+        await window.api.addLocalToWatchlist(video.id, category)
+      }
+
+      const updated = await window.api.getWatchlist()
+      setWatchlistItems(updated)
+      setCategorizingItem(null)
+      setIsSearchOpen(false)
+      setSearchQuery('')
+      setSearchResults([])
+    } catch (err) {
+      console.error('[Home] Watchlist save failed:', err)
+    } finally {
+      setSavingWatchlist(false)
+    }
+  }
+
   const checkContinueScroll = useCallback(() => {
     const rail = continueWatchingRef.current
     if (!rail) return
@@ -545,6 +604,7 @@ const Home: React.FC<HomeProps> = ({ onPlay, onShowDetail, onNavigate, refreshKe
                                 video={result}
                                 onSelect={openSearchResult}
                                 onWarm={warmSearchResult}
+                                onAddToWatchlist={openWatchlistCategoryPicker}
                               />
                             ))}
                           </div>
@@ -580,7 +640,12 @@ const Home: React.FC<HomeProps> = ({ onPlay, onShowDetail, onNavigate, refreshKe
             </div>
           </div>
 
-          <HeroCarousel items={featured} onPlay={handlePlayFromHome} onShowDetail={handleShowDetailFromHome} />
+          <HeroCarousel
+            items={featured}
+            onPlay={handlePlayFromHome}
+            onShowDetail={handleShowDetailFromHome}
+            onAddToWatchlist={openWatchlistCategoryPicker}
+          />
         </div>
       </section>
 
@@ -723,6 +788,100 @@ const Home: React.FC<HomeProps> = ({ onPlay, onShowDetail, onNavigate, refreshKe
           ))}
         </div>
       </section>
+
+      {categorizingItem && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-200">
+          <div className="w-full max-w-sm overflow-hidden rounded-2xl border border-secondary bg-surface shadow-2xl animate-in zoom-in-95 duration-200">
+            <div className="flex items-center justify-between border-b border-secondary px-6 py-5">
+              <div>
+                <h3 className="text-base font-bold text-text">Save to...</h3>
+                <p className="mt-0.5 max-w-[220px] truncate text-[11px] text-muted">
+                  {categorizingItem.title}
+                </p>
+              </div>
+              <button
+                onClick={() => setCategorizingItem(null)}
+                className="rounded-xl p-2 text-muted transition-colors hover:bg-white/5 hover:text-text"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="max-h-[300px] space-y-1.5 overflow-y-auto p-4">
+              <button
+                onClick={() => saveToWatchlist(categorizingItem, 'Watchlist')}
+                disabled={savingWatchlist}
+                className="group flex w-full items-center gap-3 rounded-xl p-3 text-muted transition-all hover:bg-amber-500/10 hover:text-amber-400 disabled:opacity-50"
+              >
+                <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-secondary/50 group-hover:bg-amber-500/20">
+                  <Bookmark size={14} />
+                </div>
+                <span className="text-sm font-medium">Watchlist</span>
+                <span className="ml-auto text-[10px] font-bold uppercase tracking-widest opacity-0 group-hover:opacity-100">Default</span>
+              </button>
+
+              {watchlistCategories.filter(category => category !== 'Watchlist').map(category => (
+                <button
+                  key={category}
+                  onClick={() => saveToWatchlist(categorizingItem, category)}
+                  disabled={savingWatchlist}
+                  className="group flex w-full items-center gap-3 rounded-xl p-3 text-muted transition-all hover:bg-primary/10 hover:text-primary disabled:opacity-50"
+                >
+                  <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-secondary/50 group-hover:bg-primary/20">
+                    <Bookmark size={14} />
+                  </div>
+                  <span className="text-sm font-medium">{category}</span>
+                  {savingWatchlist && <Loader2 size={14} className="ml-auto animate-spin" />}
+                </button>
+              ))}
+            </div>
+
+            <div className="border-t border-secondary bg-secondary/20 p-4">
+              {!isCreatingCategory ? (
+                <button
+                  onClick={() => setIsCreatingCategory(true)}
+                  className="flex w-full items-center justify-center gap-2 rounded-xl border border-dashed border-muted/30 py-2.5 text-sm font-medium text-muted transition-all hover:border-primary/50 hover:text-text"
+                >
+                  <Bookmark size={14} className="opacity-50" />
+                  Create New Category
+                </button>
+              ) : (
+                <div className="space-y-3 animate-in slide-in-from-bottom-2 duration-200">
+                  <input
+                    autoFocus
+                    type="text"
+                    value={newCategoryName}
+                    onChange={(event) => setNewCategoryName(event.target.value)}
+                    onKeyDown={(event) => {
+                      if (event.key === 'Enter' && newCategoryName.trim()) {
+                        saveToWatchlist(categorizingItem, newCategoryName.trim())
+                      }
+                      if (event.key === 'Escape') setIsCreatingCategory(false)
+                    }}
+                    placeholder="Category name"
+                    className="w-full rounded-xl border border-primary/30 bg-surface px-4 py-2.5 text-sm outline-none placeholder:text-muted/40 focus:ring-2 focus:ring-primary/20"
+                  />
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => setIsCreatingCategory(false)}
+                      className="flex-1 py-2 text-xs font-medium text-muted transition-colors hover:text-text"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      disabled={!newCategoryName.trim() || savingWatchlist}
+                      onClick={() => saveToWatchlist(categorizingItem, newCategoryName.trim())}
+                      className="flex-[2] rounded-lg bg-primary py-2 text-xs font-bold text-black transition-all disabled:opacity-50"
+                    >
+                      {savingWatchlist ? <Loader2 size={14} className="mx-auto animate-spin" /> : 'Create & Save'}
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

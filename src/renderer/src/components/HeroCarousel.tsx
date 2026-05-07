@@ -6,6 +6,7 @@ interface HeroCarouselProps {
   items: Video[]
   onPlay: (video: Video) => void
   onShowDetail: (video: Video) => void
+  onAddToWatchlist: (video: Video) => void
 }
 
 const getHeroImageUrl = (path?: string | null) => {
@@ -16,7 +17,7 @@ const getHeroImageUrl = (path?: string | null) => {
   return path.startsWith('http') ? path : `media://file/${encodeURIComponent(path)}`
 }
 
-const HeroCarousel: React.FC<HeroCarouselProps> = ({ items, onPlay, onShowDetail }) => {
+const HeroCarousel: React.FC<HeroCarouselProps> = ({ items, onPlay, onShowDetail, onAddToWatchlist }) => {
   const [currentIndex, setCurrentIndex] = useState(0)
   const [isAutoPlaying, setIsAutoPlaying] = useState(true)
 
@@ -141,13 +142,7 @@ const HeroCarousel: React.FC<HeroCarouselProps> = ({ items, onPlay, onShowDetail
           <button
             onClick={(e) => {
               e.stopPropagation()
-              // Add to watchlist logic
-              if (current.isExternal) {
-                window.api.addToWatchlistExternal(current)
-              } else {
-                window.api.toggleWatchlist(current.id)
-              }
-              alert('Added to Watchlist!')
+              onAddToWatchlist(current)
             }}
             className="flex items-center gap-2.5 bg-white/30 hover:bg-white/40 text-white px-7 py-3.5 rounded-2xl font-black text-xs tracking-widest transition-all border border-white/10 hover:scale-105 active:scale-95 uppercase italic glass-effect"
           >

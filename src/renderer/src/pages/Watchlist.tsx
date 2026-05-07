@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react'
 import { Video } from '../types'
 import VideoCard from '../components/VideoCard'
+import HorizontalScrollRow from '../components/HorizontalScrollRow'
 import { Bookmark, BookmarkCheck, Film, Loader2, Search, Tv, X } from 'lucide-react'
 
 interface WatchlistProps {
@@ -30,6 +31,9 @@ const Watchlist: React.FC<WatchlistProps> = ({ onPlay, onShowDetail }) => {
   const [results, setResults] = useState<TMDBResult[]>([])
   const [searching, setSearching] = useState(false)
   const [addingId, setAddingId] = useState<number | null>(null)
+  const [categorizingItem, setCategorizingItem] = useState<TMDBResult | null>(null)
+  const [newCategoryName, setNewCategoryName] = useState('')
+  const [isCreatingCategory, setIsCreatingCategory] = useState(false)
   const isInitialLoad = useRef(true)
 
   const fetchWatchlist = async () => {
@@ -48,7 +52,13 @@ const Watchlist: React.FC<WatchlistProps> = ({ onPlay, onShowDetail }) => {
 
   const isInWatchlist = (tmdbId: number) => items.some(item => item.tmdb_id === tmdbId)
 
-  const toExternalVideo = (item: TMDBResult): Video => {
+  const categories = Array.from(new Set(items.map(item => item.category || 'Watchlist'))).sort((a, b) => {
+    if (a === 'Watchlist') return -1
+    if (b === 'Watchlist') return 1
+    return a.localeCompare(b)
+  })
+
+  const toExternalVideo = (item: TMDBResult, category: string = 'Watchlist'): Video => {
     const title = item.title || item.name || 'Untitled'
     const type = item.media_type === 'tv' ? 'series' : 'movie'
     const releaseYear = (item.release_date || item.first_air_date || '').slice(0, 4)
@@ -65,7 +75,8 @@ const Watchlist: React.FC<WatchlistProps> = ({ onPlay, onShowDetail }) => {
       vote_average: item.vote_average,
       release_year: releaseYear ? Number(releaseYear) : undefined,
       isExternal: true,
-      is_watchlist: true
+      is_watchlist: true,
+      category
     }
   }
 
@@ -90,14 +101,22 @@ const Watchlist: React.FC<WatchlistProps> = ({ onPlay, onShowDetail }) => {
     setResults([])
   }
 
-  const handleAddToWatchlist = async (item: TMDBResult, e?: React.MouseEvent) => {
+  const openCategoryPicker = (item: TMDBResult, e?: React.MouseEvent) => {
     e?.stopPropagation()
     if (isInWatchlist(item.id)) return
+    setCategorizingItem(item)
+    setIsCreatingCategory(false)
+    setNewCategoryName('')
+  }
 
+  const handleAddToWatchlist = async (item: TMDBResult, category: string = 'Watchlist') => {
     setAddingId(item.id)
     try {
-      await window.api.addToWatchlistExternal(toExternalVideo(item))
+      await window.api.addToWatchlistExternal(toExternalVideo(item, category))
       await fetchWatchlist()
+      setCategorizingItem(null)
+      setQuery('')
+      setResults([])
     } catch (err) {
       console.error('[Watchlist] Add error:', err)
     } finally {
@@ -170,7 +189,7 @@ const Watchlist: React.FC<WatchlistProps> = ({ onPlay, onShowDetail }) => {
               return (
                 <button
                   key={`${item.media_type}-${item.id}`}
-                  onClick={(e) => handleAddToWatchlist(item, e)}
+                  onClick={(e) => openCategoryPicker(item, e)}
                   disabled={alreadyAdded || addingId === item.id}
                   className="group text-left disabled:cursor-default"
                   title={alreadyAdded ? 'Already in Watchlist' : 'Add to Watchlist'}
@@ -233,10 +252,35 @@ const Watchlist: React.FC<WatchlistProps> = ({ onPlay, onShowDetail }) => {
           ))}
         </div>
       ) : results.length === 0 && items.length > 0 ? (
-        <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-6">
-          {items.map(video => (
-            <VideoCard key={video.tmdb_id || video.id} video={video} onPlay={onPlay} onShowDetail={onShowDetail} />
-          ))}
+        <div className="space-y-10">
+          {categories.map(category => {
+            const categoryItems = items.filter(item => (item.category || 'Watchlist') === category)
+            return (
+              <section key={category} className="space-y-4">
+                <div className="flex items-center gap-3">
+                  <div className="flex h-9 w-9 items-center justify-center rounded-xl border border-primary/20 bg-primary/10 text-primary">
+                    <Bookmark size={16} />
+                  </div>
+                  <div>
+                    <h3 className="text-lg font-black text-white uppercase italic tracking-tight">{category}</h3>
+                    <p className="text-[10px] font-bold uppercase tracking-widest text-white/30">
+                      {categoryItems.length} title{categoryItems.length === 1 ? '' : 's'}
+                    </p>
+                  </div>
+                </div>
+                <HorizontalScrollRow>
+                  {categoryItems.map(video => (
+                    <div
+                      key={`${video.isExternal ? 'external' : 'local'}-${video.tmdb_id || video.id}`}
+                      className="w-[calc((100vw-9rem)/2)] max-w-[220px] flex-shrink-0 sm:w-[190px] md:w-[200px] lg:w-[210px]"
+                    >
+                      <VideoCard video={video} onPlay={onPlay} onShowDetail={onShowDetail} />
+                    </div>
+                  ))}
+                </HorizontalScrollRow>
+              </section>
+            )
+          })}
         </div>
       ) : results.length === 0 ? (
         <div className="flex flex-col items-center justify-center py-40 text-center space-y-6 opacity-20">
@@ -248,6 +292,100 @@ const Watchlist: React.FC<WatchlistProps> = ({ onPlay, onShowDetail }) => {
         </div>
       ) : (
         null
+      )}
+
+      {categorizingItem && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-200">
+          <div className="w-full max-w-sm bg-surface border border-secondary rounded-2xl shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200">
+            <div className="px-6 py-5 border-b border-secondary flex items-center justify-between">
+              <div>
+                <h3 className="text-base font-bold text-text">Save to...</h3>
+                <p className="text-[11px] text-muted mt-0.5 truncate max-w-[220px]">
+                  {categorizingItem.title || categorizingItem.name}
+                </p>
+              </div>
+              <button
+                onClick={() => setCategorizingItem(null)}
+                className="p-2 rounded-xl hover:bg-white/5 text-muted hover:text-text transition-colors"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="p-4 space-y-1.5 max-h-[300px] overflow-y-auto">
+              <button
+                onClick={() => handleAddToWatchlist(categorizingItem, 'Watchlist')}
+                disabled={addingId === categorizingItem.id}
+                className="w-full flex items-center gap-3 p-3 rounded-xl hover:bg-amber-500/10 text-muted hover:text-amber-400 group transition-all disabled:opacity-50"
+              >
+                <div className="w-8 h-8 rounded-lg bg-secondary/50 flex items-center justify-center group-hover:bg-amber-500/20">
+                  <Bookmark size={14} />
+                </div>
+                <span className="text-sm font-medium">Watchlist</span>
+                <span className="ml-auto text-[10px] opacity-0 group-hover:opacity-100 uppercase tracking-widest font-bold">Default</span>
+              </button>
+
+              {categories.filter(category => category !== 'Watchlist').map(category => (
+                <button
+                  key={category}
+                  onClick={() => handleAddToWatchlist(categorizingItem, category)}
+                  disabled={addingId === categorizingItem.id}
+                  className="w-full flex items-center gap-3 p-3 rounded-xl hover:bg-primary/10 text-muted hover:text-primary group transition-all disabled:opacity-50"
+                >
+                  <div className="w-8 h-8 rounded-lg bg-secondary/50 flex items-center justify-center group-hover:bg-primary/20">
+                    <Bookmark size={14} />
+                  </div>
+                  <span className="text-sm font-medium">{category}</span>
+                  {addingId === categorizingItem.id && <Loader2 size={14} className="ml-auto animate-spin" />}
+                </button>
+              ))}
+            </div>
+
+            <div className="p-4 bg-secondary/20 border-t border-secondary">
+              {!isCreatingCategory ? (
+                <button
+                  onClick={() => setIsCreatingCategory(true)}
+                  className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl border border-dashed border-muted/30 text-muted hover:text-text hover:border-primary/50 transition-all text-sm font-medium"
+                >
+                  <Bookmark size={14} className="opacity-50" />
+                  Create New Category
+                </button>
+              ) : (
+                <div className="space-y-3 animate-in slide-in-from-bottom-2 duration-200">
+                  <input
+                    autoFocus
+                    type="text"
+                    value={newCategoryName}
+                    onChange={(e) => setNewCategoryName(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' && newCategoryName.trim()) {
+                        handleAddToWatchlist(categorizingItem, newCategoryName.trim())
+                      }
+                      if (e.key === 'Escape') setIsCreatingCategory(false)
+                    }}
+                    placeholder="Category name"
+                    className="w-full px-4 py-2.5 bg-surface border border-primary/30 rounded-xl text-sm outline-none focus:ring-2 focus:ring-primary/20 placeholder:text-muted/40"
+                  />
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => setIsCreatingCategory(false)}
+                      className="flex-1 py-2 text-xs font-medium text-muted hover:text-text transition-colors"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      disabled={!newCategoryName.trim() || addingId === categorizingItem.id}
+                      onClick={() => handleAddToWatchlist(categorizingItem, newCategoryName.trim())}
+                      className="flex-[2] py-2 bg-primary text-black font-bold text-xs rounded-lg disabled:opacity-50 transition-all"
+                    >
+                      {addingId === categorizingItem.id ? <Loader2 size={14} className="mx-auto animate-spin" /> : 'Create & Save'}
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
       )}
     </div>
   )

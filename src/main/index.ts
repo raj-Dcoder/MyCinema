@@ -721,6 +721,43 @@ function handleCommandLine(argv: string[], mainWindow: BrowserWindow | null) {
   }
 }
 
+type BackupImportSummary = {
+  imported: boolean
+  canceled?: boolean
+  filePath?: string
+  foldersAdded: number
+  foldersScanned: number
+  foldersMissing: number
+  externalWatchlistImported: number
+  localWatchlistRestored: number
+  favoritesRestored: number
+}
+
+const BACKUP_FORMAT = 'mycinema.backup'
+const BACKUP_VERSION = 1
+
+function getBackupDefaultPath(): string {
+  const stamp = new Date().toISOString().replace(/[:.]/g, '-')
+  return join(app.getPath('documents'), `mycinema-backup-${stamp}.json`)
+}
+
+function parseBackupFile(filePath: string): any {
+  const raw = fs.readFileSync(filePath, 'utf8')
+  const parsed = JSON.parse(raw)
+
+  if (
+    !parsed ||
+    parsed.app !== 'MyCinema' ||
+    parsed.format !== BACKUP_FORMAT ||
+    typeof parsed.version !== 'number' ||
+    !parsed.data
+  ) {
+    throw new Error('Selected file is not a valid MyCinema backup.')
+  }
+
+  return parsed
+}
+
 
 
 app.whenReady().then(() => {
@@ -872,6 +909,128 @@ ipcMain.handle('get-series-info', (_, seriesName) => {
 
 ipcMain.handle('get-folders', () => {
   return db.getFolders()
+})
+
+ipcMain.handle('export-user-backup', async () => {
+  try {
+    const result = await dialog.showSaveDialog({
+      title: 'Export MyCinema Backup',
+      defaultPath: getBackupDefaultPath(),
+      filters: [
+        { name: 'MyCinema Backup', extensions: ['json'] }
+      ]
+    })
+
+    if (result.canceled || !result.filePath) {
+      return { exported: false, canceled: true }
+    }
+
+    const backup = {
+      app: 'MyCinema',
+      format: BACKUP_FORMAT,
+      version: BACKUP_VERSION,
+      exportedAt: new Date().toISOString(),
+      data: db.getBackupData()
+    }
+
+    fs.writeFileSync(result.filePath, JSON.stringify(backup, null, 2), 'utf8')
+
+    return {
+      exported: true,
+      filePath: result.filePath,
+      folders: backup.data.folders.length,
+      externalWatchlist: backup.data.watchlist.external.length,
+      localWatchlist: backup.data.watchlist.local.length,
+      favorites: backup.data.favorites.length
+    }
+  } catch (err) {
+    console.error('[Backup] Export failed:', err)
+    return {
+      exported: false,
+      error: err instanceof Error ? err.message : 'Export failed.'
+    }
+  }
+})
+
+ipcMain.handle('import-user-backup', async (): Promise<BackupImportSummary | { imported: false; canceled?: boolean; error?: string }> => {
+  try {
+    const result = await dialog.showOpenDialog({
+      title: 'Import MyCinema Backup',
+      properties: ['openFile'],
+      filters: [
+        { name: 'MyCinema Backup', extensions: ['json'] }
+      ]
+    })
+
+    if (result.canceled || result.filePaths.length === 0) {
+      return { imported: false, canceled: true }
+    }
+
+    const filePath = result.filePaths[0]
+    const backup = parseBackupFile(filePath)
+    const folders = Array.isArray(backup.data.folders) ? backup.data.folders : []
+    const externalWatchlist = Array.isArray(backup.data.watchlist?.external) ? backup.data.watchlist.external : []
+    const localWatchlist = Array.isArray(backup.data.watchlist?.local) ? backup.data.watchlist.local : []
+    const favorites = Array.isArray(backup.data.favorites) ? backup.data.favorites : []
+
+    const summary: BackupImportSummary = {
+      imported: true,
+      filePath,
+      foldersAdded: 0,
+      foldersScanned: 0,
+      foldersMissing: 0,
+      externalWatchlistImported: 0,
+      localWatchlistRestored: 0,
+      favoritesRestored: 0
+    }
+
+    for (const folder of folders) {
+      const folderPath = typeof folder === 'string' ? folder : folder?.path
+      if (!folderPath || typeof folderPath !== 'string') continue
+
+      const addResult = db.addFolder(folderPath)
+      summary.foldersAdded += addResult.changes
+
+      if (!fs.existsSync(folderPath)) {
+        summary.foldersMissing += 1
+        continue
+      }
+
+      attachFolderWatcher(folderPath)
+      await scanFolder(folderPath)
+      summary.foldersScanned += 1
+    }
+
+    for (const item of externalWatchlist) {
+      if (!item || typeof item.tmdb_id !== 'number' || !item.title || !['movie', 'series'].includes(item.type)) {
+        continue
+      }
+
+      db.importExternalWatchlistItem(item)
+      summary.externalWatchlistImported += 1
+    }
+
+    for (const item of localWatchlist) {
+      if (!item || !['movie', 'series'].includes(item.type)) continue
+      const restoreResult = db.restoreLocalWatchlistItem(item)
+      summary.localWatchlistRestored += restoreResult.changes > 0 ? 1 : 0
+    }
+
+    for (const item of favorites) {
+      if (!item || !['movie', 'series'].includes(item.type)) continue
+      const restoreResult = db.restoreFavoriteItem(item)
+      summary.favoritesRestored += restoreResult.changes > 0 ? 1 : 0
+    }
+
+    BrowserWindow.getAllWindows().forEach(w => w.webContents.send('library-updated'))
+    return summary
+  } catch (err) {
+    console.error('[Backup] Import failed:', err)
+    return {
+      imported: false,
+      error: err instanceof Error ? err.message : 'Import failed.'
+    }
+  }
 })
 
 ipcMain.handle('remove-folder', (_, folderPath: string) => {
@@ -1477,6 +1636,10 @@ ipcMain.handle('toggle-favorite', (_, id: number) => {
 
 ipcMain.handle('toggle-watchlist', (_, id: number) => {
   return db.toggleWatchlist(id)
+})
+
+ipcMain.handle('add-local-to-watchlist', (_, id: number, category: string) => {
+  return db.addLocalVideoToWatchlist(id, category)
 })
 
 ipcMain.handle('add-to-watchlist-external', (_, item: any) => {

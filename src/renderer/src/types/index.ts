@@ -23,4 +23,6 @@ export interface Video {
   isExternal?: boolean
   is_favorite?: boolean
   is_watchlist?: boolean
+  category?: string
+  media_type?: 'movie' | 'tv'
 }

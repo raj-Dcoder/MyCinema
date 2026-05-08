@@ -1,3 +1,34 @@
+# MyCinema v1.20.0
+
+Feature release focused on more resilient downloads, better source picking, watchlist category flow, and cleaner fullscreen playback.
+
+### Downloads
+- **Retry Failed Downloads**: Failed torrent downloads now show a Retry action that clears the failed session and restarts from the saved magnet.
+- **Storage Overview**: The Download page now displays free and total space for the MyCinema downloads folder with a refreshable usage bar.
+- **Live Search Cache**: Download search now debounces TMDB lookups, reuses recent search results, and avoids clearing the interface with repeated requests.
+
+### Source Selection
+- **Health-Based Source Sorting**: Download and detail-page source lists now use shared seed, peer, and quality scoring so healthier sources appear first.
+- **Episode Filters**: Series source browsing can now narrow results by season and episode, while season packs remain available separately.
+- **Speed Labels**: Source rows now show FAST, GOOD, OK, or SLOW labels based on seed availability.
+
+### Watchlist & Library
+- **Save To Category From Details**: Detail pages now let users choose an existing watchlist category or create a new one before saving a title.
+- **Watchlist Refresh Fix**: The Watchlist tab refreshes after detail-page changes, so newly saved or removed titles appear without reopening the app.
+- **Sharper Remote Artwork**: TMDB posters and cards now request higher-resolution image sizes for cleaner browsing.
+
+### Playback
+- **Better Fullscreen Targeting**: The player now requests fullscreen on the player shell, keeping boosted renderers and controls aligned.
+- **Aspect-Ratio Contain Fix**: Contain mode now sizes the video surface from the real video aspect ratio instead of stretching every file to the viewport.
+- **Subtitle Position Polish**: Subtitles move higher when controls are visible and settle lower when controls are hidden.
+
+### Security & Privacy
+- **Safer Torrent Retry Cleanup**: Retrying a failed download destroys any previous active or duplicate torrent instance before restarting it.
+- **Tracker Enrichment Without Extra User Data**: Magnets are enriched with public tracker announce URLs for reliability while keeping downloads in the local MyCinema downloads folder.
+- **Storage Read Errors Stay Local**: Download storage checks return local status and error text through IPC without exposing paths outside the app UI.
+
+***
+
 # MyCinema v1.19.3
 
 Patch release focused on Watch Together stability and lower TMDB usage on app launch.

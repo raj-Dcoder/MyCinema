@@ -17,53 +17,67 @@ import Download from './pages/Download'
 import appLogo from './assets/mycinema-logo.png'
 
 const LATEST_RELEASE = {
-  version: '1.19.3',
+  version: '1.20.0',
   eyebrow: 'What\'s New',
-  headline: 'Watch Together and Home load cleaner.',
-  summary: 'This patch keeps watch parties open and reduces repeated TMDB traffic on launch.',
+  headline: 'Downloads are easier to recover and choose.',
+  summary: 'This release improves download reliability, source filtering, watchlist saving, and fullscreen playback.',
   steps: [
     {
-      icon: Wrench,
-      title: 'Watch Together',
-      description: 'The watch party popup now stays open while you use it.',
+      icon: DownloadIcon,
+      title: 'Downloads',
+      description: 'The Download page now gives clearer status and recovery controls.',
       color: 'from-blue-500 to-cyan-400',
       iconColor: 'text-cyan-400',
       items: [
-        'Host Party, Join, copy, and code entry no longer dismiss the popup.',
-        'Player clicks and watch party controls now stay separated.'
+        'Retry failed torrent downloads without searching again.',
+        'Check free and total downloads-folder storage from the page header.'
       ]
     },
     {
       icon: Sparkles,
-      title: 'Home Discovery',
-      description: 'Home discovery data is reused between app launches.',
+      title: 'Source Picking',
+      description: 'Source lists are easier to scan before starting a download.',
       color: 'from-emerald-400 to-teal-500',
       iconColor: 'text-emerald-400',
       items: [
-        'Trending movies, trending series, and India OTT rows now use a 6-hour cache.',
-        'Restarting the app no longer refetches those TMDB lists immediately.'
+        'Health scoring now sorts by seeds, peers, and quality.',
+        'Series sources can be filtered by season, episode, or season packs.'
+      ]
+    },
+    {
+      icon: Bookmark,
+      title: 'Watchlist & Playback',
+      description: 'Saving and watching titles should feel more consistent.',
+      color: 'from-violet-500 to-fuchsia-400',
+      iconColor: 'text-fuchsia-300',
+      items: [
+        'Choose or create a watchlist category from the detail page.',
+        'Fullscreen contain mode now follows the video aspect ratio.'
       ]
     },
     {
       icon: ShieldCheck,
       title: 'Security & Privacy',
-      description: 'Networking stays quieter and more predictable.',
+      description: 'Download recovery keeps cleanup local and predictable.',
       color: 'from-amber-400 to-orange-500',
       iconColor: 'text-amber-400',
       items: [
-        'Successful TMDB list responses are cached locally in the app data folder.',
-        'The cache refreshes after 6 hours or if the saved data cannot be read.'
+        'Retrying clears old torrent instances before restarting.',
+        'Storage checks report local download-folder status through IPC.'
       ]
     }
   ]
 }
 
 const getWhatsNewStorageKey = (version: string) => `mycinema_whats_new_seen_${version}`
+const SIDEBAR_EXPANDED_STORAGE_KEY = 'mycinema_sidebar_expanded'
 const isDevPreview = import.meta.env.DEV
 
 const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState<'home' | 'videos' | 'movies' | 'series' | 'download' | 'settings' | 'watchlist' | 'history' | 'favorites'>('home')
-  const [isSidebarExpanded, setIsSidebarExpanded] = useState(true)
+  const [isSidebarExpanded, setIsSidebarExpanded] = useState(() => {
+    return localStorage.getItem(SIDEBAR_EXPANDED_STORAGE_KEY) !== 'false'
+  })
 
   const [showWhatsNew, setShowWhatsNew] = useState(() => isDevPreview || localStorage.getItem(getWhatsNewStorageKey(LATEST_RELEASE.version)) !== 'true')
   const [whatsNewStep, setWhatsNewStep] = useState(0)
@@ -71,6 +85,7 @@ const App: React.FC = () => {
   const [playingVideo, setPlayingVideo] = useState<Video | null>(null)
   const [selectedVideo, setSelectedVideo] = useState<Video | null>(null)
   const [homeRefreshKey, setHomeRefreshKey] = useState(0)
+  const [watchlistRefreshKey, setWatchlistRefreshKey] = useState(0)
   const [userName, setUserName] = useState(() => localStorage.getItem('mycinema_user_name') || 'User')
   const [isFullscreen, setIsFullscreen] = useState(true)
   const [launchFullscreen, setLaunchFullscreen] = useState(true)
@@ -84,6 +99,10 @@ const App: React.FC = () => {
     window.addEventListener('mycinema_name_updated', handleNameUpdate)
     return () => window.removeEventListener('mycinema_name_updated', handleNameUpdate)
   }, [])
+
+  useEffect(() => {
+    localStorage.setItem(SIDEBAR_EXPANDED_STORAGE_KEY, String(isSidebarExpanded))
+  }, [isSidebarExpanded])
 
   useEffect(() => {
     window.api.isFullscreen().then(setIsFullscreen).catch(() => {})
@@ -436,7 +455,7 @@ const App: React.FC = () => {
           {activeTab === 'videos'  && <Videos onPlay={handlePlayVideo} />}
           {activeTab === 'movies'  && <Movies onPlay={handlePlayVideo} onShowDetail={setSelectedVideo} />}
           {activeTab === 'series'  && <Series onPlay={handlePlayVideo} onShowDetail={setSelectedVideo} />}
-          {activeTab === 'watchlist' && <Watchlist onPlay={handlePlayVideo} onShowDetail={setSelectedVideo} />}
+          {activeTab === 'watchlist' && <Watchlist onPlay={handlePlayVideo} onShowDetail={setSelectedVideo} refreshKey={watchlistRefreshKey} />}
           {activeTab === 'history' && <History onPlay={handlePlayVideo} onShowDetail={setSelectedVideo} />}
           {activeTab === 'favorites' && <Favorites onPlay={handlePlayVideo} onShowDetail={setSelectedVideo} />}
           {activeTab === 'download' && <Download onShowDetail={setSelectedVideo} />}
@@ -450,6 +469,7 @@ const App: React.FC = () => {
           video={selectedVideo} 
           onClose={() => setSelectedVideo(null)} 
           onPlay={handlePlayVideo}
+          onWatchlistChange={() => setWatchlistRefreshKey(k => k + 1)}
         />
       )}
 

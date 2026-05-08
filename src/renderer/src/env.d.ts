@@ -66,12 +66,21 @@ interface Api {
   cancelTorrentDownload: (id: string) => Promise<boolean>
   removeDownload: (id: string, deleteFile?: boolean) => Promise<boolean>
   pauseResumeTorrent: (id: string) => Promise<boolean>
+  retryTorrentDownload: (id: string) => Promise<boolean>
   getActiveDownloads: () => Promise<any[]>
   onTorrentProgress: (callback: (data: any) => void) => () => void
   // File utilities
   openFolder: (filePath: string) => Promise<void>
   getMediaInfo: (filePath: string) => Promise<any>
   openDownloadsFolder: () => Promise<void>
+  getDownloadsStorage: () => Promise<{
+    path: string
+    free: number
+    total: number
+    used: number
+    percentUsed: number
+    error?: string
+  }>
   // OpenSubtitles API
   searchOnlineSubtitles: (params: { query?: string; tmdbId?: number; season?: number; episode?: number; languages?: string; mediaType?: string }) => Promise<any>
   downloadOnlineSubtitle: (params: { fileId: number; videoFilePath: string; fileName?: string }) => Promise<any>

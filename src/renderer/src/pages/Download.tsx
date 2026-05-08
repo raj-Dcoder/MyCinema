@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react'
-import { Search, Download as DownloadIcon, Film, Tv, X, Loader2, HardDrive, CheckCircle2, AlertCircle, Pause, Play, FolderOpen, Bookmark, BookmarkCheck, ArrowLeft, Languages } from 'lucide-react'
+import { Search, Download as DownloadIcon, Film, Tv, X, Loader2, HardDrive, CheckCircle2, AlertCircle, Pause, Play, FolderOpen, Bookmark, BookmarkCheck, ArrowLeft, Languages, RotateCcw } from 'lucide-react'
 
 import { Video } from '../types'
+import { getTorrentSourceHealthScore, getTorrentSourceSpeedLabel } from '../utils/torrentSources'
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 interface TMDBResult {
@@ -46,8 +47,25 @@ interface ActiveDownload {
   errorMessage?: string
 }
 
+interface DownloadsStorage {
+  path: string
+  free: number
+  total: number
+  used: number
+  percentUsed: number
+  error?: string
+}
+
 const TMDB_IMG = 'https://image.tmdb.org/t/p'
 const WATCHLIST_KEY = 'mycinema_watchlist'
+
+const formatBytes = (bytes: number) => {
+  if (!Number.isFinite(bytes) || bytes <= 0) return '0 B'
+  const units = ['B', 'KB', 'MB', 'GB', 'TB']
+  const index = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1)
+  const value = bytes / Math.pow(1024, index)
+  return `${value >= 10 || index === 0 ? value.toFixed(0) : value.toFixed(1)} ${units[index]}`
+}
 
 interface DownloadProps {
   onShowDetail?: (video: Video) => void
@@ -65,7 +83,9 @@ const Download: React.FC<DownloadProps> = ({ onShowDetail }) => {
   const [showDownloads, setShowDownloads] = useState(false)
   const [downloadToRemove, setDownloadToRemove] = useState<string | null>(null)
   const [loadingDetailId, setLoadingDetailId] = useState<string | null>(null)
+  const [downloadsStorage, setDownloadsStorage] = useState<DownloadsStorage | null>(null)
   const removedIdsRef = useRef<Set<string>>(new Set())
+  const searchCacheRef = useRef<Map<string, TMDBResult[]>>(new Map())
   const searchInputRef = useRef<HTMLInputElement>(null)
 
   const [selectedSeason, setSelectedSeason] = useState<string>('all')
@@ -102,7 +122,7 @@ const Download: React.FC<DownloadProps> = ({ onShowDetail }) => {
       title,
       file_path: '',
       type,
-      poster_path: item.poster_path ? `${TMDB_IMG}/w500${item.poster_path}` : undefined,
+      poster_path: item.poster_path ? `${TMDB_IMG}/w780${item.poster_path}` : undefined,
       backdrop_path: item.backdrop_path ? `${TMDB_IMG}/w1280${item.backdrop_path}` : undefined,
       overview: item.overview,
       vote_average: item.vote_average,
@@ -143,9 +163,16 @@ const Download: React.FC<DownloadProps> = ({ onShowDetail }) => {
     window.api.getVideos().then(setAllVideos).catch(console.error)
   }
 
+  const refreshDownloadsStorage = () => {
+    window.api.getDownloadsStorage()
+      .then(setDownloadsStorage)
+      .catch((err: any) => console.error('[Download] Storage read failed:', err))
+  }
+
   useEffect(() => {
     fetchVideos()
     fetchWatchlist()
+    refreshDownloadsStorage()
 
     try {
       const stored = localStorage.getItem(WATCHLIST_KEY)
@@ -166,7 +193,11 @@ const Download: React.FC<DownloadProps> = ({ onShowDetail }) => {
 
     // Refresh videos every 30 seconds to catch new scans
     const interval = setInterval(fetchVideos, 30000)
-    return () => clearInterval(interval)
+    const storageInterval = setInterval(refreshDownloadsStorage, 30000)
+    return () => {
+      clearInterval(interval)
+      clearInterval(storageInterval)
+    }
   }, [])
 
   // Listen for torrent progress from main process
@@ -229,6 +260,54 @@ const Download: React.FC<DownloadProps> = ({ onShowDetail }) => {
     }
   }
 
+  useEffect(() => {
+    const trimmed = query.trim()
+
+    if (!trimmed) {
+      setResults([])
+      setSearching(false)
+      return
+    }
+
+    setSelectedItem(null)
+    setSources([])
+
+    const cacheKey = trimmed.toLowerCase()
+    const cached = searchCacheRef.current.get(cacheKey)
+    if (cached) {
+      setResults(cached)
+      setSearching(false)
+      return
+    }
+
+    let cancelled = false
+    setSearching(true)
+
+    const timer = window.setTimeout(async () => {
+      try {
+        const data = await window.api.searchTMDB(trimmed)
+        if (cancelled) return
+
+        const filtered = (data || [])
+          .filter((item: TMDBResult) => item.media_type === 'movie' || item.media_type === 'tv')
+          .slice(0, 12)
+
+        searchCacheRef.current.set(cacheKey, filtered)
+        setResults(filtered)
+      } catch (err) {
+        console.error('[Download] TMDB search error:', err)
+        if (!cancelled) setResults([])
+      } finally {
+        if (!cancelled) setSearching(false)
+      }
+    }, 180)
+
+    return () => {
+      cancelled = true
+      window.clearTimeout(timer)
+    }
+  }, [query])
+
   // ─── Fetch Torrent Sources ───────────────────────────────────────────────
   const handleSelectResult = async (item: TMDBResult) => {
     setSelectedItem(item)
@@ -257,6 +336,7 @@ const Download: React.FC<DownloadProps> = ({ onShowDetail }) => {
     try {
       await window.api.startTorrentDownload(source.magnet, `${title} (${source.quality})`, selectedItem?.id)
       setShowDownloads(true)
+      refreshDownloadsStorage()
     } catch (err) {
       console.error('[Download] Start download error:', err)
     }
@@ -281,6 +361,35 @@ const Download: React.FC<DownloadProps> = ({ onShowDetail }) => {
     }
   }
 
+  const handleRetryDownload = async (id: string) => {
+    setDownloads(prev => prev.map(d => d.id === id ? {
+      ...d,
+      status: 'connecting',
+      downloadSpeed: '0 B/s',
+      timeRemaining: '—',
+      errorMessage: undefined
+    } : d))
+    setShowDownloads(true)
+
+    try {
+      const success = await window.api.retryTorrentDownload(id)
+      if (!success) {
+        setDownloads(prev => prev.map(d => d.id === id ? {
+          ...d,
+          status: 'error',
+          errorMessage: 'Retry failed. Please try again.'
+        } : d))
+      }
+    } catch (err) {
+      console.error('[Download] Retry error:', err)
+      setDownloads(prev => prev.map(d => d.id === id ? {
+        ...d,
+        status: 'error',
+        errorMessage: 'Retry failed. Please try again.'
+      } : d))
+    }
+  }
+
   const handleRemoveDownload = async (id: string | null, deleteFile: boolean = false) => {
     if (!id) return
     const targetId = id
@@ -299,6 +408,7 @@ const Download: React.FC<DownloadProps> = ({ onShowDetail }) => {
         removedIdsRef.current.delete(targetId)
       } else if (deleteFile) {
         fetchVideos()
+        refreshDownloadsStorage()
       }
     } catch (err) {
       console.error('[Download] Remove error:', err)
@@ -308,6 +418,7 @@ const Download: React.FC<DownloadProps> = ({ onShowDetail }) => {
 
   const activeCount = downloads.filter(d => d.status === 'downloading').length
   const panelOpen = selectedItem !== null
+  const storageUsedPercent = Math.round(downloadsStorage?.percentUsed || 0)
 
   const availableSeasons = React.useMemo(() => {
     const seasons = new Set<number>()
@@ -329,21 +440,23 @@ const Download: React.FC<DownloadProps> = ({ onShowDetail }) => {
   }, [sources, selectedSeason])
 
   const filteredSources = React.useMemo(() => {
-    return sources.filter(s => {
-      // 1. Apply Hindi Only filter if active
-      if (hindiOnly && !s.isHindi) return false
+    return sources
+      .filter(s => {
+        // 1. Apply Hindi Only filter if active
+        if (hindiOnly && !s.isHindi) return false
 
-      // 2. TV Series specific filtering
-      if (selectedItem?.media_type !== 'tv') return true
-      if (selectedSeason === 'packs') return s.isSeasonPack
-      if (selectedSeason !== 'all') {
-        if (s.parsedSeason !== parseInt(selectedSeason) || s.isSeasonPack) return false
-        if (selectedEpisode !== 'all') {
-          if (s.parsedEpisode !== parseInt(selectedEpisode)) return false
+        // 2. TV Series specific filtering
+        if (selectedItem?.media_type !== 'tv') return true
+        if (selectedSeason === 'packs') return s.isSeasonPack
+        if (selectedSeason !== 'all') {
+          if (s.parsedSeason !== parseInt(selectedSeason) || s.isSeasonPack) return false
+          if (selectedEpisode !== 'all') {
+            if (s.parsedEpisode !== parseInt(selectedEpisode)) return false
+          }
         }
-      }
-      return true
-    })
+        return true
+      })
+      .sort((a, b) => getTorrentSourceHealthScore(b) - getTorrentSourceHealthScore(a))
   }, [sources, selectedSeason, selectedEpisode, selectedItem, hindiOnly])
 
   // Optimization: Memoize a video map for O(1) lookup during render
@@ -411,13 +524,51 @@ const Download: React.FC<DownloadProps> = ({ onShowDetail }) => {
       {/* Main Content Area */}
       <div className={`transition-all duration-300 ${panelOpen ? 'mr-[380px]' : ''}`}>
         {/* Header */}
-        <div className="flex items-center justify-between mb-6">
+        <div className="mb-6 flex flex-wrap items-start justify-between gap-4">
           <div>
             <h1 className="text-2xl font-bold mb-1">Download</h1>
             <p className="text-sm text-muted">Search and download movies & series directly.</p>
           </div>
 
-          <div className="flex items-center gap-3">
+          <div className="mt-2 flex flex-wrap items-center justify-end gap-3">
+            <button
+              onClick={refreshDownloadsStorage}
+              className="group flex min-w-[210px] items-center gap-3 rounded-xl border border-white/10 bg-white/5 px-4 py-2 text-left transition-colors hover:bg-white/10"
+              title={downloadsStorage?.path ? `Downloads storage: ${downloadsStorage.path}` : 'Refresh downloads storage'}
+            >
+              <HardDrive size={16} className="shrink-0 text-primary" />
+              <div className="min-w-0 flex-1">
+                {downloadsStorage?.error ? (
+                  <>
+                    <p className="text-xs font-semibold text-red-300">Storage unavailable</p>
+                    <p className="truncate text-[10px] text-muted/70">Click to retry</p>
+                  </>
+                ) : downloadsStorage ? (
+                  <>
+                    <div className="flex items-center justify-between gap-3">
+                      <p className="text-xs font-semibold text-text">{formatBytes(downloadsStorage.free)} free</p>
+                      <p className="text-[10px] text-muted">{formatBytes(downloadsStorage.total)} total</p>
+                    </div>
+                    <div className="mt-1 h-1 overflow-hidden rounded-full bg-white/10">
+                      <div
+                        className={`h-full rounded-full transition-[width] duration-500 ${
+                          storageUsedPercent >= 90 ? 'bg-red-400' :
+                          storageUsedPercent >= 75 ? 'bg-amber-400' :
+                          'bg-primary'
+                        }`}
+                        style={{ width: `${storageUsedPercent}%` }}
+                      />
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <p className="text-xs font-semibold text-text">Checking storage</p>
+                    <p className="text-[10px] text-muted/70">Downloads folder</p>
+                  </>
+                )}
+              </div>
+            </button>
+
             {/* Open Downloads Folder */}
             <button
               onClick={() => window.api.openDownloadsFolder()}
@@ -589,6 +740,16 @@ const Download: React.FC<DownloadProps> = ({ onShowDetail }) => {
                         </button>
                       </div>
                     )}
+                    {dl.status === 'error' && (
+                      <button
+                        onClick={() => handleRetryDownload(dl.id)}
+                        className="inline-flex items-center gap-1.5 px-2 py-1 rounded-lg text-xs font-semibold text-red-300 bg-red-400/10 hover:bg-red-400/20 hover:text-red-200 transition-colors"
+                        title="Retry this download"
+                      >
+                        <RotateCcw size={13} />
+                        Retry
+                      </button>
+                    )}
                     <button
                       id={`dl-btn-${dl.id}`}
                       onClick={() => setDownloadToRemove(dl.id)}
@@ -600,6 +761,9 @@ const Download: React.FC<DownloadProps> = ({ onShowDetail }) => {
                   </div>
                   {dl.status !== 'done' && dl.downloaded && dl.size && (
                     <p className="text-[11px] text-muted/70">{dl.downloaded} / {dl.size}</p>
+                  )}
+                  {dl.status === 'error' && dl.errorMessage && (
+                    <p className="text-[11px] text-red-300/70">{dl.errorMessage}</p>
                   )}
                 </div>
               )
@@ -787,6 +951,12 @@ const Download: React.FC<DownloadProps> = ({ onShowDetail }) => {
                               <span className="text-[10px] font-bold text-[#FF9933] bg-[#FF9933]/10 px-1.5 py-0.5 rounded border border-[#FF9933]/20">HINDI</span>
                             )}
                             <span className="text-[10px] text-muted">{source.size}</span>
+                            <span className={`text-[10px] font-bold ${
+                              getTorrentSourceSpeedLabel(source) === 'FAST' ? 'text-emerald-300' :
+                              getTorrentSourceSpeedLabel(source) === 'GOOD' ? 'text-green-400' :
+                              getTorrentSourceSpeedLabel(source) === 'OK' ? 'text-yellow-300' :
+                              'text-red-300'
+                            }`}>{getTorrentSourceSpeedLabel(source)}</span>
                             <span className="text-[10px] text-green-400/70">{source.seeds}↑</span>
                             <span className="text-[10px] text-muted/50">{source.peers}↓</span>
                           </div>

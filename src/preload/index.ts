@@ -58,6 +58,8 @@ const api = {
     ipcRenderer.invoke('remove-download', id, deleteFile),
   pauseResumeTorrent: (id: string) => 
     ipcRenderer.invoke('pause-resume-torrent', id),
+  retryTorrentDownload: (id: string) =>
+    ipcRenderer.invoke('retry-torrent-download', id),
   getActiveDownloads: () => 
     ipcRenderer.invoke('get-active-downloads'),
   onTorrentProgress: (callback: (data: any) => void) => {
@@ -69,6 +71,7 @@ const api = {
   openFolder: (filePath: string) => ipcRenderer.invoke('open-folder', filePath),
   getMediaInfo: (filePath: string) => ipcRenderer.invoke('get-media-info', filePath),
   openDownloadsFolder: () => ipcRenderer.invoke('open-downloads-folder'),
+  getDownloadsStorage: () => ipcRenderer.invoke('get-downloads-storage'),
   // OpenSubtitles API
   searchOnlineSubtitles: (params: { query?: string; tmdbId?: number; season?: number; episode?: number; languages?: string; mediaType?: string }) =>
     ipcRenderer.invoke('search-opensubtitles', params),

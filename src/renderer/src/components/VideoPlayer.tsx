@@ -250,8 +250,10 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
   const [downloadingSubId, setDownloadingSubId] = useState<number | null>(null)
   
   const previewVideoRef = useRef<HTMLVideoElement>(null)
+  const playerShellRef = useRef<HTMLDivElement>(null)
   const [hoverTime, setHoverTime] = useState<number | null>(null)
   const [hoverPosition, setHoverPosition] = useState<number>(0)
+  const [videoAspectRatio, setVideoAspectRatio] = useState(16 / 9)
 
   const [isAnyBoostEnabled, setIsAnyBoostEnabled] = useState(false)
 
@@ -726,8 +728,8 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
     }
 
     // Auto-enter fullscreen on first mount
-    if (!document.fullscreenElement && videoRef.current?.parentElement) {
-      videoRef.current.parentElement.requestFullscreen().catch(() => {})
+    if (!document.fullscreenElement && playerShellRef.current) {
+      playerShellRef.current.requestFullscreen().catch(() => {})
     }
 
     const handleFullscreenChange = () => {
@@ -776,6 +778,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
   // ── Imperative subtitle overlay (matches the working 2x Speed Toast pattern) ──
   // ─────────────────────────────────────────────────────────────────────────────
   const subtitleContainerRef = useRef<HTMLDivElement | null>(null)
+  const subtitleBottom = showControls ? '136px' : '48px'
 
   useEffect(() => {
     // Clean up existing container if it exists
@@ -792,7 +795,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
       const container = document.createElement('div')
       container.style.cssText = [
         'position:fixed',
-        'bottom:20px',
+        `bottom:${subtitleBottom}`,
         'left:0',
         'right:0',
         'display:flex',
@@ -801,7 +804,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
         'z-index:2147483647',
         'will-change:transform',
         'transition:bottom 0.3s ease',
-        showControls ? 'bottom:112px' : 'bottom:20px',
+        `bottom:${subtitleBottom}`,
       ].join(';')
 
       if (subtitleLoading) {
@@ -855,9 +858,9 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
   // Update subtitle position when controls show/hide
   useEffect(() => {
     if (subtitleContainerRef.current) {
-      subtitleContainerRef.current.style.bottom = showControls ? '112px' : '20px'
+      subtitleContainerRef.current.style.bottom = subtitleBottom
     }
-  }, [showControls])
+  }, [subtitleBottom])
 
   useEffect(() => {
     if (activeSubKey !== null && videoRef.current) {
@@ -1020,8 +1023,8 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
   }
 
   const cycleAspectRatio = () => {
-    if (videoRef.current?.parentElement && !document.fullscreenElement) {
-      videoRef.current.parentElement.requestFullscreen().catch((err) => console.log(err))
+    if (playerShellRef.current && !document.fullscreenElement) {
+      playerShellRef.current.requestFullscreen().catch((err) => console.log(err))
     }
     
     setAspectMode(prev => {
@@ -1811,9 +1814,9 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
   }
 
   const toggleFullscreen = () => {
-    if (videoRef.current?.parentElement) {
+    if (playerShellRef.current) {
       if (!document.fullscreenElement) {
-        videoRef.current.parentElement.requestFullscreen()
+        playerShellRef.current.requestFullscreen()
       } else {
         document.exitFullscreen()
       }
@@ -1899,8 +1902,28 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
     }
   ] as const
 
+  const updateVideoAspectRatio = () => {
+    const videoEl = videoRef.current
+    if (videoEl?.videoWidth && videoEl.videoHeight) {
+      setVideoAspectRatio(videoEl.videoWidth / videoEl.videoHeight)
+    }
+  }
+
+  const videoSurfaceStyle: React.CSSProperties = aspectMode === 'contain'
+    ? {
+        width: `min(100vw, calc(100vh * ${videoAspectRatio}))`,
+        height: `min(100vh, calc(100vw / ${videoAspectRatio}))`
+      }
+    : {
+        width: '100vw',
+        height: '100vh'
+      }
+
+  const videoObjectFit: React.CSSProperties['objectFit'] = aspectMode === 'cover' ? 'cover' : 'fill'
+
   return (
     <div 
+      ref={playerShellRef}
       className={`fixed inset-0 z-50 bg-black flex flex-col items-center justify-center group overflow-hidden ${!showControls ? 'cursor-none' : ''}`}
       onMouseMove={(e) => {
         setShowControls(true)
@@ -1919,19 +1942,16 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
       onPointerLeave={handlePointerUpOrLeave}
       onPointerCancel={handlePointerUpOrLeave}
     >
-      <video
-        ref={videoRef}
-        src={`media://file/${encodeURIComponent(currentVideo.file_path)}`}
-        className={`w-full h-full outline-none transition-opacity duration-200 ${showControls ? 'subs-up' : 'subs-down'} ${isAnyBoostEnabled ? 'opacity-0 pointer-events-none' : 'opacity-100'}`}
-        style={{ 
-          objectFit: aspectMode as any, 
-          clipPath: 'inset(0px)',
-          width: '100vw',
-          height: '100vh',
-          minWidth: '100%',
-          minHeight: '100%'
-        }}
-        onTimeUpdate={() => {
+      <div className="relative overflow-hidden bg-black" style={videoSurfaceStyle}>
+        <video
+          ref={videoRef}
+          src={`media://file/${encodeURIComponent(currentVideo.file_path)}`}
+          className={`h-full w-full outline-none transition-opacity duration-200 ${showControls ? 'subs-up' : 'subs-down'} ${isAnyBoostEnabled ? 'opacity-0 pointer-events-none' : 'opacity-100'}`}
+          style={{ 
+            objectFit: videoObjectFit,
+            clipPath: 'inset(0px)'
+          }}
+          onTimeUpdate={() => {
           if (!isSeeking && videoRef.current) {
             // Throttle React state to 4×/sec to reduce GC pressure on Chromium GPU pipeline
             const now = Date.now()
@@ -1986,6 +2006,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
         }}
         onLoadedMetadata={() => {
           if (videoRef.current) {
+            updateVideoAspectRatio()
             videoRef.current.playbackRate = playbackRate
             // Explicitly set volume on each new load to prevent silent starts
             videoRef.current.volume = volume
@@ -2003,30 +2024,33 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
             setAudioTracks(tracksArray)
           }
         }}
+        onLoadedData={updateVideoAspectRatio}
+        onResize={updateVideoAspectRatio}
         onError={(e) => {
           console.error('Video Error:', e)
           const error = (e.target as HTMLVideoElement).error
           console.error('Video Error Details:', error?.message, error?.code)
         }}
-        autoPlay
-      >
-      </video>
+          autoPlay
+        >
+        </video>
 
-      <FPSBoostRenderer
-              videoRef={videoRef}
-              enabled={fpsBoostEnabled}
-              aspectMode={aspectMode}
-              isPlaying={isPlaying}
-            />
+        <FPSBoostRenderer
+          videoRef={videoRef}
+          enabled={fpsBoostEnabled}
+          aspectMode={aspectMode}
+          isPlaying={isPlaying}
+        />
 
-      <QualityBoostRenderer
-              videoRef={videoRef}
-              enabled={qualitySharpnessEnabled || qualityVibranceEnabled}
-              sharpnessEnabled={qualitySharpnessEnabled}
-              vibranceEnabled={qualityVibranceEnabled}
-              aspectMode={aspectMode}
-              isPlaying={isPlaying}
-            />
+        <QualityBoostRenderer
+          videoRef={videoRef}
+          enabled={qualitySharpnessEnabled || qualityVibranceEnabled}
+          sharpnessEnabled={qualitySharpnessEnabled}
+          vibranceEnabled={qualityVibranceEnabled}
+          aspectMode={aspectMode}
+          isPlaying={isPlaying}
+        />
+      </div>
 
       <style>{`
         @keyframes seekAnim {

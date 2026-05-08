@@ -304,6 +304,8 @@ const FPSBoostRenderer: React.FC<FPSBoostRendererProps> = ({ videoRef, enabled, 
 
         syncCanvasSize(canvas);
         gl.viewport(0, 0, canvas.width, canvas.height);
+        gl.clearColor(0, 0, 0, 1);
+        gl.clear(gl.COLOR_BUFFER_BIT);
 
         gl.useProgram(program);
 
@@ -359,6 +361,8 @@ const FPSBoostRenderer: React.FC<FPSBoostRendererProps> = ({ videoRef, enabled, 
       } else if (video.readyState >= 2 && framesReceivedRef.current < 2) {
         syncCanvasSize(canvas);
         gl.viewport(0, 0, canvas.width, canvas.height);
+        gl.clearColor(0, 0, 0, 1);
+        gl.clear(gl.COLOR_BUFFER_BIT);
 
         // Just draw the current frame if we don't have enough for interpolation yet
         gl.useProgram(program);

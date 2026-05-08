@@ -10,16 +10,22 @@ interface VideoCardProps {
   isContinueWatching?: boolean
 }
 
+const getHighQualityTmdbImageUrl = (url: string) => {
+  return url.startsWith('https://image.tmdb.org/t/p/')
+    ? url.replace(/\/t\/p\/(w342|w500|w780|w1280|original)\//, '/t/p/w780/')
+    : url
+}
+
 const VideoCard: React.FC<VideoCardProps> = ({ video, onPlay, onShowDetail, isContinueWatching }) => {
   const posterUrl = video.poster_path 
     ? (video.poster_path.startsWith('http') 
-        ? video.poster_path 
+        ? getHighQualityTmdbImageUrl(video.poster_path)
         : `media://file/${encodeURIComponent(video.poster_path)}`)
     : null
 
   const backdropUrl = video.backdrop_path 
     ? (video.backdrop_path.startsWith('http') 
-        ? video.backdrop_path 
+        ? getHighQualityTmdbImageUrl(video.backdrop_path)
         : `media://file/${encodeURIComponent(video.backdrop_path)}`)
     : null
 
@@ -138,7 +144,7 @@ const VideoCard: React.FC<VideoCardProps> = ({ video, onPlay, onShowDetail, isCo
 
         <div className="absolute inset-0 flex flex-col justify-end bg-gradient-to-t from-black via-black/75 to-black/10 p-3 opacity-0 transition-opacity duration-300 group-hover:opacity-100 group-focus-visible:opacity-100">
           <div className="mb-auto flex items-start justify-between gap-2">
-            {video.isExternal ? (
+            {video.isExternal && !video.is_watchlist ? (
               <span className="rounded-md border border-red-500/30 bg-red-600/25 px-2 py-1 text-[8px] font-black uppercase tracking-widest text-white backdrop-blur-md">
                 Trending
               </span>

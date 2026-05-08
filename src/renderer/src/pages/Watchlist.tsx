@@ -7,6 +7,7 @@ import { Bookmark, BookmarkCheck, Film, Loader2, Search, Tv, X } from 'lucide-re
 interface WatchlistProps {
   onPlay: (video: Video) => void
   onShowDetail: (video: Video) => void
+  refreshKey?: number
 }
 
 interface TMDBResult {
@@ -24,7 +25,7 @@ interface TMDBResult {
 
 const TMDB_IMG = 'https://image.tmdb.org/t/p'
 
-const Watchlist: React.FC<WatchlistProps> = ({ onPlay, onShowDetail }) => {
+const Watchlist: React.FC<WatchlistProps> = ({ onPlay, onShowDetail, refreshKey = 0 }) => {
   const [items, setItems] = useState<Video[]>([])
   const [loading, setLoading] = useState(true)
   const [query, setQuery] = useState('')
@@ -35,6 +36,7 @@ const Watchlist: React.FC<WatchlistProps> = ({ onPlay, onShowDetail }) => {
   const [newCategoryName, setNewCategoryName] = useState('')
   const [isCreatingCategory, setIsCreatingCategory] = useState(false)
   const isInitialLoad = useRef(true)
+  const searchCacheRef = useRef<Map<string, TMDBResult[]>>(new Map())
 
   const fetchWatchlist = async () => {
     if (isInitialLoad.current) {
@@ -69,7 +71,7 @@ const Watchlist: React.FC<WatchlistProps> = ({ onPlay, onShowDetail }) => {
       title,
       file_path: '',
       type,
-      poster_path: item.poster_path ? `${TMDB_IMG}/w500${item.poster_path}` : undefined,
+      poster_path: item.poster_path ? `${TMDB_IMG}/w780${item.poster_path}` : undefined,
       backdrop_path: item.backdrop_path ? `${TMDB_IMG}/w1280${item.backdrop_path}` : undefined,
       overview: item.overview,
       vote_average: item.vote_average,
@@ -95,6 +97,51 @@ const Watchlist: React.FC<WatchlistProps> = ({ onPlay, onShowDetail }) => {
       setSearching(false)
     }
   }
+
+  useEffect(() => {
+    const trimmed = query.trim()
+
+    if (!trimmed) {
+      setResults([])
+      setSearching(false)
+      return
+    }
+
+    const cacheKey = trimmed.toLowerCase()
+    const cached = searchCacheRef.current.get(cacheKey)
+    if (cached) {
+      setResults(cached)
+      setSearching(false)
+      return
+    }
+
+    let cancelled = false
+    setSearching(true)
+
+    const timer = window.setTimeout(async () => {
+      try {
+        const data = await window.api.searchTMDB(trimmed)
+        if (cancelled) return
+
+        const filtered = (data || [])
+          .filter((item: TMDBResult) => item.media_type === 'movie' || item.media_type === 'tv')
+          .slice(0, 12)
+
+        searchCacheRef.current.set(cacheKey, filtered)
+        setResults(filtered)
+      } catch (err) {
+        console.error('[Watchlist] TMDB search error:', err)
+        if (!cancelled) setResults([])
+      } finally {
+        if (!cancelled) setSearching(false)
+      }
+    }, 180)
+
+    return () => {
+      cancelled = true
+      window.clearTimeout(timer)
+    }
+  }, [query])
 
   const clearSearch = () => {
     setQuery('')
@@ -129,6 +176,11 @@ const Watchlist: React.FC<WatchlistProps> = ({ onPlay, onShowDetail }) => {
     window.api.onLibraryUpdated(fetchWatchlist)
     return () => window.api.removeAllLibraryUpdateListeners()
   }, [])
+
+  useEffect(() => {
+    if (isInitialLoad.current) return
+    fetchWatchlist()
+  }, [refreshKey])
 
   return (
     <div className="space-y-10">
@@ -197,7 +249,7 @@ const Watchlist: React.FC<WatchlistProps> = ({ onPlay, onShowDetail }) => {
                   <div className="relative aspect-[2/3] w-full rounded-2xl overflow-hidden bg-secondary shadow-lg ring-1 ring-white/5 group-hover:ring-primary/50 transition-all duration-300 group-hover:-translate-y-1">
                     {item.poster_path ? (
                       <img
-                        src={`${TMDB_IMG}/w342${item.poster_path}`}
+                        src={`${TMDB_IMG}/w500${item.poster_path}`}
                         alt={item.title || item.name}
                         className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-105"
                         loading="lazy"

@@ -34,7 +34,7 @@ const mapTmdbSearchResult = (item: any): Video => {
     file_path: '',
     type: isSeries ? 'series' : 'movie',
     series_name: isSeries ? title : undefined,
-    poster_path: getTmdbImageUrl(item.poster_path, 'w500') || undefined,
+    poster_path: getTmdbImageUrl(item.poster_path, 'w780') || undefined,
     backdrop_path: getTmdbImageUrl(item.backdrop_path, 'w1280') || undefined,
     overview: item.overview || undefined,
     vote_average: typeof item.vote_average === 'number' ? item.vote_average : undefined,
@@ -122,6 +122,11 @@ const ContinueWatchingCard: React.FC<{
       <div className="absolute inset-x-0 bottom-0 h-1.5 bg-white/20">
         <div className="h-full bg-red-600" style={{ width: `${progressPercent}%` }} />
       </div>
+      {remainingTime && (
+        <span className="absolute right-5 top-5 rounded-md bg-black/55 px-2 py-1 text-[10px] font-black uppercase tracking-wider text-white shadow-lg shadow-black/30 backdrop-blur-md">
+          {remainingTime}
+        </span>
+      )}
       <div className="absolute inset-0 flex flex-col justify-end p-5">
         <div className="mb-auto flex items-start justify-between gap-3">
           {episodeLabel && (
@@ -129,18 +134,12 @@ const ContinueWatchingCard: React.FC<{
               {episodeLabel}
             </div>
           )}
-          {remainingTime && <span className="rounded-md bg-white/15 px-2 py-1 text-[10px] font-black uppercase tracking-wider text-white backdrop-blur-sm">{remainingTime}</span>}
         </div>
 
         <div className="space-y-2">
           <h4 className="line-clamp-1 text-lg font-black italic tracking-tight text-white drop-shadow-[0_2px_12px_rgba(0,0,0,0.9)]">
             {title}
           </h4>
-          {episodeLabel && video.title && video.title !== title && (
-            <p className="line-clamp-1 text-[11px] font-black uppercase tracking-wider text-red-100/85">
-              {video.title}
-            </p>
-          )}
           {tagline && (
             <p className="line-clamp-1 text-xs font-medium leading-snug text-white/65 transition-all duration-300 group-hover:line-clamp-2 group-hover:text-white/75">
               {tagline}

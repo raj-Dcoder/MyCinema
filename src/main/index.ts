@@ -764,7 +764,6 @@ app.whenReady().then(() => {
   registerSubtitleProtocol()
   registerAudioProtocol()
   setupYoutubeEmbedHeaders()
-  
   db.initDb()
   electronApp.setAppUserModelId('com.electron')
 
@@ -1227,6 +1226,36 @@ ipcMain.handle('open-downloads-folder', () => {
   shell.openPath(dlPath)
 })
 
+ipcMain.handle('get-downloads-storage', async () => {
+  const dlPath = path.join(app.getPath('downloads'), 'MyCinema')
+  try {
+    if (!fs.existsSync(dlPath)) fs.mkdirSync(dlPath, { recursive: true })
+    const stats = await fs.promises.statfs(dlPath)
+    const blockSize = Number(stats.bsize || 0)
+    const total = Number(stats.blocks || 0) * blockSize
+    const free = Number((stats as any).bavail ?? stats.bfree ?? 0) * blockSize
+    const used = Math.max(0, total - free)
+
+    return {
+      path: dlPath,
+      free,
+      total,
+      used,
+      percentUsed: total > 0 ? Math.min(100, Math.max(0, (used / total) * 100)) : 0
+    }
+  } catch (err: any) {
+    console.error('[Storage] Failed to read downloads storage:', err?.message || err)
+    return {
+      path: dlPath,
+      free: 0,
+      total: 0,
+      used: 0,
+      percentUsed: 0,
+      error: err?.message || 'Unable to read storage'
+    }
+  }
+})
+
 // ─── Get Media Info via ffprobe ───────────────────────────────────────────────
 ipcMain.handle('get-media-info', (_event, filePath: string): Promise<any> => {
   return new Promise((resolve) => {
@@ -1452,8 +1481,8 @@ async function getWebTorrentClient(): Promise<any> {
       dht: true,
       // Privacy: LSD disabled by default
       lsd: false,
-      // Reduced from 1000: extreme connection counts can crash home routers
-      maxConns: 200,
+      // Keep enough peers for healthy swarms without pushing most home routers too hard.
+      maxConns: 350,
     })
     
     webtorrentClient.on('error', (err: Error) => {
@@ -1668,11 +1697,6 @@ function isHindiContent(title: string): boolean {
     lower.includes('हिंदी') ||
     lower.includes('audio:hindi') ||
     lower.includes('audio hindi') ||
-    lower.includes('dual audio') ||
-    lower.includes('dual-audio') ||
-    lower.includes('multi audio') ||
-    lower.includes('multi-audio') ||
-    lower.includes('dubbed') ||
     lower.includes('hin-eng') ||
     lower.includes('katmoviehd') ||
     lower.includes('katmovieshd') ||
@@ -1735,9 +1759,7 @@ function getHindiScore(title: string): number {
   }
 
   if (lower.includes('hindi')) score += 20
-  if (lower.includes('dual audio') || lower.includes('dual-audio')) score += 15
-  if (lower.includes('multi audio') || lower.includes('multi-audio')) score += 15
-  if (lower.includes('dubbed')) score += 10
+  if (/\bhin(di?)?\b/i.test(lower) || lower.includes('hin-eng')) score += 20
   if (lower.includes('official')) score += 10
   if (lower.includes('1080p')) score += 5
   if (lower.includes('2160p') || lower.includes('4k')) score += 15
@@ -1785,6 +1807,7 @@ function parseTorrentioStream(stream: any, fallbackTitle: string): any | null {
 // ─── Shared Tracker List & Magnet Enrichment ─────────────────────────────────
 const EXTRA_TRACKERS = [
   'udp://tracker.opentrackr.org:1337/announce',
+  'udp://open.demonii.com:1337/announce',
   'udp://open.stealth.si:80/announce',
   'udp://tracker.torrent.eu.org:451/announce',
   'udp://exodus.desync.com:6969/announce',
@@ -1794,6 +1817,12 @@ const EXTRA_TRACKERS = [
   'udp://9.rarbg.com:2810/announce',
   'udp://p4p.arenabg.com:1337',
   'udp://open.tracker.cl:1337/announce',
+  'udp://tracker.tryhackx.org:6969/announce',
+  'udp://tracker-udp.gbitt.info:80/announce',
+  'udp://uploads.gamecoast.net:6969/announce',
+  'https://tracker.gbitt.info/announce',
+  'https://tracker.bt4g.com:443/announce',
+  'https://tracker.nanoha.org/announce',
   'wss://tracker.openwebtorrent.com',
   'wss://tracker.btorrent.xyz',
 ]
@@ -2303,7 +2332,10 @@ ipcMain.handle('search-torrent-sources', async (_, title: string, year: string, 
       const hash = match ? match[1].toLowerCase() : src.magnet
       if (!seenHashes.has(hash)) {
         seenHashes.add(hash)
-        uniqueSources.push(src)
+        uniqueSources.push({
+          ...src,
+          magnet: enrichMagnetWithTrackers(src.magnet)
+        })
       }
     }
 
@@ -2319,13 +2351,14 @@ ipcMain.handle('search-torrent-sources', async (_, title: string, year: string, 
 async function startWebTorrent(torrentId: string, magnetUrl: string, title: string, initialProgress: number = 0) {
   const client = await getWebTorrentClient()
   const downloadPath = getDownloadPath()
+  const enrichedMagnetUrl = enrichMagnetWithTrackers(magnetUrl)
 
   console.log(`[Torrent] Starting download: "${title}" -> ${downloadPath}`)
-  console.log(`[Torrent] Magnet: ${magnetUrl.slice(0, 80)}...`)
+  console.log(`[Torrent] Magnet: ${enrichedMagnetUrl.slice(0, 80)}...`)
 
   broadcastProgress(torrentId, { downloadSpeed: 0, timeRemaining: 0, length: 0, downloaded: 0, progress: initialProgress / 100, name: title } as any, 'downloading')
 
-  const torrent = client.add(magnetUrl, { 
+  const torrent = client.add(enrichedMagnetUrl, { 
     path: downloadPath,
     announce: EXTRA_TRACKERS
   })
@@ -2371,6 +2404,9 @@ async function startWebTorrent(torrentId: string, magnetUrl: string, title: stri
     clearInterval(progressInterval)
     broadcastProgress(torrentId, torrent, 'error', err.message)
     console.error(`[Torrent] Error: ${err.message}`)
+    if (!torrent.destroyed) {
+      torrent.destroy()
+    }
     activeTorrents.delete(torrentId)
   })
 
@@ -2394,16 +2430,17 @@ async function autoResumeDownloads() {
 ipcMain.handle('start-torrent-download', async (_, magnetUrl: string, title: string, tmdbId?: number) => {
   try {
     const torrentId = crypto.randomUUID()
+    const enrichedMagnetUrl = enrichMagnetWithTrackers(magnetUrl)
     
     db.addDownload({
       id: torrentId,
       title,
-      magnet: magnetUrl,
+      magnet: enrichedMagnetUrl,
       status: 'downloading',
       tmdbId
     })
 
-    await startWebTorrent(torrentId, magnetUrl, title, 0)
+    await startWebTorrent(torrentId, enrichedMagnetUrl, title, 0)
     return torrentId
   } catch (err) {
     console.error('[Torrent] Start download error:', err)
@@ -2491,6 +2528,44 @@ ipcMain.handle('pause-resume-torrent', async (_, id: string) => {
     return true
   } catch (err) {
     console.error('[Torrent] Pause/Resume error:', err)
+    return false
+  }
+})
+
+// ─── IPC: Retry Failed Torrent ────────────────────────────────────────────────
+ipcMain.handle('retry-torrent-download', async (_, id: string) => {
+  try {
+    const dbDl = db.getDownloads().find((d: any) => d.id === id)
+    if (!dbDl) return false
+
+    const existingTorrent = activeTorrents.get(id)
+    if (existingTorrent && !existingTorrent.destroyed) {
+      existingTorrent.destroy()
+      activeTorrents.delete(id)
+    }
+
+    try {
+      const client = await getWebTorrentClient()
+      const duplicateTorrent = typeof client.get === 'function' ? client.get(dbDl.magnet) : null
+      if (duplicateTorrent && !duplicateTorrent.destroyed) {
+        await destroyTorrentForDelete(duplicateTorrent)
+      }
+    } catch (err: any) {
+      console.warn('[Torrent] Could not clear previous failed torrent before retry:', err.message)
+    }
+
+    db.updateDownload({
+      ...dbDl,
+      downloadSpeed: '0 B/s',
+      timeRemaining: '—',
+      status: 'connecting',
+      errorMessage: null
+    })
+
+    await startWebTorrent(id, dbDl.magnet, dbDl.title, dbDl.progress || 0)
+    return true
+  } catch (err) {
+    console.error('[Torrent] Retry error:', err)
     return false
   }
 })

@@ -93,6 +93,14 @@ const FPSBoostRenderer: React.FC<FPSBoostRendererProps> = ({ videoRef, enabled, 
   const texCoordBufferRef = useRef<WebGLBuffer | null>(null);
   const textureSizeRef = useRef<{ width: number; height: number }>({ width: 0, height: 0 });
   const framesReceivedRef = useRef<number>(0);
+  const renderStatusRef = useRef(false);
+  const [isRendering, setIsRendering] = useState(false);
+
+  const setRenderStatus = (nextStatus: boolean) => {
+    if (renderStatusRef.current === nextStatus) return;
+    renderStatusRef.current = nextStatus;
+    setIsRendering(nextStatus);
+  };
 
   // FPS Tracking
   const [fps, setFps] = useState<number>(0);
@@ -131,7 +139,10 @@ const FPSBoostRenderer: React.FC<FPSBoostRendererProps> = ({ videoRef, enabled, 
       antialias: false,
       powerPreference: 'high-performance'
     });
-    if (!gl) return;
+    if (!gl) {
+      setRenderStatus(false);
+      return;
+    }
     glRef.current = gl;
 
     // Create program
@@ -194,6 +205,7 @@ const FPSBoostRenderer: React.FC<FPSBoostRendererProps> = ({ videoRef, enabled, 
     texturesRef.current = [t0, t1];
 
     return () => {
+      setRenderStatus(false);
       if (glRef.current) {
         const gl = glRef.current;
         texturesRef.current.forEach(t => gl.deleteTexture(t));
@@ -205,7 +217,10 @@ const FPSBoostRenderer: React.FC<FPSBoostRendererProps> = ({ videoRef, enabled, 
   }, [videoRef]);
 
   useEffect(() => {
-    if (!enabled || !glRef.current || !programRef.current) return;
+    if (!enabled || !glRef.current || !programRef.current) {
+      setRenderStatus(false);
+      return;
+    }
 
     const canvas = canvasRef.current!;
     const gl = glRef.current;
@@ -215,6 +230,7 @@ const FPSBoostRenderer: React.FC<FPSBoostRendererProps> = ({ videoRef, enabled, 
       const video = videoRef.current;
       if (!video || !glRef.current || !enabled) {
         rvfcRef.current = undefined;
+        setRenderStatus(false);
         return;
       }
       
@@ -247,19 +263,25 @@ const FPSBoostRenderer: React.FC<FPSBoostRendererProps> = ({ videoRef, enabled, 
       gl.bindTexture(gl.TEXTURE_2D, texturesRef.current[0]);
       
       // Use texSubImage2D if texture size is already established for better performance
-      if (textureSizeRef.current.width !== video.videoWidth || textureSizeRef.current.height !== video.videoHeight) {
-        // Allocate both textures first correctly
-        gl.bindTexture(gl.TEXTURE_2D, texturesRef.current[0]);
-        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, video.videoWidth, video.videoHeight, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
-        gl.bindTexture(gl.TEXTURE_2D, texturesRef.current[1]);
-        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, video.videoWidth, video.videoHeight, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
-        
-        textureSizeRef.current = { width: video.videoWidth, height: video.videoHeight };
-        
-        // Rebind current texture
-        gl.bindTexture(gl.TEXTURE_2D, texturesRef.current[0]);
+      try {
+        if (textureSizeRef.current.width !== video.videoWidth || textureSizeRef.current.height !== video.videoHeight) {
+          // Allocate both textures first correctly
+          gl.bindTexture(gl.TEXTURE_2D, texturesRef.current[0]);
+          gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, video.videoWidth, video.videoHeight, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+          gl.bindTexture(gl.TEXTURE_2D, texturesRef.current[1]);
+          gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, video.videoWidth, video.videoHeight, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+          
+          textureSizeRef.current = { width: video.videoWidth, height: video.videoHeight };
+          
+          // Rebind current texture
+          gl.bindTexture(gl.TEXTURE_2D, texturesRef.current[0]);
+        }
+        gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, gl.RGBA, gl.UNSIGNED_BYTE, video);
+      } catch (err) {
+        console.warn('[FPS Boost] Falling back to native video; frame upload failed:', err);
+        setRenderStatus(false);
+        return;
       }
-      gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, gl.RGBA, gl.UNSIGNED_BYTE, video);
       
       lastTimeRef.current = currentTime;
       lastFrameTimeRef.current = frameTime;
@@ -280,7 +302,10 @@ const FPSBoostRenderer: React.FC<FPSBoostRendererProps> = ({ videoRef, enabled, 
     video.addEventListener('play', resetFrames);
 
     const render = (now: number) => {
-      if (!videoRef.current || !glRef.current || !enabled) return;
+      if (!videoRef.current || !glRef.current || !enabled) {
+        setRenderStatus(false);
+        return;
+      }
 
       const video = videoRef.current;
       const gl = glRef.current;
@@ -357,7 +382,13 @@ const FPSBoostRenderer: React.FC<FPSBoostRendererProps> = ({ videoRef, enabled, 
         gl.activeTexture(gl.TEXTURE1);
         gl.bindTexture(gl.TEXTURE_2D, texturesRef.current[1]);
 
-        gl.drawArrays(gl.TRIANGLES, 0, 6);
+        try {
+          gl.drawArrays(gl.TRIANGLES, 0, 6);
+          setRenderStatus(true);
+        } catch (err) {
+          console.warn('[FPS Boost] Falling back to native video; draw failed:', err);
+          setRenderStatus(false);
+        }
       } else if (video.readyState >= 2 && framesReceivedRef.current < 2) {
         syncCanvasSize(canvas);
         gl.viewport(0, 0, canvas.width, canvas.height);
@@ -385,7 +416,13 @@ const FPSBoostRenderer: React.FC<FPSBoostRendererProps> = ({ videoRef, enabled, 
 
         gl.activeTexture(gl.TEXTURE0);
         gl.bindTexture(gl.TEXTURE_2D, texturesRef.current[0]);
-        gl.drawArrays(gl.TRIANGLES, 0, 6);
+        try {
+          gl.drawArrays(gl.TRIANGLES, 0, 6);
+          setRenderStatus(true);
+        } catch (err) {
+          console.warn('[FPS Boost] Falling back to native video; draw failed:', err);
+          setRenderStatus(false);
+        }
       }
 
       requestRef.current = requestAnimationFrame(render);
@@ -397,6 +434,7 @@ const FPSBoostRenderer: React.FC<FPSBoostRendererProps> = ({ videoRef, enabled, 
     requestRef.current = requestAnimationFrame(render);
 
     return () => {
+      setRenderStatus(false);
       if (requestRef.current) cancelAnimationFrame(requestRef.current);
       if (rvfcRef.current && videoRef.current && 'cancelVideoFrameCallback' in videoRef.current) {
         (videoRef.current as any).cancelVideoFrameCallback(rvfcRef.current);
@@ -413,7 +451,7 @@ const FPSBoostRenderer: React.FC<FPSBoostRendererProps> = ({ videoRef, enabled, 
       <canvas
         ref={canvasRef}
         className={`absolute inset-0 w-full h-full ${
-          enabled ? 'opacity-100' : 'opacity-0'
+          enabled && isRendering ? 'opacity-100' : 'opacity-0'
         }`}
         style={{
           width: '100%',

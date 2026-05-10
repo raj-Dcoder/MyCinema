@@ -1,3 +1,29 @@
+# MyCinema v1.21.0
+
+Feature release focused on faster source discovery, a warmer home startup, and more reliable playback controls.
+
+### Source Discovery
+- **Progressive Source Search**: Download and detail-page source panels now update as providers finish instead of waiting for every torrent source to complete.
+- **Broader Provider Coverage**: Source search now checks YTS or EZTV, Torrentio, MediaFusion, KnightCrawler, 1337x, APIBay, SolidTorrents, and Bitsearch with shared filtering and de-duplication.
+- **Cached Source Results**: Recent source results can appear immediately while the app refreshes providers in the background.
+
+### Home & Discovery
+- **Instant Home Snapshot**: Home restores the last populated continue-watching, recent, trending, and featured rows from local storage while fresh data loads.
+- **Scrollable Trending Rails**: Trending This Week and Trending in India now use horizontal rails so more titles remain browsable without crowding the page.
+- **Stronger India Trending**: India discovery now mixes watchable movies and series, regional signals, daily trending, title logos, and stale cache fallback.
+
+### Playback & Downloads
+- **Safer Boost Rendering**: FPS and quality boost canvases only take over when they are actively rendering, so native video remains visible on render failures.
+- **Cleaner Audio Track Startup**: Embedded audio loading waits for video metadata and keeps native and external tracks labeled more consistently.
+- **Better Download Names**: Downloads preserve the selected source title, display added-time ordering, and show paused or pending states more clearly.
+
+### Security & Privacy
+- **Scoped IPC Listeners**: Library and torrent-source progress listeners now return cleanup callbacks so pages can unsubscribe without clearing unrelated listeners.
+- **Network Timeout Guardrails**: TMDB and torrent provider requests use explicit timeouts and fallback paths, reducing stuck network work without exposing secrets.
+- **Safer Media Ranges**: Local media range requests now reject invalid byte ranges with a proper 416 response instead of attempting unsafe reads.
+
+***
+
 # MyCinema v1.20.0
 
 Feature release focused on more resilient downloads, better source picking, watchlist category flow, and cleaner fullscreen playback.
@@ -38,7 +64,7 @@ Patch release focused on Watch Together stability and lower TMDB usage on app la
 - **Safer Player Interaction**: Watch party controls now stay isolated from the player click handler that closes other player popups.
 
 ### Home Discovery
-- **Persistent TMDB Cache**: Trending movies, trending series, India OTT rows, and India OTT provider IDs now cache to disk for 6 hours.
+- **Persistent TMDB Cache**: Trending movies, trending series, India OTT rows, and India OTT provider IDs now cache to disk for 12 hours.
 - **Lower Startup Traffic**: Reopening MyCinema from the shortcut reuses fresh cached TMDB lists instead of refetching them every launch.
 
 ### Security & Privacy

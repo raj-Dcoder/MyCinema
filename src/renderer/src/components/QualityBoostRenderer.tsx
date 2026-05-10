@@ -92,6 +92,14 @@ const QualityBoostRenderer: React.FC<QualityBoostRendererProps> = ({ videoRef, e
   const positionBufferRef = useRef<WebGLBuffer | null>(null);
   const texCoordBufferRef = useRef<WebGLBuffer | null>(null);
   const textureSizeRef = useRef<{ width: number; height: number }>({ width: 0, height: 0 });
+  const renderStatusRef = useRef(false);
+  const [isRendering, setIsRendering] = useState(false);
+
+  const setRenderStatus = (nextStatus: boolean) => {
+    if (renderStatusRef.current === nextStatus) return;
+    renderStatusRef.current = nextStatus;
+    setIsRendering(nextStatus);
+  };
 
   const VS_SOURCE = `
     attribute vec2 a_position;
@@ -170,7 +178,10 @@ const QualityBoostRenderer: React.FC<QualityBoostRendererProps> = ({ videoRef, e
       antialias: false,
       powerPreference: 'high-performance'
     });
-    if (!gl) return;
+    if (!gl) {
+      setRenderStatus(false);
+      return;
+    }
     glRef.current = gl;
 
     // Create shaders
@@ -226,6 +237,7 @@ const QualityBoostRenderer: React.FC<QualityBoostRendererProps> = ({ videoRef, e
     textureRef.current = texture;
 
     return () => {
+      setRenderStatus(false);
       if (glRef.current) {
         const gl = glRef.current;
         if (textureRef.current) gl.deleteTexture(textureRef.current);
@@ -237,7 +249,10 @@ const QualityBoostRenderer: React.FC<QualityBoostRendererProps> = ({ videoRef, e
   }, [videoRef]);
 
   useEffect(() => {
-    if (!glRef.current || !programRef.current) return;
+    if (!glRef.current || !programRef.current) {
+      setRenderStatus(false);
+      return;
+    }
 
     const canvas = canvasRef.current!;
     const gl = glRef.current;
@@ -251,11 +266,13 @@ const QualityBoostRenderer: React.FC<QualityBoostRendererProps> = ({ videoRef, e
           glRef.current.clearColor(0, 0, 0, 0);
           glRef.current.clear(glRef.current.COLOR_BUFFER_BIT);
         }
+        setRenderStatus(false);
         requestRef.current = undefined;
         return;
       }
 
       if (!videoRef.current || !glRef.current) {
+        setRenderStatus(false);
         requestRef.current = requestAnimationFrame(render);
         return;
       }
@@ -264,48 +281,56 @@ const QualityBoostRenderer: React.FC<QualityBoostRendererProps> = ({ videoRef, e
       const gl = glRef.current;
       
       if (video.readyState >= 2) {
-        syncCanvasSize(canvas);
-        gl.viewport(0, 0, canvas.width, canvas.height);
-        gl.clearColor(0, 0, 0, 1);
-        gl.clear(gl.COLOR_BUFFER_BIT);
+        try {
+          syncCanvasSize(canvas);
+          gl.viewport(0, 0, canvas.width, canvas.height);
+          gl.clearColor(0, 0, 0, 1);
+          gl.clear(gl.COLOR_BUFFER_BIT);
 
-        gl.useProgram(program);
+          gl.useProgram(program);
 
-        const geometry = getAspectGeometry(video, canvas, aspectMode);
-        gl.bindBuffer(gl.ARRAY_BUFFER, positionBufferRef.current);
-        gl.bufferData(gl.ARRAY_BUFFER, geometry.positions, gl.DYNAMIC_DRAW);
-        gl.bindBuffer(gl.ARRAY_BUFFER, texCoordBufferRef.current);
-        gl.bufferData(gl.ARRAY_BUFFER, geometry.texCoords, gl.DYNAMIC_DRAW);
+          const geometry = getAspectGeometry(video, canvas, aspectMode);
+          gl.bindBuffer(gl.ARRAY_BUFFER, positionBufferRef.current);
+          gl.bufferData(gl.ARRAY_BUFFER, geometry.positions, gl.DYNAMIC_DRAW);
+          gl.bindBuffer(gl.ARRAY_BUFFER, texCoordBufferRef.current);
+          gl.bufferData(gl.ARRAY_BUFFER, geometry.texCoords, gl.DYNAMIC_DRAW);
 
-        // Position attribute
-        gl.enableVertexAttribArray(locations.position);
-        gl.bindBuffer(gl.ARRAY_BUFFER, positionBufferRef.current);
-        gl.vertexAttribPointer(locations.position, 2, gl.FLOAT, false, 0, 0);
+          // Position attribute
+          gl.enableVertexAttribArray(locations.position);
+          gl.bindBuffer(gl.ARRAY_BUFFER, positionBufferRef.current);
+          gl.vertexAttribPointer(locations.position, 2, gl.FLOAT, false, 0, 0);
 
-        // TexCoord attribute
-        gl.enableVertexAttribArray(locations.texCoord);
-        gl.bindBuffer(gl.ARRAY_BUFFER, texCoordBufferRef.current);
-        gl.vertexAttribPointer(locations.texCoord, 2, gl.FLOAT, false, 0, 0);
+          // TexCoord attribute
+          gl.enableVertexAttribArray(locations.texCoord);
+          gl.bindBuffer(gl.ARRAY_BUFFER, texCoordBufferRef.current);
+          gl.vertexAttribPointer(locations.texCoord, 2, gl.FLOAT, false, 0, 0);
 
-        // Resolution uniform
-        gl.uniform2f(locations.uResolution, video.videoWidth || canvas.width, video.videoHeight || canvas.height);
-        gl.uniform1f(locations.uSharpenAmount, sharpnessEnabled ? 0.35 : 0.0);
-        gl.uniform1f(locations.uVibranceAmount, vibranceEnabled ? 0.25 : 0.0);
+          // Resolution uniform
+          gl.uniform2f(locations.uResolution, video.videoWidth || canvas.width, video.videoHeight || canvas.height);
+          gl.uniform1f(locations.uSharpenAmount, sharpnessEnabled ? 0.35 : 0.0);
+          gl.uniform1f(locations.uVibranceAmount, vibranceEnabled ? 0.25 : 0.0);
 
-        // Update texture with video frame
-        gl.activeTexture(gl.TEXTURE0);
-        gl.bindTexture(gl.TEXTURE_2D, textureRef.current);
-        
-        if (textureSizeRef.current.width === video.videoWidth && textureSizeRef.current.height === video.videoHeight) {
-          gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, gl.RGBA, gl.UNSIGNED_BYTE, video);
-        } else {
-          gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, video);
-          textureSizeRef.current = { width: video.videoWidth, height: video.videoHeight };
+          // Update texture with video frame
+          gl.activeTexture(gl.TEXTURE0);
+          gl.bindTexture(gl.TEXTURE_2D, textureRef.current);
+          
+          if (textureSizeRef.current.width === video.videoWidth && textureSizeRef.current.height === video.videoHeight) {
+            gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, gl.RGBA, gl.UNSIGNED_BYTE, video);
+          } else {
+            gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, video);
+            textureSizeRef.current = { width: video.videoWidth, height: video.videoHeight };
+          }
+          
+          gl.uniform1i(locations.uImage, 0);
+
+          gl.drawArrays(gl.TRIANGLES, 0, 6);
+          setRenderStatus(true);
+        } catch (err) {
+          console.warn('[Quality Boost] Falling back to native video; frame render failed:', err);
+          setRenderStatus(false);
         }
-        
-        gl.uniform1i(locations.uImage, 0);
-
-        gl.drawArrays(gl.TRIANGLES, 0, 6);
+      } else {
+        setRenderStatus(false);
       }
 
       requestRef.current = requestAnimationFrame(render);
@@ -314,6 +339,7 @@ const QualityBoostRenderer: React.FC<QualityBoostRendererProps> = ({ videoRef, e
     requestRef.current = requestAnimationFrame(render);
 
     return () => {
+      setRenderStatus(false);
       if (requestRef.current) cancelAnimationFrame(requestRef.current);
     };
   }, [enabled, sharpnessEnabled, vibranceEnabled, videoRef, isPlaying, aspectMode]);
@@ -323,7 +349,7 @@ const QualityBoostRenderer: React.FC<QualityBoostRendererProps> = ({ videoRef, e
       <canvas
         ref={canvasRef}
         className={`absolute inset-0 w-full h-full ${
-          enabled ? 'opacity-100' : 'opacity-0'
+          enabled && isRendering ? 'opacity-100' : 'opacity-0'
         }`}
         style={{
           width: '100%',

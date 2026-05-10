@@ -578,7 +578,8 @@ export function getDownloads() {
     size: row.size,
     downloaded: row.downloaded,
     tmdbId: row.tmdb_id,
-    errorMessage: row.error_message
+    errorMessage: row.error_message,
+    addedAt: row.added_at
   }))
 }
 

@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef, useCallback } from 'react'
 import { Video } from '../types'
 import VideoCard from '../components/VideoCard'
 import HeroCarousel from '../components/HeroCarousel'
+import HorizontalScrollRow from '../components/HorizontalScrollRow'
 import { groupSeriesCards } from '../utils/seriesCards'
 import { Search as SearchIcon, Bell, Bookmark, ChevronLeft, ChevronRight, Play, X, Loader2, Star, Film, Tv } from 'lucide-react'
 
@@ -10,6 +11,67 @@ interface HomeProps {
   onShowDetail: (video: Video) => void
   onNavigate: (tab: 'movies' | 'series' | 'history') => void
   refreshKey: number
+}
+
+const TRENDING_HERO_LIMIT = 10
+const POSTER_RAIL_CARD_CLASS = 'basis-[calc((100%_-_1.25rem)/2)] flex-shrink-0 md:basis-[calc((100%_-_3.75rem)/4)] lg:basis-[calc((100%_-_6.25rem)/6)]'
+const HOME_SNAPSHOT_STORAGE_KEY = 'mycinema_home_snapshot_v2'
+
+type HomeSnapshot = {
+  continueWatching: Video[]
+  recentMovies: Video[]
+  recentSeries: Video[]
+  trendingMovies: Video[]
+  trendingSeries: Video[]
+  trendingIndia: Video[]
+  featured: Video[]
+  timestamp: number
+}
+
+const readHomeSnapshot = (): HomeSnapshot | null => {
+  try {
+    const raw = localStorage.getItem(HOME_SNAPSHOT_STORAGE_KEY)
+    if (!raw) return null
+
+    const parsed = JSON.parse(raw) as Partial<HomeSnapshot>
+    if (!parsed || typeof parsed !== 'object') return null
+
+    return {
+      continueWatching: Array.isArray(parsed.continueWatching) ? parsed.continueWatching : [],
+      recentMovies: Array.isArray(parsed.recentMovies) ? parsed.recentMovies : [],
+      recentSeries: Array.isArray(parsed.recentSeries) ? parsed.recentSeries : [],
+      trendingMovies: Array.isArray(parsed.trendingMovies) ? parsed.trendingMovies : [],
+      trendingSeries: Array.isArray(parsed.trendingSeries) ? parsed.trendingSeries : [],
+      trendingIndia: Array.isArray(parsed.trendingIndia) ? parsed.trendingIndia : [],
+      featured: Array.isArray(parsed.featured) ? parsed.featured : [],
+      timestamp: typeof parsed.timestamp === 'number' ? parsed.timestamp : 0
+    }
+  } catch {
+    return null
+  }
+}
+
+const writeHomeSnapshot = (snapshot: Omit<HomeSnapshot, 'timestamp'>) => {
+  const hasAnyContent = [
+    snapshot.continueWatching,
+    snapshot.recentMovies,
+    snapshot.recentSeries,
+    snapshot.trendingMovies,
+    snapshot.trendingSeries,
+    snapshot.trendingIndia,
+    snapshot.featured
+  ].some(items => items.length > 0)
+
+  if (!hasAnyContent) return
+
+  try {
+    localStorage.setItem(HOME_SNAPSHOT_STORAGE_KEY, JSON.stringify({
+      ...snapshot,
+      timestamp: Date.now()
+    }))
+  } catch (err) {
+    console.warn('[Home] Failed to persist startup snapshot:', err)
+  }
 }
 
 const getImageUrl = (path?: string | null) => {
@@ -42,6 +104,25 @@ const mapTmdbSearchResult = (item: any): Video => {
     tmdb_id: item.id,
     isExternal: true
   }
+}
+
+const buildHeroTrendingItems = (movies: Video[], series: Video[]) => {
+  const mixed: Video[] = []
+  const seen = new Set<string>()
+  const maxLength = Math.max(movies.length, series.length)
+
+  for (let i = 0; i < maxLength && mixed.length < TRENDING_HERO_LIMIT; i += 1) {
+    for (const video of [movies[i], series[i]]) {
+      if (!video) continue
+      const key = `${video.type}:${video.tmdb_id || video.id}`
+      if (seen.has(key)) continue
+      seen.add(key)
+      mixed.push(video)
+      if (mixed.length >= TRENDING_HERO_LIMIT) break
+    }
+  }
+
+  return mixed
 }
 
 const formatDuration = (seconds?: number) => {
@@ -230,13 +311,14 @@ const SearchResultCard: React.FC<{
 }
 
 const Home: React.FC<HomeProps> = ({ onPlay, onShowDetail, onNavigate, refreshKey }) => {
-  const [continueWatching, setContinueWatching] = useState<Video[]>([])
-  const [recentMovies, setRecentMovies] = useState<Video[]>([])
-  const [recentSeries, setRecentSeries] = useState<Video[]>([])
-  const [trendingMovies, setTrendingMovies] = useState<Video[]>([])
-  const [trendingSeries, setTrendingSeries] = useState<Video[]>([])
-  const [trendingIndia, setTrendingIndia] = useState<Video[]>([])
-  const [featured, setFeatured] = useState<Video[]>([])
+  const initialSnapshotRef = useRef<HomeSnapshot | null>(readHomeSnapshot())
+  const [continueWatching, setContinueWatching] = useState<Video[]>(() => initialSnapshotRef.current?.continueWatching || [])
+  const [recentMovies, setRecentMovies] = useState<Video[]>(() => initialSnapshotRef.current?.recentMovies || [])
+  const [recentSeries, setRecentSeries] = useState<Video[]>(() => initialSnapshotRef.current?.recentSeries || [])
+  const [trendingMovies, setTrendingMovies] = useState<Video[]>(() => initialSnapshotRef.current?.trendingMovies || [])
+  const [trendingSeries, setTrendingSeries] = useState<Video[]>(() => initialSnapshotRef.current?.trendingSeries || [])
+  const [trendingIndia, setTrendingIndia] = useState<Video[]>(() => initialSnapshotRef.current?.trendingIndia || [])
+  const [featured, setFeatured] = useState<Video[]>(() => initialSnapshotRef.current?.featured || [])
   const [userName, setUserName] = useState(() => localStorage.getItem('mycinema_user_name') || 'User')
   const continueWatchingRef = useRef<HTMLDivElement>(null)
   const [showContinueLeft, setShowContinueLeft] = useState(false)
@@ -258,38 +340,63 @@ const Home: React.FC<HomeProps> = ({ onPlay, onShowDetail, onNavigate, refreshKe
   const searchCacheRef = useRef<Map<string, Video[]>>(new Map())
   const isSearchOpenRef = useRef(false)
   const suppressContentClickUntilRef = useRef(0)
+  const didRunInitialRefreshRef = useRef(false)
 
-  const fetchData = async () => {
+  const refreshLocalHomeData = useCallback(async () => {
     try {
-      const [allVideos, cw, trendingM, trendingS, trendingIN] = await Promise.all([
+      const [allVideos, cw] = await Promise.all([
         window.api.getVideos(),
-        window.api.getContinueWatching(),
-        window.api.fetchTrending('movie').catch(err => { console.error('Trending Movies Error:', err); return [] }),
-        window.api.fetchTrending('series').catch(err => { console.error('Trending Series Error:', err); return [] }),
-        window.api.fetchTrendingIndia().catch(err => { console.error('Trending India Error:', err); return [] })
+        window.api.getContinueWatching()
       ])
-      
-      setTrendingMovies(trendingM)
-      setTrendingSeries(trendingS)
-      setTrendingIndia(trendingIN)
-      setFeatured([...trendingM.slice(0, 3), ...trendingS.slice(0, 3)])
+
       setContinueWatching(groupContinueWatching(cw))
-      
+
       // 1. Movie vs Video logic: Movies >= 1 hour (3600s), Videos < 1 hour
       const moviesOnly = allVideos.filter(v => v.type === 'movie' && (v.duration === 0 || !v.duration || v.duration >= 3600))
       setRecentMovies(moviesOnly.slice(0, 10))
 
       setRecentSeries(groupSeriesCards(allVideos).slice(0, 10))
-      window.api.getWatchlist().then(setWatchlistItems).catch(console.error)
-      
+    } catch (err) {
+      console.error('Home local refresh error:', err)
+    }
+  }, [])
+
+  const fetchDiscoveryData = useCallback(async () => {
+    const [trendingM, trendingS] = await Promise.all([
+      window.api.fetchTrending('movie').catch(err => { console.error('Trending Movies Error:', err); return [] }),
+      window.api.fetchTrending('series').catch(err => { console.error('Trending Series Error:', err); return [] })
+    ])
+
+    if (trendingM.length > 0) setTrendingMovies(trendingM)
+    if (trendingS.length > 0) setTrendingSeries(trendingS)
+
+    const heroItems = buildHeroTrendingItems(trendingM, trendingS)
+    if (heroItems.length > 0) setFeatured(heroItems)
+
+    window.api.fetchTrendingIndia()
+      .then(items => {
+        if (items.length > 0) setTrendingIndia(items)
+      })
+      .catch(err => {
+        console.error('Trending India Error:', err)
+      })
+  }, [])
+
+  const fetchData = useCallback(async () => {
+    try {
+      await Promise.all([
+        refreshLocalHomeData(),
+        fetchDiscoveryData(),
+        window.api.getWatchlist().then(setWatchlistItems).catch(console.error)
+      ])
     } catch (err) {
       console.error('Home fetchData error:', err)
     }
-  }
+  }, [fetchDiscoveryData, refreshLocalHomeData])
 
   useEffect(() => {
     fetchData()
-    window.api.onLibraryUpdated(fetchData)
+    const cleanupLibraryUpdates = window.api.onLibraryUpdated(refreshLocalHomeData)
 
     const handleNameUpdate = () => {
       setUserName(localStorage.getItem('mycinema_user_name') || 'User')
@@ -297,14 +404,35 @@ const Home: React.FC<HomeProps> = ({ onPlay, onShowDetail, onNavigate, refreshKe
     window.addEventListener('mycinema_name_updated', handleNameUpdate)
 
     return () => {
-      window.api.removeAllLibraryUpdateListeners()
+      cleanupLibraryUpdates()
       window.removeEventListener('mycinema_name_updated', handleNameUpdate)
     }
-  }, [refreshKey])
+  }, [fetchData, refreshLocalHomeData])
+
+  useEffect(() => {
+    if (!didRunInitialRefreshRef.current) {
+      didRunInitialRefreshRef.current = true
+      return
+    }
+
+    refreshLocalHomeData()
+  }, [refreshKey, refreshLocalHomeData])
 
   useEffect(() => {
     isSearchOpenRef.current = isSearchOpen
   }, [isSearchOpen])
+
+  useEffect(() => {
+    writeHomeSnapshot({
+      continueWatching,
+      recentMovies,
+      recentSeries,
+      trendingMovies,
+      trendingSeries,
+      trendingIndia,
+      featured
+    })
+  }, [continueWatching, recentMovies, recentSeries, trendingMovies, trendingSeries, trendingIndia, featured])
 
   const suppressNextHomeClick = () => {
     suppressContentClickUntilRef.current = Date.now() + 350
@@ -722,28 +850,47 @@ const Home: React.FC<HomeProps> = ({ onPlay, onShowDetail, onNavigate, refreshKe
         <div className="flex items-center justify-between mb-4">
           <h3 className="text-lg font-black text-white uppercase italic tracking-tight">Trending This Week</h3>
         </div>
-        <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-5">
-          {trendingMovies.slice(0, 6).map(video => (
-            <VideoCard key={video.tmdb_id || video.id} video={video} onPlay={handlePlayFromHome} onShowDetail={handleShowDetailFromHome} />
+        <HorizontalScrollRow contentClassName="gap-5">
+          {trendingMovies.map(video => (
+            <div
+              key={video.tmdb_id || video.id}
+              className={POSTER_RAIL_CARD_CLASS}
+            >
+              <VideoCard video={video} onPlay={handlePlayFromHome} onShowDetail={handleShowDetailFromHome} />
+            </div>
           ))}
-        </div>
+          {trendingMovies.length === 0 && Array.from({ length: TRENDING_HERO_LIMIT }, (_, i) => i + 1).map(i => (
+            <div
+              key={i}
+              className={`${POSTER_RAIL_CARD_CLASS} aspect-[2/3] rounded-2xl bg-white/5 animate-pulse`}
+            />
+          ))}
+        </HorizontalScrollRow>
       </section>
 
       {/* 4. India-Specific Trending Section */}
       <section className="mx-auto mt-7 max-w-[1600px] px-8">
         <div className="flex items-center justify-between mb-4">
           <div>
-            <h3 className="text-lg font-black text-white uppercase italic tracking-tight">Trending on India OTT</h3>
+            <h3 className="text-lg font-black text-white uppercase italic tracking-tight">Trending in India</h3>
           </div>
         </div>
-        <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-5">
-          {trendingIndia.slice(0, 6).map(video => (
-            <VideoCard key={video.tmdb_id || video.id} video={video} onPlay={handlePlayFromHome} onShowDetail={handleShowDetailFromHome} />
+        <HorizontalScrollRow contentClassName="gap-5">
+          {trendingIndia.map(video => (
+            <div
+              key={video.tmdb_id || video.id}
+              className={POSTER_RAIL_CARD_CLASS}
+            >
+              <VideoCard video={video} onPlay={handlePlayFromHome} onShowDetail={handleShowDetailFromHome} />
+            </div>
           ))}
-          {trendingIndia.length === 0 && [1,2,3,4,5,6].map(i => (
-            <div key={i} className="aspect-[2/3] bg-white/5 rounded-2xl animate-pulse" />
+          {trendingIndia.length === 0 && Array.from({ length: TRENDING_HERO_LIMIT }, (_, i) => i + 1).map(i => (
+            <div
+              key={i}
+              className={`${POSTER_RAIL_CARD_CLASS} aspect-[2/3] rounded-2xl bg-white/5 animate-pulse`}
+            />
           ))}
-        </div>
+        </HorizontalScrollRow>
       </section>
 
       {/* 5. Recently Added Movies */}

@@ -17,53 +17,53 @@ import Download from './pages/Download'
 import appLogo from './assets/mycinema-logo.png'
 
 const LATEST_RELEASE = {
-  version: '1.20.0',
+  version: '1.21.0',
   eyebrow: 'What\'s New',
-  headline: 'Downloads are easier to recover and choose.',
-  summary: 'This release improves download reliability, source filtering, watchlist saving, and fullscreen playback.',
+  headline: 'Sources arrive faster, and Home wakes up smoother.',
+  summary: 'This release improves source discovery, Home startup, playback rendering, and listener cleanup.',
   steps: [
     {
       icon: DownloadIcon,
-      title: 'Downloads',
-      description: 'The Download page now gives clearer status and recovery controls.',
+      title: 'Source Discovery',
+      description: 'Download choices now appear progressively as providers respond.',
       color: 'from-blue-500 to-cyan-400',
       iconColor: 'text-cyan-400',
       items: [
-        'Retry failed torrent downloads without searching again.',
-        'Check free and total downloads-folder storage from the page header.'
+        'Source panels update while YTS, EZTV, Torrentio, MediaFusion, KnightCrawler, 1337x, APIBay, SolidTorrents, and Bitsearch finish.',
+        'Cached results can appear first while the app refreshes providers.'
       ]
     },
     {
       icon: Sparkles,
-      title: 'Source Picking',
-      description: 'Source lists are easier to scan before starting a download.',
+      title: 'Home Discovery',
+      description: 'Home keeps useful rows visible while fresh discovery data loads.',
       color: 'from-emerald-400 to-teal-500',
       iconColor: 'text-emerald-400',
       items: [
-        'Health scoring now sorts by seeds, peers, and quality.',
-        'Series sources can be filtered by season, episode, or season packs.'
+        'The last populated Home snapshot restores instantly on startup.',
+        'Trending This Week and Trending in India now use scrollable rails.'
       ]
     },
     {
-      icon: Bookmark,
-      title: 'Watchlist & Playback',
-      description: 'Saving and watching titles should feel more consistent.',
+      icon: Zap,
+      title: 'Playback & Downloads',
+      description: 'Playback helpers and download labels are more resilient.',
       color: 'from-violet-500 to-fuchsia-400',
       iconColor: 'text-fuchsia-300',
       items: [
-        'Choose or create a watchlist category from the detail page.',
-        'Fullscreen contain mode now follows the video aspect ratio.'
+        'Boost canvases only cover the video when they are actively rendering.',
+        'Downloads preserve the selected source title and sort active items first.'
       ]
     },
     {
       icon: ShieldCheck,
       title: 'Security & Privacy',
-      description: 'Download recovery keeps cleanup local and predictable.',
+      description: 'Network and IPC cleanup paths are tighter and more predictable.',
       color: 'from-amber-400 to-orange-500',
       iconColor: 'text-amber-400',
       items: [
-        'Retrying clears old torrent instances before restarting.',
-        'Storage checks report local download-folder status through IPC.'
+        'Library and torrent progress listeners now clean up without clearing unrelated pages.',
+        'TMDB, provider, and local media range requests have safer timeout and validation handling.'
       ]
     }
   ]
@@ -450,17 +450,25 @@ const App: React.FC = () => {
 
       {/* Main Content */}
       <main className="flex-1 overflow-y-auto scrollbar-hide relative">
-        <div className={activeTab === 'home' ? 'pt-6 pb-14' : 'px-8 pt-6 pb-14 max-w-[1600px] mx-auto'}>
-          {activeTab === 'home'    && <Home onPlay={handlePlayVideo} onShowDetail={setSelectedVideo} onNavigate={setActiveTab} refreshKey={homeRefreshKey} />}
-          {activeTab === 'videos'  && <Videos onPlay={handlePlayVideo} />}
-          {activeTab === 'movies'  && <Movies onPlay={handlePlayVideo} onShowDetail={setSelectedVideo} />}
-          {activeTab === 'series'  && <Series onPlay={handlePlayVideo} onShowDetail={setSelectedVideo} />}
-          {activeTab === 'watchlist' && <Watchlist onPlay={handlePlayVideo} onShowDetail={setSelectedVideo} refreshKey={watchlistRefreshKey} />}
-          {activeTab === 'history' && <History onPlay={handlePlayVideo} onShowDetail={setSelectedVideo} />}
-          {activeTab === 'favorites' && <Favorites onPlay={handlePlayVideo} onShowDetail={setSelectedVideo} />}
-          {activeTab === 'download' && <Download onShowDetail={setSelectedVideo} />}
-          {activeTab === 'settings' && <SettingsPage />}
+        <div
+          className={activeTab === 'home' ? 'relative pt-6 pb-14 opacity-100' : 'pointer-events-none absolute inset-x-0 top-0 opacity-0'}
+          aria-hidden={activeTab !== 'home'}
+        >
+          <Home onPlay={handlePlayVideo} onShowDetail={setSelectedVideo} onNavigate={setActiveTab} refreshKey={homeRefreshKey} />
         </div>
+
+        {activeTab !== 'home' && (
+          <div className="px-8 pt-6 pb-14 max-w-[1600px] mx-auto">
+            {activeTab === 'videos'  && <Videos onPlay={handlePlayVideo} />}
+            {activeTab === 'movies'  && <Movies onPlay={handlePlayVideo} onShowDetail={setSelectedVideo} />}
+            {activeTab === 'series'  && <Series onPlay={handlePlayVideo} onShowDetail={setSelectedVideo} />}
+            {activeTab === 'watchlist' && <Watchlist onPlay={handlePlayVideo} onShowDetail={setSelectedVideo} refreshKey={watchlistRefreshKey} />}
+            {activeTab === 'history' && <History onPlay={handlePlayVideo} onShowDetail={setSelectedVideo} />}
+            {activeTab === 'favorites' && <Favorites onPlay={handlePlayVideo} onShowDetail={setSelectedVideo} />}
+            {activeTab === 'download' && <Download onShowDetail={setSelectedVideo} />}
+            {activeTab === 'settings' && <SettingsPage />}
+          </div>
+        )}
       </main>
 
       {/* Detail Screen Overlay */}
@@ -498,7 +506,12 @@ const App: React.FC = () => {
               exit={{ opacity: 0 }}
               className="fixed inset-0 z-[200] flex items-center justify-center p-4 sm:p-6"
             >
-              <div className="absolute inset-0 bg-black/90 backdrop-blur-md" onClick={closeWhatsNew} />
+              <div
+                className="absolute inset-0 bg-[#05070c]/20 backdrop-blur-[30px] [backdrop-filter:blur(30px)_saturate(1.25)_brightness(0.86)]"
+                onClick={closeWhatsNew}
+              />
+              <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(180deg,rgba(255,255,255,0.08),rgba(5,7,12,0.12)_45%,rgba(0,0,0,0.28))]" />
+              <div className="pointer-events-none absolute inset-0 shadow-[inset_0_0_140px_rgba(0,0,0,0.42)]" />
 
               <motion.div
                 initial={{ scale: 0.9, y: 20, opacity: 0 }}

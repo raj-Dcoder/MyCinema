@@ -173,8 +173,7 @@ const Watchlist: React.FC<WatchlistProps> = ({ onPlay, onShowDetail, refreshKey 
 
   useEffect(() => {
     fetchWatchlist()
-    window.api.onLibraryUpdated(fetchWatchlist)
-    return () => window.api.removeAllLibraryUpdateListeners()
+    return window.api.onLibraryUpdated(fetchWatchlist)
   }, [])
 
   useEffect(() => {

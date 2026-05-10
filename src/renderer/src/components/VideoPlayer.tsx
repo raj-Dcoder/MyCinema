@@ -20,6 +20,8 @@ import {
 
 type AudioBoostProfile = 'balanced' | 'rich' | 'night'
 
+const SUBTITLE_OVERLAY_Z_INDEX = 35
+
 const AUDIO_BOOST_PROFILES: Record<AudioBoostProfile, {
   label: string
   detail: string
@@ -170,6 +172,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
   const [isBuffering, setIsBuffering] = useState(false)
   const [audioTracks, setAudioTracks] = useState<any[]>([])
   const [selectedAudioId, setSelectedAudioId] = useState<string>('')
+  const [hasVideoMetadata, setHasVideoMetadata] = useState(false)
   const [showMediaMenu, setShowMediaMenu] = useState(false)
   const [showAdvancedMenu, setShowAdvancedMenu] = useState(false)
   const [playbackRate, setPlaybackRate] = useState<number>(1)
@@ -254,16 +257,6 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
   const [hoverTime, setHoverTime] = useState<number | null>(null)
   const [hoverPosition, setHoverPosition] = useState<number>(0)
   const [videoAspectRatio, setVideoAspectRatio] = useState(16 / 9)
-
-  const [isAnyBoostEnabled, setIsAnyBoostEnabled] = useState(false)
-
-  useEffect(() => {
-    // Small debounce to prevent flickering when toggling boost features
-    const timer = setTimeout(() => {
-      setIsAnyBoostEnabled(fpsBoostEnabled || qualitySharpnessEnabled || qualityVibranceEnabled)
-    }, 50)
-    return () => clearTimeout(timer)
-  }, [fpsBoostEnabled, qualitySharpnessEnabled, qualityVibranceEnabled])
 
   useEffect(() => {
     localStorage.setItem('mycinema_fps_boost', fpsBoostEnabled.toString())
@@ -497,16 +490,23 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
   })
 
   const availableAudio = React.useMemo(() => {
+    if (!hasVideoMetadata) return []
+
     const arr: any[] = []
-    if (embeddedAudio.length > audioTracks.length) {
-      embeddedAudio.forEach((t, i) => arr.push({ id: `ext-${t.index}`, index: t.index, native: false, label: formatTrackLabel(t, i + 1) }))
-    } else if (audioTracks.length > 0) {
-      audioTracks.forEach((t, i) => arr.push({ id: `nat-${i}`, index: i, native: true, label: formatTrackLabel(t, i + 1) }))
+    if (audioTracks.length > 0) {
+      audioTracks.forEach((t, i) => {
+        arr.push({ id: `nat-${i}`, index: i, native: true, label: formatTrackLabel(embeddedAudio[i] || t, i + 1) })
+      })
+      embeddedAudio.slice(audioTracks.length).forEach((t, i) => {
+        arr.push({ id: `ext-${t.index}`, index: t.index, native: false, label: formatTrackLabel(t, audioTracks.length + i + 1) })
+      })
     } else if (embeddedAudio.length > 0) {
-      embeddedAudio.forEach((t, i) => arr.push({ id: `ext-${t.index}`, index: t.index, native: false, label: formatTrackLabel(t, i + 1) }))
+      embeddedAudio.forEach((t, i) => {
+        arr.push({ id: `ext-${t.index}`, index: t.index, native: false, label: formatTrackLabel(t, i + 1) })
+      })
     }
     return arr
-  }, [embeddedAudio, audioTracks])
+  }, [embeddedAudio, audioTracks, hasVideoMetadata])
 
   const primeNativeAudioTrack = () => {
     const videoEl = videoRef.current
@@ -534,6 +534,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
     audioEl.volume = volume
     audioEl.playbackRate = playbackRate
     audioEl.src = `audio://file/${encodeURIComponent(currentVideo.file_path)}?track=${trackIndex}&time=${safeTime}`
+    audioEl.load()
 
     if (shouldPlay) {
       audioEl.play().catch(e => console.log('Audio play failed:', e))
@@ -593,8 +594,14 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
   }, [seekPopup.id, seekPopup.show])
 
   useEffect(() => {
+    let isCancelled = false
+    let mediaTrackTimer: ReturnType<typeof setTimeout> | null = null
+    let metadataTrackLoader: (() => void) | null = null
+    const startupVideoEl = videoRef.current
+
     const fetchProgress = async () => {
       const progress = await window.api.getVideoProgress(currentVideo.id)
+      if (isCancelled) return
       let targetTime = progress?.last_watched_time || 0
       
       if (progress?.completed) {
@@ -627,6 +634,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
 
     const fetchMediaTracks = async () => {
       const srt = await window.api.getSubtitlePath(currentVideo.file_path)
+      if (isCancelled) return
       if (srt) setSubtitlePath(srt)
       else setSubtitlePath(null)
 
@@ -635,6 +643,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
            window.api.getEmbeddedSubtitles(currentVideo.file_path),
            window.api.getEmbeddedAudio(currentVideo.file_path)
         ])
+        if (isCancelled) return
         setEmbeddedSubs(embeddedS || [])
         setEmbeddedAudio(embeddedA || [])
 
@@ -661,6 +670,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
         }
 
         await Promise.all(conversionJobs)
+        if (isCancelled) return
         setConvertedSubPaths(newPaths)
         console.log('[VideoPlayer] Pre-converted', newPaths.size, 'subtitle track(s)')
 
@@ -704,27 +714,37 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
     // Reset audio track state so the availableAudio effect re-selects properly
     setSelectedAudioId('')
     setAudioTracks([])
+    setHasVideoMetadata(false)
     setEmbeddedAudio([])
     setEmbeddedSubs([])
     clearActiveSubtitleSelection(false)
     setConvertedSubPaths(new Map())
 
     fetchProgress()
-    fetchMediaTracks()
     checkNextEpisode(currentVideo)
     setIsPlaying(false)
-    if (videoRef.current) {
+    if (startupVideoEl) {
       // Fix: Ensure volume is up and non-muted
-      videoRef.current.volume = volume
-      videoRef.current.muted = false
-      videoRef.current.load()
+      startupVideoEl.volume = volume
+      startupVideoEl.muted = false
+      startupVideoEl.load()
 
-      videoRef.current.play().then(() => {
+      startupVideoEl.play().then(() => {
         // Double check audio context resume for Audio Boost
         if (audioCtxRef.current?.state === 'suspended') {
           audioCtxRef.current.resume()
         }
       }).catch(e => console.error('Auto-play failed:', e))
+
+      metadataTrackLoader = () => {
+        mediaTrackTimer = setTimeout(fetchMediaTracks, 1200)
+      }
+
+      if (startupVideoEl.readyState >= 1) {
+        metadataTrackLoader()
+      } else {
+        startupVideoEl.addEventListener('loadedmetadata', metadataTrackLoader, { once: true })
+      }
     }
 
     // Auto-enter fullscreen on first mount
@@ -738,6 +758,11 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
     document.addEventListener('fullscreenchange', handleFullscreenChange)
 
     return () => {
+      isCancelled = true
+      if (mediaTrackTimer) clearTimeout(mediaTrackTimer)
+      if (startupVideoEl && metadataTrackLoader) {
+        startupVideoEl.removeEventListener('loadedmetadata', metadataTrackLoader)
+      }
       document.removeEventListener('fullscreenchange', handleFullscreenChange)
     }
   }, [currentVideo.id, currentVideo.file_path])
@@ -791,7 +816,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
     if (activeSubKey !== null && videoRef.current?.parentElement) {
       const parent = videoRef.current.parentElement
 
-      // Use fixed positioning with max z-index to stay above the hardware video plane
+      // Keep subtitles above the video while leaving the controls/seek preview layer on top.
       const container = document.createElement('div')
       container.style.cssText = [
         'position:fixed',
@@ -801,7 +826,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
         'display:flex',
         'justify-content:center',
         'pointer-events:none',
-        'z-index:2147483647',
+        `z-index:${SUBTITLE_OVERLAY_Z_INDEX}`,
         'will-change:transform',
         'transition:bottom 0.3s ease',
         `bottom:${subtitleBottom}`,
@@ -1946,7 +1971,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
         <video
           ref={videoRef}
           src={`media://file/${encodeURIComponent(currentVideo.file_path)}`}
-          className={`h-full w-full outline-none transition-opacity duration-200 ${showControls ? 'subs-up' : 'subs-down'} ${isAnyBoostEnabled ? 'opacity-0 pointer-events-none' : 'opacity-100'}`}
+          className={`h-full w-full outline-none ${showControls ? 'subs-up' : 'subs-down'} opacity-100`}
           style={{ 
             objectFit: videoObjectFit,
             clipPath: 'inset(0px)'
@@ -1969,25 +1994,22 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
           const time = videoRef.current.currentTime
           setCurrentTime(time)
           timeRef.current = time
-          handleCustomAudioSeekSync(time)
+          syncSelectedExternalAudio(time, !videoRef.current.paused)
           activeSubtitleCueIndexRef.current = -1
           renderSubtitleAtTime(time)
         }}
         onDurationChange={() => {
           if (videoRef.current) {
-            setDuration(videoRef.current.duration)
-            durationRef.current = videoRef.current.duration || 1
+            const nextDuration = Number.isFinite(videoRef.current.duration) ? videoRef.current.duration : 0
+            setDuration(nextDuration)
+            durationRef.current = nextDuration || 1
           }
         }}
         onPlay={() => { 
           setIsPlaying(true); 
           const trackObj = availableAudio.find(a => a.id === selectedAudioId);
           if (trackObj && !trackObj.native && audioRef.current) {
-            if (!audioRef.current.src) {
-              startExternalAudioTrack(trackObj.index, videoRef.current?.currentTime || 0, true)
-            } else {
-              audioRef.current.play().catch(e => console.log('Audio onPlay failed:', e));
-            }
+            startExternalAudioTrack(trackObj.index, videoRef.current?.currentTime || 0, true)
           }
         }}
         onPause={() => { setIsPlaying(false); if (audioRef.current && audioRef.current.src) audioRef.current.pause(); }}
@@ -2006,8 +2028,12 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
         }}
         onLoadedMetadata={() => {
           if (videoRef.current) {
+            setHasVideoMetadata(true)
             updateVideoAspectRatio()
             videoRef.current.playbackRate = playbackRate
+            const nextDuration = Number.isFinite(videoRef.current.duration) ? videoRef.current.duration : 0
+            setDuration(nextDuration)
+            durationRef.current = nextDuration || 1
             // Explicitly set volume on each new load to prevent silent starts
             videoRef.current.volume = volume
             const activeAudio = availableAudio.find(a => a.id === selectedAudioId)

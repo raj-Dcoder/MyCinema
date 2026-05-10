@@ -29,8 +29,7 @@ const History: React.FC<HistoryProps> = ({ onPlay, onShowDetail }) => {
 
   useEffect(() => {
     fetchHistory()
-    window.api.onLibraryUpdated(fetchHistory)
-    return () => window.api.removeAllLibraryUpdateListeners()
+    return window.api.onLibraryUpdated(fetchHistory)
   }, [])
 
   return (

@@ -29,8 +29,7 @@ const Favorites: React.FC<FavoritesProps> = ({ onPlay, onShowDetail }) => {
 
   useEffect(() => {
     fetchFavorites()
-    window.api.onLibraryUpdated(fetchFavorites)
-    return () => window.api.removeAllLibraryUpdateListeners()
+    return window.api.onLibraryUpdated(fetchFavorites)
   }, [])
 
   return (

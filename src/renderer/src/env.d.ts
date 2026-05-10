@@ -17,7 +17,7 @@ interface Api {
   preConvertSubtitle: (filePath: string, trackIndex: number, isExternal: boolean) => Promise<string | null>
   onOpenExternalFile: (callback: (filePath: string) => void) => () => void
   getPendingExternalFile: () => Promise<string | null>
-  onLibraryUpdated: (callback: () => void) => void
+  onLibraryUpdated: (callback: () => void) => () => void
   removeAllLibraryUpdateListeners: () => void
   getFolders: () => Promise<any[]>
   removeFolder: (folderPath: string) => Promise<boolean>
@@ -61,8 +61,9 @@ interface Api {
   installUpdate: () => void
   // Torrent download APIs
   searchTMDB: (query: string) => Promise<any[]>
-  searchTorrentSources: (title: string, year: string, mediaType: string, tmdbId: number) => Promise<any[]>
-  startTorrentDownload: (magnetUrl: string, title: string, tmdbId?: number) => Promise<string | boolean>
+  searchTorrentSources: (title: string, year: string, mediaType: string, tmdbId: number, requestId?: string) => Promise<any[]>
+  onTorrentSourcesProgress: (callback: (data: any) => void) => () => void
+  startTorrentDownload: (magnetUrl: string, title: string, tmdbId?: number, name?: string) => Promise<string | boolean>
   cancelTorrentDownload: (id: string) => Promise<boolean>
   removeDownload: (id: string, deleteFile?: boolean) => Promise<boolean>
   pauseResumeTorrent: (id: string) => Promise<boolean>

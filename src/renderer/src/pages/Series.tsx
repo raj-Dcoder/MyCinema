@@ -32,8 +32,7 @@ const Series: React.FC<SeriesProps> = ({ onPlay, onShowDetail }) => {
 
   useEffect(() => {
     fetchSeries()
-    window.api.onLibraryUpdated(fetchSeries)
-    return () => window.api.removeAllLibraryUpdateListeners()
+    return window.api.onLibraryUpdated(fetchSeries)
   }, [])
 
   return (

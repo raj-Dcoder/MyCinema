@@ -3,9 +3,10 @@ import { ChevronLeft, ChevronRight } from 'lucide-react'
 
 interface HorizontalScrollRowProps {
   children: React.ReactNode
+  contentClassName?: string
 }
 
-const HorizontalScrollRow: React.FC<HorizontalScrollRowProps> = ({ children }) => {
+const HorizontalScrollRow: React.FC<HorizontalScrollRowProps> = ({ children, contentClassName = 'gap-4' }) => {
   const scrollRef = useRef<HTMLDivElement>(null)
   const [showLeft, setShowLeft] = useState(false)
   const [showRight, setShowRight] = useState(false)
@@ -63,7 +64,7 @@ const HorizontalScrollRow: React.FC<HorizontalScrollRowProps> = ({ children }) =
       {/* Scrollable row */}
       <div
         ref={scrollRef}
-        className="flex overflow-x-auto gap-4 px-8 pt-4 pb-6 scrollbar-hide scroll-smooth"
+        className={`flex overflow-x-auto px-8 pt-4 pb-6 scrollbar-hide scroll-smooth ${contentClassName}`}
       >
         {children}
       </div>

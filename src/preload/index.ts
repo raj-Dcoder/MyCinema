@@ -22,7 +22,11 @@ const api = {
     return () => ipcRenderer.removeListener('open-external-file', handler)
   },
   getPendingExternalFile: () => ipcRenderer.invoke('get-pending-external-file'),
-  onLibraryUpdated: (callback: () => void) => ipcRenderer.on('library-updated', (_event) => callback()),
+  onLibraryUpdated: (callback: () => void) => {
+    const handler = () => callback()
+    ipcRenderer.on('library-updated', handler)
+    return () => ipcRenderer.removeListener('library-updated', handler)
+  },
   removeAllLibraryUpdateListeners: () => ipcRenderer.removeAllListeners('library-updated'),
   getFolders: () => ipcRenderer.invoke('get-folders'),
   removeFolder: (folderPath: string) => ipcRenderer.invoke('remove-folder', folderPath),
@@ -48,10 +52,15 @@ const api = {
   installUpdate: () => ipcRenderer.send('install-update'),
   // Torrent download APIs
   searchTMDB: (query: string) => ipcRenderer.invoke('search-tmdb', query),
-  searchTorrentSources: (title: string, year: string, mediaType: string, tmdbId: number) => 
-    ipcRenderer.invoke('search-torrent-sources', title, year, mediaType, tmdbId),
-  startTorrentDownload: (magnetUrl: string, title: string, tmdbId?: number) => 
-    ipcRenderer.invoke('start-torrent-download', magnetUrl, title, tmdbId),
+  searchTorrentSources: (title: string, year: string, mediaType: string, tmdbId: number, requestId?: string) =>
+    ipcRenderer.invoke('search-torrent-sources', title, year, mediaType, tmdbId, requestId),
+  onTorrentSourcesProgress: (callback: (data: any) => void) => {
+    const handler = (_event: any, data: any) => callback(data)
+    ipcRenderer.on('torrent-sources-progress', handler)
+    return () => ipcRenderer.removeListener('torrent-sources-progress', handler)
+  },
+  startTorrentDownload: (magnetUrl: string, title: string, tmdbId?: number, name?: string) =>
+    ipcRenderer.invoke('start-torrent-download', magnetUrl, title, tmdbId, name),
   cancelTorrentDownload: (id: string) => 
     ipcRenderer.invoke('cancel-torrent-download', id),
   removeDownload: (id: string, deleteFile?: boolean) => 

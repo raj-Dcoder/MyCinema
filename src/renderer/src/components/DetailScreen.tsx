@@ -77,6 +77,8 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, onClose, onPlay, onW
   const [showDownloadOptions, setShowDownloadOptions] = useState(false)
   const [startingSourceMagnet, setStartingSourceMagnet] = useState<string | null>(null)
   const [startedSourceMagnet, setStartedSourceMagnet] = useState<string | null>(null)
+  const [sourceSearchStatus, setSourceSearchStatus] = useState({ found: 0, completed: 0, total: 0, cached: false, done: false })
+  const sourceSearchRequestRef = useRef<string | null>(null)
 
   const handleToggleFavorite = async () => {
     const newValue = await window.api.toggleFavorite(video.id)
@@ -166,18 +168,30 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, onClose, onPlay, onW
     setSourceSeasonFilter('all')
     setSourceEpisodeFilter('all')
     setStartedSourceMagnet(null)
+    setSourceSearchStatus({ found: 0, completed: 0, total: 0, cached: false, done: false })
+    const requestId = `${video.tmdb_id}-${Date.now()}-${Math.random().toString(36).slice(2)}`
+    sourceSearchRequestRef.current = requestId
     try {
       const results = await window.api.searchTorrentSources(
         video.title, 
         video.release_year?.toString() || '', 
         video.type === 'series' ? 'tv' : 'movie', 
-        video.tmdb_id!
+        video.tmdb_id!,
+        requestId
       )
-      setSources(results)
+      if (sourceSearchRequestRef.current === requestId) {
+        setSources(results)
+        setSourceSearchStatus(prev => ({ ...prev, found: results.length, done: true }))
+      }
     } catch (err) {
       console.error('Failed to search sources:', err)
+      if (sourceSearchRequestRef.current === requestId) {
+        setSourceSearchStatus(prev => ({ ...prev, done: true }))
+      }
     } finally {
-      setSearching(false)
+      if (sourceSearchRequestRef.current === requestId) {
+        setSearching(false)
+      }
     }
   }
 
@@ -186,10 +200,28 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, onClose, onPlay, onW
     await handleSearchSources(false)
   }
 
+  useEffect(() => {
+    const cleanup = window.api.onTorrentSourcesProgress((data: any) => {
+      if (!data || data.requestId !== sourceSearchRequestRef.current) return
+      if (Array.isArray(data.sources)) {
+        setSources(data.sources)
+      }
+      setSourceSearchStatus({
+        found: Array.isArray(data.sources) ? data.sources.length : 0,
+        completed: data.completedProviders || 0,
+        total: data.totalProviders || 0,
+        cached: Boolean(data.cached),
+        done: Boolean(data.done)
+      })
+      if (data.done) setSearching(false)
+    })
+    return cleanup
+  }, [])
+
   const handleDownloadSource = async (source: any) => {
     setStartingSourceMagnet(source.magnet)
     try {
-      const torrentId = await window.api.startTorrentDownload(source.magnet, video.title, video.tmdb_id)
+      const torrentId = await window.api.startTorrentDownload(source.magnet, video.title, video.tmdb_id, source.title)
       if (torrentId) {
         setStartedSourceMagnet(source.magnet)
       }
@@ -531,61 +563,6 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, onClose, onPlay, onW
               </p>
             </div>
 
-            {(trailerLoading || trailer) && (
-              <div className="max-w-2xl">
-                {trailerLoading ? (
-                  <div className="h-28 rounded-2xl border border-white/8 bg-white/[0.03] overflow-hidden flex items-center gap-4 px-4">
-                    <div className="h-20 w-32 rounded-xl bg-white/5 animate-pulse" />
-                    <div className="min-w-0 flex-1 space-y-2">
-                      <div className="h-3 w-28 rounded-full bg-white/8 animate-pulse" />
-                      <div className="h-4 w-56 max-w-full rounded-full bg-white/8 animate-pulse" />
-                      <div className="h-3 w-36 rounded-full bg-white/5 animate-pulse" />
-                    </div>
-                    <Loader2 size={20} className="text-primary animate-spin" />
-                  </div>
-                ) : (
-                  <button
-                    onClick={() => setShowTrailerModal(true)}
-                    className="group/trailer relative w-full overflow-hidden rounded-2xl border border-white/10 bg-white/[0.04] text-left transition-all duration-300 hover:border-red-500/35 hover:bg-white/[0.07] hover:-translate-y-0.5 hover:shadow-[0_18px_45px_rgba(0,0,0,0.35)]"
-                  >
-                    <div className="flex items-stretch">
-                      <div className="relative h-28 w-40 shrink-0 overflow-hidden bg-black">
-                        <img
-                          src={trailer.thumbnailUrl}
-                          alt=""
-                          className="h-full w-full object-cover opacity-80 transition-transform duration-500 group-hover/trailer:scale-105"
-                        />
-                        <div className="absolute inset-0 bg-gradient-to-r from-black/10 to-black/55" />
-                        <div className="absolute inset-0 flex items-center justify-center">
-                          <div className="flex h-11 w-11 items-center justify-center rounded-full bg-red-600 text-white shadow-[0_10px_30px_rgba(220,38,38,0.45)] transition-transform duration-300 group-hover/trailer:scale-110">
-                            <Play size={18} fill="currentColor" />
-                          </div>
-                        </div>
-                      </div>
-
-                      <div className="min-w-0 flex-1 p-4 flex items-center justify-between gap-4">
-                        <div className="min-w-0">
-                          <div className="mb-1.5 flex items-center gap-2 text-[9px] font-black uppercase tracking-[0.18em] text-red-400">
-                            <Clapperboard size={14} />
-                            <span>{trailer.label || `${trailer.official ? 'Official' : 'YouTube'} ${trailer.type || 'Trailer'}`}</span>
-                          </div>
-                          <h3 className="truncate text-sm md:text-base font-black text-white tracking-tight">
-                            {trailer.name || 'Watch Trailer'}
-                          </h3>
-                          <p className="mt-1 line-clamp-1 text-[11px] font-semibold text-white/35">
-                            {video.type === 'series' && trailer.seasonNumber ? `${video.series_name || video.title} • Season ${trailer.seasonNumber}` : video.type === 'series' && video.series_name ? video.series_name : video.title}
-                          </p>
-                        </div>
-                        <div className="hidden sm:flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-white/10 bg-black/25 text-white/45 transition-all group-hover/trailer:text-white group-hover/trailer:border-red-500/30 group-hover/trailer:bg-red-600/15">
-                          <Play size={16} fill="currentColor" />
-                        </div>
-                      </div>
-                    </div>
-                  </button>
-                )}
-              </div>
-            )}
-
             {/* Actions */}
             <div className="flex flex-wrap items-center gap-4 pt-4">
               {!video.isExternal ? (
@@ -656,6 +633,77 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, onClose, onPlay, onW
                   </button>
                 )}
               </div>
+            </div>
+
+            <div className="max-w-2xl">
+              {trailerLoading || !shouldLoadTrailer ? (
+                <div className="h-28 rounded-2xl border border-white/8 bg-white/[0.03] overflow-hidden flex items-center gap-4 px-4">
+                  <div className="h-20 w-32 rounded-xl bg-white/5 animate-pulse" />
+                  <div className="min-w-0 flex-1 space-y-2">
+                    <div className="h-3 w-28 rounded-full bg-white/8 animate-pulse" />
+                    <div className="h-4 w-56 max-w-full rounded-full bg-white/8 animate-pulse" />
+                    <div className="h-3 w-36 rounded-full bg-white/5 animate-pulse" />
+                  </div>
+                  <Loader2 size={20} className="text-primary animate-spin" />
+                </div>
+              ) : trailer ? (
+                <button
+                  onClick={() => setShowTrailerModal(true)}
+                  className="group/trailer relative w-full overflow-hidden rounded-2xl border border-white/10 bg-white/[0.04] text-left transition-all duration-300 hover:border-red-500/35 hover:bg-white/[0.07] hover:-translate-y-0.5 hover:shadow-[0_18px_45px_rgba(0,0,0,0.35)]"
+                >
+                  <div className="flex items-stretch">
+                    <div className="relative h-28 w-40 shrink-0 overflow-hidden bg-black">
+                      <img
+                        src={trailer.thumbnailUrl}
+                        alt=""
+                        className="h-full w-full object-cover opacity-80 transition-transform duration-500 group-hover/trailer:scale-105"
+                      />
+                      <div className="absolute inset-0 bg-gradient-to-r from-black/10 to-black/55" />
+                      <div className="absolute inset-0 flex items-center justify-center">
+                        <div className="flex h-11 w-11 items-center justify-center rounded-full bg-red-600 text-white shadow-[0_10px_30px_rgba(220,38,38,0.45)] transition-transform duration-300 group-hover/trailer:scale-110">
+                          <Play size={18} fill="currentColor" />
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="min-w-0 flex-1 p-4 flex items-center justify-between gap-4">
+                      <div className="min-w-0">
+                        <div className="mb-1.5 flex items-center gap-2 text-[9px] font-black uppercase tracking-[0.18em] text-red-400">
+                          <Clapperboard size={14} />
+                          <span>{trailer.label || `${trailer.official ? 'Official' : 'YouTube'} ${trailer.type || 'Trailer'}`}</span>
+                        </div>
+                        <h3 className="truncate text-sm md:text-base font-black text-white tracking-tight">
+                          {trailer.name || 'Watch Trailer'}
+                        </h3>
+                        <p className="mt-1 line-clamp-1 text-[11px] font-semibold text-white/35">
+                          {video.type === 'series' && trailer.seasonNumber ? `${video.series_name || video.title} • Season ${trailer.seasonNumber}` : video.type === 'series' && video.series_name ? video.series_name : video.title}
+                        </p>
+                      </div>
+                      <div className="hidden sm:flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-white/10 bg-black/25 text-white/45 transition-all group-hover/trailer:text-white group-hover/trailer:border-red-500/30 group-hover/trailer:bg-red-600/15">
+                        <Play size={16} fill="currentColor" />
+                      </div>
+                    </div>
+                  </div>
+                </button>
+              ) : (
+                <div className="h-28 rounded-2xl border border-white/8 bg-white/[0.03] overflow-hidden flex items-center gap-4 px-4">
+                  <div className="flex h-20 w-32 shrink-0 items-center justify-center rounded-xl bg-black/25 border border-white/8 text-white/25">
+                    <Clapperboard size={24} />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <div className="mb-1.5 flex items-center gap-2 text-[9px] font-black uppercase tracking-[0.18em] text-white/35">
+                      <Clapperboard size={14} />
+                      <span>Trailer</span>
+                    </div>
+                    <h3 className="truncate text-sm md:text-base font-black text-white/70 tracking-tight">
+                      Trailer unavailable
+                    </h3>
+                    <p className="mt-1 line-clamp-1 text-[11px] font-semibold text-white/30">
+                      No playable trailer was found right now.
+                    </p>
+                  </div>
+                </div>
+              )}
             </div>
 
             {/* Media Info Modal */}
@@ -937,40 +985,60 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, onClose, onPlay, onW
       {showDownloadOptions && (
         <>
           <div
-            className="fixed inset-0 z-[70] bg-black/45 backdrop-blur-sm animate-in fade-in duration-200"
+            className="fixed inset-0 z-[70] bg-black/25 animate-in fade-in duration-150"
             onClick={() => setShowDownloadOptions(false)}
           />
-          <aside className="fixed inset-y-0 right-0 z-[80] flex w-full max-w-[430px] flex-col border-l border-white/10 bg-surface/98 shadow-2xl animate-in slide-in-from-right duration-300">
-            <div className="flex items-start justify-between gap-4 border-b border-white/10 px-5 py-5">
-              <div className="min-w-0">
-                <div className="mb-2 flex items-center gap-2 text-[10px] font-black uppercase tracking-[0.18em] text-primary">
-                  <Download size={14} />
-                  Download Options
+          <aside className="fixed inset-y-0 right-0 z-[80] flex w-full max-w-[500px] flex-col border-l border-white/10 bg-[#0B0F16] shadow-2xl animate-in slide-in-from-right duration-300">
+            <div className="border-b border-white/10 bg-[#0F141D]">
+              <div className="flex items-start justify-between gap-4 px-5 py-5">
+                <div className="min-w-0">
+                  <div className="mb-2 flex items-center gap-2 text-[10px] font-black uppercase tracking-[0.18em] text-primary">
+                    <Download size={14} />
+                    Download Sources
+                  </div>
+                  <h3 className="truncate text-lg font-black text-white">
+                    {video.type === 'series' && video.series_name ? video.series_name : video.title}
+                  </h3>
+                  <div className="mt-3 flex flex-wrap items-center gap-2">
+                    <span className="rounded-md border border-white/10 bg-white/[0.04] px-2.5 py-1 text-[10px] font-bold text-white/65">
+                      {filteredSources.length} shown
+                    </span>
+                    <span className="rounded-md border border-white/10 bg-white/[0.04] px-2.5 py-1 text-[10px] font-bold text-white/65">
+                      {sources.length} total
+                    </span>
+                    {filteredSources[0] && (
+                      <span className="rounded-md border border-emerald-400/20 bg-emerald-400/10 px-2.5 py-1 text-[10px] font-bold text-emerald-300">
+                        Best: {getTorrentSourceSpeedLabel(filteredSources[0])}
+                      </span>
+                    )}
+                    {searching && sourceSearchStatus.total > 0 && (
+                      <span className="rounded-md border border-primary/20 bg-primary/10 px-2.5 py-1 text-[10px] font-bold text-primary">
+                        Checking {sourceSearchStatus.completed}/{sourceSearchStatus.total}
+                      </span>
+                    )}
+                    {sourceSearchStatus.cached && (
+                      <span className="rounded-md border border-white/10 bg-white/[0.04] px-2.5 py-1 text-[10px] font-bold text-white/45">
+                        Cached first
+                      </span>
+                    )}
+                  </div>
                 </div>
-                <h3 className="truncate text-lg font-black text-white">
-                  {video.type === 'series' && video.series_name ? video.series_name : video.title}
-                </h3>
-                <p className="mt-1 text-[11px] font-semibold text-white/35">
-                  {filteredSources.length} / {sources.length} sources
-                </p>
+                <button
+                  onClick={() => setShowDownloadOptions(false)}
+                  className="shrink-0 rounded-lg border border-white/10 bg-white/[0.04] p-2 text-white/55 transition-colors hover:bg-white/[0.08] hover:text-white"
+                  title="Close download options"
+                >
+                  <X size={18} />
+                </button>
               </div>
-              <button
-                onClick={() => setShowDownloadOptions(false)}
-                className="shrink-0 rounded-xl border border-white/10 bg-white/5 p-2 text-white/45 transition-colors hover:bg-white/10 hover:text-white"
-                title="Close download options"
-              >
-                <X size={18} />
-              </button>
-            </div>
 
-            <div className="border-b border-white/10 px-5 py-4">
-              <div className="flex flex-wrap items-center gap-2">
+              <div className="flex flex-wrap items-center gap-2 border-t border-white/10 px-5 py-3">
                 <button
                   onClick={() => setHindiOnly(value => !value)}
-                  className={`flex items-center gap-1.5 rounded-lg border px-3 py-2 text-[10px] font-black uppercase tracking-widest transition-all ${
+                  className={`flex min-h-9 items-center gap-1.5 rounded-lg border px-3 text-[10px] font-black uppercase tracking-widest transition-all ${
                     hindiOnly
-                      ? 'border-[#FF9933]/35 bg-[#FF9933]/18 text-[#FFB76B]'
-                      : 'border-white/10 bg-white/[0.04] text-white/45 hover:bg-white/[0.08] hover:text-white/70'
+                      ? 'border-[#FF9933]/40 bg-[#FF9933]/16 text-[#FFB76B]'
+                      : 'border-white/10 bg-[#151B25] text-white/55 hover:bg-[#1A2230] hover:text-white/80'
                   }`}
                 >
                   <Languages size={12} />
@@ -985,7 +1053,7 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, onClose, onPlay, onW
                         setSourceSeasonFilter(event.target.value)
                         setSourceEpisodeFilter('all')
                       }}
-                      className="rounded-lg border border-white/10 bg-[#10141d] px-3 py-2 text-[10px] font-black uppercase tracking-widest text-white/65 outline-none transition-colors hover:bg-white/[0.08]"
+                      className="min-h-9 rounded-lg border border-white/10 bg-[#151B25] px-3 text-[10px] font-black uppercase tracking-widest text-white/70 outline-none transition-colors hover:bg-[#1A2230]"
                     >
                       <option className="bg-[#10141d] text-white" value="all">All Seasons</option>
                       <option className="bg-[#10141d] text-white" value="packs">Season Packs</option>
@@ -1000,7 +1068,7 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, onClose, onPlay, onW
                       <select
                         value={sourceEpisodeFilter}
                         onChange={(event) => setSourceEpisodeFilter(event.target.value)}
-                        className="rounded-lg border border-white/10 bg-[#10141d] px-3 py-2 text-[10px] font-black uppercase tracking-widest text-white/65 outline-none transition-colors hover:bg-white/[0.08]"
+                        className="min-h-9 rounded-lg border border-white/10 bg-[#151B25] px-3 text-[10px] font-black uppercase tracking-widest text-white/70 outline-none transition-colors hover:bg-[#1A2230]"
                       >
                         <option className="bg-[#10141d] text-white" value="all">Any Episode</option>
                         {sourceEpisodes.map(episode => (
@@ -1016,7 +1084,7 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, onClose, onPlay, onW
                 <button
                   onClick={() => handleSearchSources(true)}
                   disabled={searching || !video.tmdb_id}
-                  className="ml-auto flex items-center gap-1.5 rounded-lg border border-white/10 bg-white/[0.04] px-3 py-2 text-[10px] font-black uppercase tracking-widest text-white/45 transition-all hover:bg-white/[0.08] hover:text-white/70 disabled:opacity-50"
+                  className="ml-auto flex min-h-9 items-center gap-1.5 rounded-lg border border-white/10 bg-[#151B25] px-3 text-[10px] font-black uppercase tracking-widest text-white/55 transition-all hover:bg-[#1A2230] hover:text-white/80 disabled:opacity-50"
                   title="Refresh sources"
                 >
                   {searching ? <Loader2 size={12} className="animate-spin" /> : <Search size={12} />}
@@ -1025,14 +1093,23 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, onClose, onPlay, onW
               </div>
             </div>
 
-            <div className="flex-1 overflow-y-auto px-4 py-4 scrollbar-thin">
-              {searching ? (
+            <div className="flex-1 overflow-y-auto bg-[#080B10] px-4 py-4 scrollbar-thin">
+              {(searching || !sourceSearchStatus.done) && filteredSources.length === 0 ? (
                 <div className="flex h-full min-h-[340px] flex-col items-center justify-center gap-4 text-center">
                   <div className="h-12 w-12 rounded-full border-4 border-primary/20 border-t-primary animate-spin" />
-                  <p className="text-xs font-black uppercase tracking-widest text-muted">Scanning sources...</p>
+                  <p className="text-xs font-black uppercase tracking-widest text-muted">
+                    {sourceSearchStatus.total > 0
+                      ? `Checking ${sourceSearchStatus.completed}/${sourceSearchStatus.total} providers...`
+                      : 'Scanning sources...'}
+                  </p>
                 </div>
               ) : filteredSources.length > 0 ? (
                 <div className="space-y-2.5">
+                  {searching && (
+                    <div className="rounded-lg border border-primary/15 bg-primary/10 px-3 py-2 text-[10px] font-bold uppercase tracking-widest text-primary">
+                      {filteredSources.length} sources found. Still checking {Math.max(0, sourceSearchStatus.total - sourceSearchStatus.completed)} providers...
+                    </div>
+                  )}
                   {filteredSources.map((src, idx) => {
                     const speedLabel = getTorrentSourceSpeedLabel(src)
                     const isStarting = startingSourceMagnet === src.magnet

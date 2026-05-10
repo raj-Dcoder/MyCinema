@@ -34,8 +34,7 @@ const Movies: React.FC<MoviesProps> = ({ onPlay, onShowDetail }) => {
 
   useEffect(() => {
     fetchMovies()
-    window.api.onLibraryUpdated(fetchMovies)
-    return () => window.api.removeAllLibraryUpdateListeners()
+    return window.api.onLibraryUpdated(fetchMovies)
   }, [])
 
   return (

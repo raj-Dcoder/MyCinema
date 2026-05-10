@@ -157,8 +157,7 @@ const Videos: React.FC<VideosProps> = ({ onPlay }) => {
 
   useEffect(() => {
     fetchClips()
-    window.api.onLibraryUpdated(fetchClips)
-    return () => window.api.removeAllLibraryUpdateListeners()
+    return window.api.onLibraryUpdated(fetchClips)
   }, [])
 
   const filteredClips = useMemo(() => {

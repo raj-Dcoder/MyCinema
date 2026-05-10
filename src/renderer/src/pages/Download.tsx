@@ -36,15 +36,17 @@ interface TorrentSource {
 interface ActiveDownload {
   id: string
   title: string
+  name?: string | null
   quality: string
   progress: number
   downloadSpeed: string
   timeRemaining: string
-  status: 'downloading' | 'done' | 'error' | 'paused' | 'connecting'
+  status: 'downloading' | 'done' | 'error' | 'paused' | 'connecting' | 'pending'
   size: string
   downloaded: string
   tmdbId?: number
   errorMessage?: string
+  addedAt?: string
 }
 
 interface DownloadsStorage {
@@ -67,6 +69,34 @@ const formatBytes = (bytes: number) => {
   return `${value >= 10 || index === 0 ? value.toFixed(0) : value.toFixed(1)} ${units[index]}`
 }
 
+const getDownloadStatusRank = (status: ActiveDownload['status'] | 'pending') => {
+  if (status === 'downloading' || status === 'connecting') return 0
+  if (status === 'done') return 2
+  return 1
+}
+
+const getDownloadSortTitle = (download: ActiveDownload) => (download.name || download.title || '').trim().toLowerCase()
+
+const getDownloadTime = (download: ActiveDownload) => {
+  const time = download.addedAt ? new Date(download.addedAt).getTime() : 0
+  return Number.isFinite(time) ? time : 0
+}
+
+const sortDownloads = (items: ActiveDownload[]) => {
+  return [...items].sort((a, b) => {
+    const statusDiff = getDownloadStatusRank(a.status) - getDownloadStatusRank(b.status)
+    if (statusDiff !== 0) return statusDiff
+
+    const timeDiff = getDownloadTime(b) - getDownloadTime(a)
+    if (timeDiff !== 0) return timeDiff
+
+    return getDownloadSortTitle(a).localeCompare(getDownloadSortTitle(b), undefined, {
+      numeric: true,
+      sensitivity: 'base'
+    })
+  })
+}
+
 interface DownloadProps {
   onShowDetail?: (video: Video) => void
 }
@@ -78,6 +108,7 @@ const Download: React.FC<DownloadProps> = ({ onShowDetail }) => {
   const [selectedItem, setSelectedItem] = useState<TMDBResult | null>(null)
   const [sources, setSources] = useState<TorrentSource[]>([])
   const [loadingSources, setLoadingSources] = useState(false)
+  const [sourceSearchStatus, setSourceSearchStatus] = useState({ found: 0, completed: 0, total: 0, cached: false, done: false })
   const [downloads, setDownloads] = useState<ActiveDownload[]>([])
   const [allVideos, setAllVideos] = useState<Video[]>([])
   const [showDownloads, setShowDownloads] = useState(false)
@@ -87,6 +118,7 @@ const Download: React.FC<DownloadProps> = ({ onShowDetail }) => {
   const removedIdsRef = useRef<Set<string>>(new Set())
   const searchCacheRef = useRef<Map<string, TMDBResult[]>>(new Map())
   const searchInputRef = useRef<HTMLInputElement>(null)
+  const sourceSearchRequestRef = useRef<string | null>(null)
 
   const [selectedSeason, setSelectedSeason] = useState<string>('all')
   const [selectedEpisode, setSelectedEpisode] = useState<string>('all')
@@ -308,25 +340,54 @@ const Download: React.FC<DownloadProps> = ({ onShowDetail }) => {
     }
   }, [query])
 
+  useEffect(() => {
+    const cleanup = window.api.onTorrentSourcesProgress((data: any) => {
+      if (!data || data.requestId !== sourceSearchRequestRef.current) return
+      if (Array.isArray(data.sources)) {
+        setSources(data.sources)
+      }
+      setSourceSearchStatus({
+        found: Array.isArray(data.sources) ? data.sources.length : 0,
+        completed: data.completedProviders || 0,
+        total: data.totalProviders || 0,
+        cached: Boolean(data.cached),
+        done: Boolean(data.done)
+      })
+      if (data.done) setLoadingSources(false)
+    })
+    return cleanup
+  }, [])
+
   // ─── Fetch Torrent Sources ───────────────────────────────────────────────
   const handleSelectResult = async (item: TMDBResult) => {
     setSelectedItem(item)
     setLoadingSources(true)
     setSources([])
+    setSourceSearchStatus({ found: 0, completed: 0, total: 0, cached: false, done: false })
     setSelectedSeason('all')
     setSelectedEpisode('all')
+    const requestId = `${item.id}-${Date.now()}-${Math.random().toString(36).slice(2)}`
+    sourceSearchRequestRef.current = requestId
 
     try {
       const title = item.title || item.name || ''
       const year = (item.release_date || item.first_air_date || '').slice(0, 4)
       const mediaType = item.media_type
-      const result = await window.api.searchTorrentSources(title, year, mediaType, item.id)
-      setSources(result || [])
+      const result = await window.api.searchTorrentSources(title, year, mediaType, item.id, requestId)
+      if (sourceSearchRequestRef.current === requestId) {
+        setSources(result || [])
+        setSourceSearchStatus(prev => ({ ...prev, found: (result || []).length, done: true }))
+      }
     } catch (err) {
       console.error('[Download] Source fetch error:', err)
-      setSources([])
+      if (sourceSearchRequestRef.current === requestId) {
+        setSources([])
+        setSourceSearchStatus(prev => ({ ...prev, done: true }))
+      }
     } finally {
-      setLoadingSources(false)
+      if (sourceSearchRequestRef.current === requestId) {
+        setLoadingSources(false)
+      }
     }
   }
 
@@ -334,7 +395,7 @@ const Download: React.FC<DownloadProps> = ({ onShowDetail }) => {
   const handleStartDownload = async (source: TorrentSource) => {
     const title = selectedItem?.title || selectedItem?.name || 'Unknown'
     try {
-      await window.api.startTorrentDownload(source.magnet, `${title} (${source.quality})`, selectedItem?.id)
+      await window.api.startTorrentDownload(source.magnet, `${title} (${source.quality})`, selectedItem?.id, source.title)
       setShowDownloads(true)
       refreshDownloadsStorage()
     } catch (err) {
@@ -416,7 +477,8 @@ const Download: React.FC<DownloadProps> = ({ onShowDetail }) => {
     }
   }
 
-  const activeCount = downloads.filter(d => d.status === 'downloading').length
+  const sortedDownloads = React.useMemo(() => sortDownloads(downloads), [downloads])
+  const activeCount = downloads.filter(d => d.status === 'downloading' || d.status === 'connecting').length
   const panelOpen = selectedItem !== null
   const storageUsedPercent = Math.round(downloadsStorage?.percentUsed || 0)
 
@@ -522,7 +584,7 @@ const Download: React.FC<DownloadProps> = ({ onShowDetail }) => {
       )}
 
       {/* Main Content Area */}
-      <div className={`transition-all duration-300 ${panelOpen ? 'mr-[380px]' : ''}`}>
+      <div className={`transition-all duration-300 ${panelOpen ? 'mr-[500px]' : ''}`}>
         {/* Header */}
         <div className="mb-6 flex flex-wrap items-start justify-between gap-4">
           <div>
@@ -640,14 +702,14 @@ const Download: React.FC<DownloadProps> = ({ onShowDetail }) => {
             <div className="flex items-center justify-between px-5 py-3 border-b border-secondary">
               <div className="flex items-center gap-2">
                 <div className="w-2 h-2 rounded-full bg-primary animate-pulse" />
-                <h3 className="text-sm font-semibold text-text">Active Downloads</h3>
+                <h3 className="text-sm font-semibold text-text">Downloads</h3>
               </div>
               <button onClick={() => setShowDownloads(false)} className="text-muted hover:text-text transition-colors">
                 <X size={16} />
               </button>
             </div>
             <div className="divide-y divide-secondary/50">
-              {downloads.map(dl => {
+              {sortedDownloads.map(dl => {
                 // Optimized matching using memoized map
                 const matchingVideo = (() => {
                   if (dl.tmdbId && videoMap.has(`tmdb-${dl.tmdbId}`)) {
@@ -689,7 +751,7 @@ const Download: React.FC<DownloadProps> = ({ onShowDetail }) => {
                             />
                           )}
                         </button>
-                        <span className="text-sm font-medium text-text truncate" title={dl.title}>{dl.title}</span>
+                        <span className="text-sm font-medium text-text truncate" title={dl.name || dl.title}>{dl.name || dl.title}</span>
                       </div>
                       <div className="flex items-center gap-2 flex-shrink-0">
                         {dl.status === 'downloading' && (
@@ -702,6 +764,16 @@ const Download: React.FC<DownloadProps> = ({ onShowDetail }) => {
                       {dl.status === 'connecting' && (
                         <span className="flex items-center gap-1.5 text-xs text-amber-400">
                           <Loader2 size={12} className="animate-spin" /> Resolving Metadata...
+                        </span>
+                      )}
+                      {dl.status === 'paused' && (
+                        <span className="flex items-center gap-1 text-xs text-muted">
+                          <Pause size={14} /> Paused
+                        </span>
+                      )}
+                      {dl.status === 'pending' && (
+                        <span className="flex items-center gap-1 text-xs text-amber-400">
+                          <AlertCircle size={14} /> Pending
                         </span>
                       )}
                       {dl.status === 'done' && (
@@ -845,102 +917,144 @@ const Download: React.FC<DownloadProps> = ({ onShowDetail }) => {
 
       {/* ─── Right Side Panel ───────────────────────────────────────────────── */}
       <div
-        className={`fixed top-0 right-0 h-full w-[380px] bg-surface/95 backdrop-blur-2xl border-l border-secondary z-50 transform transition-transform duration-300 ease-out ${
+        className={`fixed top-0 right-0 z-50 flex h-full w-full max-w-[500px] flex-col border-l border-white/10 bg-[#0B0F16] shadow-2xl transform transition-transform duration-300 ease-out ${
           panelOpen ? 'translate-x-0' : 'translate-x-full'
         }`}
       >
         {selectedItem && (
           <div className="flex flex-col h-full">
-            {/* Panel Header with Backdrop */}
-            <div className="relative h-44 flex-shrink-0 overflow-hidden">
-              {selectedItem.backdrop_path && (
-                <img
-                  src={`${TMDB_IMG}/w780${selectedItem.backdrop_path}`}
-                  className="absolute inset-0 w-full h-full object-cover opacity-40"
-                />
-              )}
-              <div className="absolute inset-0 bg-gradient-to-t from-surface via-surface/80 to-transparent" />
-              
-              {/* Close Button */}
-              <button
-                onClick={() => { setSelectedItem(null); setSources([]) }}
-                className="absolute top-4 right-4 z-20 p-2 rounded-full bg-black/40 backdrop-blur-sm text-white/80 hover:text-white hover:bg-black/60 transition-colors"
-              >
-                <X size={16} />
-              </button>
-
-              <div className="relative z-10 flex flex-col justify-end h-full px-5 pb-4">
-                <div className="flex items-center gap-2 mb-1">
-                  {selectedItem.media_type === 'movie' ? <Film size={13} className="text-primary" /> : <Tv size={13} className="text-primary" />}
-                  <span className="text-[10px] uppercase tracking-widest text-primary font-bold">
-                    {selectedItem.media_type === 'movie' ? 'Movie' : 'TV Series'}
-                  </span>
-                  {selectedItem.vote_average > 0 && (
-                    <span className="text-[10px] text-yellow-400 font-bold ml-auto">★ {selectedItem.vote_average.toFixed(1)}</span>
-                  )}
+            <div className="border-b border-white/10 bg-[#0F141D]">
+              <div className="flex items-start justify-between gap-4 px-5 py-5">
+                <div className="min-w-0">
+                  <div className="mb-2 flex items-center gap-2 text-[10px] font-black uppercase tracking-[0.18em] text-primary">
+                    <DownloadIcon size={14} />
+                    Download Sources
+                  </div>
+                  <h2 className="truncate text-lg font-black text-white">
+                    {selectedItem.title || selectedItem.name}
+                  </h2>
+                  <div className="mt-3 flex flex-wrap items-center gap-2">
+                    <span className="rounded-md border border-white/10 bg-white/[0.04] px-2.5 py-1 text-[10px] font-bold text-white/65">
+                      {selectedItem.media_type === 'movie' ? 'Movie' : 'TV Series'}
+                    </span>
+                    {selectedItem.vote_average > 0 && (
+                      <span className="rounded-md border border-yellow-400/20 bg-yellow-400/10 px-2.5 py-1 text-[10px] font-bold text-yellow-300">
+                        ★ {selectedItem.vote_average.toFixed(1)}
+                      </span>
+                    )}
+                    <span className="rounded-md border border-white/10 bg-white/[0.04] px-2.5 py-1 text-[10px] font-bold text-white/65">
+                      {filteredSources.length} shown
+                    </span>
+                    <span className="rounded-md border border-white/10 bg-white/[0.04] px-2.5 py-1 text-[10px] font-bold text-white/65">
+                      {sources.length} total
+                    </span>
+                    {filteredSources[0] && (
+                      <span className="rounded-md border border-emerald-400/20 bg-emerald-400/10 px-2.5 py-1 text-[10px] font-bold text-emerald-300">
+                        Best: {getTorrentSourceSpeedLabel(filteredSources[0])}
+                      </span>
+                    )}
+                    {loadingSources && sourceSearchStatus.total > 0 && (
+                      <span className="rounded-md border border-primary/20 bg-primary/10 px-2.5 py-1 text-[10px] font-bold text-primary">
+                        Checking {sourceSearchStatus.completed}/{sourceSearchStatus.total}
+                      </span>
+                    )}
+                    {sourceSearchStatus.cached && (
+                      <span className="rounded-md border border-white/10 bg-white/[0.04] px-2.5 py-1 text-[10px] font-bold text-white/45">
+                        Cached first
+                      </span>
+                    )}
+                  </div>
                 </div>
-                <h2 className="text-base font-bold text-text leading-tight">{selectedItem.title || selectedItem.name}</h2>
-                <p className="text-[11px] text-muted mt-1 line-clamp-2 leading-relaxed">{selectedItem.overview}</p>
+                <button
+                  onClick={() => { setSelectedItem(null); setSources([]) }}
+                  className="shrink-0 rounded-lg border border-white/10 bg-white/[0.04] p-2 text-white/55 transition-colors hover:bg-white/[0.08] hover:text-white"
+                  title="Close download sources"
+                >
+                  <X size={18} />
+                </button>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2 border-t border-white/10 px-5 py-3">
+                <button
+                  onClick={() => setHindiOnly(!hindiOnly)}
+                  className={`flex min-h-9 items-center gap-1.5 rounded-lg border px-3 text-[10px] font-black uppercase tracking-widest transition-all ${
+                    hindiOnly
+                      ? 'border-[#FF9933]/40 bg-[#FF9933]/16 text-[#FFB76B]'
+                      : 'border-white/10 bg-[#151B25] text-white/55 hover:bg-[#1A2230] hover:text-white/80'
+                  }`}
+                >
+                  <Languages size={12} />
+                  {hindiOnly ? 'Hindi Only' : 'All Audio'}
+                </button>
+
+                {selectedItem?.media_type === 'tv' && (
+                  <>
+                    <select
+                      value={selectedSeason}
+                      onChange={(e) => { setSelectedSeason(e.target.value); setSelectedEpisode('all'); }}
+                      className="min-h-9 rounded-lg border border-white/10 bg-[#151B25] px-3 text-[10px] font-black uppercase tracking-widest text-white/70 outline-none transition-colors hover:bg-[#1A2230]"
+                    >
+                      <option className="bg-[#10141d] text-white" value="all">All Seasons</option>
+                      <option className="bg-[#10141d] text-white" value="packs">Season Packs</option>
+                      {availableSeasons.map(s => (
+                        <option className="bg-[#10141d] text-white" key={`season-${s}`} value={s.toString()}>
+                          Season {s}
+                        </option>
+                      ))}
+                    </select>
+
+                    {selectedSeason !== 'all' && selectedSeason !== 'packs' && availableEpisodes.length > 0 && (
+                      <select
+                        value={selectedEpisode}
+                        onChange={(e) => setSelectedEpisode(e.target.value)}
+                        className="min-h-9 rounded-lg border border-white/10 bg-[#151B25] px-3 text-[10px] font-black uppercase tracking-widest text-white/70 outline-none transition-colors hover:bg-[#1A2230]"
+                      >
+                        <option className="bg-[#10141d] text-white" value="all">Any Episode</option>
+                        {availableEpisodes.map(ep => (
+                          <option className="bg-[#10141d] text-white" key={`ep-${ep}`} value={ep.toString()}>
+                            Episode {ep}
+                          </option>
+                        ))}
+                      </select>
+                    )}
+                  </>
+                )}
+
+                <button
+                  onClick={() => handleSelectResult(selectedItem)}
+                  disabled={loadingSources}
+                  className="ml-auto flex min-h-9 items-center gap-1.5 rounded-lg border border-white/10 bg-[#151B25] px-3 text-[10px] font-black uppercase tracking-widest text-white/55 transition-all hover:bg-[#1A2230] hover:text-white/80 disabled:opacity-50"
+                  title="Refresh sources"
+                >
+                  {loadingSources ? <Loader2 size={12} className="animate-spin" /> : <Search size={12} />}
+                  Refresh
+                </button>
               </div>
             </div>
 
             {/* Sources List */}
-            <div className="flex-1 overflow-y-auto px-4 py-4 flex flex-col w-full">
-              {loadingSources ? (
-                <div className="flex items-center justify-center py-12 gap-3 text-muted">
-                  <Loader2 size={18} className="animate-spin" />
-                  <span className="text-sm">Finding sources...</span>
+            <div className="flex-1 overflow-y-auto bg-[#080B10] px-4 py-4 flex flex-col w-full scrollbar-thin">
+              {(loadingSources || !sourceSearchStatus.done) && filteredSources.length === 0 ? (
+                <div className="flex h-full min-h-[340px] flex-col items-center justify-center gap-4 text-center">
+                  <div className="h-12 w-12 rounded-full border-4 border-primary/20 border-t-primary animate-spin" />
+                  <p className="text-xs font-black uppercase tracking-widest text-muted">
+                    {sourceSearchStatus.total > 0
+                      ? `Checking ${sourceSearchStatus.completed}/${sourceSearchStatus.total} providers...`
+                      : 'Scanning sources...'}
+                  </p>
                 </div>
               ) : sources.length > 0 ? (
                 <div className="space-y-3 flex-1 flex flex-col w-full">
-                  <div className="flex items-center justify-between px-1 shrink-0">
-                    <h3 className="text-[10px] font-semibold uppercase tracking-widest text-muted">
-                      {filteredSources.length} Source{filteredSources.length !== 1 ? 's' : ''} Available
-                    </h3>
-                    
-                    <button 
-                      onClick={() => setHindiOnly(!hindiOnly)}
-                      className={`flex items-center gap-1.5 px-2 py-1 rounded text-[10px] font-bold transition-all border ${
-                        hindiOnly 
-                          ? 'bg-[#FF9933]/20 text-[#FF9933] border-[#FF9933]/30 shadow-sm shadow-[#FF9933]/10' 
-                          : 'bg-white/5 text-muted/60 border-white/10 hover:text-muted hover:bg-white/10'
-                      }`}
-                    >
-                      <Languages size={10} />
-                      {hindiOnly ? 'HINDI ONLY' : 'ALL AUDIO'}
-                    </button>
-                  </div>
-
-                  {selectedItem?.media_type === 'tv' && (
-                    <div className="flex items-center gap-2 pb-1 shrink-0">
-                      <select 
-                        value={selectedSeason} 
-                        onChange={(e) => { setSelectedSeason(e.target.value); setSelectedEpisode('all'); }}
-                        className="bg-surface border border-secondary text-text text-[11px] font-medium rounded px-2 py-1 outline-none hover:bg-white/[0.03] transition-colors cursor-pointer"
-                      >
-                        <option className="bg-surface text-text" value="all">All Seasons</option>
-                        <option className="bg-surface text-text" value="packs">Full Season Packs (1080p+)</option>
-                        {availableSeasons.map(s => <option className="bg-surface text-text" key={`season-${s}`} value={s.toString()}>Season {s}</option>)}
-                      </select>
-                      
-                      {selectedSeason !== 'all' && selectedSeason !== 'packs' && availableEpisodes.length > 0 && (
-                        <select 
-                          value={selectedEpisode} 
-                          onChange={(e) => setSelectedEpisode(e.target.value)}
-                          className="bg-surface border border-secondary text-text text-[11px] font-medium rounded px-2 py-1 outline-none hover:bg-white/[0.03] transition-colors cursor-pointer"
-                        >
-                          <option className="bg-surface text-text" value="all">Any Episode</option>
-                          {availableEpisodes.map(ep => <option className="bg-surface text-text" key={`ep-${ep}`} value={ep.toString()}>Episode {ep}</option>)}
-                        </select>
-                      )}
+                  <div className="space-y-2 pb-4 overflow-x-hidden">
+                  {loadingSources && (
+                    <div className="rounded-lg border border-primary/15 bg-primary/10 px-3 py-2 text-[10px] font-bold uppercase tracking-widest text-primary">
+                      {filteredSources.length} sources found. Still checking {Math.max(0, sourceSearchStatus.total - sourceSearchStatus.completed)} providers...
                     </div>
                   )}
-
-                  <div className="space-y-2 pb-4 overflow-x-hidden">
                   {filteredSources.map((source, idx) => (
                     <div
                       key={idx}
-                      className="flex flex-col gap-2 px-3.5 py-3 rounded-xl bg-white/[0.03] hover:bg-white/[0.06] border border-secondary/30 transition-colors group"
+                      className="flex flex-col gap-2 px-3.5 py-3 rounded-xl border border-white/10 bg-white/[0.035] transition-colors hover:border-white/15 hover:bg-white/[0.065] group"
                     >
                       <div className="flex items-start justify-between gap-2">
                         <div className="flex-1 min-w-0">
@@ -974,9 +1088,9 @@ const Download: React.FC<DownloadProps> = ({ onShowDetail }) => {
                   </div>
                 </div>
               ) : (
-                <div className="flex flex-col items-center justify-center py-12 gap-2 text-muted">
-                  <HardDrive size={28} className="opacity-30" />
-                  <p className="text-sm">No sources found.</p>
+                <div className="flex h-full min-h-[340px] flex-col items-center justify-center gap-3 rounded-2xl border border-dashed border-white/10 px-8 text-center">
+                  <HardDrive size={34} className="text-muted/40" />
+                  <p className="text-xs font-black uppercase tracking-widest text-muted">No sources found.</p>
                   <p className="text-[11px] text-muted/50">Try a different title or check back later.</p>
                 </div>
               )}

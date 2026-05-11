@@ -1,3 +1,46 @@
+# MyCinema v1.22.0
+
+Feature release focused on shareable MyCinema links, exact source handoff, smarter local libraries, seek previews, and sturdier download controls.
+
+### Sharing & Deep Links
+- **MyCinema Share Links**: Movie and series detail pages now create share links with WhatsApp, Telegram, copy-link, and copy-message actions.
+- **Desktop Deep-Link Opening**: The app now registers the `mycinema://` protocol so shared movie and series links can open directly in MyCinema.
+- **Exact Source Handoff**: Shared links can carry the selected source metadata, letting the receiver open the same title with the shared source pinned at the top while fresh providers refresh.
+- **Public Share Worker**: Added a Cloudflare Worker share page with Open Graph metadata, poster/backdrop previews, favicon branding, and an app handoff button.
+
+### Downloads & Source Picking
+- **Share Exact Download Mirror**: Download history can now share the exact magnet/source used for a title when TMDB context is available.
+- **Season Pack Filtering**: Download and detail source panels now separate season packs from episode results and add a dedicated season-pack selector.
+- **Hindi Source Signals**: Source search has stronger Hindi and dual-audio detection, Hindi provider coverage, and visible Hindi result counts in the Download panel.
+- **More Provider Coverage**: Source discovery adds or strengthens Torrentio Hindi, Torrentio Dual Audio, Annatar, Comet, Jackettio, Shluflix, Peerflix, Stremify, Nyaa, TorrentGalaxy, LimeTorrents, GloTorrents, 1337x Hindi, and BTDig paths.
+- **Pause/Resume Stability**: Download pause and resume now use pending-state guards so stale progress events do not immediately flip the UI back.
+
+### Player & Local Library
+- **Seek Thumbnail Preview**: Hovering the playback progress bar now asks the main process for cached ffmpeg thumbnails instead of loading a second hidden video preview.
+- **Videos Stay Videos**: The scanner now classifies personal clips, recordings, lectures, short files, and other non-release media as Videos instead of forcing them into Movies.
+- **Metadata Refresh Fixes**: Rescans can refresh changed titles, types, series fields, TMDB IDs, and stale cached poster matches instead of only filling duration.
+- **Backup Restore Coverage**: Backup import now accepts saved local `video` items in watchlist and favorites data.
+
+### Home & Detail Polish
+- **Separate India Rails**: Home now has separate India movie and India series rows, each backed by type-specific cache snapshots.
+- **Fresher India OTT Discovery**: India trending now uses a stricter recent OTT window, origin-country filtering, and popularity sorting for movies and series separately.
+- **Detail Vibe Tags**: Detail pages now derive concise vibe tags from genre, title, tagline, and overview context instead of only listing raw genres.
+- **External Title Handling**: Shared or TMDB-backed external titles can open details, trailers, source search, watchlist, and favorite actions without requiring a local file.
+
+### Security & Privacy
+- **Validated Share Payloads**: Deep links validate media type, TMDB ID, and magnet-based source payloads before opening shared source data.
+- **Safe Share Rendering**: The share Worker escapes rendered metadata, keeps TMDB access server-side through a Worker secret, and avoids putting the API key in shared URLs.
+- **Scoped Seek Preview IPC**: Seek thumbnails use the existing safe-path check before ffmpeg touches local files.
+- **Cleaner Torrent Shutdown**: Quit handling clears torrent progress timers, paused IDs, active torrents, and the WebTorrent client to reduce shutdown noise.
+- **Expected Close-Abort Handling**: Known Electron close-abort errors from pending async work are logged as expected shutdown events instead of crashing the main process.
+
+### Developer & Release
+- **Protocol Packaging**: Windows builds now declare the MyCinema Link protocol in `electron-builder.yml`.
+- **Share Worker Project**: Added a deployable `share-worker` project with Worker code, Wrangler config, and setup notes for the share domain.
+- **Local Worker Temp Ignore**: Local `.wrangler` output is ignored so deploy cache files do not enter release commits.
+
+***
+
 # MyCinema v1.21.0
 
 Feature release focused on faster source discovery, a warmer home startup, and more reliable playback controls.

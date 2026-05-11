@@ -21,9 +21,8 @@ const Movies: React.FC<MoviesProps> = ({ onPlay, onShowDetail }) => {
     try {
       const allVideos: Video[] = await window.api.getVideos()
       
-      const ONE_HOUR = 3600
       const isMovie = (v: Video) => 
-        v.type === 'movie' && (v.duration === 0 || !v.duration || v.duration >= ONE_HOUR)
+        v.type === 'movie'
 
       setMovies(allVideos.filter(isMovie))
     } finally {

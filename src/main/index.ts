@@ -15,6 +15,35 @@ import { pathToFileURL } from 'url'
 import https from 'https'
 import dns from 'dns'
 
+function isExpectedCloseAbort(error: unknown): boolean {
+  const message = error instanceof Error
+    ? `${error.name}: ${error.message}`
+    : String(error)
+
+  return message.includes('OperationError') &&
+    message.includes('User-Initiated Abort') &&
+    message.includes('Close called')
+}
+
+process.on('uncaughtException', (error) => {
+  if (isExpectedCloseAbort(error)) {
+    console.warn('[Shutdown] Ignored expected close-abort from pending async work:', error.message)
+    return
+  }
+
+  console.error('[Main] Uncaught exception:', error)
+  throw error
+})
+
+process.on('unhandledRejection', (reason) => {
+  if (isExpectedCloseAbort(reason)) {
+    console.warn('[Shutdown] Ignored expected close-abort rejection from pending async work:', reason)
+    return
+  }
+
+  console.error('[Main] Unhandled rejection:', reason)
+})
+
 // Custom DNS resolver using Google/Cloudflare to bypass ISP blocks
 const customDns = new dns.Resolver()
 customDns.setServers(['8.8.8.8', '1.1.1.1'])
@@ -50,9 +79,9 @@ function parseHttpResponse(data: string): any {
 
 function nodeHttpsRequestOnce(
   url: string,
-  opts: { method?: string; headers?: Record<string, string>; body?: string; timeoutMs?: number; resolvedHost?: string } = {}
+  opts: { method?: string; headers?: Record<string, string>; body?: string; timeoutMs?: number; resolvedHost?: string; redirectsCount?: number } = {}
 ): Promise<string> {
-  const { method = 'GET', headers = {}, body, timeoutMs = 10000, resolvedHost } = opts
+  const { method = 'GET', headers = {}, body, timeoutMs = 10000, resolvedHost, redirectsCount = 0 } = opts
   return new Promise((resolve, reject) => {
     let req: any = null
     const timer = setTimeout(() => {
@@ -85,6 +114,17 @@ function nodeHttpsRequestOnce(
         res.on('data', (chunk: string) => { data += chunk })
         res.on('end', () => {
           clearTimeout(timer)
+          if (res.statusCode && [301, 302, 307, 308].includes(res.statusCode) && res.headers.location && redirectsCount < 3) {
+            let redirectUrl = res.headers.location
+            if (redirectUrl.startsWith('/')) {
+              const parsed = new URL(url)
+              redirectUrl = `${parsed.protocol}//${parsed.host}${redirectUrl}`
+            }
+            const newOpts = { ...opts, redirectsCount: redirectsCount + 1 }
+            delete newOpts.resolvedHost
+            resolve(nodeHttpsRequestOnce(redirectUrl, newOpts))
+            return
+          }
           if (res.statusCode && res.statusCode >= 400) {
             reject(new Error(`HTTP ${res.statusCode} fetching ${url}`))
             return
@@ -438,7 +478,7 @@ function createWindow(): void {
       runStartupScan().catch(err => console.error('[Startup] Scan error:', err))
       autoResumeDownloads().catch(err => console.error('[Startup] Auto-resume error:', err))
     })
-    handleCommandLine(process.argv, null)
+    handleCommandLine(process.argv, mainWindow)
   })
 
   mainWindow.webContents.setWindowOpenHandler((details) => {
@@ -714,6 +754,22 @@ app.commandLine.appendSwitch('enable-blink-features', 'AudioVideoTracks')
 // Prevent Chromium's hardware decoder from artifacting (producing grey glitchy soup) on specific high-bitrate MKV frames
 app.commandLine.appendSwitch('disable-features', 'D3D11VideoDecoder') 
 
+const APP_PROTOCOL = 'mycinema'
+
+type SharedMediaTarget = {
+  type: 'movie' | 'series'
+  tmdbId: number
+  source?: {
+    title: string
+    quality?: string
+    size?: string
+    magnet: string
+    seeds?: number
+    peers?: number
+    isHindi?: boolean
+  }
+}
+
 const gotTheLock = app.requestSingleInstanceLock()
 
 if (!gotTheLock) {
@@ -722,9 +778,10 @@ if (!gotTheLock) {
 }
 
 let pendingExternalFilePath: string | null = null;
+let pendingSharedMediaTarget: SharedMediaTarget | null = null
 const allowedExternalDirs = new Set<string>();
 
-app.on('second-instance', (event, commandLine, workingDirectory) => {
+app.on('second-instance', (_event, commandLine, _workingDirectory) => {
   const mainWindow = BrowserWindow.getAllWindows()[0]
   if (mainWindow) {
     if (mainWindow.isMinimized()) mainWindow.restore()
@@ -733,7 +790,73 @@ app.on('second-instance', (event, commandLine, workingDirectory) => {
   }
 })
 
+function parseSharedMediaUrl(rawUrl: string): SharedMediaTarget | null {
+  try {
+    const parsed = new URL(rawUrl)
+    if (parsed.protocol !== `${APP_PROTOCOL}:`) return null
+
+    const hostType = parsed.hostname.toLowerCase()
+    const pathParts = parsed.pathname.split('/').filter(Boolean)
+    const rawType = hostType || pathParts[0] || ''
+    const rawId = hostType ? pathParts[0] : pathParts[1]
+    const type = rawType === 'tv' ? 'series' : rawType
+    const tmdbId = Number.parseInt(rawId || parsed.searchParams.get('tmdbId') || parsed.searchParams.get('id') || '', 10)
+
+    if ((type !== 'movie' && type !== 'series') || !Number.isFinite(tmdbId) || tmdbId <= 0) {
+      return null
+    }
+
+    let source: SharedMediaTarget['source']
+    const encodedSource = parsed.searchParams.get('source')
+    if (encodedSource) {
+      try {
+        const normalized = encodedSource.replace(/-/g, '+').replace(/_/g, '/')
+        const padded = normalized.padEnd(Math.ceil(normalized.length / 4) * 4, '=')
+        const parsedSource = JSON.parse(Buffer.from(padded, 'base64').toString('utf8'))
+        if (
+          parsedSource &&
+          typeof parsedSource.title === 'string' &&
+          typeof parsedSource.magnet === 'string' &&
+          parsedSource.magnet.startsWith('magnet:')
+        ) {
+          source = {
+            title: parsedSource.title,
+            quality: typeof parsedSource.quality === 'string' ? parsedSource.quality : undefined,
+            size: typeof parsedSource.size === 'string' ? parsedSource.size : undefined,
+            magnet: parsedSource.magnet,
+            seeds: typeof parsedSource.seeds === 'number' ? parsedSource.seeds : undefined,
+            peers: typeof parsedSource.peers === 'number' ? parsedSource.peers : undefined,
+            isHindi: Boolean(parsedSource.isHindi)
+          }
+        }
+      } catch {
+        source = undefined
+      }
+    }
+
+    return { type, tmdbId, source }
+  } catch {
+    return null
+  }
+}
+
+function dispatchSharedMediaTarget(target: SharedMediaTarget, mainWindow: BrowserWindow | null) {
+  pendingSharedMediaTarget = target
+  if (mainWindow && mainWindow.webContents && !mainWindow.webContents.isLoading()) {
+    mainWindow.webContents.send('open-shared-media', target)
+  }
+}
+
 function handleCommandLine(argv: string[], mainWindow: BrowserWindow | null) {
+  const sharedUrl = argv.find(arg => arg.startsWith(`${APP_PROTOCOL}://`))
+  if (sharedUrl) {
+    const target = parseSharedMediaUrl(sharedUrl)
+    if (target) {
+      dispatchSharedMediaTarget(target, mainWindow)
+      return
+    }
+  }
+
   const filePath = argv.find(arg => 
     !arg.startsWith('--') && 
     arg !== process.execPath &&
@@ -748,6 +871,90 @@ function handleCommandLine(argv: string[], mainWindow: BrowserWindow | null) {
       mainWindow.webContents.send('open-external-file', filePath)
     }
   }
+}
+
+app.on('open-url', (event, url) => {
+  event.preventDefault()
+  const target = parseSharedMediaUrl(url)
+  if (!target) return
+  const mainWindow = BrowserWindow.getAllWindows()[0] || null
+  dispatchSharedMediaTarget(target, mainWindow)
+  if (mainWindow) {
+    if (mainWindow.isMinimized()) mainWindow.restore()
+    mainWindow.focus()
+  }
+})
+
+const seekPreviewJobs = new Map<string, Promise<string | null>>()
+
+function getSeekPreviewCachePath(filePath: string, time: number): string | null {
+  try {
+    const normalizedPath = path.normalize(filePath)
+    const stat = fs.statSync(normalizedPath)
+    const cacheRoot = path.join(app.getPath('userData'), 'seek_previews')
+    const cacheKey = crypto
+      .createHash('sha1')
+      .update(`${normalizedPath}:${stat.size}:${stat.mtimeMs}`)
+      .digest('hex')
+    const cacheDir = path.join(cacheRoot, cacheKey)
+    const bucketTime = Math.max(0, Math.floor(time / 5) * 5)
+
+    return path.join(cacheDir, `${bucketTime.toString().padStart(6, '0')}.jpg`)
+  } catch {
+    return null
+  }
+}
+
+function generateSeekPreviewThumbnail(filePath: string, time: number): Promise<string | null> {
+  const normalizedPath = path.normalize(filePath)
+  const localPath = getSeekPreviewCachePath(normalizedPath, time)
+  if (!localPath) return Promise.resolve(null)
+
+  if (fs.existsSync(localPath)) {
+    try {
+      if (fs.statSync(localPath).size > 0) return Promise.resolve(localPath)
+      fs.unlinkSync(localPath)
+    } catch {
+      return Promise.resolve(null)
+    }
+  }
+
+  const existingJob = seekPreviewJobs.get(localPath)
+  if (existingJob) return existingJob
+
+  const job = new Promise<string | null>((resolve) => {
+    fs.mkdirSync(path.dirname(localPath), { recursive: true })
+    const bucketTime = Math.max(0, Math.floor(time / 5) * 5)
+
+    ffmpeg(normalizedPath)
+      .seekInput(bucketTime)
+      .frames(1)
+      .videoFilters('scale=-2:144')
+      .outputOptions(['-q:v 10'])
+      .output(localPath)
+      .on('end', () => {
+        try {
+          if (fs.existsSync(localPath) && fs.statSync(localPath).size > 0) {
+            resolve(localPath)
+            return
+          }
+        } catch {}
+        resolve(null)
+      })
+      .on('error', (err) => {
+        console.warn(`[FFMPEG] Seek preview thumbnail failed: ${err.message}`)
+        try {
+          if (fs.existsSync(localPath) && fs.statSync(localPath).size === 0) fs.unlinkSync(localPath)
+        } catch {}
+        resolve(null)
+      })
+      .run()
+  }).finally(() => {
+    seekPreviewJobs.delete(localPath)
+  })
+
+  seekPreviewJobs.set(localPath, job)
+  return job
 }
 
 type BackupImportSummary = {
@@ -798,6 +1005,12 @@ app.whenReady().then(() => {
   db.initDb()
   electronApp.setAppUserModelId('com.electron')
 
+  if (process.defaultApp && process.argv.length >= 2) {
+    app.setAsDefaultProtocolClient(APP_PROTOCOL, process.execPath, [path.resolve(process.argv[1])])
+  } else {
+    app.setAsDefaultProtocolClient(APP_PROTOCOL)
+  }
+
   // Attach file-system watchers for all already-saved folders
   const savedFolders = db.getFolders() as any[]
   savedFolders.forEach(f => attachFolderWatcher(f.path))
@@ -817,8 +1030,11 @@ app.on('before-quit', () => {
   folderWatchers.forEach(w => w.close())
   folderWatchers.clear()
   // Gracefully destroy all active torrents
+  torrentProgressIntervals.forEach(interval => clearInterval(interval))
+  torrentProgressIntervals.clear()
   activeTorrents.forEach(t => { try { t.destroy() } catch {} })
   activeTorrents.clear()
+  pausedTorrentIds.clear()
   if (webtorrentClient) { try { webtorrentClient.destroy() } catch {} }
 })
 
@@ -1039,13 +1255,13 @@ ipcMain.handle('import-user-backup', async (): Promise<BackupImportSummary | { i
     }
 
     for (const item of localWatchlist) {
-      if (!item || !['movie', 'series'].includes(item.type)) continue
+      if (!item || !['movie', 'series', 'video'].includes(item.type)) continue
       const restoreResult = db.restoreLocalWatchlistItem(item)
       summary.localWatchlistRestored += restoreResult.changes > 0 ? 1 : 0
     }
 
     for (const item of favorites) {
-      if (!item || !['movie', 'series'].includes(item.type)) continue
+      if (!item || !['movie', 'series', 'video'].includes(item.type)) continue
       const restoreResult = db.restoreFavoriteItem(item)
       summary.favoritesRestored += restoreResult.changes > 0 ? 1 : 0
     }
@@ -1392,6 +1608,16 @@ ipcMain.handle('get-media-info', (_event, filePath: string): Promise<any> => {
   })
 })
 
+ipcMain.handle('get-seek-preview-thumbnail', async (_event, filePath: string, time: number): Promise<string | null> => {
+  if (!isSafeFilePath(filePath)) {
+    console.error(`[IPC] 403 Forbidden path in get-seek-preview-thumbnail: ${filePath}`)
+    return null
+  }
+
+  const safeTime = Number.isFinite(time) ? Math.max(0, time) : 0
+  return generateSeekPreviewThumbnail(filePath, safeTime)
+})
+
 ipcMain.handle('clear-all-data', async () => {
   try {
     const { response } = await dialog.showMessageBox({
@@ -1499,6 +1725,21 @@ function setupAutoUpdater(win: BrowserWindow): void {
 // ─── WebTorrent Download Engine ──────────────────────────────────────────────
 let webtorrentClient: any = null
 const activeTorrents = new Map<string, any>() // id -> torrent instance
+const torrentProgressIntervals = new Map<string, NodeJS.Timeout>()
+const pausedTorrentIds = new Set<string>()
+
+function clearTorrentProgressInterval(id: string): void {
+  const interval = torrentProgressIntervals.get(id)
+  if (interval) {
+    clearInterval(interval)
+    torrentProgressIntervals.delete(id)
+  }
+}
+
+function markTorrentInactive(id: string): void {
+  clearTorrentProgressInterval(id)
+  activeTorrents.delete(id)
+}
 
 async function getWebTorrentClient(): Promise<any> {
   if (!webtorrentClient) {
@@ -1570,16 +1811,23 @@ function broadcastProgress(id: string, torrent: any, status: string, errorMessag
   if (status === 'downloading' && (!torrent.length || torrent.length === 0)) {
     displayStatus = 'connecting'
   }
+  if (pausedTorrentIds.has(id) && displayStatus !== 'done' && displayStatus !== 'error') {
+    displayStatus = 'paused'
+  }
 
   const data: any = {
     id,
     title: (torrent as any)._myCinemaTitle || torrent.name || existing?.title || 'Download',
     name: torrent.name || (torrent as any)._myCinemaName || existing?.name || null,
     progress: newProgress,
-    downloadSpeed: torrent.downloadSpeed !== undefined 
+    downloadSpeed: displayStatus === 'paused'
+      ? '0 B/s'
+      : torrent.downloadSpeed !== undefined 
       ? formatBytes(torrent.downloadSpeed || 0) + '/s' 
       : (existing?.downloadSpeed || '0 B/s'),
-    timeRemaining: torrent.timeRemaining !== undefined 
+    timeRemaining: displayStatus === 'paused'
+      ? '—'
+      : torrent.timeRemaining !== undefined 
       ? formatTime(torrent.timeRemaining ? torrent.timeRemaining / 1000 : Infinity) 
       : (existing?.timeRemaining || '—'),
     status: displayStatus,
@@ -1603,6 +1851,42 @@ function broadcastProgress(id: string, torrent: any, status: string, errorMessag
 // Never hardcode API keys in source files.
 const TMDB_API_KEY = process.env.MAIN_VITE_TMDB_API_KEY || (import.meta as any).env?.MAIN_VITE_TMDB_API_KEY || ''
 const OPENSUBTITLES_API_KEY = process.env.MAIN_VITE_OPENSUBTITLES_API_KEY || (import.meta as any).env?.MAIN_VITE_OPENSUBTITLES_API_KEY || ''
+
+async function fetchSharedMediaByTmdbId(type: 'movie' | 'series', tmdbId: number): Promise<any | null> {
+  const localVideo = db.findVideoByTmdbId(tmdbId) as any
+  if (localVideo && (!localVideo.type || localVideo.type === type)) {
+    return localVideo
+  }
+
+  if (!TMDB_API_KEY) {
+    console.warn('[TMDB] TMDB_API_KEY is not set — cannot resolve shared media link')
+    return null
+  }
+
+  const endpoint = type === 'series' ? 'tv' : 'movie'
+  const data = await nodeHttpGet(`https://api.themoviedb.org/3/${endpoint}/${tmdbId}?api_key=${TMDB_API_KEY}&language=en-US`)
+  if (!data || data.success === false) return null
+
+  const title = type === 'series' ? data.name : data.title
+  const releaseDate = type === 'series' ? data.first_air_date : data.release_date
+
+  return {
+    id: -tmdbId,
+    title: title || 'Untitled',
+    file_path: '',
+    type,
+    series_name: type === 'series' ? title || 'Untitled' : undefined,
+    poster_path: data.poster_path ? `https://image.tmdb.org/t/p/w780${data.poster_path}` : undefined,
+    backdrop_path: data.backdrop_path ? `https://image.tmdb.org/t/p/w1280${data.backdrop_path}` : undefined,
+    overview: data.overview || undefined,
+    tagline: data.tagline || undefined,
+    genres: Array.isArray(data.genres) ? data.genres.map((genre: any) => genre.name).filter(Boolean).join(', ') : undefined,
+    vote_average: typeof data.vote_average === 'number' ? data.vote_average : undefined,
+    release_year: releaseDate ? Number(String(releaseDate).slice(0, 4)) : undefined,
+    tmdb_id: tmdbId,
+    isExternal: true
+  }
+}
 
 function computeOpenSubtitlesHash(filePath: string): { moviehash: string; moviebytesize: number } | null {
   try {
@@ -1680,12 +1964,27 @@ ipcMain.handle('fetch-trending', async (_, type: 'movie' | 'series') => {
   return await tmdb.fetchTrending(type)
 })
 
-ipcMain.handle('fetch-trending-india', async () => {
-  return await tmdb.fetchTrendingInIndia()
+ipcMain.handle('fetch-trending-india', async (_, type: 'movie' | 'series' = 'movie') => {
+  return await tmdb.fetchTrendingInIndia(type)
 })
 
 ipcMain.handle('get-tmdb-trailer', async (_, params: { tmdbId?: number | null; title: string; type: 'movie' | 'series'; year?: number | null; seasonNumber?: number | null; preferLatestSeason?: boolean }) => {
   return await tmdb.fetchTmdbTrailer(params)
+})
+
+ipcMain.handle('get-pending-shared-media-target', () => {
+  const target = pendingSharedMediaTarget
+  pendingSharedMediaTarget = null
+  return target
+})
+
+ipcMain.handle('get-shared-media-by-tmdb-id', async (_, type: 'movie' | 'series', tmdbId: number) => {
+  try {
+    return await fetchSharedMediaByTmdbId(type, tmdbId)
+  } catch (err) {
+    console.error('[TMDB] Shared media lookup failed:', err)
+    return null
+  }
 })
 
 ipcMain.handle('toggle-favorite', (_, id: number) => {
@@ -1721,14 +2020,25 @@ ipcMain.handle('find-video-by-tmdb-id', (_, tmdbId: number) => {
 })
 
 // ─── Hindi Detection & Ranking Helpers ────────────────────────────────────────
+function normalizeLanguageProbe(value: string): string {
+  return value
+    .toLowerCase()
+    .replace(/&/g, ' and ')
+    .replace(/[\[\](){}|:;,_./\\-]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
 function isHindiContent(title: string): boolean {
-  const lower = title.toLowerCase()
+  const lower = normalizeLanguageProbe(title)
   return (
     lower.includes('hindi') ||
     lower.includes('हिंदी') ||
-    lower.includes('audio:hindi') ||
     lower.includes('audio hindi') ||
-    lower.includes('hin-eng') ||
+    lower.includes('hindi audio') ||
+    lower.includes('hindi dubbed') ||
+    lower.includes('hin eng') ||
+    lower.includes('eng hin') ||
     lower.includes('katmoviehd') ||
     lower.includes('katmovieshd') ||
     lower.includes('hdhub4u') ||
@@ -1749,8 +2059,6 @@ function isHindiContent(title: string): boolean {
     lower.includes('u3p') ||
     lower.includes('darksiderg') ||
     lower.includes('mkvcinemas') ||
-    lower.includes('1tamilmv') ||
-    lower.includes('tamilmv') ||
     lower.includes('bollyshare') ||
     lower.includes('desiremovies') ||
     lower.includes('moviespapa') ||
@@ -1762,38 +2070,73 @@ function isHindiContent(title: string): boolean {
     lower.includes('khatrimaza') ||
     lower.includes('moviespur') ||
     lower.includes('7starhd') ||
-    lower.includes('tamilyogi') ||
-    lower.includes('isaimini') ||
-    lower.includes('tamilrockers') ||
     /\bhin(di?)?\b/i.test(lower) ||
-    /[\[\(\.]hin[\]\)\.]/i.test(lower)
+    /\b(hin|hindi)\s*(audio|dub|dubbed|voice|lang|language)\b/i.test(lower) ||
+    /\b(audio|dub|dubbed|voice|lang|language)\s*(hin|hindi)\b/i.test(lower) ||
+    /\bhin\s*(eng|tam|tel|mal|kan)\b/i.test(lower) ||
+    /\b(eng|tam|tel|mal|kan)\s*hin\b/i.test(lower) ||
+    title.includes('🇮🇳')
   )
 }
 
+function getTorrentSourceLanguageProbe(source: any): string {
+  return [
+    source?.title,
+    source?.name,
+    source?.description,
+    source?.filename,
+    source?.language,
+    source?.behaviorHints?.bingeGroup,
+    source?.behaviorHints?.videoHash
+  ].filter(Boolean).join(' ')
+}
+
+function normalizeTorrentSourceHindiFlag<T extends { isHindi?: boolean }>(source: T): T {
+  return {
+    ...source,
+    isHindi: isHindiContent(getTorrentSourceLanguageProbe(source))
+  }
+}
+
 function getHindiScore(title: string): number {
-  const lower = title.toLowerCase()
+  const lower = normalizeLanguageProbe(title)
   let score = 0
   
-  // High quality sites requested by user
+  // High quality sites / Indian release groups — consistently provide Hindi dubbed content
   const premiumSites = [
     'katmoviehd', 'katmovieshd', 'vegamovies', 'dotmovies', 'hdhub4u', 'uhdmovies', 
-    'luxmovies', 'darksiderg', 'bolly4u', '1tamilmv', 'tamilmv', 'hdmovies4u', 
+    'luxmovies', 'darksiderg', 'bolly4u', 'hdmovies4u', 
     'bollyshare', 'desiremovies', 'moviespapa', 'moviesnation', 'hdmovies24',
-    'filmyzilla', 'downloadhub', 'tamilblasters', '7starhd'
+    'filmyzilla', 'downloadhub', 'tamilblasters', '7starhd', 'skymovies', 'skymovieshd',
+    'mkvcinemas', 'mkvmoviespoint', 'mkvmad', 'extramovies', '9xmovies', 'world4ufree',
+    'moviesflix', 'khatrimaza', 'moviespur', '1tamilmv', 'tamilmv', 'gdtot', 'hubcloud',
+    'torrentgalaxy hindi', 'dual audio', 'pahe', 'psa', 'mkvcage', 'ssrmovies',
+    'worldfree4u', 'hdmovieshub', 'cinevood', 'filmyhit', 'jalshamovie', 'uncutmaza',
+    'coolmoviez', 'hdmoviearea', 'themoviesflix', 'mlwbd', 'mkvking', 'ofilmywap'
   ]
   
   for (const site of premiumSites) {
     if (lower.includes(site)) {
-      score += 45 // Slightly higher priority
+      score += 50
       break
     }
   }
 
-  if (lower.includes('hindi')) score += 20
-  if (/\bhin(di?)?\b/i.test(lower) || lower.includes('hin-eng')) score += 20
+  if (lower.includes('hindi dubbed')) score += 40
+  if (lower.includes('hindi audio')) score += 35
+  if (lower.includes('hindi')) score += 25
+  if (/\bhin(di?)?\b/i.test(lower) || lower.includes('hin eng') || lower.includes('eng hin')) score += 25
+  if (lower.includes('dual audio') || lower.includes('multi audio')) score += 20
   if (lower.includes('official')) score += 10
-  if (lower.includes('1080p')) score += 5
-  if (lower.includes('2160p') || lower.includes('4k')) score += 15
+
+  // Quality bonuses — push higher quality Hindi to the top
+  if (lower.includes('2160p') || lower.includes('4k') || lower.includes('uhd')) score += 25
+  if (lower.includes('1080p')) score += 12
+  if (lower.includes('bluray') || lower.includes('blu ray') || lower.includes('bdrip') || lower.includes('brrip')) score += 8
+  if (lower.includes('web dl') || lower.includes('web-dl') || lower.includes('webdl') || lower.includes('webrip')) score += 5
+  if (lower.includes('x265') || lower.includes('h265') || lower.includes('hevc')) score += 3
+  if (lower.includes('10bit') || lower.includes('10 bit')) score += 2
+  if (lower.includes('atmos') || lower.includes('dd5 1') || lower.includes('ddp5 1') || lower.includes('dts')) score += 3
   
   return score
 }
@@ -1801,12 +2144,16 @@ function getHindiScore(title: string): number {
 // ─── Torrentio Stream Parser Helper ──────────────────────────────────────────
 const TORRENTIO_BASE = 'https://torrentio.strem.fun/sort=seeders|qualityfilter=cam,screener'
 
-function parseTorrentioStream(stream: any, fallbackTitle: string): any | null {
+function parseTorrentioStream(stream: any, fallbackTitle: string, options: { provider?: string } = {}): any | null {
   if (!stream.infoHash) return null
   const streamTitle = stream.title || ''
+  const languageProbe = getTorrentSourceLanguageProbe({
+    ...stream,
+    provider: options.provider
+  })
   
   // Parse quality
-  const qualityMatch = streamTitle.match(/(2160p|1080p|720p|480p)/i)
+  const qualityMatch = `${streamTitle} ${stream.name || ''}`.match(/(2160p|1080p|720p|480p)/i)
   const quality = qualityMatch ? qualityMatch[1] : (stream.name?.includes('1080p') ? '1080p' : 'HD')
   
   // Parse size e.g. "💾 2.34 GB" or "💾 980 MB"
@@ -1816,20 +2163,35 @@ function parseTorrentioStream(stream: any, fallbackTitle: string): any | null {
   // Parse seeds e.g. "👤 123"
   const seedMatch = streamTitle.match(/(?:👤|Seeders:)\s*([0-9]+)/i)
   const seeds = seedMatch ? parseInt(seedMatch[1]) : 0
+  if (seeds === 0) return null
   
-  const isHindi = isHindiContent(streamTitle)
+  const isHindi = isHindiContent(languageProbe)
   
-  // Clean up title
-  const cleanTitle = streamTitle.split('\n')[0].replace(/[\[\(][A-Za-z0-9 ]*[\]\)]/g, '').trim() || `${fallbackTitle} (Aggregated)`
+  // Clean up title: multi-line strings in Stremio APIs usually have the release name on line 2 if line 1 is a tracker or uploader name
+  const lines = streamTitle.split('\n')
+  let cleanTitle = lines[0]
+  if (lines.length > 1) {
+    const normFallback = fallbackTitle.toLowerCase().replace(/[^a-z0-9]/g, '')
+    const normLine0 = lines[0].toLowerCase().replace(/[^a-z0-9]/g, '')
+    const normLine1 = lines[1].toLowerCase().replace(/[^a-z0-9]/g, '')
+    if (!normLine0.includes(normFallback) && normLine1.includes(normFallback)) {
+      cleanTitle = lines[1]
+    } else if (lines[0].toLowerCase().includes('imdb') || lines[0].length < 15) {
+      cleanTitle = lines[1]
+    }
+  }
+
+  cleanTitle = cleanTitle.replace(/[\[\(][A-Za-z0-9 ]*[\]\)]/g, '').replace(/💾.*/, '').replace(/👤.*/, '').trim() || `${fallbackTitle} (Aggregated)`
 
   return {
-    title: cleanTitle.substring(0, 80),
+    title: cleanTitle.substring(0, 100),
     quality,
     size,
     magnet: `magnet:?xt=urn:btih:${stream.infoHash}&dn=${encodeURIComponent(cleanTitle)}`,
     seeds,
     peers: Math.floor(seeds * 0.2),
     type: 'web',
+    provider: options.provider,
     isHindi
   }
 }
@@ -1876,13 +2238,6 @@ function isRelevanceMatch(resultTitle: string, searchTitle: string, mediaType: s
   const wordMatch = titleWords.length > 0 && titleWords.every(word => new RegExp(`\\b${word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i').test(rt))
   if (!exactTitleMatch && !wordMatch) return false
 
-  // 2. Short title protection (e.g. "From", "The Bear")
-  // If title is short, it should appear at the very beginning of the result
-  if (st.length <= 5) {
-    const titleIndex = rt.indexOf(st);
-    if (titleIndex > 2) return false; // Must be near start
-  }
-
   // 3. For movies, if year is provided, check if a different year exists in the result title.
   // TV results are intentionally allowed without Sxx/episode markers because many
   // providers label show packs generically, especially for new or regional series.
@@ -1921,32 +2276,81 @@ function getTorrentSourceCacheKey(title: string, year: string, mediaType: string
   return `${mediaType}:${tmdbId}:${title.toLowerCase()}:${year || ''}`
 }
 
+function parseTvTorrentMetadata(sourceTitle: string): { parsedSeason?: number; parsedEpisode?: number; isSeasonPack?: boolean } {
+  const titleLower = sourceTitle.toLowerCase()
+  const seasonEpisodeMatch =
+    titleLower.match(/\bs(\d{1,2})[\s._-]*e(?:p)?[\s._-]*(\d{1,3})\b/i) ||
+    titleLower.match(/\b(\d{1,2})x(\d{1,3})\b/i) ||
+    titleLower.match(/\bseason[\s._-]*(\d{1,2})[\s._-]*(?:episode|ep)[\s._-]*(\d{1,3})\b/i) ||
+    titleLower.match(/\b(?:episode|ep)\s*(\d{1,3})\b[\s\S]*?\bseason\s*(\d{1,2})\b/i)
+
+  if (seasonEpisodeMatch) {
+    const episodeFirst = /^(?:episode|ep)/i.test(seasonEpisodeMatch[0])
+    return {
+      parsedSeason: parseInt(seasonEpisodeMatch[episodeFirst ? 2 : 1]),
+      parsedEpisode: parseInt(seasonEpisodeMatch[episodeFirst ? 1 : 2]),
+      isSeasonPack: false
+    }
+  }
+
+  const seasonMatch =
+    titleLower.match(/\bs(\d{1,2})\b/i) ||
+    titleLower.match(/\bseason\s*(\d{1,2})\b/i)
+
+  if (!seasonMatch) return {}
+
+  const hasEpisodeSignal =
+    /\be(?:p)?[\s._-]*\d{1,3}\b/i.test(titleLower) ||
+    /\b(?:episode|ep)[\s._-]*\d{1,3}\b/i.test(titleLower)
+
+  return {
+    parsedSeason: parseInt(seasonMatch[1]),
+    isSeasonPack: !hasEpisodeSignal
+  }
+}
+
 function normalizeTorrentSources(sources: any[], mediaType: string): any[] {
     // Parse Season / Episode metadata
     let enrichedSources = sources.map(src => {
+      const normalized = normalizeTorrentSourceHindiFlag({ ...src })
       if (mediaType === 'tv') {
-        const titleLower = src.title.toLowerCase()
-        const seMatch = titleLower.match(/s(\d{1,2})e(\d{1,2})/i) || titleLower.match(/season\s*(\d{1,2})\s*episode\s*(\d{1,2})/i)
-        
-        if (seMatch) {
-          src.parsedSeason = parseInt(seMatch[1])
-          src.parsedEpisode = parseInt(seMatch[2])
-          src.isSeasonPack = false
-        } else {
-          const sMatch = titleLower.match(/s(\d{1,2})\b/i) || titleLower.match(/season\s*(\d{1,2})\b/i)
-          if (sMatch) {
-            src.parsedSeason = parseInt(sMatch[1])
-            src.isSeasonPack = true
-          }
+        const metadata = parseTvTorrentMetadata(normalized.title)
+        normalized.parsedSeason = metadata.parsedSeason
+        normalized.parsedEpisode = metadata.parsedEpisode
+        normalized.isSeasonPack = Boolean(metadata.isSeasonPack)
+      }
+      return normalized
+    })
+
+    // Improve quality label using file size when no explicit tag is present
+    enrichedSources = enrichedSources.map(src => {
+      const qualityText = `${src.quality || ''} ${src.title || ''}`.toLowerCase()
+      if (!/\b(480p|720p|1080p|2160p|4k|uhd)\b/i.test(qualityText)) {
+        // Estimate quality from file size for unlabeled torrents
+        const sizeMatch = (src.size || '').match(/([\d.]+)\s*(GB|MB|TB)/i)
+        if (sizeMatch) {
+          const sizeInMB = sizeMatch[2].toUpperCase() === 'GB' ? parseFloat(sizeMatch[1]) * 1024
+            : sizeMatch[2].toUpperCase() === 'TB' ? parseFloat(sizeMatch[1]) * 1024 * 1024
+            : parseFloat(sizeMatch[1])
+          if (sizeInMB > 8000) src.quality = '2160p'
+          else if (sizeInMB > 2500) src.quality = '1080p'
+          else if (sizeInMB > 800) src.quality = '720p'
+          else src.quality = '480p'
         }
       }
       return src
     })
 
-    // Keep only full-HD and 4K sources in the source picker.
+    // Quality filter: Keep 1080p+ by default, but allow 720p for Hindi content
+    // (many Hindi dubs only exist in 720p — dropping them loses most Hindi results)
     enrichedSources = enrichedSources.filter(src => {
       const qualityText = `${src.quality || ''} ${src.title || ''}`.toLowerCase()
-      return /\b(1080p|2160p|4k|uhd)\b/i.test(qualityText)
+      const is1080pPlus = /\b(1080p|2160p|4k|uhd)\b/i.test(qualityText)
+      if (is1080pPlus) return true
+      // Allow 720p for Hindi content since it's often the best available
+      const is720p = /\b720p\b/i.test(qualityText)
+      if (is720p && src.isHindi) return true
+      return false
     })
 
     // Filter Season Packs that are not 1080p+
@@ -1961,10 +2365,10 @@ function normalizeTorrentSources(sources: any[], mediaType: string): any[] {
       })
     }
 
-    // Sort heavily by requirements ΓÇö Hindi content and premium sites prioritized
+    // Sort heavily by requirements — Hindi content and premium sites prioritized
     enrichedSources.sort((a, b) => {
-      const scoreA = getHindiScore(a.title)
-      const scoreB = getHindiScore(b.title)
+      const scoreA = getHindiScore(getTorrentSourceLanguageProbe(a)) + (a.isHindi ? 25 : 0)
+      const scoreB = getHindiScore(getTorrentSourceLanguageProbe(b)) + (b.isHindi ? 25 : 0)
       const qualityScore = (source: any) => {
         const quality = String(source.quality || '').toLowerCase()
         if (quality.includes('2160') || quality.includes('4k')) return 30
@@ -1973,7 +2377,7 @@ function normalizeTorrentSources(sources: any[], mediaType: string): any[] {
         if (quality.includes('480')) return 2
         return 6
       }
-      const healthScore = (source: any) => (Number(source.seeds) || 0) * 3 + (Number(source.peers) || 0) * 0.4 + qualityScore(source) + getHindiScore(source.title)
+      const healthScore = (source: any) => (Number(source.seeds) || 0) * 3 + (Number(source.peers) || 0) * 0.4 + qualityScore(source) + getHindiScore(getTorrentSourceLanguageProbe(source)) + (source.isHindi ? 25 : 0)
 
       if (mediaType === 'movie') {
         // Priority 1: Hindi Score (includes site priority)
@@ -2134,9 +2538,46 @@ async function fetchEztvSources(imdbId: string): Promise<any[]> {
 
 async function fetchTorrentioSources(imdbId: string, title: string, mediaType: string): Promise<any[]> {
   if (!imdbId) return []
-  const torrentioUrl = `${TORRENTIO_BASE}/stream/${mediaType === 'movie' ? 'movie' : 'series'}/${imdbId}.json`
-  const data: any = await nodeHttpGet(torrentioUrl, 6500)
-  return (data?.streams || []).map((stream: any) => parseTorrentioStream(stream, title)).filter(Boolean)
+  const url = `${TORRENTIO_BASE}/stream/${mediaType === 'movie' ? 'movie' : 'series'}/${imdbId}.json`
+  const data: any = await nodeHttpGet(url, 6500)
+  return (data?.streams || []).flatMap((stream: any) => {
+    const parsed = parseTorrentioStream(stream, title, { provider: 'Torrentio' })
+    if (!parsed) return []
+    parsed.title = `${parsed.title} (Torrentio)`
+    return [parsed]
+  })
+}
+
+async function fetchTorrentioHindiSources(imdbId: string, title: string, mediaType: string): Promise<any[]> {
+  if (!imdbId) return []
+  const url = `https://torrentio.strem.fun/sort=seeders|language=hindi/stream/${mediaType === 'movie' ? 'movie' : 'series'}/${imdbId}.json`
+  const data: any = await nodeHttpGet(url, 6500)
+  return (data?.streams || []).flatMap((stream: any) => {
+    const parsed = parseTorrentioStream(stream, title, { provider: 'Torrentio Hindi' })
+    if (!parsed) return []
+    parsed.title = `${parsed.title} (Torrentio)`
+    return [parsed]
+  })
+}
+
+// ─── MediaFusion — specifically great for Indian/Hindi content ───────────────
+async function fetchMediaFusionSources(imdbId: string, title: string, mediaType: string): Promise<any[]> {
+  if (!imdbId) return []
+  // Use public elfhosted mediafusion instance
+  const url = `https://mediafusion.elfhosted.com/stream/${mediaType === 'movie' ? 'movie' : 'series'}/${imdbId}.json`
+  const data: any = await nodeHttpGet(url, 7500)
+  return (data?.streams || []).flatMap((stream: any) => {
+    // MediaFusion stream format is similar to Torrentio
+    const parsed = parseTorrentioStream(stream, title, { provider: 'MediaFusion' })
+    if (!parsed) return []
+    // Add MediaFusion tag and make sure hindi content is marked
+    parsed.title = `${parsed.title} (MF)`
+    const streamInfo = `${stream.title || ''} ${stream.name || ''} ${stream.description || ''}`
+    if (/hindi|hin\s*eng|eng\s*hin|dual\s*audio|multi\s*audio|हिंदी|🇮🇳/i.test(streamInfo)) {
+      parsed.isHindi = true
+    }
+    return [parsed]
+  })
 }
 
 async function fetchApiBaySources(imdbId: string): Promise<any[]> {
@@ -2167,6 +2608,9 @@ async function fetchApiBayTitleSources(title: string, year: string, mediaType: s
     `${baseQuery} 1080p`,
     `${baseQuery} 2160p`,
     `${baseQuery} Hindi`,
+    `${baseQuery} Hindi Audio`,
+    `${baseQuery} Hindi Dubbed`,
+    `${baseQuery} Hin Eng`,
     `${baseQuery} Dual Audio`,
     mediaType === 'tv' ? `${title} S01` : '',
     mediaType === 'tv' ? `${title} Season` : ''
@@ -2192,13 +2636,7 @@ async function fetchApiBayTitleSources(title: string, year: string, mediaType: s
   return results.flatMap(result => result.status === 'fulfilled' ? result.value : [])
 }
 
-async function fetchMediaFusionSources(imdbId: string, title: string, mediaType: string): Promise<any[]> {
-  if (!imdbId) return []
-  const mfType = mediaType === 'movie' ? 'movie' : 'series'
-  const mfUrl = `https://mediafusion.elfhosted.com/stream/${mfType}/${imdbId}.json`
-  const mfData: any = await nodeHttpGet(mfUrl, 6500)
-  return (mfData?.streams || []).map((stream: any) => parseTorrentioStream(stream, title)).filter(Boolean)
-}
+
 
 async function fetchSolidSources(title: string, year: string, mediaType: string): Promise<any[]> {
   const baseQuery = mediaType === 'movie' && year ? `${title} ${year}` : title
@@ -2207,6 +2645,9 @@ async function fetchSolidSources(title: string, year: string, mediaType: string)
     `${baseQuery} 1080p`,
     `${baseQuery} 2160p`,
     `${baseQuery} Hindi`,
+    `${baseQuery} Hindi Audio`,
+    `${baseQuery} Hindi Dubbed`,
+    `${baseQuery} Hin Eng`,
     `${baseQuery} Dual Audio`,
     mediaType === 'tv' ? `${title} S01` : '',
     mediaType === 'tv' ? `${title} Season` : ''
@@ -2240,6 +2681,10 @@ async function fetchBitsearchSources(title: string, year: string, mediaType: str
     `${title}${queryYear}`,
     `${title}${queryYear} 1080p`,
     `${title}${queryYear} 2160p`,
+    `${title}${queryYear} Hindi`,
+    `${title}${queryYear} Hindi Audio`,
+    `${title}${queryYear} Hindi Dubbed`,
+    `${title}${queryYear} Hin Eng`,
     `${title}${queryYear} Dual Audio`,
     ...siteKeywords.map(keyword => `${title}${queryYear} ${keyword}`)
   ]))
@@ -2279,6 +2724,9 @@ async function fetch1337xSources(title: string, year: string, mediaType: string)
     baseQuery,
     `${baseQuery} 1080p`,
     `${baseQuery} 2160p`,
+    `${baseQuery} Hindi Audio`,
+    `${baseQuery} Hindi Dubbed`,
+    `${baseQuery} Hin Eng`,
     `${baseQuery} Dual Audio`,
     mediaType === 'movie' && year ? `${title} ${year}` : title,
     mediaType === 'movie' && year ? `${title} ${year} Hindi` : `${title} Hindi`
@@ -2327,10 +2775,435 @@ async function fetchKnightCrawlerSources(imdbId: string, title: string, mediaTyp
   const kcUrl = `https://knightcrawler.elfhosted.com/stream/${mediaType === 'movie' ? 'movie' : 'series'}/${imdbId}.json`
   const kcData: any = await nodeHttpGet(kcUrl, 6500)
   return (kcData?.streams || []).flatMap((stream: any) => {
-    const parsed = parseTorrentioStream(stream, title)
+    const parsed = parseTorrentioStream(stream, title, { provider: 'KnightCrawler' })
     if (!parsed) return []
     parsed.title = `${parsed.title} (KC)`
     return [parsed]
+  })
+}
+
+async function fetchAnnatarSources(imdbId: string, title: string, mediaType: string): Promise<any[]> {
+  if (!imdbId) return []
+  const url = `https://annatar.elfhosted.com/stream/${mediaType === 'movie' ? 'movie' : 'series'}/${imdbId}.json`
+  const data: any = await nodeHttpGet(url, 6500)
+  return (data?.streams || []).flatMap((stream: any) => {
+    const parsed = parseTorrentioStream(stream, title, { provider: 'Annatar' })
+    if (!parsed) return []
+    parsed.title = `${parsed.title} (Annatar)`
+    return [parsed]
+  })
+}
+
+async function fetchCometSources(imdbId: string, title: string, mediaType: string): Promise<any[]> {
+  if (!imdbId) return []
+  const url = `https://comet.elfhosted.com/stream/${mediaType === 'movie' ? 'movie' : 'series'}/${imdbId}.json`
+  const data: any = await nodeHttpGet(url, 6500)
+  return (data?.streams || []).flatMap((stream: any) => {
+    const parsed = parseTorrentioStream(stream, title, { provider: 'Comet' })
+    if (!parsed) return []
+    parsed.title = `${parsed.title} (Comet)`
+    return [parsed]
+  })
+}
+
+async function fetchJackettioSources(imdbId: string, title: string, mediaType: string): Promise<any[]> {
+  if (!imdbId) return []
+  const url = `https://jackettio.elfhosted.com/stream/${mediaType === 'movie' ? 'movie' : 'series'}/${imdbId}.json`
+  const data: any = await nodeHttpGet(url, 6500)
+  return (data?.streams || []).flatMap((stream: any) => {
+    const parsed = parseTorrentioStream(stream, title, { provider: 'Jackettio' })
+    if (!parsed) return []
+    parsed.title = `${parsed.title} (Jackettio)`
+    return [parsed]
+  })
+}
+
+async function fetchShluflixSources(imdbId: string, title: string, mediaType: string): Promise<any[]> {
+  if (!imdbId) return []
+  const url = `https://shluflix.elfhosted.com/stream/${mediaType === 'movie' ? 'movie' : 'series'}/${imdbId}.json`
+  const data: any = await nodeHttpGet(url, 6500)
+  return (data?.streams || []).flatMap((stream: any) => {
+    const parsed = parseTorrentioStream(stream, title, { provider: 'Shluflix' })
+    if (!parsed) return []
+    parsed.title = `${parsed.title} (Shluflix)`
+    return [parsed]
+  })
+}
+
+async function fetchPeerflixSources(imdbId: string, title: string, mediaType: string): Promise<any[]> {
+  if (!imdbId) return []
+  const url = `https://peerflix.elfhosted.com/stream/${mediaType === 'movie' ? 'movie' : 'series'}/${imdbId}.json`
+  const data: any = await nodeHttpGet(url, 6500)
+  return (data?.streams || []).flatMap((stream: any) => {
+    const parsed = parseTorrentioStream(stream, title, { provider: 'Peerflix' })
+    if (!parsed) return []
+    parsed.title = `${parsed.title} (Peerflix)`
+    return [parsed]
+  })
+}
+
+async function fetchStremifySources(imdbId: string, title: string, mediaType: string): Promise<any[]> {
+  if (!imdbId) return []
+  const url = `https://stremify.elfhosted.com/stream/${mediaType === 'movie' ? 'movie' : 'series'}/${imdbId}.json`
+  const data: any = await nodeHttpGet(url, 6500)
+  return (data?.streams || []).flatMap((stream: any) => {
+    const parsed = parseTorrentioStream(stream, title, { provider: 'Stremify' })
+    if (!parsed) return []
+    parsed.title = `${parsed.title} (Stremify)`
+    return [parsed]
+  })
+}
+
+async function fetchNyaaSources(title: string, year: string, mediaType: string): Promise<any[]> {
+  const baseQuery = mediaType === 'movie' && year ? `${title} ${year}` : title
+  const queries = [baseQuery, `${baseQuery} 1080p`, `${baseQuery} Hindi`]
+  const allSources: any[] = []
+  
+  for (const q of queries) {
+    try {
+      const url = `https://nyaa.si/?page=rss&q=${encodeURIComponent(q)}&c=0_0&f=0`
+      const xml = await nodeHttpRequest(url, { timeoutMs: 7000 })
+      if (typeof xml !== 'string') continue
+      
+      const itemRegex = /<item>[\s\S]*?<title>(.*?)<\/title>[\s\S]*?<link>(.*?)<\/link>[\s\S]*?<nyaa:seeders>(\d+)<\/nyaa:seeders>[\s\S]*?<nyaa:leechers>(\d+)<\/nyaa:leechers>[\s\S]*?<nyaa:size>([^<]+)<\/nyaa:size>[\s\S]*?<\/item>/g
+      let match
+      while ((match = itemRegex.exec(xml)) !== null) {
+        const [, tTitle, tMagnet, tSeeds, tPeers, tSize] = match
+        const cleanTitle = tTitle.trim().replace(/<!\[CDATA\[(.*?)\]\]>/g, '$1')
+        const seeds = parseInt(tSeeds) || 0
+        if (seeds === 0) continue
+        if (!isRelevanceMatch(cleanTitle, title, mediaType, year)) continue
+        
+        allSources.push({
+          title: `${cleanTitle.substring(0, 80)} (Nyaa)`,
+          quality: cleanTitle.match(/(2160p|1080p|720p|480p)/i)?.[1] || 'HD',
+          size: tSize.trim(),
+          magnet: tMagnet.trim(),
+          seeds,
+          peers: parseInt(tPeers) || 0,
+          type: 'web',
+          isHindi: isHindiContent(cleanTitle)
+        })
+      }
+    } catch (e) {}
+  }
+  return allSources
+}
+
+// ─── Torrentio Dual Audio (separate config for dual-audio/multi-audio content) ─
+async function fetchTorrentioDualAudioSources(imdbId: string, title: string, mediaType: string): Promise<any[]> {
+  if (!imdbId) return []
+  // Use multiple Torrentio configurations optimized for Hindi/dual audio content
+  const configs = [
+    'sort=seeders|language=hindi|qualityfilter=cam,screener',
+    'sort=seeders|qualityfilter=cam,screener'
+  ]
+  const allSources: any[] = []
+  for (const config of configs) {
+    try {
+      const url = `https://torrentio.strem.fun/${config}/stream/${mediaType === 'movie' ? 'movie' : 'series'}/${imdbId}.json`
+      const data: any = await nodeHttpGet(url, 6500)
+      for (const stream of (data?.streams || [])) {
+        const streamInfo = `${stream.title || ''} ${stream.name || ''}`
+        // Only keep results that mention dual audio, multi audio, or Hindi
+        const isDualOrHindi = /dual\s*audio|multi\s*audio|hindi|hin\s*eng|eng\s*hin|हिंदी|🇮🇳/i.test(streamInfo)
+        if (!isDualOrHindi) continue
+        const parsed = parseTorrentioStream(stream, title, { provider: 'Torrentio DA' })
+        if (!parsed) continue
+        parsed.title = `${parsed.title} (Dual Audio)`
+        parsed.isHindi = true
+        allSources.push(parsed)
+      }
+    } catch {}
+  }
+  return allSources
+}
+
+// ─── TorrentGalaxy — popular public tracker with strong Hindi/Indian content ──
+async function fetchTorrentGalaxySources(title: string, year: string, mediaType: string): Promise<any[]> {
+  const baseQuery = mediaType === 'movie' && year ? `${title} ${year}` : title
+  const tgxMirrors = ['torrentgalaxy.to', 'torrentgalaxy.mx', 'tgx.rs']
+  const hindiQueries = Array.from(new Set([
+    `${baseQuery} 1080p Hindi`,
+    `${baseQuery} 2160p Hindi`,
+    `${baseQuery} Hindi Dubbed`,
+    `${baseQuery} 1080p Dual Audio`,
+    `${baseQuery} Dual Audio`,
+    `${baseQuery} Hindi`,
+    baseQuery
+  ]))
+  const allSources: any[] = []
+
+  for (const domain of tgxMirrors) {
+    let succeeded = false
+    for (const query of hindiQueries) {
+      try {
+        const searchUrl = `https://${domain}/torrents.php?search=${encodeURIComponent(query)}&sort=seeders&order=desc&lang=0`
+        const html = await nodeHttpRequest(searchUrl, { timeoutMs: 9000 })
+        if (typeof html !== 'string' || html.length < 500) continue
+        succeeded = true
+
+        // Parse TorrentGalaxy HTML results
+        // Each result row contains: title, magnet, seeds, leechers, size
+        const rowRegex = /<a href="\/torrent\/[^"]*" title="([^"]*)"[\s\S]*?<a href="(magnet:\?[^"]+)"[\s\S]*?font color[^>]*>(\d+)<[\s\S]*?<\/font>[\s\S]*?<font[^>]*>(\d+)<\/font>[\s\S]*?<span class="badge[^"]*">([^<]+)<\/span>/g
+        let match
+        while ((match = rowRegex.exec(html)) !== null) {
+          const [, tTitle, tMagnet, tSeeds, tLeeches, tSize] = match
+          const cleanTitle = tTitle.trim()
+          const seeds = parseInt(tSeeds) || 0
+          if (seeds === 0) continue
+          if (!isRelevanceMatch(cleanTitle, title, mediaType, year)) continue
+          allSources.push({
+            title: `${cleanTitle.substring(0, 80)} (TGx)`,
+            quality: cleanTitle.match(/(2160p|1080p|720p|480p)/i)?.[1] || 'HD',
+            size: tSize.trim(),
+            magnet: tMagnet,
+            seeds,
+            peers: parseInt(tLeeches) || 0,
+            type: 'web',
+            isHindi: isHindiContent(cleanTitle)
+          })
+        }
+      } catch {}
+    }
+    if (succeeded) break // Got results from this mirror, skip others
+  }
+  return allSources
+}
+
+// ─── LimeTorrents — good international tracker with Hindi content ─────────────
+async function fetchLimeTorrentsSources(title: string, year: string, mediaType: string): Promise<any[]> {
+  const baseQuery = mediaType === 'movie' && year ? `${title} ${year}` : title
+  const queries = Array.from(new Set([
+    baseQuery,
+    `${baseQuery} Hindi`,
+    `${baseQuery} Hindi Dubbed`,
+    `${baseQuery} Dual Audio`
+  ]))
+  const allSources: any[] = []
+
+  for (const query of queries) {
+    try {
+      // LimeTorrents RSS feed for search
+      const rssUrl = `https://www.limetorrents.lol/searchrss/${encodeURIComponent(query)}/seeds/1/`
+      const xml = await nodeHttpRequest(rssUrl, { timeoutMs: 8000 })
+      if (typeof xml !== 'string') continue
+
+      // Parse RSS items
+      const itemRegex = /<item>[\s\S]*?<title><!\[CDATA\[(.*?)\]\]><\/title>[\s\S]*?<link>(.*?)<\/link>[\s\S]*?<description><!\[CDATA\[Size: ([^\s]+)\s+([^\s]+)[\s\S]*?Seeds: (\d+)[\s\S]*?Leechers: (\d+)[\s\S]*?\]\]><\/description>[\s\S]*?<enclosure[^>]*url="(magnet:\?[^"]*)"[\s\S]*?<\/item>/g
+      let match
+      while ((match = itemRegex.exec(xml)) !== null) {
+        const [, tTitle, , tSizeVal, tSizeUnit, tSeeds, tLeeches, tMagnet] = match
+        const cleanTitle = tTitle.trim()
+        const seeds = parseInt(tSeeds) || 0
+        if (seeds === 0) continue
+        if (!isRelevanceMatch(cleanTitle, title, mediaType, year)) continue
+        allSources.push({
+          title: `${cleanTitle.substring(0, 80)} (Lime)`,
+          quality: cleanTitle.match(/(2160p|1080p|720p|480p)/i)?.[1] || 'HD',
+          size: `${tSizeVal} ${tSizeUnit}`,
+          magnet: tMagnet,
+          seeds,
+          peers: parseInt(tLeeches) || 0,
+          type: 'web',
+          isHindi: isHindiContent(cleanTitle)
+        })
+      }
+
+      // Fallback: simpler RSS format (some mirrors use this format)
+      if (allSources.length === 0) {
+        const simpleItemRegex = /<item>[\s\S]*?<title>(.*?)<\/title>[\s\S]*?<enclosure[^>]*url="(magnet:\?[^"]*)"[\s\S]*?<\/item>/g
+        let simpleMatch
+        while ((simpleMatch = simpleItemRegex.exec(xml)) !== null) {
+          const [, tTitle, tMagnet] = simpleMatch
+          const cleanTitle = tTitle.trim().replace(/<!\[CDATA\[(.*?)\]\]>/g, '$1')
+          if (!isRelevanceMatch(cleanTitle, title, mediaType, year)) continue
+          allSources.push({
+            title: `${cleanTitle.substring(0, 80)} (Lime)`,
+            quality: cleanTitle.match(/(2160p|1080p|720p|480p)/i)?.[1] || 'HD',
+            size: '—',
+            magnet: tMagnet,
+            seeds: 1,
+            peers: 0,
+            type: 'web',
+            isHindi: isHindiContent(cleanTitle)
+          })
+        }
+      }
+    } catch {}
+  }
+  return allSources
+}
+
+// ─── GloTorrents — international tracker known for dual-audio releases ────────
+async function fetchGloTorrentsSources(title: string, year: string, mediaType: string): Promise<any[]> {
+  const baseQuery = mediaType === 'movie' && year ? `${title} ${year}` : title
+  const queries = Array.from(new Set([
+    `${baseQuery} Hindi`,
+    `${baseQuery} Dual Audio`,
+    `${baseQuery} Hindi Dubbed`,
+    `${baseQuery} 1080p Hindi`
+  ]))
+  const allSources: any[] = []
+
+  for (const query of queries) {
+    try {
+      const searchUrl = `https://glodls.to/search_results.php?search=${encodeURIComponent(query)}&cat=1&incldead=0&inclexternal=0&lang=0&sort=seeders&order=desc`
+      const html = await nodeHttpRequest(searchUrl, { timeoutMs: 8500 })
+      if (typeof html !== 'string' || html.length < 500) continue
+
+      // Parse GloTorrents HTML table rows
+      const rowRegex = /<td class="ttable_col1"[\s\S]*?<a[^>]*title="([^"]*)"[\s\S]*?<a[^>]*href="(magnet:\?[^"]+)"[\s\S]*?<td[^>]*class="ttable_col1"[^>]*>([\d,.]+\s*[GMKT]B)[\s\S]*?<td[^>]*class="ttable_col2"[^>]*><font[^>]*>(\d+)<\/font>[\s\S]*?<td[^>]*class="ttable_col1"[^>]*><font[^>]*>(\d+)<\/font>/g
+      let match
+      while ((match = rowRegex.exec(html)) !== null) {
+        const [, tTitle, tMagnet, tSize, tSeeds, tLeeches] = match
+        const cleanTitle = tTitle.trim()
+        const seeds = parseInt(tSeeds) || 0
+        if (seeds === 0) continue
+        if (!isRelevanceMatch(cleanTitle, title, mediaType, year)) continue
+        allSources.push({
+          title: `${cleanTitle.substring(0, 80)} (Glo)`,
+          quality: cleanTitle.match(/(2160p|1080p|720p|480p)/i)?.[1] || 'HD',
+          size: tSize.trim(),
+          magnet: tMagnet,
+          seeds,
+          peers: parseInt(tLeeches) || 0,
+          type: 'web',
+          isHindi: isHindiContent(cleanTitle)
+        })
+      }
+    } catch {}
+  }
+  return allSources
+}
+
+// ─── Dedicated 1337x Hindi Scraper — targets Indian release groups directly ───
+async function fetch1337xHindiSources(title: string, year: string, mediaType: string): Promise<any[]> {
+  const x1337Mirrors = ['1337x.to', '1337x.st', 'x1337x.ws']
+  const queryYear = (mediaType === 'movie' && year) ? ` ${year}` : ''
+  
+  // Indian release group branded searches — these groups consistently tag Hindi dubbed releases
+  const hindiGroupKeywords = [
+    'KatmovieHD', 'HDhub4u', 'Vegamovies', 'UHDmovies', 'Dotmovies',
+    'Bolly4u', 'Filmyzilla', 'Moviesflix', 'DesireMovies', 'MoviesPapa',
+    'MoviesNation', '7StarHD', 'SkymoviesHD', 'MKVCinemas', 'Downloadhub',
+    'Hdmovies4u', 'ExtraMovies', 'Luxmovies', 'BollyShare', 'MKVMoviesPoint',
+    'TamilBlasters', '1TamilMV', 'KhatriMaza'
+  ]
+  
+  const queries = Array.from(new Set([
+    `${title}${queryYear} 1080p Hindi Dubbed`,
+    `${title}${queryYear} 2160p Hindi Dubbed`,
+    `${title}${queryYear} Hindi Dubbed`,
+    `${title}${queryYear} 1080p Dual Audio`,
+    `${title}${queryYear} Hindi 1080p`,
+    `${title}${queryYear} Hindi 2160p`,
+    ...hindiGroupKeywords.slice(0, 6).flatMap(group => [
+      `${title}${queryYear} ${group} 1080p`,
+      `${title}${queryYear} ${group}`
+    ])
+  ]))
+  
+  const allSources: any[] = []
+  for (const domain of x1337Mirrors) {
+    let mirrorWorked = false
+    for (const xQuery of queries) {
+      try {
+        const xUrl = `https://${domain}/sort-search/${encodeURIComponent(xQuery)}/seeders/desc/1/`
+        const html = await nodeHttpRequest(xUrl, { timeoutMs: 8500 })
+        if (typeof html !== 'string') continue
+        mirrorWorked = true
+
+        const rowRegex = /<td class="coll-1 name">[\s\S]*?<a href="\/torrent\/(\d+)\/([^/]+)\/">([\s\S]*?)<\/a>[\s\S]*?<td class="coll-2 seeds">(\d+)<\/td>[\s\S]*?<td class="coll-3 leeches">(\d+)<\/td>[\s\S]*?<td class="coll-4 size">([^<]+)<span/g
+        let match
+        const torrentsToFetch: any[] = []
+        while ((match = rowRegex.exec(html)) !== null) {
+          const [, tId, tSlug, tTitleHtml, tSeeds, tLeeches, tSize] = match
+          const tTitle = tTitleHtml.replace(/<[^>]+>/g, '').trim()
+          const seeds = parseInt(tSeeds) || 0
+          if (!isRelevanceMatch(tTitle, title, mediaType, year)) continue
+          // Only keep results that look like Hindi content
+          if (!isHindiContent(tTitle)) continue
+          torrentsToFetch.push({ id: tId, slug: tSlug, title: tTitle, seeds, peers: parseInt(tLeeches) || 0, size: tSize.trim() })
+          if (torrentsToFetch.length >= 8) break
+        }
+
+        const magnets = await Promise.allSettled(torrentsToFetch.map(async (t) => {
+          const detailUrl = `https://${domain}/torrent/${t.id}/${t.slug}/`
+          const detailHtml = await nodeHttpRequest(detailUrl, { timeoutMs: 7500 })
+          const magnetMatch = detailHtml.match(/href="(magnet:\?xt=urn:btih:[^"]+)"/)
+          if (!magnetMatch) return null
+          return {
+            title: `${t.title.substring(0, 80)} (1337x Hindi)`,
+            quality: t.title.match(/(2160p|1080p|720p|480p)/i)?.[1] || 'HD',
+            size: t.size,
+            magnet: magnetMatch[1],
+            seeds: t.seeds,
+            peers: t.peers,
+            type: 'web',
+            isHindi: true
+          }
+        }))
+        allSources.push(...magnets.flatMap(r => r.status === 'fulfilled' && r.value ? [r.value] : []))
+      } catch {}
+    }
+    if (mirrorWorked && allSources.length > 0) break
+  }
+  return allSources
+}
+
+// ─── BTDIG — DHT search engine with good coverage of Hindi releases ──────────
+async function fetchBtdigSources(title: string, year: string, mediaType: string): Promise<any[]> {
+  const baseQuery = mediaType === 'movie' && year ? `${title} ${year}` : title
+  const queries = Array.from(new Set([
+    `${baseQuery} Hindi`,
+    `${baseQuery} Hindi Dubbed`,
+    `${baseQuery} Dual Audio`,
+    `${baseQuery} Hin Eng`
+  ]))
+  const allSources: any[] = []
+
+  for (const query of queries) {
+    try {
+      const searchUrl = `https://btdig.com/search?q=${encodeURIComponent(query)}&order=0`
+      const html = await nodeHttpRequest(searchUrl, { timeoutMs: 9000 })
+      if (typeof html !== 'string' || html.length < 300) continue
+
+      // Parse BTDigg results
+      const rowRegex = /<div class="one_result">[\s\S]*?<div class="torrent_name">[\s\S]*?<a href="[^"]*">([\s\S]*?)<\/a>[\s\S]*?<div class="torrent_size">\s*([^<]+)<\/div>[\s\S]*?<div class="torrent_magnet">[\s\S]*?<a href="(magnet:\?[^"]+)"/g
+      let match
+      while ((match = rowRegex.exec(html)) !== null) {
+        const [, tTitleHtml, tSize, tMagnet] = match
+        const cleanTitle = tTitleHtml.replace(/<[^>]+>/g, '').trim()
+        if (!isRelevanceMatch(cleanTitle, title, mediaType, year)) continue
+        allSources.push({
+          title: `${cleanTitle.substring(0, 80)} (BTDig)`,
+          quality: cleanTitle.match(/(2160p|1080p|720p|480p)/i)?.[1] || 'HD',
+          size: tSize.trim(),
+          magnet: tMagnet,
+          seeds: 1, // BTDigg doesn't show live seed counts; we mark as 1 so normalization doesn't discard
+          peers: 0,
+          type: 'web',
+          isHindi: isHindiContent(cleanTitle)
+        })
+      }
+    } catch {}
+  }
+  return allSources
+}
+
+function withTimeout<T>(promise: Promise<T>, timeoutMs: number, label: string): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(`${label} timed out after ${timeoutMs}ms`)), timeoutMs)
+    promise
+      .then((value) => {
+        clearTimeout(timer)
+        resolve(value)
+      })
+      .catch((err) => {
+        clearTimeout(timer)
+        reject(err)
+      })
   })
 }
 
@@ -2359,18 +3232,27 @@ async function searchTorrentSourcesProgressive(
       console.log(`[Torrent] Got IMDB ID: ${id}`)
       return id
     })
-    const providers: Array<{ name: string; run: () => Promise<any[]> }> = [
+    const providers: Array<{ name: string; timeoutMs: number; run: () => Promise<any[]> }> = [
       ...(mediaType === 'movie'
-        ? [{ name: 'YTS', run: async () => fetchYtsSources(await imdbPromise) }]
-        : [{ name: 'EZTV', run: async () => fetchEztvSources(await imdbPromise) }]),
-      { name: 'Torrentio', run: async () => fetchTorrentioSources(await imdbPromise, title, mediaType) },
-      { name: 'MediaFusion', run: async () => fetchMediaFusionSources(await imdbPromise, title, mediaType) },
-      { name: 'KnightCrawler', run: async () => fetchKnightCrawlerSources(await imdbPromise, title, mediaType) },
-      { name: '1337x', run: () => fetch1337xSources(title, year, mediaType) },
-      { name: 'APIBay Title', run: () => fetchApiBayTitleSources(title, year, mediaType) },
-      { name: 'APIBay', run: async () => fetchApiBaySources(await imdbPromise) },
-      { name: 'SolidTorrents', run: () => fetchSolidSources(title, year, mediaType) },
-      { name: 'Bitsearch', run: () => fetchBitsearchSources(title, year, mediaType) }
+        ? [{ name: 'YTS', timeoutMs: 12000, run: async () => fetchYtsSources(await imdbPromise) }]
+        : [{ name: 'EZTV', timeoutMs: 14000, run: async () => fetchEztvSources(await imdbPromise) }]),
+      { name: 'Torrentio', timeoutMs: 8000, run: async () => fetchTorrentioSources(await imdbPromise, title, mediaType) },
+      { name: 'Torrentio Hindi', timeoutMs: 8000, run: async () => fetchTorrentioHindiSources(await imdbPromise, title, mediaType) },
+      { name: 'Torrentio Dual Audio', timeoutMs: 10000, run: async () => fetchTorrentioDualAudioSources(await imdbPromise, title, mediaType) },
+      { name: 'MediaFusion', timeoutMs: 10000, run: async () => fetchMediaFusionSources(await imdbPromise, title, mediaType) },
+      // Elfhosted addons are intentionally omitted here: current public endpoints
+      // return 403/404, deprecated pages, config prompts, or no usable infoHash streams.
+      { name: '1337x', timeoutMs: 15000, run: () => fetch1337xSources(title, year, mediaType) },
+      { name: '1337x Hindi', timeoutMs: 18000, run: () => fetch1337xHindiSources(title, year, mediaType) },
+      { name: 'TorrentGalaxy', timeoutMs: 14000, run: () => fetchTorrentGalaxySources(title, year, mediaType) },
+      { name: 'APIBay Title', timeoutMs: 10000, run: () => fetchApiBayTitleSources(title, year, mediaType) },
+      { name: 'APIBay', timeoutMs: 8000, run: async () => fetchApiBaySources(await imdbPromise) },
+      { name: 'SolidTorrents', timeoutMs: 10000, run: () => fetchSolidSources(title, year, mediaType) },
+      { name: 'Bitsearch', timeoutMs: 12000, run: () => fetchBitsearchSources(title, year, mediaType) },
+      { name: 'LimeTorrents', timeoutMs: 10000, run: () => fetchLimeTorrentsSources(title, year, mediaType) },
+      { name: 'GloTorrents', timeoutMs: 10000, run: () => fetchGloTorrentsSources(title, year, mediaType) },
+      { name: 'BTDig', timeoutMs: 12000, run: () => fetchBtdigSources(title, year, mediaType) },
+      { name: 'Nyaa', timeoutMs: 8000, run: async () => fetchNyaaSources(title, year, mediaType) }
     ]
 
     let completedProviders = 0
@@ -2382,42 +3264,58 @@ async function searchTorrentSourcesProgressive(
       cached: Boolean(cachedFresh)
     })
 
-    for (const provider of providers) {
+    const pendingProviders = providers.map((provider) => ({
+      provider,
+      task: withTimeout(provider.run(), provider.timeoutMs, provider.name)
+        .then((sources) => ({ sources, error: null as string | null }))
+        .catch((err: any) => ({ sources: [] as any[], error: err?.message || 'Provider failed' }))
+    }))
+
+    while (pendingProviders.length > 0) {
       if (!isTorrentSourceRequestActive(event, requestId)) {
         return normalizeTorrentSources(rawSources, mediaType)
       }
 
-      try {
-        const providerSources = await provider.run()
-        if (!isTorrentSourceRequestActive(event, requestId)) {
-          return normalizeTorrentSources(rawSources, mediaType)
-        }
-        completedProviders += 1
-        console.log(`[Torrent] ${provider.name} returned ${providerSources.length} source(s) for "${title}"`)
-        if (providerSources.length > 0) {
-          rawSources.push(...providerSources)
-        }
-        const normalized = normalizeTorrentSources(rawSources, mediaType)
-        sendTorrentSourceProgress(event, requestId, {
-          sources: normalized,
-          provider: provider.name,
-          completedProviders,
-          totalProviders
-        })
-      } catch (err: any) {
-        if (!isTorrentSourceRequestActive(event, requestId)) {
-          return normalizeTorrentSources(rawSources, mediaType)
-        }
-        completedProviders += 1
-        console.error(`[Torrent] ${provider.name} fetch failed:`, err?.message || err)
+      const { index, provider, sources, error } = await Promise.race(
+        pendingProviders.map((entry, index) =>
+          entry.task.then((result) => ({
+            index,
+            provider: entry.provider,
+            sources: result.sources,
+            error: result.error
+          }))
+        )
+      )
+      pendingProviders.splice(index, 1)
+
+      if (!isTorrentSourceRequestActive(event, requestId)) {
+        return normalizeTorrentSources(rawSources, mediaType)
+      }
+
+      completedProviders += 1
+      if (error) {
+        console.error(`[Torrent] ${provider.name} fetch failed:`, error)
         sendTorrentSourceProgress(event, requestId, {
           sources: normalizeTorrentSources(rawSources, mediaType),
           provider: provider.name,
           completedProviders,
           totalProviders,
-          error: err?.message || 'Provider failed'
+          error
         })
+        continue
       }
+
+      console.log(`[Torrent] ${provider.name} returned ${sources.length} source(s) for "${title}"`)
+      if (sources.length > 0) {
+        rawSources.push(...sources)
+      }
+      const normalized = normalizeTorrentSources(rawSources, mediaType)
+      sendTorrentSourceProgress(event, requestId, {
+        sources: normalized,
+        provider: provider.name,
+        completedProviders,
+        totalProviders
+      })
     }
 
     const finalSources = normalizeTorrentSources(rawSources, mediaType)
@@ -2444,6 +3342,8 @@ ipcMain.handle('search-torrent-sources', async (event, title: string, year: stri
 // ΓöÇΓöÇΓöÇ IPC: Start Torrent Download ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
 
 async function startWebTorrent(torrentId: string, magnetUrl: string, title: string, initialProgress: number = 0, initialName?: string | null) {
+  pausedTorrentIds.delete(torrentId)
+  clearTorrentProgressInterval(torrentId)
   const client = await getWebTorrentClient()
   const downloadPath = getDownloadPath()
   const enrichedMagnetUrl = enrichMagnetWithTrackers(magnetUrl)
@@ -2482,30 +3382,33 @@ async function startWebTorrent(torrentId: string, magnetUrl: string, title: stri
   // Periodic progress updates (every 1s)
   const progressInterval = setInterval(() => {
     if (torrent.destroyed) {
-      clearInterval(progressInterval)
+      clearTorrentProgressInterval(torrentId)
       return
     }
     broadcastProgress(torrentId, torrent, torrent.paused ? 'paused' : 'downloading')
   }, 1000)
+  torrentProgressIntervals.set(torrentId, progressInterval)
 
   torrent.on('done', () => {
-    clearInterval(progressInterval)
+    pausedTorrentIds.delete(torrentId)
+    clearTorrentProgressInterval(torrentId)
     broadcastProgress(torrentId, torrent, 'done')
     console.log(`[Torrent] Download complete: ${title}`)
     setTimeout(() => {
       if (!torrent.destroyed) torrent.destroy()
-      activeTorrents.delete(torrentId)
+      markTorrentInactive(torrentId)
     }, 5000)
   })
 
   torrent.on('error', (err: Error) => {
-    clearInterval(progressInterval)
+    pausedTorrentIds.delete(torrentId)
+    clearTorrentProgressInterval(torrentId)
     broadcastProgress(torrentId, torrent, 'error', err.message)
     console.error(`[Torrent] Error: ${err.message}`)
     if (!torrent.destroyed) {
       torrent.destroy()
     }
-    activeTorrents.delete(torrentId)
+    markTorrentInactive(torrentId)
   })
 
   return torrent
@@ -2552,6 +3455,8 @@ ipcMain.handle('start-torrent-download', async (_, magnetUrl: string, title: str
 ipcMain.handle('cancel-torrent-download', async (_, id: string) => {
   try {
     const torrent = activeTorrents.get(id)
+    pausedTorrentIds.add(id)
+    clearTorrentProgressInterval(id)
     
     // Capture state before destroying
     const finalProgress = torrent ? torrent.progress : null
@@ -2593,6 +3498,7 @@ ipcMain.handle('pause-resume-torrent', async (_, id: string) => {
     if (!torrent || torrent.destroyed) {
       const dbDl = db.getDownloads().find((d: any) => d.id === id)
       if (dbDl) {
+        pausedTorrentIds.delete(id)
         console.log(`[Torrent] Resuming "${dbDl.title}" from ${dbDl.progress}%`)
         await startWebTorrent(id, dbDl.magnet, dbDl.title, dbDl.progress || 0)
         return true
@@ -2602,6 +3508,8 @@ ipcMain.handle('pause-resume-torrent', async (_, id: string) => {
     
     // Pause Logic (Stop & Destroy pattern for reliability)
     console.log(`[Torrent] Pausing download: ${id}`)
+    pausedTorrentIds.add(id)
+    clearTorrentProgressInterval(id)
     
     // Capture state before destroying
     const finalProgress = torrent.progress
@@ -2635,11 +3543,13 @@ ipcMain.handle('pause-resume-torrent', async (_, id: string) => {
 // ─── IPC: Retry Failed Torrent ────────────────────────────────────────────────
 ipcMain.handle('retry-torrent-download', async (_, id: string) => {
   try {
+    pausedTorrentIds.delete(id)
     const dbDl = db.getDownloads().find((d: any) => d.id === id)
     if (!dbDl) return false
 
     const existingTorrent = activeTorrents.get(id)
     if (existingTorrent && !existingTorrent.destroyed) {
+      clearTorrentProgressInterval(id)
       existingTorrent.destroy()
       activeTorrents.delete(id)
     }
@@ -2854,6 +3764,8 @@ ipcMain.handle('remove-download', async (_, id: string, deleteFile: boolean = fa
     const deleteTargets = deleteFile ? collectDownloadDeleteTargets(id, torrent, download) : []
 
     // 1. Stop and remove from memory
+    pausedTorrentIds.delete(id)
+    clearTorrentProgressInterval(id)
     if (torrent) {
       await destroyTorrentForDelete(torrent)
       activeTorrents.delete(id)

@@ -25,6 +25,10 @@ fileAssociations:
       - webm
     name: Video File
     role: Viewer
+protocols:
+  - name: MyCinema Link
+    schemes:
+      - mycinema
 win:
   icon: build/icon.ico
   target: nsis

@@ -2,7 +2,7 @@ export interface Video {
   id: number
   title: string
   file_path: string
-  type: 'movie' | 'series'
+  type: 'movie' | 'series' | 'video'
   series_name?: string
   season?: number
   episode?: number

@@ -106,3 +106,4 @@ out/
 test-*.js
 RELEASE_GUIDE.md
 .tmp-guest-profile/
+share-worker/.wrangler/

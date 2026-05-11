@@ -1,7 +1,7 @@
-import React, { useState, useEffect, useRef } from 'react'
+import React, { useState, useEffect, useLayoutEffect, useRef } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import clsx from 'clsx'
-import { Home as HomeIcon, Film, Tv, Settings as SettingsIcon, Video as VideoIcon, Download as DownloadIcon, ChevronLeft, ChevronRight, Menu, Bookmark, Clock, Heart, User, Search as SearchIcon, Bell, Settings, RefreshCw, Maximize2, Sparkles, Zap, ShieldCheck, Wrench, Check } from 'lucide-react'
+import { Home as HomeIcon, Film, Tv, Settings as SettingsIcon, Video as VideoIcon, Download as DownloadIcon, ChevronLeft, ChevronRight, Menu, Bookmark, Clock, Heart, User, Search as SearchIcon, Bell, Settings, RefreshCw, Maximize2, Sparkles, Zap, ShieldCheck, Wrench, Check, Share2 } from 'lucide-react'
 import { Video } from './types'
 import Home from './pages/Home'
 import Videos from './pages/Videos'
@@ -17,53 +17,64 @@ import Download from './pages/Download'
 import appLogo from './assets/mycinema-logo.png'
 
 const LATEST_RELEASE = {
-  version: '1.21.0',
+  version: '1.22.0',
   eyebrow: 'What\'s New',
-  headline: 'Sources arrive faster, and Home wakes up smoother.',
-  summary: 'This release improves source discovery, Home startup, playback rendering, and listener cleanup.',
+  headline: 'Share links, sharper seeking, and cleaner libraries.',
+  summary: 'This release adds MyCinema share links, better source sharing, seek previews, local-video handling, and stronger download reliability.',
   steps: [
     {
-      icon: DownloadIcon,
-      title: 'Source Discovery',
-      description: 'Download choices now appear progressively as providers respond.',
+      icon: Share2,
+      title: 'Share Links',
+      description: 'Movies, series, and exact download sources are easier to send and reopen.',
       color: 'from-blue-500 to-cyan-400',
       iconColor: 'text-cyan-400',
       items: [
-        'Source panels update while YTS, EZTV, Torrentio, MediaFusion, KnightCrawler, 1337x, APIBay, SolidTorrents, and Bitsearch finish.',
-        'Cached results can appear first while the app refreshes providers.'
+        'Detail pages can create MyCinema links with WhatsApp, Telegram, copy-link, and copy-text actions.',
+        'Shared links can reopen the desktop app directly through the new mycinema:// protocol.'
       ]
     },
     {
-      icon: Sparkles,
-      title: 'Home Discovery',
-      description: 'Home keeps useful rows visible while fresh discovery data loads.',
+      icon: DownloadIcon,
+      title: 'Downloads & Sources',
+      description: 'Source picking, sharing, and download controls are more exact.',
       color: 'from-emerald-400 to-teal-500',
       iconColor: 'text-emerald-400',
       items: [
-        'The last populated Home snapshot restores instantly on startup.',
-        'Trending This Week and Trending in India now use scrollable rails.'
+        'Completed downloads can share the exact selected mirror so friends can open the same source.',
+        'Series source filters now separate season packs from episode results and add Hindi availability counts.'
       ]
     },
     {
       icon: Zap,
-      title: 'Playback & Downloads',
-      description: 'Playback helpers and download labels are more resilient.',
+      title: 'Player & Library',
+      description: 'Local playback and scanned libraries behave more naturally.',
       color: 'from-violet-500 to-fuchsia-400',
       iconColor: 'text-fuchsia-300',
       items: [
-        'Boost canvases only cover the video when they are actively rendering.',
-        'Downloads preserve the selected source title and sort active items first.'
+        'Hovering the progress bar now shows cached ffmpeg thumbnail previews instead of loading a second video element.',
+        'Personal clips, recordings, lectures, and short videos now stay in Videos instead of being forced into Movies.'
+      ]
+    },
+    {
+      icon: Sparkles,
+      title: 'Discovery Polish',
+      description: 'Home and details now present fresher, cleaner context.',
+      color: 'from-amber-400 to-orange-500',
+      iconColor: 'text-amber-400',
+      items: [
+        'India discovery is split into separate movie and series rails with a stricter recent OTT window.',
+        'Details add vibe tags, a tighter action layout, and better behavior for external TMDB-backed titles.'
       ]
     },
     {
       icon: ShieldCheck,
-      title: 'Security & Privacy',
-      description: 'Network and IPC cleanup paths are tighter and more predictable.',
+      title: 'Security & Reliability',
+      description: 'Share, preview, and download paths received tighter guardrails.',
       color: 'from-amber-400 to-orange-500',
       iconColor: 'text-amber-400',
       items: [
-        'Library and torrent progress listeners now clean up without clearing unrelated pages.',
-        'TMDB, provider, and local media range requests have safer timeout and validation handling.'
+        'Shared links validate media type, TMDB ID, and magnet payloads before opening source data.',
+        'Seek preview IPC checks local paths, download pause/resume avoids stale progress, and shutdown cleanup clears torrent timers.'
       ]
     }
   ]
@@ -72,9 +83,10 @@ const LATEST_RELEASE = {
 const getWhatsNewStorageKey = (version: string) => `mycinema_whats_new_seen_${version}`
 const SIDEBAR_EXPANDED_STORAGE_KEY = 'mycinema_sidebar_expanded'
 const isDevPreview = import.meta.env.DEV
+type AppTab = 'home' | 'videos' | 'movies' | 'series' | 'download' | 'settings' | 'watchlist' | 'history' | 'favorites'
 
 const App: React.FC = () => {
-  const [activeTab, setActiveTab] = useState<'home' | 'videos' | 'movies' | 'series' | 'download' | 'settings' | 'watchlist' | 'history' | 'favorites'>('home')
+  const [activeTab, setActiveTab] = useState<AppTab>('home')
   const [isSidebarExpanded, setIsSidebarExpanded] = useState(() => {
     return localStorage.getItem(SIDEBAR_EXPANDED_STORAGE_KEY) !== 'false'
   })
@@ -84,13 +96,44 @@ const App: React.FC = () => {
 
   const [playingVideo, setPlayingVideo] = useState<Video | null>(null)
   const [selectedVideo, setSelectedVideo] = useState<Video | null>(null)
+  const [sharedSource, setSharedSource] = useState<any | null>(null)
   const [homeRefreshKey, setHomeRefreshKey] = useState(0)
   const [watchlistRefreshKey, setWatchlistRefreshKey] = useState(0)
   const [userName, setUserName] = useState(() => localStorage.getItem('mycinema_user_name') || 'User')
   const [isFullscreen, setIsFullscreen] = useState(true)
   const [launchFullscreen, setLaunchFullscreen] = useState(true)
   const [showWindowControls, setShowWindowControls] = useState(false)
+  const homeScrollRef = useRef<HTMLDivElement | null>(null)
+  const activePageScrollRef = useRef<HTMLDivElement | null>(null)
+  const activeTabRef = useRef<AppTab>('home')
+  const tabScrollPositionsRef = useRef<Partial<Record<AppTab, number>>>({})
   const windowControlsHideTimerRef = useRef<number | null>(null)
+
+  const getScrollElement = (tab: AppTab) => {
+    return tab === 'home' ? homeScrollRef.current : activePageScrollRef.current
+  }
+
+  const navigateToTab = (tab: AppTab) => {
+    const currentScroller = getScrollElement(activeTabRef.current)
+    if (currentScroller) {
+      tabScrollPositionsRef.current[activeTabRef.current] = currentScroller.scrollTop
+    }
+
+    setActiveTab(tab)
+  }
+
+  useLayoutEffect(() => {
+    activeTabRef.current = activeTab
+
+    const scrollTop = tabScrollPositionsRef.current[activeTab] ?? 0
+    const scroller = getScrollElement(activeTab)
+    scroller?.scrollTo({ top: scrollTop, behavior: 'auto' })
+    const frame = window.requestAnimationFrame(() => {
+      getScrollElement(activeTab)?.scrollTo({ top: scrollTop, behavior: 'auto' })
+    })
+
+    return () => window.cancelAnimationFrame(frame)
+  }, [activeTab])
 
   useEffect(() => {
     const handleNameUpdate = () => {
@@ -122,6 +165,38 @@ const App: React.FC = () => {
     })
   }, [])
 
+  useEffect(() => {
+    let cancelled = false
+
+    const openSharedMedia = async (target: { type: 'movie' | 'series'; tmdbId: number; source?: any }) => {
+      try {
+        const video = await window.api.getSharedMediaByTmdbId(target.type, target.tmdbId)
+        if (cancelled || !video) return
+
+        setShowWhatsNew(false)
+        setPlayingVideo(null)
+        setSharedSource(target.source || null)
+        setSelectedVideo(video)
+        setActiveTab(target.type === 'series' ? 'series' : 'movies')
+      } catch (err) {
+        console.error('[DeepLink] Failed to open shared media:', err)
+      }
+    }
+
+    window.api.getPendingSharedMediaTarget()
+      .then(target => {
+        if (target) openSharedMedia(target)
+      })
+      .catch(err => console.error('[DeepLink] Pending shared media lookup failed:', err))
+
+    const cleanup = window.api.onOpenSharedMedia(openSharedMedia)
+
+    return () => {
+      cancelled = true
+      cleanup()
+    }
+  }, [])
+
   const [updateState, setUpdateState] = useState<{
     status: 'idle' | 'available' | 'downloading' | 'ready'
     version?: string
@@ -143,7 +218,7 @@ const App: React.FC = () => {
             id: -1,
             title: filePath.split(/[\\/]/).pop() || 'Unknown Video',
             file_path: filePath,
-            type: 'movie',
+            type: 'video',
             duration: 0
           }
           setPlayingVideo(fakeVideo)
@@ -290,7 +365,7 @@ const App: React.FC = () => {
             {navItems.map(item => (
               <button
                 key={item.id}
-                onClick={() => setActiveTab(item.id)}
+                onClick={() => navigateToTab(item.id)}
                 className={`w-full flex items-center py-3 px-4 rounded-xl transition-all duration-200 group ${
                   activeTab === item.id ? 'bg-primary/10 text-primary' : 'text-white/40 hover:bg-white/5 hover:text-white'
                 }`}
@@ -312,7 +387,7 @@ const App: React.FC = () => {
               {libraryItems.map(item => (
                 <button
                   key={item.id}
-                  onClick={() => setActiveTab(item.id)}
+                  onClick={() => navigateToTab(item.id)}
                   className={`w-full flex items-center py-3 px-4 rounded-xl transition-all duration-200 group ${
                     activeTab === item.id ? 'bg-primary/10 text-primary' : 'text-white/40 hover:bg-white/5 hover:text-white'
                   }`}
@@ -422,7 +497,7 @@ const App: React.FC = () => {
           <div className={`flex items-center gap-4 p-3 bg-white/5 rounded-2xl border border-white/5 transition-all duration-300 ${isSidebarExpanded ? 'w-full' : 'w-12 justify-center'}`}>
             <div 
               className={`w-10 h-10 rounded-xl bg-red-600 flex items-center justify-center text-white font-black text-lg shadow-lg italic flex-shrink-0 cursor-pointer hover:scale-105 transition-transform`}
-              onClick={() => !isSidebarExpanded && setActiveTab('settings')}
+              onClick={() => !isSidebarExpanded && navigateToTab('settings')}
               title={!isSidebarExpanded ? `Settings (${userName})` : undefined}
             >
               {userName.charAt(0).toUpperCase()}
@@ -437,7 +512,7 @@ const App: React.FC = () => {
                   </p>
                 </div>
                 <button 
-                  onClick={() => setActiveTab('settings')}
+                  onClick={() => navigateToTab('settings')}
                   className="p-2 text-white/40 hover:text-white transition-colors"
                 >
                   <SettingsIcon size={18} />
@@ -449,24 +524,27 @@ const App: React.FC = () => {
       </div>
 
       {/* Main Content */}
-      <main className="flex-1 overflow-y-auto scrollbar-hide relative">
+      <main className="relative flex-1 overflow-hidden">
         <div
-          className={activeTab === 'home' ? 'relative pt-6 pb-14 opacity-100' : 'pointer-events-none absolute inset-x-0 top-0 opacity-0'}
+          ref={homeScrollRef}
+          className={activeTab === 'home' ? 'absolute inset-0 overflow-y-auto scrollbar-hide pt-6 pb-14 opacity-100' : 'pointer-events-none absolute inset-0 overflow-y-auto scrollbar-hide pt-6 pb-14 opacity-0'}
           aria-hidden={activeTab !== 'home'}
         >
-          <Home onPlay={handlePlayVideo} onShowDetail={setSelectedVideo} onNavigate={setActiveTab} refreshKey={homeRefreshKey} />
+          <Home onPlay={handlePlayVideo} onShowDetail={setSelectedVideo} onNavigate={navigateToTab} refreshKey={homeRefreshKey} />
         </div>
 
         {activeTab !== 'home' && (
-          <div className="px-8 pt-6 pb-14 max-w-[1600px] mx-auto">
-            {activeTab === 'videos'  && <Videos onPlay={handlePlayVideo} />}
-            {activeTab === 'movies'  && <Movies onPlay={handlePlayVideo} onShowDetail={setSelectedVideo} />}
-            {activeTab === 'series'  && <Series onPlay={handlePlayVideo} onShowDetail={setSelectedVideo} />}
-            {activeTab === 'watchlist' && <Watchlist onPlay={handlePlayVideo} onShowDetail={setSelectedVideo} refreshKey={watchlistRefreshKey} />}
-            {activeTab === 'history' && <History onPlay={handlePlayVideo} onShowDetail={setSelectedVideo} />}
-            {activeTab === 'favorites' && <Favorites onPlay={handlePlayVideo} onShowDetail={setSelectedVideo} />}
-            {activeTab === 'download' && <Download onShowDetail={setSelectedVideo} />}
-            {activeTab === 'settings' && <SettingsPage />}
+          <div ref={activePageScrollRef} className="absolute inset-0 overflow-y-auto scrollbar-hide">
+            <div className="px-8 pt-6 pb-14 max-w-[1600px] mx-auto">
+              {activeTab === 'videos'  && <Videos onPlay={handlePlayVideo} />}
+              {activeTab === 'movies'  && <Movies onPlay={handlePlayVideo} onShowDetail={setSelectedVideo} />}
+              {activeTab === 'series'  && <Series onPlay={handlePlayVideo} onShowDetail={setSelectedVideo} />}
+              {activeTab === 'watchlist' && <Watchlist onPlay={handlePlayVideo} onShowDetail={setSelectedVideo} refreshKey={watchlistRefreshKey} />}
+              {activeTab === 'history' && <History onPlay={handlePlayVideo} onShowDetail={setSelectedVideo} />}
+              {activeTab === 'favorites' && <Favorites onPlay={handlePlayVideo} onShowDetail={setSelectedVideo} />}
+              {activeTab === 'download' && <Download onShowDetail={setSelectedVideo} />}
+              {activeTab === 'settings' && <SettingsPage />}
+            </div>
           </div>
         )}
       </main>
@@ -475,7 +553,11 @@ const App: React.FC = () => {
       {selectedVideo && (
         <DetailScreen 
           video={selectedVideo} 
-          onClose={() => setSelectedVideo(null)} 
+          initialSharedSource={sharedSource}
+          onClose={() => {
+            setSelectedVideo(null)
+            setSharedSource(null)
+          }} 
           onPlay={handlePlayVideo}
           onWatchlistChange={() => setWatchlistRefreshKey(k => k + 1)}
         />
@@ -507,11 +589,12 @@ const App: React.FC = () => {
               className="fixed inset-0 z-[200] flex items-center justify-center p-4 sm:p-6"
             >
               <div
-                className="absolute inset-0 bg-[#05070c]/20 backdrop-blur-[30px] [backdrop-filter:blur(30px)_saturate(1.25)_brightness(0.86)]"
+                className="absolute inset-0 bg-[#05070c]/32 backdrop-blur-[14px] [backdrop-filter:blur(14px)_saturate(0.72)_brightness(0.72)]"
                 onClick={closeWhatsNew}
               />
-              <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(180deg,rgba(255,255,255,0.08),rgba(5,7,12,0.12)_45%,rgba(0,0,0,0.28))]" />
-              <div className="pointer-events-none absolute inset-0 shadow-[inset_0_0_140px_rgba(0,0,0,0.42)]" />
+              <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_50%_42%,rgba(255,255,255,0.08),rgba(5,7,12,0.1)_34%,rgba(0,0,0,0.34)_100%)]" />
+              <div className="pointer-events-none absolute inset-0 opacity-[0.07] [background-image:linear-gradient(90deg,rgba(255,255,255,0.5)_1px,transparent_1px),linear-gradient(0deg,rgba(255,255,255,0.5)_1px,transparent_1px)] [background-size:6px_6px]" />
+              <div className="pointer-events-none absolute inset-0 shadow-[inset_0_0_120px_rgba(0,0,0,0.46)]" />
 
               <motion.div
                 initial={{ scale: 0.9, y: 20, opacity: 0 }}

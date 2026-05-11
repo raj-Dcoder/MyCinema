@@ -39,11 +39,52 @@ async function getVideoDuration(filePath: string): Promise<number> {
 interface VideoMetadata {
   title: string
   file_path: string
-  type: 'movie' | 'series'
+  type: 'movie' | 'series' | 'video'
   series_name?: string
   season?: number
   episode?: number
   year?: number
+}
+
+function hasAnyPattern(value: string, patterns: RegExp[]) {
+  return patterns.some(pattern => pattern.test(value))
+}
+
+function classifyNonSeriesFile(filePath: string, duration: number, year?: number): 'movie' | 'video' {
+  const fileName = path.basename(filePath, path.extname(filePath))
+  const folderParts = path.dirname(filePath).split(path.sep).slice(-4)
+  const context = [fileName, ...folderParts].join(' ').toLowerCase()
+
+  const releasePatterns = [
+    /\b(480p|720p|1080p|1440p|2160p|4k|uhd)\b/i,
+    /\b(web[- .]?dl|webrip|bluray|b[dr]rip|hdrip|dvdrip|remux|hdtv)\b/i,
+    /\b(x264|x265|h\.?264|h\.?265|hevc|av1|aac|dts|ddp?5\.1|10bit)\b/i,
+    /\b(dual audio|multi audio|esub|proper|repack|extended|uncut|remastered)\b/i
+  ]
+  const movieFolderPatterns = [
+    /\b(movie|movies|film|films|cinema|hollywood|bollywood|tollywood|kollywood)\b/i
+  ]
+  const videoFolderPatterns = [
+    /\b(video|videos|clips|recordings?|captures?|screen ?recordings?|camera|dcim|lecture|lectures|course|courses|tutorials?|classes|meet|zoom)\b/i
+  ]
+  const personalVideoPatterns = [
+    /^(vid|img|dsc|mov|mvi|wa|whatsapp)[-_ ]?\d{4,}/i,
+    /\b(screen ?recording|recording|capture|obs|gameplay|meeting|zoom|google meet|lecture|tutorial|class|course|lesson|webinar|vlog|sample|clip)\b/i,
+    /\b(youtube|y2mate|screenrec|bandicam|camtasia)\b/i,
+    /\d{4}[-_]\d{2}[-_]\d{2}|\d{8}[-_]\d{6}/
+  ]
+
+  const hasReleaseSignal = hasAnyPattern(context, releasePatterns)
+  const hasMovieFolder = hasAnyPattern(context, movieFolderPatterns)
+  const hasVideoFolder = hasAnyPattern(context, videoFolderPatterns)
+  const hasPersonalSignal = hasAnyPattern(context, personalVideoPatterns)
+  const hasYear = typeof year === 'number'
+  const isShort = duration > 0 && duration < 3600
+  if (hasPersonalSignal || (hasVideoFolder && !hasReleaseSignal && !hasMovieFolder)) return 'video'
+  if (isShort && !hasReleaseSignal && !hasMovieFolder && !hasYear) return 'video'
+  if (hasYear || hasReleaseSignal || hasMovieFolder) return 'movie'
+
+  return 'video'
 }
 
 async function getAllFiles(dirPath: string, fileList: string[] = []): Promise<string[]> {
@@ -92,6 +133,21 @@ async function findLocalPoster(videoPath: string): Promise<string | null> {
   if (fs.existsSync(sameNamePng)) return sameNamePng
   
   return null
+}
+
+function getCachedPosterTmdbId(posterPath?: string | null): number | null | undefined {
+  if (!posterPath) return undefined
+
+  const parsed = path.parse(posterPath)
+  const sidecarPath = path.join(parsed.dir, `${parsed.name}.json`)
+  if (!fs.existsSync(sidecarPath)) return undefined
+
+  try {
+    const sidecar = JSON.parse(fs.readFileSync(sidecarPath, 'utf8'))
+    return typeof sidecar.tmdb_id === 'number' ? sidecar.tmdb_id : null
+  } catch {
+    return undefined
+  }
 }
 
 export async function extractOfflineThumbnail(videoPath: string, videoId: number, duration: number = 0): Promise<string | null> {
@@ -168,6 +224,9 @@ export async function scanFolder(rootPath: string) {
   for (const filePath of videoFiles) {
     const metadata = parseFilename(filePath)
     const duration = await getVideoDuration(filePath)
+    if (metadata.type === 'movie') {
+      metadata.type = classifyNonSeriesFile(filePath, duration, metadata.year)
+    }
     const localPoster = await findLocalPoster(filePath)
     
     // ─── Link with Download ──────────────────────────────────────────────────
@@ -191,7 +250,12 @@ export async function scanFolder(rootPath: string) {
       console.warn('[Scanner] Failed to link download:', e)
     }
 
-    const result = addVideo({
+    if (metadata.type === 'video' && tmdbIdFromDownload) {
+      metadata.type = 'movie'
+    }
+
+    const existingBeforeScan = allInitialVideos.find((v: any) => path.normalize(v.file_path) === path.normalize(filePath))
+    addVideo({
       ...metadata,
       file_path: filePath,
       duration: duration,
@@ -200,23 +264,41 @@ export async function scanFolder(rootPath: string) {
     })
 
     const allVideos = getVideos()
-    let videoId = 0
-    if (result.changes > 0) {
-      videoId = Number(result.lastInsertRowid)
-    } else {
-      const existing = allVideos.find((v: any) => v.file_path === filePath)
-      if (existing) videoId = existing.id
-    }
+    const currentVideoNode = allVideos.find((v: any) => path.normalize(v.file_path) === path.normalize(filePath))
+    const videoId = currentVideoNode ? currentVideoNode.id : 0
 
     if (videoId > 0) {
-      const currentVideoNode = allVideos.find((v: any) => v.id === videoId);
       const isSnap = currentVideoNode && currentVideoNode.poster_path && currentVideoNode.poster_path.includes('-snap.jpg');
       const isMissingPoster = !localPoster && (!currentVideoNode || !currentVideoNode.poster_path || currentVideoNode.poster_path === 'N/A' || isSnap);
       const isMissingMetadata = currentVideoNode && (!currentVideoNode.tagline && !currentVideoNode.genres);
+      const downloadTmdbChanged = Boolean(tmdbIdFromDownload && existingBeforeScan?.tmdb_id !== tmdbIdFromDownload);
+      const cachedPosterTmdbId = getCachedPosterTmdbId(currentVideoNode?.poster_path)
+      const cachedPosterTmdbMismatch = Boolean(tmdbIdFromDownload && cachedPosterTmdbId !== undefined && cachedPosterTmdbId !== tmdbIdFromDownload)
+
+      if (metadata.type === 'video') {
+        console.log(`[Scanner] Skipping TMDB for local video ${videoId} (Duration: ${duration}s). Falls under Videos tab.`)
+        let posterPath = localPoster || null
+        if (!posterPath) {
+          console.log(`[Scanner] Taking manual snapshot for local video ${videoId}`)
+          posterPath = await extractOfflineThumbnail(filePath, videoId, duration)
+        }
+        updateVideoMetadata(videoId, {
+          poster_path: posterPath || currentVideoNode?.poster_path || null,
+          backdrop_path: null,
+          overview: null,
+          tagline: null,
+          genres: null,
+          tmdb_id: null,
+          vote_average: null,
+          release_year: null
+        })
+        BrowserWindow.getAllWindows().forEach(w => w.webContents.send('library-updated'))
+        continue
+      }
       
       // If we are missing metadata, we should ALSO check if we have a TMDB ID.
       // If we have a TMDB ID but no metadata, we can fetch it directly.
-      if (isMissingPoster || isMissingMetadata) {
+      if (isMissingPoster || isMissingMetadata || downloadTmdbChanged || cachedPosterTmdbMismatch) {
         const searchTitle = metadata.series_name || metadata.title
         
         // Junk title filter: skip GUIDs, hashes, and extremely long descriptive titles
@@ -241,25 +323,6 @@ export async function scanFolder(rootPath: string) {
           continue;
         }
         
-        // --- NEW CATEGORIZATION LOGIC & TMDB SHORT-CIRCUIT ---
-        // If it's a short clip (< 1 hour) AND it is NOT a strictly formatted series, disable TMDB matching
-        // so it doesn't randomly scrape movies. Wait, in `addVideo` we recorded duration. 
-        if (metadata.type === 'movie' && duration > 0 && duration < 3600) {
-          console.log(`[Scanner] Skipping TMDB for short clip ${videoId} (Duration: ${duration}s). Falls under Videos tab.`)
-          if (isMissingPoster) {
-            console.log(`[Scanner] Taking manual snapshot for short video ${videoId}`)
-            const snapPath = await extractOfflineThumbnail(filePath, videoId, duration)
-            if (snapPath) {
-               updateVideoMetadata(videoId, { 
-                 poster_path: snapPath, 
-                 backdrop_path: null,
-                 overview: null, tagline: null, genres: null, tmdb_id: null, vote_average: null, release_year: null 
-               })
-            }
-          }
-          continue;
-        }
-
         console.log(`[Scanner] Requesting TMDB API for video ${videoId} with title: "${searchTitle}" ${metadata.year ? `(${metadata.year})` : ''}`)
         
         // Anti-rate-limit throttle: 500ms between requests

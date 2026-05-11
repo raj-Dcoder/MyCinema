@@ -143,9 +143,10 @@ const Videos: React.FC<VideosProps> = ({ onPlay }) => {
     const allVideos: Video[] = await window.api.getVideos()
     const cwVideos: Video[] = await window.api.getContinueWatching()
 
-    // Short clips only (< 1 hour, not a series)
+    // New scans store clips/personal media as `video`; keep the old short-movie
+    // rule as a compatibility bridge until older libraries are rescanned.
     const isShortClip = (v: Video) =>
-      v.type === 'movie' && (v.duration ?? 0) > 0 && (v.duration ?? 0) < ONE_HOUR
+      v.type === 'video' || (v.type === 'movie' && (v.duration ?? 0) > 0 && (v.duration ?? 0) < ONE_HOUR)
 
     setClips(allVideos.filter(isShortClip))
 

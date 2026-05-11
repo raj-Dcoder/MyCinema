@@ -71,7 +71,7 @@ const VideoCard: React.FC<VideoCardProps> = ({ video, onPlay, onShowDetail, isCo
 
   const title = video.type === 'series' && video.series_name ? video.series_name : video.title
   const tagline = video.tagline || video.overview
-  const category = genres.length > 0 ? genres[0] : (video.type === 'series' ? 'Web Series' : 'Movie')
+  const category = genres.length > 0 ? genres[0] : (video.type === 'series' ? 'Web Series' : video.type === 'video' ? 'Video' : 'Movie')
   const handleWatchNow = async () => {
     if (video.isExternal && onShowDetail) {
       onShowDetail(video)

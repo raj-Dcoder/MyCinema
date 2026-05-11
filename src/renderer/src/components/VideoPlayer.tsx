@@ -21,6 +21,8 @@ import {
 type AudioBoostProfile = 'balanced' | 'rich' | 'night'
 
 const SUBTITLE_OVERLAY_Z_INDEX = 35
+const SEEK_PREVIEW_BUCKET_SECONDS = 5
+const SEEK_PREVIEW_DEBOUNCE_MS = 90
 
 const AUDIO_BOOST_PROFILES: Record<AudioBoostProfile, {
   label: string
@@ -252,15 +254,33 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
   const [showOnlineSearch, setShowOnlineSearch] = useState(false)
   const [downloadingSubId, setDownloadingSubId] = useState<number | null>(null)
   
-  const previewVideoRef = useRef<HTMLVideoElement>(null)
   const playerShellRef = useRef<HTMLDivElement>(null)
   const [hoverTime, setHoverTime] = useState<number | null>(null)
   const [hoverPosition, setHoverPosition] = useState<number>(0)
+  const [seekPreviewImageSrc, setSeekPreviewImageSrc] = useState<string | null>(null)
+  const [seekPreviewLoading, setSeekPreviewLoading] = useState(false)
+  const seekPreviewThumbTimerRef = useRef<NodeJS.Timeout | null>(null)
+  const seekPreviewThumbRequestRef = useRef(0)
+  const lastSeekPreviewBucketRef = useRef<number | null>(null)
   const [videoAspectRatio, setVideoAspectRatio] = useState(16 / 9)
 
   useEffect(() => {
     localStorage.setItem('mycinema_fps_boost', fpsBoostEnabled.toString())
   }, [fpsBoostEnabled])
+
+  useEffect(() => {
+    setSeekPreviewImageSrc(null)
+    setSeekPreviewLoading(false)
+    lastSeekPreviewBucketRef.current = null
+    seekPreviewThumbRequestRef.current += 1
+
+    return () => {
+      if (seekPreviewThumbTimerRef.current) {
+        clearTimeout(seekPreviewThumbTimerRef.current)
+        seekPreviewThumbTimerRef.current = null
+      }
+    }
+  }, [currentVideo.file_path])
 
   useEffect(() => {
     localStorage.setItem('mycinema_ai_sharpness', qualitySharpnessEnabled.toString())
@@ -1177,7 +1197,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
                 const pct = (seekPreviewRef.current / dur) * 100
                 setHoverTime(seekPreviewRef.current)
                 setHoverPosition(pct)
-                if (previewVideoRef.current) previewVideoRef.current.currentTime = seekPreviewRef.current
+                requestSeekPreviewThumbnail(seekPreviewRef.current)
               }, 100)
             }, 400)
           }
@@ -1205,7 +1225,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
                 const pct = (seekPreviewRef.current / dur) * 100
                 setHoverTime(seekPreviewRef.current)
                 setHoverPosition(pct)
-                if (previewVideoRef.current) previewVideoRef.current.currentTime = seekPreviewRef.current
+                requestSeekPreviewThumbnail(seekPreviewRef.current)
               }, 100)
             }, 400)
           }
@@ -1811,6 +1831,38 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
     }
   }
 
+  const requestSeekPreviewThumbnail = (time: number) => {
+    if (!Number.isFinite(time)) return
+
+    const bucketTime = Math.max(0, Math.floor(time / SEEK_PREVIEW_BUCKET_SECONDS) * SEEK_PREVIEW_BUCKET_SECONDS)
+    if (lastSeekPreviewBucketRef.current === bucketTime) return
+    lastSeekPreviewBucketRef.current = bucketTime
+
+    if (seekPreviewThumbTimerRef.current) {
+      clearTimeout(seekPreviewThumbTimerRef.current)
+    }
+
+    seekPreviewThumbTimerRef.current = setTimeout(async () => {
+      const requestId = ++seekPreviewThumbRequestRef.current
+      setSeekPreviewLoading(true)
+
+      try {
+        const thumbPath = await window.api.getSeekPreviewThumbnail(currentVideo.file_path, bucketTime)
+        if (requestId !== seekPreviewThumbRequestRef.current) return
+
+        setSeekPreviewImageSrc(thumbPath ? `media://file/${encodeURIComponent(thumbPath)}` : null)
+      } catch (err) {
+        if (requestId === seekPreviewThumbRequestRef.current) {
+          setSeekPreviewImageSrc(null)
+        }
+      } finally {
+        if (requestId === seekPreviewThumbRequestRef.current) {
+          setSeekPreviewLoading(false)
+        }
+      }
+    }, SEEK_PREVIEW_DEBOUNCE_MS)
+  }
+
   const handleProgressMouseMove = (e: React.MouseEvent<HTMLDivElement>) => {
     const rect = e.currentTarget.getBoundingClientRect()
     // The tooltip width is w-48 (192px). Half is 96px.
@@ -1829,13 +1881,18 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
 
     setHoverPosition((popupLeft / rect.width) * 100)
 
-    if (previewVideoRef.current && Math.abs(previewVideoRef.current.currentTime - time) > 1.5) {
-      previewVideoRef.current.currentTime = time
-    }
+    requestSeekPreviewThumbnail(time)
   }
 
   const handleProgressMouseLeave = () => {
     setHoverTime(null)
+    if (seekPreviewThumbTimerRef.current) {
+      clearTimeout(seekPreviewThumbTimerRef.current)
+      seekPreviewThumbTimerRef.current = null
+    }
+    seekPreviewThumbRequestRef.current += 1
+    lastSeekPreviewBucketRef.current = null
+    setSeekPreviewLoading(false)
   }
 
   const toggleFullscreen = () => {
@@ -2463,13 +2520,18 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
             style={{ left: `${hoverPosition}%` }}
           >
             <div className="w-48 aspect-video bg-black/80 rounded-lg overflow-hidden border border-white/20 shadow-2xl flex items-center justify-center relative">
-              <video
-                ref={previewVideoRef}
-                src={`media://file/${encodeURIComponent(currentVideo.file_path)}`}
-                className="w-full h-full object-cover"
-                muted
-                preload="auto"
-              />
+              {seekPreviewImageSrc ? (
+                <img
+                  src={seekPreviewImageSrc}
+                  className="w-full h-full object-cover"
+                  alt=""
+                  draggable={false}
+                />
+              ) : (
+                <div className="flex h-full w-full items-center justify-center bg-black/70 text-white/45">
+                  {seekPreviewLoading && <Loader2 size={18} className="animate-spin" />}
+                </div>
+              )}
               <div className="absolute bottom-1 bg-black/60 px-2 py-0.5 rounded text-[10px] font-bold text-white drop-shadow-md">
                 {hoverTime !== null ? formatTime(hoverTime) : '0:00'}
               </div>

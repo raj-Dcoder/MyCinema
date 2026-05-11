@@ -1,4 +1,4 @@
-import React, { useRef, useState, useEffect, useCallback } from 'react'
+import React, { forwardRef, useRef, useState, useEffect, useCallback, useImperativeHandle } from 'react'
 import { ChevronLeft, ChevronRight } from 'lucide-react'
 
 interface HorizontalScrollRowProps {
@@ -6,7 +6,11 @@ interface HorizontalScrollRowProps {
   contentClassName?: string
 }
 
-const HorizontalScrollRow: React.FC<HorizontalScrollRowProps> = ({ children, contentClassName = 'gap-4' }) => {
+export type HorizontalScrollRowHandle = {
+  scrollToStart: () => void
+}
+
+const HorizontalScrollRow = forwardRef<HorizontalScrollRowHandle, HorizontalScrollRowProps>(({ children, contentClassName = 'gap-4' }, ref) => {
   const scrollRef = useRef<HTMLDivElement>(null)
   const [showLeft, setShowLeft] = useState(false)
   const [showRight, setShowRight] = useState(false)
@@ -39,6 +43,19 @@ const HorizontalScrollRow: React.FC<HorizontalScrollRowProps> = ({ children, con
     })
     setTimeout(checkScroll, 350)
   }
+
+  const scrollToStart = useCallback(() => {
+    if (!scrollRef.current) return
+    scrollRef.current.scrollTo({
+      left: 0,
+      behavior: 'smooth'
+    })
+    setTimeout(checkScroll, 350)
+  }, [checkScroll])
+
+  useImperativeHandle(ref, () => ({
+    scrollToStart
+  }), [scrollToStart])
 
   return (
     <div
@@ -85,6 +102,8 @@ const HorizontalScrollRow: React.FC<HorizontalScrollRowProps> = ({ children, con
       </button>
     </div>
   )
-}
+})
+
+HorizontalScrollRow.displayName = 'HorizontalScrollRow'
 
 export default HorizontalScrollRow

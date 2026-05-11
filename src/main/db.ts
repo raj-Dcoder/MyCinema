@@ -11,6 +11,37 @@ const db = new Database(dbPath, {
   timeout: 10000 // 10 seconds timeout for busy/locked database
 })
 
+function ensureTypeAllowsVideo(tableName: 'videos' | 'watchlist') {
+  const row = db.prepare(`
+    SELECT sql FROM sqlite_master
+    WHERE type = 'table' AND name = ?
+  `).get(tableName) as { sql?: string } | undefined
+
+  if (!row?.sql || row.sql.includes("'video'")) return
+
+  const tempName = `${tableName}_migration_${Date.now()}`
+  const nextSql = row.sql
+    .replace(new RegExp(`CREATE TABLE ${tableName}`, 'i'), `CREATE TABLE ${tempName}`)
+    .replace(/CHECK\s*\(\s*type\s+IN\s*\(\s*'movie'\s*,\s*'series'\s*\)\s*\)/gi, "CHECK(type IN ('movie', 'series', 'video'))")
+
+  const columns = db.prepare(`PRAGMA table_info(${tableName})`).all() as Array<{ name: string }>
+  const columnList = columns.map(column => `"${column.name}"`).join(', ')
+
+  db.pragma('foreign_keys = OFF')
+  try {
+    const migrate = db.transaction(() => {
+      db.exec(nextSql)
+      db.exec(`INSERT INTO ${tempName} (${columnList}) SELECT ${columnList} FROM ${tableName}`)
+      db.exec(`DROP TABLE ${tableName}`)
+      db.exec(`ALTER TABLE ${tempName} RENAME TO ${tableName}`)
+    })
+
+    migrate()
+  } finally {
+    db.pragma('foreign_keys = ON')
+  }
+}
+
 // Initialize database
 export function initDb() {
   db.pragma('journal_mode = WAL') // Write-Ahead Logging for better concurrency
@@ -20,7 +51,7 @@ export function initDb() {
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       title TEXT NOT NULL,
       file_path TEXT UNIQUE NOT NULL,
-      type TEXT CHECK(type IN ('movie', 'series')) NOT NULL,
+      type TEXT CHECK(type IN ('movie', 'series', 'video')) NOT NULL,
       series_name TEXT,
       season INTEGER,
       episode INTEGER,
@@ -42,7 +73,7 @@ export function initDb() {
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       tmdb_id INTEGER UNIQUE NOT NULL,
       title TEXT NOT NULL,
-      type TEXT CHECK(type IN ('movie', 'series')) NOT NULL,
+      type TEXT CHECK(type IN ('movie', 'series', 'video')) NOT NULL,
       poster_path TEXT,
       backdrop_path TEXT,
       overview TEXT,
@@ -55,6 +86,9 @@ export function initDb() {
     -- Migration: add missing columns if they don't exist
     PRAGMA table_info(videos);
   `)
+
+  ensureTypeAllowsVideo('videos')
+  ensureTypeAllowsVideo('watchlist')
 
   // Check and add columns if they don't exist
   const columns = db.prepare("PRAGMA table_info(videos)").all()
@@ -140,8 +174,20 @@ export function addVideo(video: any) {
       title, file_path, type, series_name, season, episode, duration, poster_path, vote_average, release_year, tmdb_id
     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(file_path) DO UPDATE SET
-      duration = excluded.duration
-    WHERE duration = 0 OR duration IS NULL
+      title = excluded.title,
+      type = excluded.type,
+      series_name = excluded.series_name,
+      season = excluded.season,
+      episode = excluded.episode,
+      duration = CASE
+        WHEN videos.duration = 0 OR videos.duration IS NULL THEN excluded.duration
+        ELSE videos.duration
+      END,
+      tmdb_id = CASE
+        WHEN excluded.tmdb_id IS NOT NULL THEN excluded.tmdb_id
+        WHEN excluded.type = 'video' THEN NULL
+        ELSE videos.tmdb_id
+      END
   `)
   return stmt.run(
     video.title,

@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react'
-import { Search, Download as DownloadIcon, Film, Tv, X, Loader2, HardDrive, CheckCircle2, AlertCircle, Pause, Play, FolderOpen, Bookmark, BookmarkCheck, ArrowLeft, Languages, RotateCcw } from 'lucide-react'
+import { Search, Download as DownloadIcon, Film, Tv, X, Loader2, HardDrive, CheckCircle2, AlertCircle, Pause, Play, FolderOpen, Bookmark, BookmarkCheck, ArrowLeft, Languages, RotateCcw, Share2, Copy, MessageCircle, Send } from 'lucide-react'
 
 import { Video } from '../types'
 import { getTorrentSourceHealthScore, getTorrentSourceSpeedLabel } from '../utils/torrentSources'
@@ -27,6 +27,7 @@ interface TorrentSource {
   seeds: number
   peers: number
   type: string
+  provider?: string
   isHindi?: boolean
   parsedSeason?: number
   parsedEpisode?: number
@@ -37,6 +38,7 @@ interface ActiveDownload {
   id: string
   title: string
   name?: string | null
+  magnet: string
   quality: string
   progress: number
   downloadSpeed: string
@@ -47,6 +49,29 @@ interface ActiveDownload {
   tmdbId?: number
   errorMessage?: string
   addedAt?: string
+}
+
+const hasEpisodeMarker = (source: TorrentSource) => (
+  typeof source.parsedEpisode === 'number' ||
+  /\bs\d{1,2}[\s._-]*e(?:p)?[\s._-]*\d{1,3}\b/i.test(source.title) ||
+  /\b\d{1,2}x\d{1,3}\b/i.test(source.title) ||
+  /\b(?:episode|ep)[\s._-]*\d{1,3}\b/i.test(source.title)
+)
+
+const isSeasonPackSource = (source: TorrentSource) => Boolean(source.isSeasonPack) && !hasEpisodeMarker(source)
+
+const MYCINEMA_SHARE_BASE_URL = (
+  import.meta.env.VITE_MYCINEMA_SHARE_BASE_URL ||
+  'https://mycinema-share.rajveersinghranaofficial.workers.dev'
+).replace(/\/+$/, '')
+const DOWNLOAD_SHARE_HINT_STORAGE_KEY = 'mycinema_download_share_hint_seen_v1'
+
+const encodeShareSource = (source: any) => {
+  const json = JSON.stringify(source)
+  return btoa(unescape(encodeURIComponent(json)))
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=+$/g, '')
 }
 
 interface DownloadsStorage {
@@ -113,14 +138,19 @@ const Download: React.FC<DownloadProps> = ({ onShowDetail }) => {
   const [allVideos, setAllVideos] = useState<Video[]>([])
   const [showDownloads, setShowDownloads] = useState(false)
   const [downloadToRemove, setDownloadToRemove] = useState<string | null>(null)
+  const [downloadToShare, setDownloadToShare] = useState<ActiveDownload | null>(null)
+  const [shareFeedback, setShareFeedback] = useState<string | null>(null)
+  const [showDownloadShareHint, setShowDownloadShareHint] = useState(() => localStorage.getItem(DOWNLOAD_SHARE_HINT_STORAGE_KEY) !== 'true')
   const [loadingDetailId, setLoadingDetailId] = useState<string | null>(null)
   const [downloadsStorage, setDownloadsStorage] = useState<DownloadsStorage | null>(null)
   const removedIdsRef = useRef<Set<string>>(new Set())
+  const pauseResumePendingRef = useRef<Map<string, { status: ActiveDownload['status']; expiresAt: number }>>(new Map())
   const searchCacheRef = useRef<Map<string, TMDBResult[]>>(new Map())
   const searchInputRef = useRef<HTMLInputElement>(null)
   const sourceSearchRequestRef = useRef<string | null>(null)
 
   const [selectedSeason, setSelectedSeason] = useState<string>('all')
+  const [selectedPackSeason, setSelectedPackSeason] = useState<string>('all')
   const [selectedEpisode, setSelectedEpisode] = useState<string>('all')
   const [hindiOnly, setHindiOnly] = useState<boolean>(false)
 
@@ -167,6 +197,45 @@ const Download: React.FC<DownloadProps> = ({ onShowDetail }) => {
 
   const isInWatchlist = (id: number, media_type: string) => 
     watchlist.some(w => w.tmdb_id === id && w.type === (media_type === 'tv' ? 'series' : 'movie'))
+
+  const getDownloadSharePayload = (download: ActiveDownload) => {
+    if (!download.tmdbId || !download.magnet) return null
+    const source = {
+      title: download.name || download.title,
+      quality: download.quality || '',
+      size: download.size || '',
+      magnet: download.magnet,
+      seeds: 0,
+      peers: 0
+    }
+    const mediaType = allVideos.find(video => video.tmdb_id === download.tmdbId)?.type === 'series' ? 'series' : 'movie'
+    const sourceParam = encodeShareSource(source)
+    const shareUrl = `${MYCINEMA_SHARE_BASE_URL}/${mediaType}/${download.tmdbId}?source=${sourceParam}`
+    const shareTitle = `I found this exact source on MyCinema: ${download.name || download.title}`
+    return {
+      source,
+      shareUrl,
+      shareTitle,
+      shareText: `${shareTitle}\n${shareUrl}`
+    }
+  }
+
+  const showShareFeedback = (message: string) => {
+    setShareFeedback(message)
+    window.setTimeout(() => setShareFeedback(null), 1800)
+  }
+
+  const copyShareText = async (text: string, message: string) => {
+    await navigator.clipboard.writeText(text)
+    showShareFeedback(message)
+  }
+
+  const openShareUrl = (url: string) => window.open(url, '_blank')
+
+  const dismissDownloadShareHint = () => {
+    localStorage.setItem(DOWNLOAD_SHARE_HINT_STORAGE_KEY, 'true')
+    setShowDownloadShareHint(false)
+  }
 
   const toggleWatchlist = (item: TMDBResult, e?: React.MouseEvent) => {
     e?.stopPropagation()
@@ -261,6 +330,13 @@ const Download: React.FC<DownloadProps> = ({ onShowDetail }) => {
 
     const cleanup = window.api.onTorrentProgress((data: any) => {
       if (removedIdsRef.current.has(data.id)) return
+      const pending = pauseResumePendingRef.current.get(data.id)
+      if (pending) {
+        const reachedExpectedStatus = data.status === pending.status ||
+          (pending.status === 'downloading' && data.status === 'connecting')
+        if (!reachedExpectedStatus && Date.now() < pending.expiresAt) return
+        pauseResumePendingRef.current.delete(data.id)
+      }
       
       setDownloads(prev => {
         const existing = prev.find(d => d.id === data.id)
@@ -280,6 +356,7 @@ const Download: React.FC<DownloadProps> = ({ onShowDetail }) => {
     setSearching(true)
     setSelectedItem(null)
     setSources([])
+    setSelectedPackSeason('all')
 
     try {
       const filtered = await window.api.searchTMDB(trimmed)
@@ -303,6 +380,7 @@ const Download: React.FC<DownloadProps> = ({ onShowDetail }) => {
 
     setSelectedItem(null)
     setSources([])
+    setSelectedPackSeason('all')
 
     const cacheKey = trimmed.toLowerCase()
     const cached = searchCacheRef.current.get(cacheKey)
@@ -365,6 +443,7 @@ const Download: React.FC<DownloadProps> = ({ onShowDetail }) => {
     setSources([])
     setSourceSearchStatus({ found: 0, completed: 0, total: 0, cached: false, done: false })
     setSelectedSeason('all')
+    setSelectedPackSeason('all')
     setSelectedEpisode('all')
     const requestId = `${item.id}-${Date.now()}-${Math.random().toString(36).slice(2)}`
     sourceSearchRequestRef.current = requestId
@@ -404,21 +483,30 @@ const Download: React.FC<DownloadProps> = ({ onShowDetail }) => {
   }
 
   const handlePauseResume = async (id: string) => {
+    if (pauseResumePendingRef.current.has(id)) return
+
     const dl = downloads.find(d => d.id === id)
     if (!dl) return
 
     // Optimistic status update for speed
     const newStatus = dl.status === 'paused' ? 'downloading' : 'paused'
+    pauseResumePendingRef.current.set(id, { status: newStatus as ActiveDownload['status'], expiresAt: Date.now() + 5000 })
     setDownloads(prev => prev.map(d => d.id === id ? { ...d, status: newStatus as any } : d))
     
     try {
-      await window.api.pauseResumeTorrent(id)
+      const success = await window.api.pauseResumeTorrent(id)
+      if (!success) {
+        pauseResumePendingRef.current.delete(id)
+        setDownloads(prev => prev.map(d => d.id === id ? { ...d, status: dl.status } : d))
+        return
+      }
       if (newStatus === 'downloading') {
         setShowDownloads(true)
       }
     } catch (err) {
       console.error('[Download] Pause/Resume error:', err)
-      // Note: progress handler will eventually sync the correct state if this fails
+      pauseResumePendingRef.current.delete(id)
+      setDownloads(prev => prev.map(d => d.id === id ? { ...d, status: dl.status } : d))
     }
   }
 
@@ -485,7 +573,15 @@ const Download: React.FC<DownloadProps> = ({ onShowDetail }) => {
   const availableSeasons = React.useMemo(() => {
     const seasons = new Set<number>()
     sources.forEach(s => {
-      if (s.parsedSeason !== undefined) seasons.add(s.parsedSeason)
+      if (!isSeasonPackSource(s) && s.parsedSeason !== undefined) seasons.add(s.parsedSeason)
+    })
+    return Array.from(seasons).sort((a, b) => a - b)
+  }, [sources])
+
+  const availablePackSeasons = React.useMemo(() => {
+    const seasons = new Set<number>()
+    sources.forEach(s => {
+      if (isSeasonPackSource(s) && s.parsedSeason !== undefined) seasons.add(s.parsedSeason)
     })
     return Array.from(seasons).sort((a, b) => a - b)
   }, [sources])
@@ -494,7 +590,7 @@ const Download: React.FC<DownloadProps> = ({ onShowDetail }) => {
     if (selectedSeason === 'all' || selectedSeason === 'packs') return []
     const eps = new Set<number>()
     sources.forEach(s => {
-      if (s.parsedSeason === parseInt(selectedSeason) && s.parsedEpisode !== undefined) {
+      if (!isSeasonPackSource(s) && s.parsedSeason === parseInt(selectedSeason) && s.parsedEpisode !== undefined) {
         eps.add(s.parsedEpisode)
       }
     })
@@ -509,9 +605,13 @@ const Download: React.FC<DownloadProps> = ({ onShowDetail }) => {
 
         // 2. TV Series specific filtering
         if (selectedItem?.media_type !== 'tv') return true
-        if (selectedSeason === 'packs') return s.isSeasonPack
+        if (selectedSeason === 'packs') {
+          if (!isSeasonPackSource(s)) return false
+          if (selectedPackSeason !== 'all') return s.parsedSeason === parseInt(selectedPackSeason)
+          return true
+        }
         if (selectedSeason !== 'all') {
-          if (s.parsedSeason !== parseInt(selectedSeason) || s.isSeasonPack) return false
+          if (s.parsedSeason !== parseInt(selectedSeason) || isSeasonPackSource(s)) return false
           if (selectedEpisode !== 'all') {
             if (s.parsedEpisode !== parseInt(selectedEpisode)) return false
           }
@@ -519,7 +619,7 @@ const Download: React.FC<DownloadProps> = ({ onShowDetail }) => {
         return true
       })
       .sort((a, b) => getTorrentSourceHealthScore(b) - getTorrentSourceHealthScore(a))
-  }, [sources, selectedSeason, selectedEpisode, selectedItem, hindiOnly])
+  }, [sources, selectedSeason, selectedPackSeason, selectedEpisode, selectedItem, hindiOnly])
 
   // Optimization: Memoize a video map for O(1) lookup during render
   const videoMap = React.useMemo(() => {
@@ -582,6 +682,65 @@ const Download: React.FC<DownloadProps> = ({ onShowDetail }) => {
           </div>
         </div>
       )}
+
+      {downloadToShare && (() => {
+        const payload = getDownloadSharePayload(downloadToShare)
+        if (!payload) return null
+        return (
+          <div className="fixed inset-0 z-[120] flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm" onClick={() => setDownloadToShare(null)}>
+            <div className="w-full max-w-md overflow-hidden rounded-2xl border border-secondary bg-surface shadow-2xl" onClick={e => e.stopPropagation()}>
+              <div className="flex items-center justify-between border-b border-secondary px-5 py-4">
+                <div className="flex items-center gap-3">
+                  <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-cyan-400/10 text-cyan-300">
+                    <Share2 size={18} />
+                  </div>
+                  <div>
+                    <h3 className="text-sm font-black uppercase tracking-widest text-text">Share Source</h3>
+                    <p className="mt-0.5 max-w-[250px] truncate text-xs text-muted">{downloadToShare.name || downloadToShare.title}</p>
+                  </div>
+                </div>
+                <button onClick={() => setDownloadToShare(null)} className="rounded-lg p-1.5 text-muted transition-colors hover:bg-white/5 hover:text-text">
+                  <X size={18} />
+                </button>
+              </div>
+              <div className="space-y-4 p-5">
+                <div className="rounded-xl border border-secondary bg-black/20 p-3">
+                  <p className="line-clamp-2 text-sm font-semibold text-text">{payload.source.title}</p>
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    {payload.source.quality && <span className="rounded bg-primary/10 px-2 py-1 text-[10px] font-bold text-primary">{payload.source.quality}</span>}
+                    {payload.source.size && <span className="rounded bg-white/5 px-2 py-1 text-[10px] font-bold text-muted">{payload.source.size}</span>}
+                  </div>
+                  <p className="mt-3 break-all text-[11px] font-medium text-cyan-200/70">{payload.shareUrl}</p>
+                </div>
+                {shareFeedback && (
+                  <div className="flex items-center gap-2 rounded-xl border border-emerald-400/20 bg-emerald-400/10 px-3 py-2 text-xs font-black uppercase tracking-widest text-emerald-300">
+                    <CheckCircle2 size={15} />
+                    {shareFeedback}
+                  </div>
+                )}
+                <div className="grid grid-cols-2 gap-3">
+                  <button onClick={() => openShareUrl(`https://wa.me/?text=${encodeURIComponent(payload.shareText)}`)} className="flex min-h-20 flex-col items-center justify-center gap-2 rounded-xl border border-secondary bg-white/[0.03] text-muted transition-all hover:border-emerald-400/35 hover:bg-emerald-400/10 hover:text-text">
+                    <MessageCircle size={22} className="text-emerald-300" />
+                    <span className="text-[11px] font-black uppercase tracking-widest">WhatsApp</span>
+                  </button>
+                  <button onClick={() => openShareUrl(`https://t.me/share/url?url=${encodeURIComponent(payload.shareUrl)}&text=${encodeURIComponent(payload.shareTitle)}`)} className="flex min-h-20 flex-col items-center justify-center gap-2 rounded-xl border border-secondary bg-white/[0.03] text-muted transition-all hover:border-sky-400/35 hover:bg-sky-400/10 hover:text-text">
+                    <Send size={22} className="text-sky-300" />
+                    <span className="text-[11px] font-black uppercase tracking-widest">Telegram</span>
+                  </button>
+                  <button onClick={() => copyShareText(payload.shareUrl, 'Copied link')} className="flex min-h-20 flex-col items-center justify-center gap-2 rounded-xl border border-secondary bg-white/[0.03] text-muted transition-all hover:border-cyan-400/35 hover:bg-cyan-400/10 hover:text-text">
+                    <Copy size={22} className="text-cyan-300" />
+                    <span className="text-[11px] font-black uppercase tracking-widest">Copy Link</span>
+                  </button>
+                  <button onClick={() => copyShareText(payload.shareText, 'Copied message')} className="flex min-h-20 flex-col items-center justify-center gap-2 rounded-xl border border-secondary bg-white/[0.03] text-muted transition-all hover:border-violet-400/35 hover:bg-violet-400/10 hover:text-text">
+                    <Share2 size={22} className="text-violet-300" />
+                    <span className="text-[11px] font-black uppercase tracking-widest">Copy Text</span>
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )
+      })()}
 
       {/* Main Content Area */}
       <div className={`transition-all duration-300 ${panelOpen ? 'mr-[500px]' : ''}`}>
@@ -708,8 +867,8 @@ const Download: React.FC<DownloadProps> = ({ onShowDetail }) => {
                 <X size={16} />
               </button>
             </div>
-            <div className="divide-y divide-secondary/50">
-              {sortedDownloads.map(dl => {
+          <div className="divide-y divide-secondary/50">
+              {sortedDownloads.map((dl, idx) => {
                 // Optimized matching using memoized map
                 const matchingVideo = (() => {
                   if (dl.tmdbId && videoMap.has(`tmdb-${dl.tmdbId}`)) {
@@ -718,6 +877,13 @@ const Download: React.FC<DownloadProps> = ({ onShowDetail }) => {
                   const cleanDlTitle = dl.title.replace(/\s*\([^)]*\)\s*$/, '').toLowerCase()
                   return videoMap.get(`title-${cleanDlTitle}`) || videoMap.get(`series-${cleanDlTitle}`)
                 })()
+                const isShareEligible = Boolean((dl.tmdbId || matchingVideo?.tmdb_id) && dl.magnet)
+                const showHintForThisDownload = showDownloadShareHint && idx === sortedDownloads.findIndex(item => {
+                  if (!item.magnet) return false
+                  if (item.tmdbId) return true
+                  const cleanTitle = item.title.replace(/\s*\([^)]*\)\s*$/, '').toLowerCase()
+                  return Boolean(videoMap.get(`title-${cleanTitle}`) || videoMap.get(`series-${cleanTitle}`))
+                })
 
                 const handleShowDetailWithDelay = (video: Video) => {
                   setLoadingDetailId(dl.id)
@@ -776,7 +942,7 @@ const Download: React.FC<DownloadProps> = ({ onShowDetail }) => {
                           <AlertCircle size={14} /> Pending
                         </span>
                       )}
-                      {dl.status === 'done' && (
+                        {dl.status === 'done' && (
                         <span className="flex items-center gap-1 text-xs text-green-400">
                           <CheckCircle2 size={14} /> Complete
                         </span>
@@ -785,6 +951,45 @@ const Download: React.FC<DownloadProps> = ({ onShowDetail }) => {
                         <span className="flex items-center gap-1 text-xs text-red-400">
                           <AlertCircle size={14} /> Failed
                         </span>
+                      )}
+                      {isShareEligible && (
+                        <div className="relative">
+                          <button
+                            onClick={() => {
+                              dismissDownloadShareHint()
+                              setDownloadToShare({ ...dl, tmdbId: dl.tmdbId || matchingVideo?.tmdb_id })
+                              setShareFeedback(null)
+                            }}
+                            className="p-1.5 rounded-lg text-muted hover:text-cyan-300 hover:bg-cyan-400/10 transition-colors"
+                            title="Share exact source"
+                          >
+                            <Share2 size={14} />
+                          </button>
+                          {showHintForThisDownload && (
+                            <div className="absolute right-0 top-full z-40 mt-3 w-[245px] rounded-xl border border-cyan-300/20 bg-[#07111c] p-3 text-left shadow-2xl shadow-black/45 ring-1 ring-white/5 animate-in fade-in slide-in-from-top-1 duration-200">
+                              <div className="absolute right-3 top-0 h-3 w-3 -translate-y-1/2 rotate-45 border-l border-t border-cyan-300/20 bg-[#07111c]" />
+                              <div className="flex items-start gap-3">
+                                <div className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-cyan-300/12 text-cyan-200">
+                                  <Share2 size={14} />
+                                </div>
+                                <div className="min-w-0 flex-1">
+                                  <p className="text-[10px] font-black uppercase tracking-[0.18em] text-cyan-100">Share mirrors</p>
+                                  <p className="mt-1 text-[11px] font-semibold leading-relaxed text-white/58">
+                                    Send this exact source so friends can download the same mirror.
+                                  </p>
+                                </div>
+                                <button
+                                  type="button"
+                                  onClick={dismissDownloadShareHint}
+                                  className="rounded-md p-1 text-white/35 transition-colors hover:bg-white/10 hover:text-white"
+                                  title="Dismiss hint"
+                                >
+                                  <X size={13} />
+                                </button>
+                              </div>
+                            </div>
+                          )}
+                        </div>
                       )}
                     </div>
                   </div>
@@ -805,7 +1010,8 @@ const Download: React.FC<DownloadProps> = ({ onShowDetail }) => {
                       <div className="flex items-center gap-1">
                         <button
                           onClick={() => handlePauseResume(dl.id)}
-                          className="p-1 rounded-lg text-muted hover:text-primary hover:bg-primary/10 transition-colors"
+                          disabled={pauseResumePendingRef.current.has(dl.id)}
+                          className="p-1 rounded-lg text-muted hover:text-primary hover:bg-primary/10 transition-colors disabled:cursor-wait disabled:opacity-50"
                           title={dl.status === 'paused' ? 'Resume' : 'Pause'}
                         >
                           {dl.status === 'paused' ? <Play size={14} /> : <Pause size={14} />}
@@ -917,7 +1123,7 @@ const Download: React.FC<DownloadProps> = ({ onShowDetail }) => {
 
       {/* ─── Right Side Panel ───────────────────────────────────────────────── */}
       <div
-        className={`fixed top-0 right-0 z-50 flex h-full w-full max-w-[500px] flex-col border-l border-white/10 bg-[#0B0F16] shadow-2xl transform transition-transform duration-300 ease-out ${
+        className={`fixed top-0 right-0 z-50 flex h-full w-full max-w-[560px] flex-col border-l border-white/10 bg-[#0B0F16] shadow-2xl transform transition-transform duration-300 ease-out ${
           panelOpen ? 'translate-x-0' : 'translate-x-full'
         }`}
       >
@@ -963,6 +1169,14 @@ const Download: React.FC<DownloadProps> = ({ onShowDetail }) => {
                         Cached first
                       </span>
                     )}
+                    {(() => {
+                      const hindiCount = sources.filter(s => s.isHindi).length
+                      return hindiCount > 0 ? (
+                        <span className="rounded-md border border-[#FF9933]/25 bg-[#FF9933]/10 px-2.5 py-1 text-[10px] font-bold text-[#FFB76B]">
+                          🇮🇳 {hindiCount} Hindi
+                        </span>
+                      ) : null
+                    })()}
                   </div>
                 </div>
                 <button
@@ -974,59 +1188,76 @@ const Download: React.FC<DownloadProps> = ({ onShowDetail }) => {
                 </button>
               </div>
 
-              <div className="flex flex-wrap items-center gap-2 border-t border-white/10 px-5 py-3">
-                <button
-                  onClick={() => setHindiOnly(!hindiOnly)}
-                  className={`flex min-h-9 items-center gap-1.5 rounded-lg border px-3 text-[10px] font-black uppercase tracking-widest transition-all ${
-                    hindiOnly
-                      ? 'border-[#FF9933]/40 bg-[#FF9933]/16 text-[#FFB76B]'
-                      : 'border-white/10 bg-[#151B25] text-white/55 hover:bg-[#1A2230] hover:text-white/80'
-                  }`}
-                >
-                  <Languages size={12} />
-                  {hindiOnly ? 'Hindi Only' : 'All Audio'}
-                </button>
+              <div className="flex items-center gap-2 border-t border-white/10 px-4 py-3">
+                <div className="flex min-w-0 flex-1 items-center gap-2 overflow-hidden">
+                  <button
+                    onClick={() => setHindiOnly(!hindiOnly)}
+                    className={`flex min-h-8 shrink-0 items-center gap-1.5 rounded-lg border px-2.5 text-[9px] font-black uppercase tracking-widest transition-all ${
+                      hindiOnly
+                        ? 'border-[#FF9933]/40 bg-[#FF9933]/16 text-[#FFB76B]'
+                        : 'border-white/10 bg-[#151B25] text-white/55 hover:bg-[#1A2230] hover:text-white/80'
+                    }`}
+                  >
+                    <Languages size={11} />
+                    {hindiOnly ? 'Hindi Only' : 'All Audio'}
+                  </button>
 
-                {selectedItem?.media_type === 'tv' && (
-                  <>
-                    <select
-                      value={selectedSeason}
-                      onChange={(e) => { setSelectedSeason(e.target.value); setSelectedEpisode('all'); }}
-                      className="min-h-9 rounded-lg border border-white/10 bg-[#151B25] px-3 text-[10px] font-black uppercase tracking-widest text-white/70 outline-none transition-colors hover:bg-[#1A2230]"
-                    >
-                      <option className="bg-[#10141d] text-white" value="all">All Seasons</option>
-                      <option className="bg-[#10141d] text-white" value="packs">Season Packs</option>
-                      {availableSeasons.map(s => (
-                        <option className="bg-[#10141d] text-white" key={`season-${s}`} value={s.toString()}>
-                          Season {s}
-                        </option>
-                      ))}
-                    </select>
-
-                    {selectedSeason !== 'all' && selectedSeason !== 'packs' && availableEpisodes.length > 0 && (
+                  {selectedItem?.media_type === 'tv' && (
+                    <>
                       <select
-                        value={selectedEpisode}
-                        onChange={(e) => setSelectedEpisode(e.target.value)}
-                        className="min-h-9 rounded-lg border border-white/10 bg-[#151B25] px-3 text-[10px] font-black uppercase tracking-widest text-white/70 outline-none transition-colors hover:bg-[#1A2230]"
+                        value={selectedSeason}
+                        onChange={(e) => { setSelectedSeason(e.target.value); setSelectedPackSeason('all'); setSelectedEpisode('all'); }}
+                        className="min-h-8 w-[122px] shrink-0 rounded-lg border border-white/10 bg-[#151B25] px-2 text-[9px] font-black uppercase tracking-widest text-white/70 outline-none transition-colors hover:bg-[#1A2230]"
                       >
-                        <option className="bg-[#10141d] text-white" value="all">Any Episode</option>
-                        {availableEpisodes.map(ep => (
-                          <option className="bg-[#10141d] text-white" key={`ep-${ep}`} value={ep.toString()}>
-                            Episode {ep}
+                        <option className="bg-[#10141d] text-white" value="all">All Seasons</option>
+                        <option className="bg-[#10141d] text-white" value="packs">Season Packs</option>
+                        {availableSeasons.map(s => (
+                          <option className="bg-[#10141d] text-white" key={`season-${s}`} value={s.toString()}>
+                            Season {s}
                           </option>
                         ))}
                       </select>
-                    )}
-                  </>
-                )}
+
+                      {selectedSeason === 'packs' && availablePackSeasons.length > 0 && (
+                        <select
+                          value={selectedPackSeason}
+                          onChange={(e) => setSelectedPackSeason(e.target.value)}
+                          className="min-h-8 w-[96px] shrink-0 rounded-lg border border-white/10 bg-[#151B25] px-2 text-[9px] font-black uppercase tracking-widest text-white/70 outline-none transition-colors hover:bg-[#1A2230]"
+                        >
+                          <option className="bg-[#10141d] text-white" value="all">Any</option>
+                          {availablePackSeasons.map(s => (
+                            <option className="bg-[#10141d] text-white" key={`pack-season-${s}`} value={s.toString()}>
+                              Season {s}
+                            </option>
+                          ))}
+                        </select>
+                      )}
+
+                      {selectedSeason !== 'all' && selectedSeason !== 'packs' && availableEpisodes.length > 0 && (
+                        <select
+                          value={selectedEpisode}
+                          onChange={(e) => setSelectedEpisode(e.target.value)}
+                          className="min-h-8 w-[112px] shrink-0 rounded-lg border border-white/10 bg-[#151B25] px-2 text-[9px] font-black uppercase tracking-widest text-white/70 outline-none transition-colors hover:bg-[#1A2230]"
+                        >
+                          <option className="bg-[#10141d] text-white" value="all">Any Episode</option>
+                          {availableEpisodes.map(ep => (
+                            <option className="bg-[#10141d] text-white" key={`ep-${ep}`} value={ep.toString()}>
+                              Episode {ep}
+                            </option>
+                          ))}
+                        </select>
+                      )}
+                    </>
+                  )}
+                </div>
 
                 <button
                   onClick={() => handleSelectResult(selectedItem)}
                   disabled={loadingSources}
-                  className="ml-auto flex min-h-9 items-center gap-1.5 rounded-lg border border-white/10 bg-[#151B25] px-3 text-[10px] font-black uppercase tracking-widest text-white/55 transition-all hover:bg-[#1A2230] hover:text-white/80 disabled:opacity-50"
+                  className="flex min-h-8 shrink-0 items-center gap-1.5 rounded-lg border border-white/10 bg-[#151B25] px-2.5 text-[9px] font-black uppercase tracking-widest text-white/55 transition-all hover:bg-[#1A2230] hover:text-white/80 disabled:opacity-50"
                   title="Refresh sources"
                 >
-                  {loadingSources ? <Loader2 size={12} className="animate-spin" /> : <Search size={12} />}
+                  {loadingSources ? <Loader2 size={11} className="animate-spin" /> : <Search size={11} />}
                   Refresh
                 </button>
               </div>
@@ -1043,7 +1274,7 @@ const Download: React.FC<DownloadProps> = ({ onShowDetail }) => {
                       : 'Scanning sources...'}
                   </p>
                 </div>
-              ) : sources.length > 0 ? (
+              ) : filteredSources.length > 0 ? (
                 <div className="space-y-3 flex-1 flex flex-col w-full">
                   <div className="space-y-2 pb-4 overflow-x-hidden">
                   {loadingSources && (
@@ -1090,8 +1321,12 @@ const Download: React.FC<DownloadProps> = ({ onShowDetail }) => {
               ) : (
                 <div className="flex h-full min-h-[340px] flex-col items-center justify-center gap-3 rounded-2xl border border-dashed border-white/10 px-8 text-center">
                   <HardDrive size={34} className="text-muted/40" />
-                  <p className="text-xs font-black uppercase tracking-widest text-muted">No sources found.</p>
-                  <p className="text-[11px] text-muted/50">Try a different title or check back later.</p>
+                  <p className="text-xs font-black uppercase tracking-widest text-muted">
+                    {sources.length > 0 ? 'No sources match these filters.' : 'No sources found.'}
+                  </p>
+                  <p className="text-[11px] text-muted/50">
+                    {sources.length > 0 ? 'Try All Audio or adjust the season filters.' : 'Try a different title or check back later.'}
+                  </p>
                 </div>
               )}
             </div>

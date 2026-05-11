@@ -1,0 +1,12 @@
+name = "mycinema-share"
+main = "worker.js"
+compatibility_date = "2025-05-11"
+
+# After deployment, point your chosen share domain to this worker and set
+# TMDB_API_KEY as a secret:
+#   wrangler secret put TMDB_API_KEY
+#
+# Example route after DNS is configured:
+# routes = [
+#   { pattern = "share.your-domain.com/*", custom_domain = true }
+# ]

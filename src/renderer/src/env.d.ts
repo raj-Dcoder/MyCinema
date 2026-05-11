@@ -2,6 +2,14 @@
 
 import { electronAPI } from '@electron-toolkit/preload'
 
+interface ImportMetaEnv {
+  readonly VITE_MYCINEMA_SHARE_BASE_URL?: string
+}
+
+interface ImportMeta {
+  readonly env: ImportMetaEnv
+}
+
 interface Api {
   selectFolder: () => Promise<string | null>
   getVideos: () => Promise<any[]>
@@ -45,8 +53,11 @@ interface Api {
   }>
   clearAllData: () => Promise<boolean>
   fetchTrending: (type: 'movie' | 'series') => Promise<any[]>
-  fetchTrendingIndia: () => Promise<any[]>
+  fetchTrendingIndia: (type?: 'movie' | 'series') => Promise<any[]>
   getTmdbTrailer: (params: { tmdbId?: number | null; title: string; type: 'movie' | 'series'; year?: number | null; seasonNumber?: number | null; preferLatestSeason?: boolean }) => Promise<any | null>
+  getPendingSharedMediaTarget: () => Promise<{ type: 'movie' | 'series'; tmdbId: number; source?: any } | null>
+  getSharedMediaByTmdbId: (type: 'movie' | 'series', tmdbId: number) => Promise<any | null>
+  onOpenSharedMedia: (callback: (target: { type: 'movie' | 'series'; tmdbId: number; source?: any }) => void) => () => void
   toggleFavorite: (id: number) => Promise<number | null>
   toggleWatchlist: (id: number) => Promise<number | null>
   addLocalToWatchlist: (id: number, category: string) => Promise<any>
@@ -73,6 +84,7 @@ interface Api {
   // File utilities
   openFolder: (filePath: string) => Promise<void>
   getMediaInfo: (filePath: string) => Promise<any>
+  getSeekPreviewThumbnail: (filePath: string, time: number) => Promise<string | null>
   openDownloadsFolder: () => Promise<void>
   getDownloadsStorage: () => Promise<{
     path: string

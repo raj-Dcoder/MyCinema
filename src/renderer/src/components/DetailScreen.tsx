@@ -1,10 +1,11 @@
 import React, { useEffect, useRef, useState } from 'react'
-import { X, Play, Info, Calendar, Clock, Star, FolderOpen, Film, Music, Subtitles, HardDrive, ChevronDown, ChevronUp, Heart, Bookmark, Share2, Search, Zap, Users, Download, AlertTriangle, Clapperboard, Loader2, ExternalLink, Languages, CheckCircle2 } from 'lucide-react'
+import { X, Play, Info, Calendar, Clock, Star, FolderOpen, Film, Music, Subtitles, HardDrive, ChevronDown, ChevronUp, Heart, Bookmark, Share2, Search, Zap, Users, Download, AlertTriangle, Clapperboard, Loader2, ExternalLink, Languages, CheckCircle2, Copy, MessageCircle, Send } from 'lucide-react'
 import { Video } from '../types'
 import { getTorrentSourceHealthScore, getTorrentSourceSpeedLabel } from '../utils/torrentSources'
 
 interface DetailScreenProps {
   video: Video
+  initialSharedSource?: any | null
   onClose: () => void
   onPlay: (video: Video) => void
   onWatchlistChange?: () => void
@@ -34,6 +35,68 @@ const InfoRow: React.FC<{ label: string; value: string | null | undefined }> = (
 
 type TrailerSeasonSelection = 'latest' | 'series' | number
 
+type VibeRule = {
+  label: string
+  tokens: string[]
+  genres?: string[]
+}
+
+const VIBE_RULES: VibeRule[] = [
+  { label: 'Space Survival', genres: ['science fiction', 'adventure'], tokens: ['space', 'astronaut', 'mission', 'mars', 'moon', 'planet', 'nasa', 'survival', 'alien', 'galaxy', 'interstellar', 'spaceship'] },
+  { label: 'Hard Sci-Fi', genres: ['science fiction', 'sci-fi'], tokens: ['science', 'scientist', 'physics', 'engineer', 'experiment', 'technology', 'future', 'astronaut', 'mission'] },
+  { label: 'High Drama', genres: ['drama'], tokens: ['drama', 'trauma', 'betrayal', 'grief', 'emotional', 'relationship', 'relationships', 'family'] },
+  { label: 'Teen Chaos', tokens: ['teen', 'teenage', 'high school', 'students', 'school', 'coming of age', 'adolescent', 'youth'] },
+  { label: 'Romance Heat', genres: ['romance'], tokens: ['love', 'romance', 'desire', 'crush', 'relationship', 'dating', 'sex', 'intimacy'] },
+  { label: 'Friend Group Energy', tokens: ['friends', 'friendship', 'group of', 'crew', 'classmates', 'social media'] },
+  { label: 'Dark & Messy', tokens: ['dark', 'drugs', 'addiction', 'crime', 'violence', 'secret', 'scandal', 'obsession'] },
+  { label: 'Mind Trip', genres: ['science fiction', 'sci-fi', 'mystery'], tokens: ['mind', 'reality', 'technology', 'future', 'dystopian', 'simulation', 'memory', 'experiment'] },
+  { label: 'Mystery Pull', genres: ['mystery', 'thriller'], tokens: ['mystery', 'missing', 'investigate', 'secret', 'killer', 'truth', 'detective'] },
+  { label: 'Crime Spiral', genres: ['crime'], tokens: ['crime', 'criminal', 'police', 'gang', 'murder', 'heist', 'drug dealer'] },
+  { label: 'Bingeable', tokens: ['series', 'season', 'episode', 'episodes', 'friends', 'mystery', 'secret'] },
+  { label: 'Comfort Watch', genres: ['comedy', 'family'], tokens: ['comedy', 'funny', 'warm', 'family', 'feel-good', 'friendship'] },
+  { label: 'Action Rush', genres: ['action', 'adventure'], tokens: ['action', 'mission', 'fight', 'battle', 'war', 'survive', 'chase'] },
+  { label: 'Supernatural', genres: ['fantasy', 'horror'], tokens: ['supernatural', 'ghost', 'monster', 'curse', 'witch', 'demon', 'haunted'] }
+]
+
+const splitGenres = (value?: string | null) => (
+  value ? value.split(',').map(genre => genre.trim()).filter(Boolean) : []
+)
+
+const getTasteText = (video: Video) => [
+  video.type,
+  video.title,
+  video.series_name,
+  video.tagline,
+  video.overview,
+  video.genres
+].filter(Boolean).join(' ').toLowerCase()
+
+const getVibeTags = (video: Video, genres: string[]) => {
+  const text = getTasteText(video)
+  const normalizedGenres = genres.map(genre => genre.toLowerCase())
+
+  const scored = VIBE_RULES.map(rule => {
+    const tokenHits = rule.tokens.filter(token => text.includes(token)).length
+    const genreHits = (rule.genres || []).filter(genre => normalizedGenres.includes(genre)).length
+    return { label: rule.label, score: tokenHits + genreHits * 2 }
+  })
+    .filter(item => item.score > 0)
+    .sort((a, b) => b.score - a.score)
+    .map(item => item.label)
+
+  const fallback = genres.slice(0, 3)
+  return Array.from(new Set([...scored, ...fallback])).slice(0, 5)
+}
+
+const hasSourceEpisodeMarker = (source: any) => (
+  typeof source.parsedEpisode === 'number' ||
+  /\bs\d{1,2}[\s._-]*e(?:p)?[\s._-]*\d{1,3}\b/i.test(source.title || '') ||
+  /\b\d{1,2}x\d{1,3}\b/i.test(source.title || '') ||
+  /\b(?:episode|ep)[\s._-]*\d{1,3}\b/i.test(source.title || '')
+)
+
+const isSourceSeasonPack = (source: any) => Boolean(source.isSeasonPack) && !hasSourceEpisodeMarker(source)
+
 const getMoctaleUrl = (video: Video) => {
   const title = video.type === 'series' && video.series_name ? video.series_name : video.title
   const slug = title
@@ -44,7 +107,13 @@ const getMoctaleUrl = (video: Video) => {
   return `https://www.moctale.in/content/${slug}${video.release_year ? `-${video.release_year}` : ''}`
 }
 
-const DetailScreen: React.FC<DetailScreenProps> = ({ video, onClose, onPlay, onWatchlistChange }) => {
+const MYCINEMA_SHARE_BASE_URL = (
+  import.meta.env.VITE_MYCINEMA_SHARE_BASE_URL ||
+  'https://mycinema-share.rajveersinghranaofficial.workers.dev'
+).replace(/\/+$/, '')
+const SHARE_HINT_STORAGE_KEY = 'mycinema_detail_share_hint_seen_v1'
+
+const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource, onClose, onPlay, onWatchlistChange }) => {
   const [episodes, setEpisodes] = useState<Video[]>([])
   const [loading, setLoading] = useState(false)
   const [showInfoModal, setShowInfoModal] = useState(false)
@@ -66,12 +135,17 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, onClose, onPlay, onW
   const [newWatchlistCategory, setNewWatchlistCategory] = useState('')
   const [isCreatingWatchlistCategory, setIsCreatingWatchlistCategory] = useState(false)
   const [watchlistBusy, setWatchlistBusy] = useState(false)
+  const [shareCopied, setShareCopied] = useState(false)
+  const [showShareModal, setShowShareModal] = useState(false)
+  const [shareFeedback, setShareFeedback] = useState<string | null>(null)
+  const [showShareHint, setShowShareHint] = useState(() => localStorage.getItem(SHARE_HINT_STORAGE_KEY) !== 'true')
 
   // Torrent Search State
   const [sources, setSources] = useState<any[]>([])
   const [searching, setSearching] = useState(false)
   const [hasSearched, setHasSearched] = useState(false)
   const [sourceSeasonFilter, setSourceSeasonFilter] = useState('all')
+  const [sourcePackSeasonFilter, setSourcePackSeasonFilter] = useState('all')
   const [sourceEpisodeFilter, setSourceEpisodeFilter] = useState('all')
   const [hindiOnly, setHindiOnly] = useState(false)
   const [showDownloadOptions, setShowDownloadOptions] = useState(false)
@@ -79,6 +153,9 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, onClose, onPlay, onW
   const [startedSourceMagnet, setStartedSourceMagnet] = useState<string | null>(null)
   const [sourceSearchStatus, setSourceSearchStatus] = useState({ found: 0, completed: 0, total: 0, cached: false, done: false })
   const sourceSearchRequestRef = useRef<string | null>(null)
+  const isTmdbBacked = video.type === 'movie' || video.type === 'series'
+  const isLocalMedia = !video.isExternal && Boolean(video.file_path)
+  const displayTitle = video.type === 'series' && video.series_name ? video.series_name : video.title
 
   const handleToggleFavorite = async () => {
     const newValue = await window.api.toggleFavorite(video.id)
@@ -159,16 +236,20 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, onClose, onPlay, onW
   }
 
   const handleSearchSources = async (forceRefresh: boolean = false) => {
-    if (!video.tmdb_id || (searching && !forceRefresh)) return
-    if (!forceRefresh && hasSearched && sources.length > 0) return
+    if (!isTmdbBacked || !video.tmdb_id || (searching && !forceRefresh)) return
+    const hasOnlySharedSource = Boolean(initialSharedSource?.magnet) && sources.length === 1 && sources[0]?.magnet === initialSharedSource.magnet
+    if (!forceRefresh && hasSearched && sources.length > 0 && !hasOnlySharedSource) return
 
     setSearching(true)
     setHasSearched(true)
-    setHindiOnly(false)
-    setSourceSeasonFilter('all')
-    setSourceEpisodeFilter('all')
+    if (!initialSharedSource?.magnet) {
+      setHindiOnly(false)
+      setSourceSeasonFilter('all')
+      setSourcePackSeasonFilter('all')
+      setSourceEpisodeFilter('all')
+    }
     setStartedSourceMagnet(null)
-    setSourceSearchStatus({ found: 0, completed: 0, total: 0, cached: false, done: false })
+    setSourceSearchStatus(prev => ({ ...prev, completed: 0, total: 0, cached: false, done: false }))
     const requestId = `${video.tmdb_id}-${Date.now()}-${Math.random().toString(36).slice(2)}`
     sourceSearchRequestRef.current = requestId
     try {
@@ -180,8 +261,20 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, onClose, onPlay, onW
         requestId
       )
       if (sourceSearchRequestRef.current === requestId) {
-        setSources(results)
-        setSourceSearchStatus(prev => ({ ...prev, found: results.length, done: true }))
+        setSources(prev => {
+          if (!initialSharedSource?.magnet) return results
+          const sharedSource = prev.find(source => source.magnet === initialSharedSource.magnet) || {
+            ...initialSharedSource,
+            seeds: initialSharedSource.seeds || 0,
+            peers: initialSharedSource.peers || 0,
+            type: 'shared'
+          }
+          const matchedSource = results.find(source => source.magnet === initialSharedSource.magnet)
+          const mergedSharedSource = matchedSource ? { ...sharedSource, ...matchedSource } : sharedSource
+          const others = results.filter(source => source.magnet !== initialSharedSource.magnet)
+          return [mergedSharedSource, ...others]
+        })
+        setSourceSearchStatus(prev => ({ ...prev, found: results.length + (initialSharedSource?.magnet ? 1 : 0), done: true }))
       }
     } catch (err) {
       console.error('Failed to search sources:', err)
@@ -204,7 +297,19 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, onClose, onPlay, onW
     const cleanup = window.api.onTorrentSourcesProgress((data: any) => {
       if (!data || data.requestId !== sourceSearchRequestRef.current) return
       if (Array.isArray(data.sources)) {
-        setSources(data.sources)
+        setSources(prev => {
+          if (!initialSharedSource?.magnet) return data.sources
+          const sharedSource = prev.find(source => source.magnet === initialSharedSource.magnet) || {
+            ...initialSharedSource,
+            seeds: initialSharedSource.seeds || 0,
+            peers: initialSharedSource.peers || 0,
+            type: 'shared'
+          }
+          const matchedSource = data.sources.find((source: any) => source.magnet === initialSharedSource.magnet)
+          const mergedSharedSource = matchedSource ? { ...sharedSource, ...matchedSource } : sharedSource
+          const others = data.sources.filter((source: any) => source.magnet !== initialSharedSource.magnet)
+          return [mergedSharedSource, ...others]
+        })
       }
       setSourceSearchStatus({
         found: Array.isArray(data.sources) ? data.sources.length : 0,
@@ -240,7 +345,72 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, onClose, onPlay, onW
     window.open(getMoctaleUrl(video), '_blank')
   }
 
+  const getSharePayload = () => {
+    if (!video.tmdb_id || (video.type !== 'movie' && video.type !== 'series')) return null
+
+    const mediaTitle = video.type === 'series' && video.series_name ? video.series_name : video.title
+    const appUrl = `mycinema://${video.type}/${video.tmdb_id}`
+    const shareUrl = MYCINEMA_SHARE_BASE_URL
+      ? `${MYCINEMA_SHARE_BASE_URL}/${video.type}/${video.tmdb_id}`
+      : appUrl
+    const shareTitle = `I found this on MyCinema: ${mediaTitle}${video.release_year ? ` (${video.release_year})` : ''}`
+    const shareText = `${shareTitle}\n${shareUrl}`
+
+    return { mediaTitle, shareUrl, shareTitle, shareText }
+  }
+
+  const showShareFeedback = (message: string) => {
+    setShareFeedback(message)
+    setShareCopied(true)
+    window.setTimeout(() => {
+      setShareFeedback(null)
+      setShareCopied(false)
+    }, 1800)
+  }
+
+  const copyShareText = async (text: string, message: string) => {
+    await navigator.clipboard.writeText(text)
+    showShareFeedback(message)
+  }
+
+  const openShareUrl = (url: string) => {
+    window.open(url, '_blank')
+  }
+
+  const handleShare = () => {
+    if (!getSharePayload()) return
+    localStorage.setItem(SHARE_HINT_STORAGE_KEY, 'true')
+    setShowShareHint(false)
+    setShowShareModal(true)
+  }
+
+  const handleNativeShare = async () => {
+    const payload = getSharePayload()
+    if (!payload) return
+
+    try {
+      if (navigator.share) {
+        try {
+          await navigator.share({
+            title: payload.mediaTitle,
+            text: payload.shareTitle,
+            url: payload.shareUrl
+          })
+          setShowShareModal(false)
+        } catch (err) {
+          if ((err as Error)?.name === 'AbortError') return
+          await copyShareText(payload.shareText, 'Copied message')
+        }
+      } else {
+        await copyShareText(payload.shareText, 'Copied message')
+      }
+    } catch (err) {
+      console.error('[Share] Failed to share media link:', err)
+    }
+  }
+
   const handleShowInfo = async () => {
+    if (!isLocalMedia) return
     setShowInfoModal(true)
     if (!mediaInfo) {
       setInfoLoading(true)
@@ -285,17 +455,30 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, onClose, onPlay, onW
     setSearching(false)
     setHasSearched(false)
     setSourceSeasonFilter('all')
+    setSourcePackSeasonFilter('all')
     setSourceEpisodeFilter('all')
     setHindiOnly(false)
     setShowDownloadOptions(false)
     setStartingSourceMagnet(null)
     setStartedSourceMagnet(null)
 
-    const trailerTimer = window.setTimeout(() => {
-      if (!cancelled) setShouldLoadTrailer(true)
-    }, 650)
+    if (initialSharedSource?.magnet) {
+      setSources([{ ...initialSharedSource, seeds: initialSharedSource.seeds || 0, peers: initialSharedSource.peers || 0, type: 'shared' }])
+      setShowDownloadOptions(true)
+      setHasSearched(true)
+      setSourceSearchStatus({ found: 1, completed: 0, total: 0, cached: false, done: true })
+      window.setTimeout(() => {
+        if (!cancelled) handleSearchSources(false)
+      }, 350)
+    }
 
-    if (video.type === 'series' && video.series_name) {
+    const trailerTimer = isTmdbBacked
+      ? window.setTimeout(() => {
+          if (!cancelled) setShouldLoadTrailer(true)
+        }, 650)
+      : 0
+
+    if (isLocalMedia && video.type === 'series' && video.series_name) {
       setLoading(true)
       window.api.getSeriesInfo(video.series_name).then(data => {
         if (cancelled) return
@@ -316,13 +499,13 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, onClose, onPlay, onW
 
     return () => {
       cancelled = true
-      window.clearTimeout(trailerTimer)
+      if (trailerTimer) window.clearTimeout(trailerTimer)
     }
-  }, [video])
+  }, [video, initialSharedSource, isLocalMedia])
 
   useEffect(() => {
     let cancelled = false
-    if (!shouldLoadTrailer) {
+    if (!isTmdbBacked || !shouldLoadTrailer) {
       setTrailerLoading(false)
       return () => {
         cancelled = true
@@ -345,7 +528,7 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, onClose, onPlay, onW
     window.api.getTmdbTrailer({
       tmdbId: video.tmdb_id,
       title: video.type === 'series' && video.series_name ? video.series_name : video.title,
-      type: video.type,
+      type: video.type === 'series' ? 'series' : 'movie',
       year: video.release_year,
       seasonNumber: typeof trailerSeasonSelection === 'number' ? trailerSeasonSelection : null,
       preferLatestSeason: video.type === 'series' && trailerSeasonSelection === 'latest'
@@ -366,7 +549,7 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, onClose, onPlay, onW
     return () => {
       cancelled = true
     }
-  }, [video, trailerSeasonSelection, shouldLoadTrailer])
+  }, [video, trailerSeasonSelection, shouldLoadTrailer, isTmdbBacked])
 
   // Group episodes by season
   const episodesBySeason = episodes.reduce((acc, ep) => {
@@ -383,7 +566,15 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, onClose, onPlay, onW
   const sourceSeasons = React.useMemo(() => {
     const values = new Set<number>()
     sources.forEach(source => {
-      if (typeof source.parsedSeason === 'number') values.add(source.parsedSeason)
+      if (!isSourceSeasonPack(source) && typeof source.parsedSeason === 'number') values.add(source.parsedSeason)
+    })
+    return Array.from(values).sort((a, b) => a - b)
+  }, [sources])
+
+  const sourcePackSeasons = React.useMemo(() => {
+    const values = new Set<number>()
+    sources.forEach(source => {
+      if (isSourceSeasonPack(source) && typeof source.parsedSeason === 'number') values.add(source.parsedSeason)
     })
     return Array.from(values).sort((a, b) => a - b)
   }, [sources])
@@ -394,6 +585,7 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, onClose, onPlay, onW
     sources.forEach(source => {
       if (
         source.parsedSeason === Number(sourceSeasonFilter) &&
+        !isSourceSeasonPack(source) &&
         typeof source.parsedEpisode === 'number'
       ) {
         values.add(source.parsedEpisode)
@@ -408,9 +600,13 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, onClose, onPlay, onW
         if (hindiOnly && !source.isHindi) return false
 
         if (video.type === 'series') {
-          if (sourceSeasonFilter === 'packs') return Boolean(source.isSeasonPack)
+          if (sourceSeasonFilter === 'packs') {
+            if (!isSourceSeasonPack(source)) return false
+            if (sourcePackSeasonFilter !== 'all') return source.parsedSeason === Number(sourcePackSeasonFilter)
+            return true
+          }
           if (sourceSeasonFilter !== 'all') {
-            if (source.parsedSeason !== Number(sourceSeasonFilter) || source.isSeasonPack) return false
+            if (source.parsedSeason !== Number(sourceSeasonFilter) || isSourceSeasonPack(source)) return false
             if (sourceEpisodeFilter !== 'all') return source.parsedEpisode === Number(sourceEpisodeFilter)
           }
         }
@@ -418,7 +614,7 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, onClose, onPlay, onW
         return true
       })
       .sort((a, b) => getTorrentSourceHealthScore(b) - getTorrentSourceHealthScore(a))
-  }, [sources, hindiOnly, sourceSeasonFilter, sourceEpisodeFilter, video.type])
+  }, [sources, hindiOnly, sourceSeasonFilter, sourcePackSeasonFilter, sourceEpisodeFilter, video.type])
 
   const trailerSeasonOptions = video.type === 'series'
     ? [...new Set([...seasons, ...trailerSeasons])].sort((a, b) => a - b)
@@ -459,9 +655,9 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, onClose, onPlay, onW
     return `${m}m`
   }
 
-  const genres = video.genres 
-    ? video.genres.split(',').map(g => g.trim()).filter(g => g.length > 0) 
-    : []
+  const genres = splitGenres(video.genres)
+  const visibleVibes = getVibeTags(video, genres)
+  const sharePayload = getSharePayload()
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 md:p-8 bg-black/90 backdrop-blur-md animate-in fade-in duration-300">
@@ -498,21 +694,21 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, onClose, onPlay, onW
         </div>
 
         {/* Content Section */}
-        <div className="flex-1 p-6 md:p-12 overflow-y-auto scrollbar-hide flex flex-col relative bg-surface/95">
-          <div className="space-y-8">
+        <div className="flex-1 p-6 md:p-10 lg:p-12 overflow-y-auto scrollbar-hide flex flex-col relative bg-surface/95">
+          <div className="space-y-6">
             {/* Title & Tagline */}
-            <div className="space-y-2">
+            <div className="space-y-3">
               {logoUrl ? (
                 <img
                   src={logoUrl}
-                  alt={video.type === 'series' && video.series_name ? video.series_name : video.title}
+                  alt={displayTitle}
                   loading="eager"
                   decoding="async"
-                  className="max-h-24 w-auto max-w-[min(100%,420px)] object-contain object-left drop-shadow-[0_10px_28px_rgba(0,0,0,0.75)]"
+                  className="max-h-20 md:max-h-24 w-auto max-w-[min(100%,420px)] object-contain object-left drop-shadow-[0_10px_28px_rgba(0,0,0,0.75)]"
                 />
               ) : (
                 <h2 className="text-4xl md:text-6xl font-black tracking-tighter text-white uppercase italic leading-[0.9] drop-shadow-lg">
-                  {video.type === 'series' && video.series_name ? video.series_name : video.title}
+                  {displayTitle}
                 </h2>
               )}
               {video.tagline && (
@@ -523,52 +719,55 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, onClose, onPlay, onW
             </div>
 
             {/* Meta Info Row */}
-            <div className="flex flex-wrap items-center gap-5 text-[10px] font-black text-muted uppercase tracking-[0.15em]">
+            <div className="flex flex-wrap items-center gap-2.5 text-[10px] font-black text-white/70 uppercase tracking-[0.13em]">
               {video.vote_average ? (
-                <div className="flex items-center gap-1.5 bg-white/5 px-3 py-1.5 rounded-full border border-white/10 text-white">
+                <div className="flex items-center gap-1.5 bg-white/[0.06] px-3 py-1.5 rounded-full border border-white/10 text-white">
                   <Star size={12} className="text-yellow-500 fill-yellow-500" />
+                  <span className="text-white/45">IMDb</span>
                   <span>{video.vote_average.toFixed(1)}</span>
                 </div>
               ) : null}
               {video.release_year ? (
-                <div className="flex items-center gap-1.5">
-                  <Calendar size={14} className="opacity-50" />
+                <div className="flex items-center gap-1.5 bg-white/[0.06] px-3 py-1.5 rounded-full border border-white/10">
+                  <Calendar size={12} className="text-white/45" />
                   <span>{video.release_year}</span>
                 </div>
               ) : null}
               {video.duration && (
-                <div className="flex items-center gap-1.5">
-                  <Clock size={14} className="opacity-50" />
+                <div className="flex items-center gap-1.5 bg-white/[0.06] px-3 py-1.5 rounded-full border border-white/10">
+                  <Clock size={12} className="text-white/45" />
                   <span>{formatDuration(video.duration)}</span>
                 </div>
               )}
             </div>
 
-            {/* Genres */}
+            {/* Vibe Tags */}
+            {visibleVibes.length > 0 && (
             <div className="flex flex-wrap gap-2">
-              {genres.map((genre, idx) => (
+              {visibleVibes.map((vibe, idx) => (
                 <span 
                   key={idx} 
-                  className="px-4 py-1.5 bg-white/5 text-white/70 text-[9px] font-black uppercase tracking-widest rounded-full border border-white/10 hover:bg-primary/20 hover:text-primary hover:border-primary/30 transition-all cursor-default"
+                  className="px-4 py-1.5 bg-white/5 text-white/75 text-[9px] font-black uppercase tracking-widest rounded-full border border-white/10 hover:bg-primary/20 hover:text-primary hover:border-primary/30 transition-all cursor-default"
                 >
-                  {genre}
+                  {vibe}
                 </span>
               ))}
             </div>
+            )}
 
             {/* Overview */}
-            <div className="space-y-3">
-              <p className="text-muted/90 text-sm md:text-base leading-relaxed max-w-2xl font-medium italic">
+            <div className="max-w-2xl rounded-2xl border border-white/[0.08] bg-white/[0.035] px-4 py-3.5">
+              <p className="text-white/[0.72] text-sm md:text-[15px] leading-7 font-semibold italic">
                 {video.overview || 'No overview available for this title.'}
               </p>
             </div>
 
             {/* Actions */}
-            <div className="flex flex-wrap items-center gap-4 pt-4">
+            <div className="flex flex-wrap items-center gap-3 pt-1">
               {!video.isExternal ? (
                 <button 
                   onClick={() => onPlay(video)}
-                  className="flex items-center gap-3 bg-red-600 hover:bg-red-700 text-white px-10 py-4 rounded-2xl font-black text-sm tracking-widest transition-all shadow-[0_10px_30px_rgba(220,38,38,0.4)] hover:scale-105 active:scale-95 group uppercase italic"
+                  className="flex min-h-14 items-center gap-3 bg-red-600 hover:bg-red-700 text-white px-8 rounded-2xl font-black text-sm tracking-widest transition-all shadow-[0_10px_30px_rgba(220,38,38,0.4)] hover:scale-105 active:scale-95 group uppercase italic"
                 >
                   <Play fill="white" size={20} className="group-hover:scale-110 transition-transform" />
                   Play Now
@@ -577,14 +776,14 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, onClose, onPlay, onW
                 <button 
                   onClick={handleOpenDownloadOptions}
                   disabled={searching || !video.tmdb_id}
-                  className="flex items-center gap-3 bg-primary hover:bg-primary/80 text-white px-10 py-4 rounded-2xl font-black text-sm tracking-widest transition-all shadow-[0_10px_30px_rgba(229,9,20,0.4)] hover:scale-105 active:scale-95 group uppercase italic disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="flex min-h-14 items-center gap-3 bg-primary hover:bg-primary/80 text-white px-8 rounded-2xl font-black text-sm tracking-widest transition-all shadow-[0_10px_30px_rgba(229,9,20,0.4)] hover:scale-105 active:scale-95 group uppercase italic disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   {searching ? (
                     <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
                   ) : (
                     <Download size={20} className="group-hover:scale-110 transition-transform" />
                   )}
-                  {searching ? 'Finding Sources...' : 'Download Options'}
+                  {searching ? 'Finding...' : 'Download'}
                 </button>
               )}
               
@@ -608,21 +807,68 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, onClose, onPlay, onW
                 >
                   <Heart size={20} fill={isFavorite ? "currentColor" : "none"} />
                 </button>
-                <button
-                  onClick={handleShowInfo}
-                  className="p-4 bg-white/5 border border-white/10 rounded-2xl text-white/40 hover:text-white transition-all hover:scale-105 active:scale-95 glass-effect"
-                  title="View Media Info"
-                >
-                  <Info size={20} />
-                </button>
-                <button
-                  onClick={handleOpenMoctale}
-                  className="flex items-center gap-2 px-4 py-4 bg-white/5 border border-white/10 rounded-2xl text-white/45 hover:text-white hover:border-red-500/30 hover:bg-red-600/10 transition-all hover:scale-105 active:scale-95 glass-effect"
-                  title="Open reviews on Moctale"
-                >
-                  <ExternalLink size={18} />
-                  <span className="text-[10px] font-black uppercase tracking-widest">Moctale</span>
-                </button>
+                {isLocalMedia && (
+                  <button
+                    onClick={handleShowInfo}
+                    className="p-4 bg-white/5 border border-white/10 rounded-2xl text-white/40 hover:text-white transition-all hover:scale-105 active:scale-95 glass-effect"
+                    title="View Media Info"
+                  >
+                    <Info size={20} />
+                  </button>
+                )}
+                {video.tmdb_id && (video.type === 'movie' || video.type === 'series') && (
+                  <div className="relative">
+                    <button
+                      onClick={handleShare}
+                      className={`flex items-center gap-2 px-4 py-4 border rounded-2xl transition-all hover:scale-105 active:scale-95 glass-effect ${
+                        shareCopied
+                          ? 'bg-emerald-500/15 border-emerald-400/35 text-emerald-300'
+                          : 'bg-white/5 border-white/10 text-white/45 hover:text-white hover:border-cyan-400/30 hover:bg-cyan-400/10'
+                      }`}
+                      title={shareCopied ? 'Copied share link' : 'Share MyCinema link'}
+                    >
+                      {shareCopied ? <CheckCircle2 size={18} /> : <Share2 size={18} />}
+                      <span className="text-[10px] font-black uppercase tracking-widest">{shareCopied ? 'Copied' : 'Share'}</span>
+                    </button>
+                    {showShareHint && (
+                      <div className="absolute left-1/2 top-full z-40 mt-3 w-[245px] -translate-x-1/2 rounded-xl border border-cyan-300/20 bg-[#07111c] p-3 text-left shadow-2xl shadow-black/45 ring-1 ring-white/5 animate-in fade-in slide-in-from-top-1 duration-200">
+                        <div className="absolute left-1/2 top-0 h-3 w-3 -translate-x-1/2 -translate-y-1/2 rotate-45 border-l border-t border-cyan-300/20 bg-[#07111c]" />
+                        <div className="flex items-start gap-3">
+                          <div className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-cyan-300/12 text-cyan-200">
+                            <Share2 size={14} />
+                          </div>
+                          <div className="min-w-0 flex-1">
+                            <p className="text-[10px] font-black uppercase tracking-[0.18em] text-cyan-100">New sharing</p>
+                            <p className="mt-1 text-[11px] font-semibold leading-relaxed text-white/58">
+                              Send this title to friends through WhatsApp, Telegram, or a copy link.
+                            </p>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              localStorage.setItem(SHARE_HINT_STORAGE_KEY, 'true')
+                              setShowShareHint(false)
+                            }}
+                            className="rounded-md p-1 text-white/35 transition-colors hover:bg-white/10 hover:text-white"
+                            title="Dismiss hint"
+                          >
+                            <X size={13} />
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+                {isTmdbBacked && (
+                  <button
+                    onClick={handleOpenMoctale}
+                    className="flex items-center gap-2 px-4 py-4 bg-white/5 border border-white/10 rounded-2xl text-white/45 hover:text-white hover:border-red-500/30 hover:bg-red-600/10 transition-all hover:scale-105 active:scale-95 glass-effect"
+                    title="Open reviews on Moctale"
+                  >
+                    <ExternalLink size={18} />
+                    <span className="text-[10px] font-black uppercase tracking-widest">Moctale</span>
+                  </button>
+                )}
                 {!video.isExternal && (
                   <button
                     onClick={handleOpenFolder}
@@ -635,6 +881,7 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, onClose, onPlay, onW
               </div>
             </div>
 
+            {isTmdbBacked && (
             <div className="max-w-2xl">
               {trailerLoading || !shouldLoadTrailer ? (
                 <div className="h-28 rounded-2xl border border-white/8 bg-white/[0.03] overflow-hidden flex items-center gap-4 px-4">
@@ -705,6 +952,102 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, onClose, onPlay, onW
                 </div>
               )}
             </div>
+            )}
+
+            {/* Share Modal */}
+            {showShareModal && sharePayload && (
+              <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm animate-in fade-in duration-200" onClick={() => setShowShareModal(false)}>
+                <div
+                  className="relative w-full max-w-md overflow-hidden rounded-2xl border border-white/10 bg-[#0f141d] shadow-2xl animate-in slide-in-from-bottom-4 duration-300"
+                  onClick={e => e.stopPropagation()}
+                >
+                  <div className="flex items-center justify-between px-6 py-4 border-b border-white/5 bg-white/[0.02]">
+                    <div className="flex items-center gap-3">
+                      <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-cyan-400/10 text-cyan-300">
+                        <Share2 size={18} />
+                      </div>
+                      <div>
+                        <h3 className="text-[13px] font-black text-white uppercase tracking-widest leading-none">Share Title</h3>
+                        <p className="mt-1 max-w-[260px] truncate text-[11px] font-medium text-white/35">{sharePayload.mediaTitle}</p>
+                      </div>
+                    </div>
+                    <button onClick={() => setShowShareModal(false)} className="p-1.5 rounded-lg hover:bg-white/10 text-white/50 hover:text-white transition-all">
+                      <X size={18} />
+                    </button>
+                  </div>
+
+                  <div className="p-5 space-y-4">
+                    <div className="rounded-xl border border-white/10 bg-black/25 p-3">
+                      <p className="line-clamp-2 text-sm font-semibold text-white/80">{sharePayload.shareTitle}</p>
+                      <p className="mt-2 break-all text-xs font-medium text-cyan-200/75">{sharePayload.shareUrl}</p>
+                    </div>
+
+                    {shareFeedback && (
+                      <div className="flex items-center gap-2 rounded-xl border border-emerald-400/20 bg-emerald-400/10 px-3 py-2 text-xs font-black uppercase tracking-widest text-emerald-300">
+                        <CheckCircle2 size={15} />
+                        {shareFeedback}
+                      </div>
+                    )}
+
+                    <div className="grid grid-cols-2 gap-3">
+                      <button
+                        type="button"
+                        onClick={() => openShareUrl(`https://wa.me/?text=${encodeURIComponent(sharePayload.shareText)}`)}
+                        className="flex min-h-20 flex-col items-center justify-center gap-2 rounded-xl border border-white/10 bg-white/[0.04] text-white/75 transition-all hover:border-emerald-400/35 hover:bg-emerald-400/10 hover:text-white"
+                      >
+                        <MessageCircle size={22} className="text-emerald-300" />
+                        <span className="text-[11px] font-black uppercase tracking-widest">WhatsApp</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => openShareUrl(`https://t.me/share/url?url=${encodeURIComponent(sharePayload.shareUrl)}&text=${encodeURIComponent(sharePayload.shareTitle)}`)}
+                        className="flex min-h-20 flex-col items-center justify-center gap-2 rounded-xl border border-white/10 bg-white/[0.04] text-white/75 transition-all hover:border-sky-400/35 hover:bg-sky-400/10 hover:text-white"
+                      >
+                        <Send size={22} className="text-sky-300" />
+                        <span className="text-[11px] font-black uppercase tracking-widest">Telegram</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => copyShareText(sharePayload.shareUrl, 'Copied link')}
+                        className="flex min-h-20 flex-col items-center justify-center gap-2 rounded-xl border border-white/10 bg-white/[0.04] text-white/75 transition-all hover:border-cyan-400/35 hover:bg-cyan-400/10 hover:text-white"
+                      >
+                        <Copy size={22} className="text-cyan-300" />
+                        <span className="text-[11px] font-black uppercase tracking-widest">Copy Link</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => copyShareText(sharePayload.shareText, 'Copied message')}
+                        className="flex min-h-20 flex-col items-center justify-center gap-2 rounded-xl border border-white/10 bg-white/[0.04] text-white/75 transition-all hover:border-violet-400/35 hover:bg-violet-400/10 hover:text-white"
+                      >
+                        <Share2 size={22} className="text-violet-300" />
+                        <span className="text-[11px] font-black uppercase tracking-widest">Copy Text</span>
+                      </button>
+                    </div>
+
+                    <div className="flex gap-3">
+                      <button
+                        type="button"
+                        onClick={handleNativeShare}
+                        className="flex min-h-11 flex-1 items-center justify-center gap-2 rounded-xl bg-red-600 px-4 text-xs font-black uppercase tracking-widest text-white transition-all hover:bg-red-500"
+                      >
+                        <Share2 size={16} />
+                        More Options
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          copyShareText(sharePayload.shareUrl, 'Copied link')
+                          openShareUrl('https://www.instagram.com/direct/inbox/')
+                        }}
+                        className="flex min-h-11 flex-1 items-center justify-center rounded-xl border border-white/10 bg-white/[0.04] px-4 text-xs font-black uppercase tracking-widest text-white/70 transition-all hover:bg-white/[0.08] hover:text-white"
+                      >
+                        Instagram
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
 
             {/* Media Info Modal */}
             {showInfoModal && (
@@ -905,8 +1248,8 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, onClose, onPlay, onW
               </div>
             )}
 
-            {/* Episodes Section (for Series) */}
-            {video.type === 'series' && (
+            {/* Episodes Section (for downloaded series) */}
+            {isLocalMedia && video.type === 'series' && (loading || episodes.length > 0) && (
               <div className="pt-10 space-y-6">
                 <div className="flex flex-col md:flex-row md:items-center justify-between border-b border-white/5 pb-4 gap-4">
                   <h3 className="text-2xl font-black text-white italic uppercase tracking-tighter">
@@ -988,7 +1331,7 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, onClose, onPlay, onW
             className="fixed inset-0 z-[70] bg-black/25 animate-in fade-in duration-150"
             onClick={() => setShowDownloadOptions(false)}
           />
-          <aside className="fixed inset-y-0 right-0 z-[80] flex w-full max-w-[500px] flex-col border-l border-white/10 bg-[#0B0F16] shadow-2xl animate-in slide-in-from-right duration-300">
+          <aside className="fixed inset-y-0 right-0 z-[80] flex w-full max-w-[560px] flex-col border-l border-white/10 bg-[#0B0F16] shadow-2xl animate-in slide-in-from-right duration-300">
             <div className="border-b border-white/10 bg-[#0F141D]">
               <div className="flex items-start justify-between gap-4 px-5 py-5">
                 <div className="min-w-0">
@@ -1021,6 +1364,14 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, onClose, onPlay, onW
                         Cached first
                       </span>
                     )}
+                    {(() => {
+                      const hindiCount = sources.filter(s => s.isHindi).length
+                      return hindiCount > 0 ? (
+                        <span className="rounded-md border border-[#FF9933]/25 bg-[#FF9933]/10 px-2.5 py-1 text-[10px] font-bold text-[#FFB76B]">
+                          🇮🇳 {hindiCount} Hindi
+                        </span>
+                      ) : null
+                    })()}
                   </div>
                 </div>
                 <button
@@ -1032,62 +1383,80 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, onClose, onPlay, onW
                 </button>
               </div>
 
-              <div className="flex flex-wrap items-center gap-2 border-t border-white/10 px-5 py-3">
-                <button
-                  onClick={() => setHindiOnly(value => !value)}
-                  className={`flex min-h-9 items-center gap-1.5 rounded-lg border px-3 text-[10px] font-black uppercase tracking-widest transition-all ${
-                    hindiOnly
-                      ? 'border-[#FF9933]/40 bg-[#FF9933]/16 text-[#FFB76B]'
-                      : 'border-white/10 bg-[#151B25] text-white/55 hover:bg-[#1A2230] hover:text-white/80'
-                  }`}
-                >
-                  <Languages size={12} />
-                  {hindiOnly ? 'Hindi Only' : 'All Audio'}
-                </button>
+              <div className="flex items-center gap-2 border-t border-white/10 px-4 py-3">
+                <div className="flex min-w-0 flex-1 items-center gap-2 overflow-hidden">
+                  <button
+                    onClick={() => setHindiOnly(value => !value)}
+                    className={`flex min-h-8 shrink-0 items-center gap-1.5 rounded-lg border px-2.5 text-[9px] font-black uppercase tracking-widest transition-all ${
+                      hindiOnly
+                        ? 'border-[#FF9933]/40 bg-[#FF9933]/16 text-[#FFB76B]'
+                        : 'border-white/10 bg-[#151B25] text-white/55 hover:bg-[#1A2230] hover:text-white/80'
+                    }`}
+                  >
+                    <Languages size={11} />
+                    {hindiOnly ? 'Hindi Only' : 'All Audio'}
+                  </button>
 
-                {video.type === 'series' && (
-                  <>
-                    <select
-                      value={sourceSeasonFilter}
-                      onChange={(event) => {
-                        setSourceSeasonFilter(event.target.value)
-                        setSourceEpisodeFilter('all')
-                      }}
-                      className="min-h-9 rounded-lg border border-white/10 bg-[#151B25] px-3 text-[10px] font-black uppercase tracking-widest text-white/70 outline-none transition-colors hover:bg-[#1A2230]"
-                    >
-                      <option className="bg-[#10141d] text-white" value="all">All Seasons</option>
-                      <option className="bg-[#10141d] text-white" value="packs">Season Packs</option>
-                      {sourceSeasons.map(season => (
-                        <option className="bg-[#10141d] text-white" key={season} value={season.toString()}>
-                          Season {season}
-                        </option>
-                      ))}
-                    </select>
-
-                    {sourceSeasonFilter !== 'all' && sourceSeasonFilter !== 'packs' && sourceEpisodes.length > 0 && (
+                  {video.type === 'series' && (
+                    <>
                       <select
-                        value={sourceEpisodeFilter}
-                        onChange={(event) => setSourceEpisodeFilter(event.target.value)}
-                        className="min-h-9 rounded-lg border border-white/10 bg-[#151B25] px-3 text-[10px] font-black uppercase tracking-widest text-white/70 outline-none transition-colors hover:bg-[#1A2230]"
+                        value={sourceSeasonFilter}
+                        onChange={(event) => {
+                          setSourceSeasonFilter(event.target.value)
+                          setSourcePackSeasonFilter('all')
+                          setSourceEpisodeFilter('all')
+                        }}
+                        className="min-h-8 w-[122px] shrink-0 rounded-lg border border-white/10 bg-[#151B25] px-2 text-[9px] font-black uppercase tracking-widest text-white/70 outline-none transition-colors hover:bg-[#1A2230]"
                       >
-                        <option className="bg-[#10141d] text-white" value="all">Any Episode</option>
-                        {sourceEpisodes.map(episode => (
-                          <option className="bg-[#10141d] text-white" key={episode} value={episode.toString()}>
-                            Episode {episode}
+                        <option className="bg-[#10141d] text-white" value="all">All Seasons</option>
+                        <option className="bg-[#10141d] text-white" value="packs">Season Packs</option>
+                        {sourceSeasons.map(season => (
+                          <option className="bg-[#10141d] text-white" key={season} value={season.toString()}>
+                            Season {season}
                           </option>
                         ))}
                       </select>
-                    )}
-                  </>
-                )}
+
+                      {sourceSeasonFilter === 'packs' && sourcePackSeasons.length > 0 && (
+                        <select
+                          value={sourcePackSeasonFilter}
+                          onChange={(event) => setSourcePackSeasonFilter(event.target.value)}
+                          className="min-h-8 w-[96px] shrink-0 rounded-lg border border-white/10 bg-[#151B25] px-2 text-[9px] font-black uppercase tracking-widest text-white/70 outline-none transition-colors hover:bg-[#1A2230]"
+                        >
+                          <option className="bg-[#10141d] text-white" value="all">Any</option>
+                          {sourcePackSeasons.map(season => (
+                            <option className="bg-[#10141d] text-white" key={`pack-season-${season}`} value={season.toString()}>
+                              Season {season}
+                            </option>
+                          ))}
+                        </select>
+                      )}
+
+                      {sourceSeasonFilter !== 'all' && sourceSeasonFilter !== 'packs' && sourceEpisodes.length > 0 && (
+                        <select
+                          value={sourceEpisodeFilter}
+                          onChange={(event) => setSourceEpisodeFilter(event.target.value)}
+                          className="min-h-8 w-[112px] shrink-0 rounded-lg border border-white/10 bg-[#151B25] px-2 text-[9px] font-black uppercase tracking-widest text-white/70 outline-none transition-colors hover:bg-[#1A2230]"
+                        >
+                          <option className="bg-[#10141d] text-white" value="all">Any Episode</option>
+                          {sourceEpisodes.map(episode => (
+                            <option className="bg-[#10141d] text-white" key={episode} value={episode.toString()}>
+                              Episode {episode}
+                            </option>
+                          ))}
+                        </select>
+                      )}
+                    </>
+                  )}
+                </div>
 
                 <button
                   onClick={() => handleSearchSources(true)}
                   disabled={searching || !video.tmdb_id}
-                  className="ml-auto flex min-h-9 items-center gap-1.5 rounded-lg border border-white/10 bg-[#151B25] px-3 text-[10px] font-black uppercase tracking-widest text-white/55 transition-all hover:bg-[#1A2230] hover:text-white/80 disabled:opacity-50"
+                  className="flex min-h-8 shrink-0 items-center gap-1.5 rounded-lg border border-white/10 bg-[#151B25] px-2.5 text-[9px] font-black uppercase tracking-widest text-white/55 transition-all hover:bg-[#1A2230] hover:text-white/80 disabled:opacity-50"
                   title="Refresh sources"
                 >
-                  {searching ? <Loader2 size={12} className="animate-spin" /> : <Search size={12} />}
+                  {searching ? <Loader2 size={11} className="animate-spin" /> : <Search size={11} />}
                   Refresh
                 </button>
               </div>
@@ -1114,14 +1483,26 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, onClose, onPlay, onW
                     const speedLabel = getTorrentSourceSpeedLabel(src)
                     const isStarting = startingSourceMagnet === src.magnet
                     const isStarted = startedSourceMagnet === src.magnet
+                    const isSharedSource = initialSharedSource?.magnet && src.magnet === initialSharedSource.magnet
+                    const sharedSourceHasLiveStats = isSharedSource && ((Number(src.seeds) || 0) > 0 || (Number(src.peers) || 0) > 0)
 
                     return (
                       <div
                         key={`${src.magnet || src.title}-${idx}`}
-                        className="group rounded-xl border border-white/10 bg-white/[0.035] px-3.5 py-3 transition-colors hover:border-white/15 hover:bg-white/[0.065]"
+                        className={`group rounded-xl border px-3.5 py-3 transition-colors ${
+                          isSharedSource
+                            ? 'border-cyan-400/35 bg-cyan-400/10 shadow-[0_0_28px_rgba(34,211,238,0.08)]'
+                            : 'border-white/10 bg-white/[0.035] hover:border-white/15 hover:bg-white/[0.065]'
+                        }`}
                       >
                         <div className="flex items-start justify-between gap-3">
                           <div className="min-w-0 flex-1">
+                            {isSharedSource && (
+                              <div className="mb-2 inline-flex items-center gap-1.5 rounded-md border border-cyan-300/25 bg-cyan-300/10 px-2 py-1 text-[9px] font-black uppercase tracking-widest text-cyan-200">
+                                <Share2 size={11} />
+                                {sharedSourceHasLiveStats ? 'Shared source matched' : searching ? 'Shared source, checking stats' : 'Shared source'}
+                              </div>
+                            )}
                             <p className="truncate text-xs font-semibold leading-relaxed text-white" title={src.title}>
                               {src.title}
                             </p>

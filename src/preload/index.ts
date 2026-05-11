@@ -34,9 +34,16 @@ const api = {
   importUserBackup: () => ipcRenderer.invoke('import-user-backup'),
   clearAllData: () => ipcRenderer.invoke('clear-all-data'),
   fetchTrending: (type: 'movie' | 'series') => ipcRenderer.invoke('fetch-trending', type),
-  fetchTrendingIndia: () => ipcRenderer.invoke('fetch-trending-india'),
+  fetchTrendingIndia: (type: 'movie' | 'series' = 'movie') => ipcRenderer.invoke('fetch-trending-india', type),
   getTmdbTrailer: (params: { tmdbId?: number | null; title: string; type: 'movie' | 'series'; year?: number | null; seasonNumber?: number | null; preferLatestSeason?: boolean }) =>
     ipcRenderer.invoke('get-tmdb-trailer', params),
+  getPendingSharedMediaTarget: () => ipcRenderer.invoke('get-pending-shared-media-target'),
+  getSharedMediaByTmdbId: (type: 'movie' | 'series', tmdbId: number) => ipcRenderer.invoke('get-shared-media-by-tmdb-id', type, tmdbId),
+  onOpenSharedMedia: (callback: (target: { type: 'movie' | 'series'; tmdbId: number; source?: any }) => void) => {
+    const handler = (_event: any, target: { type: 'movie' | 'series'; tmdbId: number; source?: any }) => callback(target)
+    ipcRenderer.on('open-shared-media', handler)
+    return () => ipcRenderer.removeListener('open-shared-media', handler)
+  },
   toggleFavorite: (id: number) => ipcRenderer.invoke('toggle-favorite', id),
   toggleWatchlist: (id: number) => ipcRenderer.invoke('toggle-watchlist', id),
   addLocalToWatchlist: (id: number, category: string) => ipcRenderer.invoke('add-local-to-watchlist', id, category),
@@ -79,6 +86,7 @@ const api = {
   // File utilities
   openFolder: (filePath: string) => ipcRenderer.invoke('open-folder', filePath),
   getMediaInfo: (filePath: string) => ipcRenderer.invoke('get-media-info', filePath),
+  getSeekPreviewThumbnail: (filePath: string, time: number) => ipcRenderer.invoke('get-seek-preview-thumbnail', filePath, time),
   openDownloadsFolder: () => ipcRenderer.invoke('open-downloads-folder'),
   getDownloadsStorage: () => ipcRenderer.invoke('get-downloads-storage'),
   // OpenSubtitles API

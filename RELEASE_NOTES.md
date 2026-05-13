@@ -1,3 +1,18 @@
+# MyCinema v1.22.2
+
+Patch release focused on making the in-app What's New experience accurately describe the latest release.
+
+### What's New Popup
+- **Accurate Release Story**: The first-launch popup now lists the actual v1.22 changes and v1.22.1 performance-release work instead of generic launch copy.
+- **Real User-Facing Sections**: Slides now cover share links, Watch Together talk flow, source and download responsiveness, safety fixes, and player polish.
+- **New Release Marker**: The popup version is now `1.22.2`, so users who already saw v1.22.1 will see the corrected release notes once.
+
+### Release Integrity
+- **Version Alignment**: Package metadata, lockfile metadata, release notes, and the in-app release key now all point to v1.22.2.
+- **Experiment Branch Still Excluded**: This release continues from `master` and does not merge the separate experiment/watch-party branch.
+
+***
+
 # MyCinema v1.22.1
 
 Patch release that ships the performance-improvement build as a new version after v1.22.0, keeping the experimental Watch Party branch out of this release.

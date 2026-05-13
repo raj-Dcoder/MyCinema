@@ -39,24 +39,30 @@ type WhatsNewSlide = {
   headline: string
   highlight: string
   support: string
+  bullets: string[]
   signal: string
   cta: string
 }
 
 export const LATEST_RELEASE = {
-  version: '1.22.1',
+  version: '1.22.2',
   eyebrow: 'What\'s New',
   slides: [
     {
       id: 'reveal',
       layout: 'reveal',
       icon: Sparkles,
-      kicker: 'Fresh drop',
-      headline: 'You asked. We upgraded.',
-      highlight: 'upgraded',
-      support: 'A faster, cleaner v1.22 built for watch nights, share links, and less friction.',
-      signal: '6 upgrades live',
-      cta: 'Show me',
+      kicker: 'Release notes fixed',
+      headline: 'Here is what really changed.',
+      highlight: 'really changed',
+      support: 'This version refreshes the in-app release story so the popup matches the actual fixes and improvements shipped in the latest build.',
+      bullets: [
+        'New v1.22.2 marker so the updated popup appears once for users.',
+        'Release slides now call out the real performance, player, source, and cleanup work.',
+        'The release stays on the performance build already merged into master.'
+      ],
+      signal: 'v1.22.2 live',
+      cta: 'Start tour',
       mood: {
         name: 'celebration',
         gradient: 'from-orange-300 via-pink-500 to-violet-500',
@@ -71,12 +77,17 @@ export const LATEST_RELEASE = {
       id: 'share',
       layout: 'share',
       icon: Share2,
-      kicker: 'Sharing',
-      headline: 'Share the EXACT source.',
-      highlight: 'EXACT',
-      support: 'Send the same movie, series, or download mirror in a MyCinema link that reopens the app.',
-      signal: 'Source locked',
-      cta: 'Send it',
+      kicker: 'Sharing & links',
+      headline: 'Shared links carry more context.',
+      highlight: 'more context',
+      support: 'Movies, series, and completed downloads can now create richer MyCinema links for cleaner handoff between people and devices.',
+      bullets: [
+        'Detail pages support WhatsApp, Telegram, copy-link, and copy-message sharing.',
+        'Deep links open back into MyCinema through the mycinema:// protocol.',
+        'Exact source metadata can pin the shared mirror while fresh providers refresh.'
+      ],
+      signal: 'Handoff ready',
+      cta: 'Next',
       mood: {
         name: 'sharing',
         gradient: 'from-blue-400 via-cyan-300 to-teal-300',
@@ -90,13 +101,18 @@ export const LATEST_RELEASE = {
     {
       id: 'discovery',
       layout: 'discovery',
-      icon: Search,
-      kicker: 'Discovery',
-      headline: 'New finds hit different.',
-      highlight: 'different',
-      support: 'India movies and series now land in fresher rails with tighter detail vibes.',
-      signal: 'Fresh rails',
-      cta: 'Explore',
+      icon: Tv,
+      kicker: 'Watch Together',
+      headline: 'Pause the movie to talk.',
+      highlight: 'talk',
+      support: 'Watch Together now has a cleaner conversation flow for rooms, so speaking does not fight the movie audio.',
+      bullets: [
+        'Hold-to-talk enables the mic only while speaking.',
+        'Playback pauses for the active speaker and resumes after the conversation pause.',
+        'Host and guest dev profiles make two-client testing safer without profile conflicts.'
+      ],
+      signal: 'Talk mode',
+      cta: 'Next',
       mood: {
         name: 'discovery',
         gradient: 'from-violet-400 via-fuchsia-400 to-pink-400',
@@ -111,12 +127,17 @@ export const LATEST_RELEASE = {
       id: 'downloads',
       layout: 'downloads',
       icon: DownloadIcon,
-      kicker: 'Downloads',
-      headline: 'Downloads. But smarter.',
-      highlight: 'smarter',
-      support: 'Season packs, Hindi counts, pause/resume, and source picking now feel way less messy.',
-      signal: 'Queue clean',
-      cta: 'Try it',
+      kicker: 'Sources & downloads',
+      headline: 'Source results feel lighter.',
+      highlight: 'lighter',
+      support: 'Download and detail source panels now do less UI thrash while still surfacing richer filters and healthier results.',
+      bullets: [
+        'Torrent providers run with controlled concurrency instead of flooding at once.',
+        'Source progress updates are batched so large result lists feel smoother.',
+        'Season packs, episodes, Hindi signals, and pause/resume states are clearer.'
+      ],
+      signal: 'Less waiting',
+      cta: 'Next',
       mood: {
         name: 'downloads',
         gradient: 'from-emerald-300 via-green-400 to-teal-300',
@@ -131,12 +152,17 @@ export const LATEST_RELEASE = {
       id: 'security',
       layout: 'security',
       icon: ShieldCheck,
-      kicker: 'Trust',
-      headline: 'Links stay clean.',
-      highlight: 'clean',
-      support: 'Shared media validates before opening, while previews and downloads get tighter guardrails.',
-      signal: 'Verified',
-      cta: 'Lock in',
+      kicker: 'Fixes & safety',
+      headline: 'Cleanup is more careful.',
+      highlight: 'more careful',
+      support: 'Several quiet fixes reduce stale work, unsafe paths, and accidental download deletion edge cases.',
+      bullets: [
+        'Shared payloads validate media type, TMDB ID, and magnet source data.',
+        'Seek thumbnails stay behind the local safe-path check before ffmpeg runs.',
+        'Single-episode deletion targets the right files instead of broad folders.'
+      ],
+      signal: 'Guarded',
+      cta: 'Next',
       mood: {
         name: 'security',
         gradient: 'from-yellow-200 via-lime-300 to-emerald-300',
@@ -152,11 +178,16 @@ export const LATEST_RELEASE = {
       layout: 'celebrate',
       icon: Zap,
       kicker: 'Player polish',
-      headline: 'Everything feels faster.',
-      highlight: 'faster',
-      support: 'Seek previews, local-video sorting, and detail polish make the library feel awake.',
+      headline: 'Playback got the good fixes.',
+      highlight: 'good fixes',
+      support: 'The player update focuses on smoother startup, more reliable rendering, better audio controls, and less leftover async work.',
+      bullets: [
+        'FPS boost, sharpness, and vibrance now share one safer WebGL renderer.',
+        'Audio Boost adds Auto, Dialogue, Night, Laptop, and Cinema profiles with intensity.',
+        'Subtitle loading, external audio sync, fullscreen state, and player cleanup are sturdier.'
+      ],
       signal: 'Ready to watch',
-      cta: 'Watch now',
+      cta: 'Done',
       mood: {
         name: 'finish',
         gradient: 'from-orange-300 via-pink-400 to-purple-400',
@@ -270,14 +301,28 @@ const CTAButton = ({ slide, isLastStep, onClick }: { slide: WhatsNewSlide; isLas
 )
 
 const HeadlineBlock = ({ slide, align = 'left' }: { slide: WhatsNewSlide; align?: 'left' | 'center' }) => (
-  <div className={clsx('relative z-10 flex max-w-[620px] flex-col gap-5', align === 'center' && 'mx-auto items-center text-center')}>
+  <div className={clsx('relative z-10 flex max-w-[640px] flex-col gap-5', align === 'center' && 'mx-auto items-center text-center')}>
     <MoodBadge slide={slide} />
-    <h2 className="text-[62px] font-black leading-[0.9] tracking-normal text-white">
+    <h2 className="text-[48px] font-black leading-[0.94] tracking-normal text-white xl:text-[58px]">
       {renderHeadline(slide)}
     </h2>
     <p className={clsx('max-w-[470px] text-base font-semibold leading-7 text-white/60', align === 'center' && 'mx-auto')}>
       {slide.support}
     </p>
+    <div className={clsx('grid max-w-[560px] gap-2.5', align === 'center' && 'mx-auto')}>
+      {slide.bullets.map((item) => (
+        <div
+          key={item}
+          className={clsx(
+            'flex gap-3 rounded-2xl border bg-black/25 px-4 py-3 text-left text-sm font-semibold leading-5 text-white/70 backdrop-blur-xl',
+            slide.mood.border
+          )}
+        >
+          <Check size={16} className={clsx('mt-0.5 flex-shrink-0', slide.mood.text)} strokeWidth={3} />
+          <span>{item}</span>
+        </div>
+      ))}
+    </div>
   </div>
 )
 
@@ -319,7 +364,7 @@ const RevealVisual = ({ slide }: { slide: WhatsNewSlide }) => (
     </div>
     <div className={clsx('relative flex h-56 w-56 items-center justify-center rounded-[3rem] border bg-black/40 backdrop-blur-2xl', slide.mood.border, slide.mood.shadow)}>
       <span className={clsx('absolute inset-5 rounded-[2.2rem] bg-gradient-to-br opacity-20 blur-2xl', slide.mood.gradient)} />
-      <span className="relative text-[74px] font-black leading-none tracking-normal text-white">1.22</span>
+      <span className="relative text-[74px] font-black leading-none tracking-normal text-white">1.22.2</span>
       <Sparkles className={clsx('absolute -right-5 -top-5', slide.mood.text)} size={44} />
     </div>
   </div>

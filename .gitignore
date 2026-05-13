@@ -105,6 +105,8 @@ out/
 *.db
 test-*.js
 RELEASE_GUIDE.md
+.tmp-release-body.md
+.release-work/
 .tmp-guest-profile/
 .tmp-watch-*/
 share-worker/.wrangler/

@@ -211,8 +211,15 @@ const FPSBoostRenderer: React.FC<FPSBoostRendererProps> = ({ videoRef, enabled, 
         texturesRef.current.forEach(t => gl.deleteTexture(t));
         if (positionBufferRef.current) gl.deleteBuffer(positionBufferRef.current);
         if (texCoordBufferRef.current) gl.deleteBuffer(texCoordBufferRef.current);
-        gl.deleteProgram(programRef.current);
+        if (programRef.current) gl.deleteProgram(programRef.current);
+        gl.getExtension('WEBGL_lose_context')?.loseContext();
       }
+      glRef.current = null;
+      programRef.current = null;
+      texturesRef.current = [];
+      positionBufferRef.current = null;
+      texCoordBufferRef.current = null;
+      textureSizeRef.current = { width: 0, height: 0 };
     };
   }, [videoRef]);
 

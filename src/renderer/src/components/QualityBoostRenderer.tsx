@@ -244,7 +244,14 @@ const QualityBoostRenderer: React.FC<QualityBoostRendererProps> = ({ videoRef, e
         if (positionBufferRef.current) gl.deleteBuffer(positionBufferRef.current);
         if (texCoordBufferRef.current) gl.deleteBuffer(texCoordBufferRef.current);
         if (programRef.current) gl.deleteProgram(programRef.current);
+        gl.getExtension('WEBGL_lose_context')?.loseContext();
       }
+      glRef.current = null;
+      programRef.current = null;
+      textureRef.current = null;
+      positionBufferRef.current = null;
+      texCoordBufferRef.current = null;
+      textureSizeRef.current = { width: 0, height: 0 };
     };
   }, [videoRef]);
 

@@ -16,6 +16,9 @@ Feature release focused on shareable MyCinema links, exact source handoff, smart
 - **Pause/Resume Stability**: Download pause and resume now use pending-state guards so stale progress events do not immediately flip the UI back.
 
 ### Player & Local Library
+- **Watch Together Push-To-Talk**: Watch Together rooms now support microphone-based push-to-talk that pauses the movie while someone speaks, shares the speaker state, and resumes playback after the conversation pause.
+- **Unified AI Enhancement Renderer**: FPS boost, sharpness, and vibrance now share one WebGL enhancement renderer with safer canvas cleanup and native-video fallback behavior.
+- **Richer Audio Boost Profiles**: Audio Boost now includes Auto, Dialogue, Night, Laptop, and Cinema profiles with intensity controls for clearer voice and loudness tuning.
 - **Seek Thumbnail Preview**: Hovering the playback progress bar now asks the main process for cached ffmpeg thumbnails instead of loading a second hidden video preview.
 - **Videos Stay Videos**: The scanner now classifies personal clips, recordings, lectures, short files, and other non-release media as Videos instead of forcing them into Movies.
 - **Metadata Refresh Fixes**: Rescans can refresh changed titles, types, series fields, TMDB IDs, and stale cached poster matches instead of only filling duration.
@@ -35,6 +38,8 @@ Feature release focused on shareable MyCinema links, exact source handoff, smart
 - **Expected Close-Abort Handling**: Known Electron close-abort errors from pending async work are logged as expected shutdown events instead of crashing the main process.
 
 ### Developer & Release
+- **Two-Client Watch Party Dev Scripts**: Added separate host and guest development scripts with isolated temporary profiles for local Watch Together testing.
+- **Immersive What's New Onboarding**: The release popup now uses a dedicated full-screen onboarding component with slide navigation, keyboard controls, and v1.22 messaging.
 - **Protocol Packaging**: Windows builds now declare the MyCinema Link protocol in `electron-builder.yml`.
 - **Share Worker Project**: Added a deployable `share-worker` project with Worker code, Wrangler config, and setup notes for the share domain.
 - **Local Worker Temp Ignore**: Local `.wrangler` output is ignored so deploy cache files do not enter release commits.

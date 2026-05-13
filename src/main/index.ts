@@ -48,6 +48,13 @@ process.on('unhandledRejection', (reason) => {
 const customDns = new dns.Resolver()
 customDns.setServers(['8.8.8.8', '1.1.1.1'])
 
+const devProfileRoot = process.env.MYCINEMA_USER_DATA_DIR
+if (is.dev && devProfileRoot) {
+  fs.mkdirSync(devProfileRoot, { recursive: true })
+  app.setPath('userData', devProfileRoot)
+  console.log(`[Dev] Using MyCinema profile: ${devProfileRoot}`)
+}
+
 function resolveHostname(hostname: string, timeoutMs: number = 1500): Promise<string> {
   return new Promise((resolve) => {
     let settled = false
@@ -428,7 +435,7 @@ function createWindow(): void {
     x: state.x,
     y: state.y,
     show: false,
-    fullScreen: settings.launchFullscreen,
+    fullscreen: settings.launchFullscreen,
     autoHideMenuBar: true,
     icon: appIconPath,
     webPreferences: {
@@ -770,7 +777,8 @@ type SharedMediaTarget = {
   }
 }
 
-const gotTheLock = app.requestSingleInstanceLock()
+const allowDevMultiClient = is.dev && process.env.MYCINEMA_MULTI_CLIENT === '1'
+const gotTheLock = allowDevMultiClient || app.requestSingleInstanceLock()
 
 if (!gotTheLock) {
   app.quit()
@@ -781,14 +789,16 @@ let pendingExternalFilePath: string | null = null;
 let pendingSharedMediaTarget: SharedMediaTarget | null = null
 const allowedExternalDirs = new Set<string>();
 
-app.on('second-instance', (_event, commandLine, _workingDirectory) => {
-  const mainWindow = BrowserWindow.getAllWindows()[0]
-  if (mainWindow) {
-    if (mainWindow.isMinimized()) mainWindow.restore()
-    mainWindow.focus()
-    handleCommandLine(commandLine, mainWindow)
-  }
-})
+if (!allowDevMultiClient) {
+  app.on('second-instance', (_event, commandLine, _workingDirectory) => {
+    const mainWindow = BrowserWindow.getAllWindows()[0]
+    if (mainWindow) {
+      if (mainWindow.isMinimized()) mainWindow.restore()
+      mainWindow.focus()
+      handleCommandLine(commandLine, mainWindow)
+    }
+  })
+}
 
 function parseSharedMediaUrl(rawUrl: string): SharedMediaTarget | null {
   try {
@@ -3207,6 +3217,8 @@ function withTimeout<T>(promise: Promise<T>, timeoutMs: number, label: string): 
   })
 }
 
+const TORRENT_SOURCE_PROVIDER_CONCURRENCY = 5
+
 async function searchTorrentSourcesProgressive(
   event: Electron.IpcMainInvokeEvent | null,
   title: string,
@@ -3264,20 +3276,37 @@ async function searchTorrentSourcesProgressive(
       cached: Boolean(cachedFresh)
     })
 
-    const pendingProviders = providers.map((provider) => ({
-      provider,
-      task: withTimeout(provider.run(), provider.timeoutMs, provider.name)
-        .then((sources) => ({ sources, error: null as string | null }))
-        .catch((err: any) => ({ sources: [] as any[], error: err?.message || 'Provider failed' }))
-    }))
+    const pendingProviders = [...providers]
+    const activeProviders: Array<{
+      provider: { name: string; timeoutMs: number; run: () => Promise<any[]> }
+      task: Promise<{ sources: any[]; error: string | null }>
+    }> = []
 
-    while (pendingProviders.length > 0) {
+    const startNextProviders = () => {
+      while (
+        pendingProviders.length > 0 &&
+        activeProviders.length < TORRENT_SOURCE_PROVIDER_CONCURRENCY &&
+        isTorrentSourceRequestActive(event, requestId)
+      ) {
+        const provider = pendingProviders.shift()!
+        activeProviders.push({
+          provider,
+          task: withTimeout(provider.run(), provider.timeoutMs, provider.name)
+            .then((sources) => ({ sources, error: null as string | null }))
+            .catch((err: any) => ({ sources: [] as any[], error: err?.message || 'Provider failed' }))
+        })
+      }
+    }
+
+    startNextProviders()
+
+    while (activeProviders.length > 0) {
       if (!isTorrentSourceRequestActive(event, requestId)) {
         return normalizeTorrentSources(rawSources, mediaType)
       }
 
       const { index, provider, sources, error } = await Promise.race(
-        pendingProviders.map((entry, index) =>
+        activeProviders.map((entry, index) =>
           entry.task.then((result) => ({
             index,
             provider: entry.provider,
@@ -3286,7 +3315,7 @@ async function searchTorrentSourcesProgressive(
           }))
         )
       )
-      pendingProviders.splice(index, 1)
+      activeProviders.splice(index, 1)
 
       if (!isTorrentSourceRequestActive(event, requestId)) {
         return normalizeTorrentSources(rawSources, mediaType)
@@ -3302,6 +3331,7 @@ async function searchTorrentSourcesProgressive(
           totalProviders,
           error
         })
+        startNextProviders()
         continue
       }
 
@@ -3316,6 +3346,7 @@ async function searchTorrentSourcesProgressive(
         completedProviders,
         totalProviders
       })
+      startNextProviders()
     }
 
     const finalSources = normalizeTorrentSources(rawSources, mediaType)
@@ -3646,9 +3677,153 @@ function collectMatchingDownloadRootTargets(downloadRoot: string, download: any)
   return targets
 }
 
+function getDownloadSearchNames(torrent: any, download: any): string[] {
+  const sourceNames = [
+    torrent?.name,
+    torrent?._myCinemaName,
+    download?.name,
+    getMagnetDisplayName(download?.magnet)
+  ]
+    .map(name => normalizeSearchName(name))
+    .filter(name => name.length >= 6)
+
+  if (sourceNames.length > 0) return sourceNames
+
+  return [download?.title]
+    .map(name => normalizeSearchName(name))
+    .filter(name => name.length >= 6)
+}
+
+function isLikelyDownloadMatch(candidatePath: string, torrent: any, download: any): boolean {
+  const candidateName = normalizeSearchName(candidatePath)
+  if (!candidateName) return false
+
+  const searchNames = getDownloadSearchNames(torrent, download)
+  if (searchNames.length === 0) return true
+
+  return searchNames.some(searchName =>
+    candidateName.includes(searchName) || searchName.includes(candidateName)
+  )
+}
+
+function collectMatchingEpisodeFileTargets(
+  downloadRoot: string,
+  torrent: any,
+  download: any,
+  tvMeta: { parsedSeason?: number; parsedEpisode?: number }
+): string[] {
+  if (typeof tvMeta.parsedEpisode !== 'number' || !fs.existsSync(downloadRoot)) return []
+
+  const targets: string[] = []
+  const stack = [downloadRoot]
+  let visited = 0
+
+  while (stack.length > 0 && visited < 5000) {
+    const current = stack.pop()
+    if (!current) continue
+    visited++
+
+    let entries: any[]
+    try {
+      entries = fs.readdirSync(current, { withFileTypes: true })
+    } catch {
+      continue
+    }
+
+    for (const entry of entries) {
+      const entryPath = path.join(current, entry.name)
+      if (entry.isDirectory()) {
+        stack.push(entryPath)
+        continue
+      }
+
+      if (!entry.isFile() || !isVideoFilePath(entry.name)) continue
+      const meta = parseTvTorrentMetadata(entryPath)
+      const sameEpisode = Number(meta.parsedSeason || 1) === Number(tvMeta.parsedSeason || 1) &&
+        Number(meta.parsedEpisode) === Number(tvMeta.parsedEpisode)
+      if (sameEpisode && isLikelyDownloadMatch(path.relative(downloadRoot, entryPath), torrent, download)) {
+        targets.push(entryPath)
+      }
+    }
+  }
+
+  return targets
+}
+
+function isVideoFilePath(candidate?: string | null): boolean {
+  return Boolean(candidate && VIDEO_EXTS.has(path.extname(candidate).toLowerCase()))
+}
+
+function getDownloadSourceNames(torrent: any, download: any): string[] {
+  return [
+    torrent?.name,
+    torrent?._myCinemaName,
+    download?.name,
+    getMagnetDisplayName(download?.magnet),
+    download?.title
+  ].filter(Boolean)
+}
+
+function inferDownloadTvMetadata(torrent: any, download: any): { parsedSeason?: number; parsedEpisode?: number; isSeasonPack?: boolean } {
+  const videoFileMetas: ReturnType<typeof parseTvTorrentMetadata>[] = Array.isArray(torrent?.files)
+    ? torrent.files
+        .map((file: any) => file?.path || file?.name)
+        .filter((filePath: string | undefined) => isVideoFilePath(filePath))
+        .map((filePath: string) => parseTvTorrentMetadata(filePath))
+    : []
+
+  const episodeMetas = videoFileMetas.filter(meta => typeof meta.parsedEpisode === 'number')
+  const episodeKeys = new Set(episodeMetas.map(meta => `${meta.parsedSeason || 1}:${meta.parsedEpisode}`))
+  if (episodeKeys.size > 1) {
+    const seasons = new Set(episodeMetas.map(meta => meta.parsedSeason).filter((season): season is number => typeof season === 'number'))
+    return {
+      parsedSeason: seasons.size === 1 ? Array.from(seasons)[0] : undefined,
+      isSeasonPack: true
+    }
+  }
+  if (episodeMetas.length === 1) return { ...episodeMetas[0], isSeasonPack: false }
+
+  for (const name of getDownloadSourceNames(torrent, download)) {
+    const meta = parseTvTorrentMetadata(name)
+    if (typeof meta.parsedEpisode === 'number') return { ...meta, isSeasonPack: false }
+  }
+
+  for (const meta of videoFileMetas) {
+    if (meta.isSeasonPack) return meta
+  }
+
+  for (const name of getDownloadSourceNames(torrent, download)) {
+    const meta = parseTvTorrentMetadata(name)
+    if (meta.isSeasonPack) return meta
+  }
+
+  return {}
+}
+
+function getMatchingDownloadedVideos(downloadRoot: string, download: any, tvMeta: { parsedSeason?: number; parsedEpisode?: number; isSeasonPack?: boolean }): any[] {
+  if (!download?.tmdbId) return []
+
+  return (db.getVideos() as any[]).filter((video: any) => {
+    if (video.tmdb_id !== download.tmdbId || !isPathInsideRoot(video.file_path, downloadRoot)) return false
+
+    if (typeof tvMeta.parsedEpisode === 'number') {
+      return Number(video.season || 1) === Number(tvMeta.parsedSeason || 1) && Number(video.episode) === Number(tvMeta.parsedEpisode)
+    }
+
+    if (tvMeta.isSeasonPack && typeof tvMeta.parsedSeason === 'number') {
+      return Number(video.season || 1) === Number(tvMeta.parsedSeason)
+    }
+
+    return Boolean(tvMeta.isSeasonPack)
+  })
+}
+
 function collectDownloadDeleteTargets(id: string, torrent: any, download: any): string[] {
   const downloadRoot = getDownloadPath()
   const targets = new Set<string>()
+  const tvMeta = inferDownloadTvMetadata(torrent, download)
+  const isSingleEpisodeDownload = typeof tvMeta.parsedEpisode === 'number' && tvMeta.isSeasonPack === false
+  const isSeasonPackDownload = Boolean(tvMeta.isSeasonPack) && !isSingleEpisodeDownload
 
   const addTarget = (candidate?: string | null) => {
     if (!candidate) return
@@ -3666,10 +3841,17 @@ function collectDownloadDeleteTargets(id: string, torrent: any, download: any): 
     }
   }
 
-  addTarget(torrent?.name)
-  addTarget(torrent?._myCinemaName)
-  addTarget(download?.name)
-  addTarget(getMagnetDisplayName(download?.magnet))
+  const matchingVideos = getMatchingDownloadedVideos(downloadRoot, download, tvMeta)
+  for (const video of matchingVideos) {
+    addAbsoluteTarget(video.file_path)
+  }
+
+  if (!isSingleEpisodeDownload) {
+    addTarget(torrent?.name)
+    addTarget(torrent?._myCinemaName)
+    addTarget(download?.name)
+    addTarget(getMagnetDisplayName(download?.magnet))
+  }
 
   if (Array.isArray(torrent?.files)) {
     for (const file of torrent.files) {
@@ -3677,29 +3859,39 @@ function collectDownloadDeleteTargets(id: string, torrent: any, download: any): 
       if (!relativeFilePath) continue
 
       addTarget(relativeFilePath)
-      addAbsoluteTarget(getTopLevelDownloadTarget(downloadRoot, relativeFilePath))
+      if (!isSingleEpisodeDownload) {
+        addAbsoluteTarget(getTopLevelDownloadTarget(downloadRoot, relativeFilePath))
+      }
     }
   }
 
-  if (download?.tmdbId) {
+  if (download?.tmdbId && !isSingleEpisodeDownload && !isSeasonPackDownload) {
     const videos = db.getVideos() as any[]
     for (const video of videos) {
-      if (video.tmdb_id === download.tmdbId && isPathInsideRoot(video.file_path, downloadRoot)) {
+      if (video.tmdb_id === download.tmdbId && video.type !== 'series' && isPathInsideRoot(video.file_path, downloadRoot)) {
         addAbsoluteTarget(video.file_path)
         addAbsoluteTarget(getTopLevelDownloadTarget(downloadRoot, path.relative(downloadRoot, video.file_path)))
       }
     }
   }
 
-  if (targets.size === 0) {
+  if (targets.size === 0 && !isSingleEpisodeDownload) {
     for (const target of collectMatchingDownloadRootTargets(downloadRoot, download)) {
+      addAbsoluteTarget(target)
+    }
+  }
+
+  if (targets.size === 0 && isSingleEpisodeDownload) {
+    for (const target of collectMatchingEpisodeFileTargets(downloadRoot, torrent, download, tvMeta)) {
       addAbsoluteTarget(target)
     }
   }
 
   if (targets.size === 0) {
     const fallbackName = download?.name || torrent?.name || torrent?._myCinemaName || download?.title || id
-    addTarget(fallbackName)
+    if (!isSingleEpisodeDownload || isVideoFilePath(fallbackName)) {
+      addTarget(fallbackName)
+    }
   }
 
   return Array.from(targets).sort((a, b) => a.length - b.length)

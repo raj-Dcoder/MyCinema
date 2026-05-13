@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { Peer, DataConnection } from 'peerjs';
+import { Peer, DataConnection, MediaConnection } from 'peerjs';
 import { createPeerSetup, SyncMessage } from '../utils/p2pSync';
 
 const generateShortId = () => Math.random().toString(36).substring(2, 8).toUpperCase();
@@ -8,14 +8,26 @@ interface UseWatchTogetherReturn {
   isHost: boolean;
   roomId: string | null;
   participants: string[];
+  localPeerId: string | null;
   isConnecting: boolean;
   error: string | null;
+  voiceError: string | null;
+  voiceEnabled: boolean;
+  isMicActive: boolean;
+  remoteAudioStreams: RemoteAudioStream[];
   startHosting: () => void;
   joinRoom: (roomId: string) => void;
   leaveRoom: () => void;
   broadcastState: (msg: SyncMessage) => void;
+  startVoiceSession: () => Promise<boolean>;
+  setPushToTalkActive: (active: boolean) => void;
   onReceiveSyncObj: React.MutableRefObject<((msg: SyncMessage) => void) | null>;
   debugLogs: string[];
+}
+
+interface RemoteAudioStream {
+  peerId: string;
+  stream: MediaStream;
 }
 
 export function useWatchTogether(): UseWatchTogetherReturn {
@@ -24,6 +36,10 @@ export function useWatchTogether(): UseWatchTogetherReturn {
   const [participants, setParticipants] = useState<string[]>([]);
   const [isConnecting, setIsConnecting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [voiceError, setVoiceError] = useState<string | null>(null);
+  const [voiceEnabled, setVoiceEnabled] = useState(false);
+  const [isMicActive, setIsMicActive] = useState(false);
+  const [remoteAudioStreams, setRemoteAudioStreams] = useState<RemoteAudioStream[]>([]);
   const [debugLogs, setDebugLogs] = useState<string[]>([]);
 
   const addLog = useCallback((msg: string) => {
@@ -32,9 +48,24 @@ export function useWatchTogether(): UseWatchTogetherReturn {
   }, []);
 
   const peerRef = useRef<Peer | null>(null);
+  const localPeerIdRef = useRef<string | null>(null);
   const connectionsRef = useRef<DataConnection[]>([]); // For host to maintain guests
   const hostConnectionRef = useRef<DataConnection | null>(null); // For guest to maintain host
+  const localStreamRef = useRef<MediaStream | null>(null);
+  const mediaCallsRef = useRef<MediaConnection[]>([]);
   const onReceiveSyncObj = useRef<((msg: SyncMessage) => void) | null>(null);
+
+  const stopVoice = useCallback(() => {
+    mediaCallsRef.current.forEach(call => call.close());
+    mediaCallsRef.current = [];
+    if (localStreamRef.current) {
+      localStreamRef.current.getTracks().forEach(track => track.stop());
+      localStreamRef.current = null;
+    }
+    setRemoteAudioStreams([]);
+    setVoiceEnabled(false);
+    setIsMicActive(false);
+  }, []);
 
   const cleanup = useCallback((clearError = true) => {
     connectionsRef.current.forEach(c => c.close());
@@ -47,22 +78,68 @@ export function useWatchTogether(): UseWatchTogetherReturn {
       peerRef.current.destroy();
       peerRef.current = null;
     }
+    localPeerIdRef.current = null;
+    stopVoice();
     setRoomId(null);
     setIsHost(false);
     setParticipants([]);
     setIsConnecting(false);
     if (clearError) setError(null);
+  }, [stopVoice]);
+
+  const handleRemoteStream = useCallback((peerId: string, stream: MediaStream) => {
+    setRemoteAudioStreams(prev => {
+      const next = prev.filter(item => item.peerId !== peerId);
+      return [...next, { peerId, stream }];
+    });
   }, []);
 
-  const handleIncomingMessage = (data: unknown) => {
+  const removeRemoteStream = useCallback((peerId: string) => {
+    setRemoteAudioStreams(prev => prev.filter(item => item.peerId !== peerId));
+  }, []);
+
+  const wireMediaCall = useCallback((call: MediaConnection) => {
+    mediaCallsRef.current = mediaCallsRef.current.filter(existing => existing.peer !== call.peer);
+    mediaCallsRef.current.push(call);
+    call.on('stream', (stream) => handleRemoteStream(call.peer, stream));
+    call.on('close', () => {
+      mediaCallsRef.current = mediaCallsRef.current.filter(existing => existing !== call);
+      removeRemoteStream(call.peer);
+    });
+    call.on('error', (err: any) => {
+      addLog(`[Voice] Call error with ${call.peer}: ${err.message || 'Unknown error'}`);
+      setVoiceError(err.message || 'Voice call failed.');
+    });
+  }, [addLog, handleRemoteStream, removeRemoteStream]);
+
+  const bindIncomingVoiceCalls = useCallback((peer: Peer) => {
+    peer.on('call', (call: MediaConnection) => {
+      if (!localStreamRef.current) {
+        addLog(`[Voice] Incoming call from ${call.peer}, but mic is not enabled yet.`);
+        call.close();
+        return;
+      }
+      call.answer(localStreamRef.current);
+      wireMediaCall(call);
+    });
+  }, [addLog, wireMediaCall]);
+
+  const connectVoiceToPeer = useCallback((peerId: string) => {
+    if (!peerRef.current || !localStreamRef.current) return;
+    if (mediaCallsRef.current.some(call => call.peer === peerId)) return;
+    const call = peerRef.current.call(peerId, localStreamRef.current);
+    wireMediaCall(call);
+  }, [wireMediaCall]);
+
+  const handleIncomingMessage = useCallback((data: unknown, senderPeer?: string) => {
     // Basic validation
     if (data && typeof data === 'object' && 'type' in data && 'time' in data) {
-      const msg = data as SyncMessage;
+      const msg = { ...(data as SyncMessage), speakerId: (data as SyncMessage).speakerId || senderPeer };
       if (onReceiveSyncObj.current) {
         onReceiveSyncObj.current(msg);
       }
     }
-  };
+  }, []);
 
   const startHosting = useCallback(() => {
     cleanup();
@@ -90,10 +167,13 @@ export function useWatchTogether(): UseWatchTogetherReturn {
       peer.on('open', (id) => {
         clearTimeout(timeoutInfo);
         addLog(`[Host] Peer OPEN event fired! ID: ${id}`);
+        localPeerIdRef.current = id;
         setIsHost(true);
         setRoomId(newRoomId);
         setIsConnecting(false);
       });
+
+      bindIncomingVoiceCalls(peer);
 
       peer.on('connection', (conn: any) => {
         addLog(`[Host] Incoming connection from: ${conn.peer}`);
@@ -103,14 +183,22 @@ export function useWatchTogether(): UseWatchTogetherReturn {
           setParticipants(prev => [...prev, conn.peer]);
           
           conn.on('data', (data: any) => {
-             // Wait, as host do we expect messages from guests? 
+            handleIncomingMessage(data, conn.peer);
+            if (data && typeof data === 'object' && 'type' in data && ['TALK_START', 'TALK_END'].includes(data.type)) {
+              connectionsRef.current.forEach(other => {
+                if (other.open && other.peer !== conn.peer) other.send({ ...data, speakerId: conn.peer });
+              });
+            }
           });
 
           conn.on('close', () => {
             addLog(`[Host] Connection CLOSED: ${conn.peer}`);
             connectionsRef.current = connectionsRef.current.filter(c => c.peer !== conn.peer);
             setParticipants(prev => prev.filter(p => p !== conn.peer));
+            removeRemoteStream(conn.peer);
           });
+
+          if (localStreamRef.current) connectVoiceToPeer(conn.peer);
         });
       });
 
@@ -127,7 +215,7 @@ export function useWatchTogether(): UseWatchTogetherReturn {
       setError(e.message);
       setIsConnecting(false);
     }
-  }, [cleanup, addLog]);
+  }, [cleanup, addLog, bindIncomingVoiceCalls, connectVoiceToPeer, handleIncomingMessage, removeRemoteStream]);
 
   const joinRoom = useCallback((idToJoin: string) => {
     cleanup();
@@ -147,6 +235,7 @@ export function useWatchTogether(): UseWatchTogetherReturn {
     peer.on('open', () => {
       clearTimeout(timeoutInfo);
       addLog(`[Guest] Peer OPEN event fired! Connecting to host...`);
+      localPeerIdRef.current = peer.id;
       const fullHostId = `mycinema-wt-${idToJoin.toUpperCase()}`;
       const conn = peer.connect(fullHostId, { reliable: true });
 
@@ -173,12 +262,14 @@ export function useWatchTogether(): UseWatchTogetherReturn {
       });
     });
 
+    bindIncomingVoiceCalls(peer);
+
     peer.on('error', (err) => {
       setError(err.message);
       setIsConnecting(false);
       cleanup();
     });
-  }, [cleanup]);
+  }, [cleanup, addLog, bindIncomingVoiceCalls, connectVoiceToPeer, handleIncomingMessage, removeRemoteStream]);
 
   const broadcastState = useCallback((msg: SyncMessage) => {
     if (isHost) {
@@ -188,11 +279,49 @@ export function useWatchTogether(): UseWatchTogetherReturn {
         }
       });
     }
-    // Alternatively, if guest sends something, we can send to host directly
-    // else if (hostConnectionRef.current && hostConnectionRef.current.open) {
-    //   hostConnectionRef.current.send(msg);
-    // }
+    else if (hostConnectionRef.current && hostConnectionRef.current.open) {
+      hostConnectionRef.current.send(msg);
+    }
   }, [isHost]);
+
+  const startVoiceSession = useCallback(async () => {
+    if (localStreamRef.current) return true;
+    try {
+      setVoiceError(null);
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true
+        }
+      });
+      stream.getAudioTracks().forEach(track => {
+        track.enabled = false;
+      });
+      localStreamRef.current = stream;
+      setVoiceEnabled(true);
+
+      if (isHost) {
+        connectionsRef.current.forEach(conn => connectVoiceToPeer(conn.peer));
+      } else {
+        const hostPeerId = `mycinema-wt-${roomId}`;
+        if (roomId) connectVoiceToPeer(hostPeerId);
+      }
+
+      return true;
+    } catch (err: any) {
+      setVoiceError(err.message || 'Microphone permission was denied.');
+      return false;
+    }
+  }, [connectVoiceToPeer, isHost, roomId]);
+
+  const setPushToTalkActive = useCallback((active: boolean) => {
+    if (!localStreamRef.current) return;
+    localStreamRef.current.getAudioTracks().forEach(track => {
+      track.enabled = active;
+    });
+    setIsMicActive(active);
+  }, []);
 
   const leaveRoom = useCallback(() => {
     cleanup();
@@ -208,12 +337,19 @@ export function useWatchTogether(): UseWatchTogetherReturn {
     isHost,
     roomId,
     participants,
+    localPeerId: localPeerIdRef.current,
     isConnecting,
     error,
+    voiceError,
+    voiceEnabled,
+    isMicActive,
+    remoteAudioStreams,
     startHosting,
     joinRoom,
     leaveRoom,
     broadcastState,
+    startVoiceSession,
+    setPushToTalkActive,
     onReceiveSyncObj,
     debugLogs
   };

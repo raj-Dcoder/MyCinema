@@ -2,11 +2,14 @@ import { app } from 'electron'
 import { join } from 'path'
 import path from 'path'
 import { createRequire } from 'module'
+import fs from 'fs'
 
 const require = createRequire(import.meta.url)
 const Database = require('better-sqlite3')
 
-const dbPath = join(app.getPath('userData'), 'mycinema.db')
+const dbRoot = process.env.MYCINEMA_USER_DATA_DIR || app.getPath('userData')
+fs.mkdirSync(dbRoot, { recursive: true })
+const dbPath = join(dbRoot, 'mycinema.db')
 const db = new Database(dbPath, { 
   timeout: 10000 // 10 seconds timeout for busy/locked database
 })

@@ -148,6 +148,9 @@ const Download: React.FC<DownloadProps> = ({ onShowDetail }) => {
   const searchCacheRef = useRef<Map<string, TMDBResult[]>>(new Map())
   const searchInputRef = useRef<HTMLInputElement>(null)
   const sourceSearchRequestRef = useRef<string | null>(null)
+  const pendingSourceProgressRef = useRef<any | null>(null)
+  const sourceProgressTimerRef = useRef<number | null>(null)
+  const [, startSourceTransition] = React.useTransition()
 
   const [selectedSeason, setSelectedSeason] = useState<string>('all')
   const [selectedPackSeason, setSelectedPackSeason] = useState<string>('all')
@@ -419,28 +422,64 @@ const Download: React.FC<DownloadProps> = ({ onShowDetail }) => {
   }, [query])
 
   useEffect(() => {
-    const cleanup = window.api.onTorrentSourcesProgress((data: any) => {
+    const flushSourceProgress = () => {
+      sourceProgressTimerRef.current = null
+      const data = pendingSourceProgressRef.current
+      pendingSourceProgressRef.current = null
       if (!data || data.requestId !== sourceSearchRequestRef.current) return
-      if (Array.isArray(data.sources)) {
-        setSources(data.sources)
-      }
-      setSourceSearchStatus({
+
+      const nextStatus = {
         found: Array.isArray(data.sources) ? data.sources.length : 0,
         completed: data.completedProviders || 0,
         total: data.totalProviders || 0,
         cached: Boolean(data.cached),
         done: Boolean(data.done)
+      }
+
+      startSourceTransition(() => {
+        if (Array.isArray(data.sources)) {
+          setSources(data.sources)
+        }
+        setSourceSearchStatus(nextStatus)
+        if (data.done) setLoadingSources(false)
       })
-      if (data.done) setLoadingSources(false)
+    }
+
+    const cleanup = window.api.onTorrentSourcesProgress((data: any) => {
+      if (!data || data.requestId !== sourceSearchRequestRef.current) return
+      pendingSourceProgressRef.current = data
+      if (data.done) {
+        if (sourceProgressTimerRef.current) {
+          window.clearTimeout(sourceProgressTimerRef.current)
+          sourceProgressTimerRef.current = null
+        }
+        flushSourceProgress()
+        return
+      }
+      if (!sourceProgressTimerRef.current) {
+        sourceProgressTimerRef.current = window.setTimeout(flushSourceProgress, 120)
+      }
     })
-    return cleanup
-  }, [])
+    return () => {
+      cleanup()
+      if (sourceProgressTimerRef.current) {
+        window.clearTimeout(sourceProgressTimerRef.current)
+        sourceProgressTimerRef.current = null
+      }
+      pendingSourceProgressRef.current = null
+    }
+  }, [startSourceTransition])
 
   // ─── Fetch Torrent Sources ───────────────────────────────────────────────
   const handleSelectResult = async (item: TMDBResult) => {
     setSelectedItem(item)
     setLoadingSources(true)
     setSources([])
+    pendingSourceProgressRef.current = null
+    if (sourceProgressTimerRef.current) {
+      window.clearTimeout(sourceProgressTimerRef.current)
+      sourceProgressTimerRef.current = null
+    }
     setSourceSearchStatus({ found: 0, completed: 0, total: 0, cached: false, done: false })
     setSelectedSeason('all')
     setSelectedPackSeason('all')
@@ -454,8 +493,10 @@ const Download: React.FC<DownloadProps> = ({ onShowDetail }) => {
       const mediaType = item.media_type
       const result = await window.api.searchTorrentSources(title, year, mediaType, item.id, requestId)
       if (sourceSearchRequestRef.current === requestId) {
-        setSources(result || [])
-        setSourceSearchStatus(prev => ({ ...prev, found: (result || []).length, done: true }))
+        startSourceTransition(() => {
+          setSources(result || [])
+          setSourceSearchStatus(prev => ({ ...prev, found: (result || []).length, done: true }))
+        })
       }
     } catch (err) {
       console.error('[Download] Source fetch error:', err)
@@ -569,36 +610,38 @@ const Download: React.FC<DownloadProps> = ({ onShowDetail }) => {
   const activeCount = downloads.filter(d => d.status === 'downloading' || d.status === 'connecting').length
   const panelOpen = selectedItem !== null
   const storageUsedPercent = Math.round(downloadsStorage?.percentUsed || 0)
+  const deferredSources = React.useDeferredValue(sources)
+  const sourceView = loadingSources ? deferredSources : sources
 
   const availableSeasons = React.useMemo(() => {
     const seasons = new Set<number>()
-    sources.forEach(s => {
+    sourceView.forEach(s => {
       if (!isSeasonPackSource(s) && s.parsedSeason !== undefined) seasons.add(s.parsedSeason)
     })
     return Array.from(seasons).sort((a, b) => a - b)
-  }, [sources])
+  }, [sourceView])
 
   const availablePackSeasons = React.useMemo(() => {
     const seasons = new Set<number>()
-    sources.forEach(s => {
+    sourceView.forEach(s => {
       if (isSeasonPackSource(s) && s.parsedSeason !== undefined) seasons.add(s.parsedSeason)
     })
     return Array.from(seasons).sort((a, b) => a - b)
-  }, [sources])
+  }, [sourceView])
 
   const availableEpisodes = React.useMemo(() => {
     if (selectedSeason === 'all' || selectedSeason === 'packs') return []
     const eps = new Set<number>()
-    sources.forEach(s => {
+    sourceView.forEach(s => {
       if (!isSeasonPackSource(s) && s.parsedSeason === parseInt(selectedSeason) && s.parsedEpisode !== undefined) {
         eps.add(s.parsedEpisode)
       }
     })
     return Array.from(eps).sort((a, b) => a - b)
-  }, [sources, selectedSeason])
+  }, [sourceView, selectedSeason])
 
   const filteredSources = React.useMemo(() => {
-    return sources
+    return sourceView
       .filter(s => {
         // 1. Apply Hindi Only filter if active
         if (hindiOnly && !s.isHindi) return false
@@ -619,7 +662,7 @@ const Download: React.FC<DownloadProps> = ({ onShowDetail }) => {
         return true
       })
       .sort((a, b) => getTorrentSourceHealthScore(b) - getTorrentSourceHealthScore(a))
-  }, [sources, selectedSeason, selectedPackSeason, selectedEpisode, selectedItem, hindiOnly])
+  }, [sourceView, selectedSeason, selectedPackSeason, selectedEpisode, selectedItem, hindiOnly])
 
   // Optimization: Memoize a video map for O(1) lookup during render
   const videoMap = React.useMemo(() => {

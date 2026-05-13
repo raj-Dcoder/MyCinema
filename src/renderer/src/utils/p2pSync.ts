@@ -4,9 +4,10 @@ import PeerJs, { Peer } from 'peerjs';
 const PeerClass = (PeerJs && (PeerJs as any).Peer) || (PeerJs && (PeerJs as any).default) || PeerJs;
 
 export type SyncMessage = {
-  type: 'PLAY' | 'PAUSE' | 'SEEK' | 'SYNC' | 'SPEED';
+  type: 'PLAY' | 'PAUSE' | 'SEEK' | 'SYNC' | 'SPEED' | 'TALK_START' | 'TALK_END';
   time: number;
   rate?: number;
+  speakerId?: string;
 };
 
 export const createPeerSetup = (id?: string): Peer => {

@@ -1,10 +1,9 @@
 import React, { useEffect, useRef, useState } from 'react'
-import { Play, Pause, Rewind, FastForward, X, Maximize, Minimize, Volume2, VolumeX, Subtitles, Music, SkipForward as SkipNext, ArrowLeft, MessageSquareText, AlertTriangle, Check, Monitor, RectangleHorizontal, Crop, FolderOpen, Info, Film, HardDrive, ChevronDown, ChevronUp, ListVideo, Users, Search, Globe, Loader2, Download, RotateCcw, Zap, Sparkles, Wand2, PictureInPicture2 } from 'lucide-react'
+import { Play, Pause, Rewind, FastForward, X, Maximize, Minimize, Volume2, VolumeX, Subtitles, Music, SkipForward as SkipNext, ArrowLeft, MessageSquareText, AlertTriangle, Check, Monitor, RectangleHorizontal, Crop, FolderOpen, Info, Film, HardDrive, ChevronDown, ChevronUp, ListVideo, Users, Search, Globe, Loader2, Download, RotateCcw, Zap, Sparkles, Wand2, PictureInPicture2, Mic, MicOff } from 'lucide-react'
 import { Video } from '../types'
 import { useWatchTogether } from '../hooks/useWatchTogether'
 import { WatchTogetherModal } from './WatchTogetherModal'
-import FPSBoostRenderer from './FPSBoostRenderer'
-import QualityBoostRenderer from './QualityBoostRenderer'
+import AIEnhancementRenderer from './AIEnhancementRenderer'
 import {
   SUBTITLE_SYNC_COARSE_STEP_MS,
   SUBTITLE_SYNC_FINE_STEP_MS,
@@ -18,7 +17,8 @@ import {
   type SubCue
 } from '../utils/subtitleSync'
 
-type AudioBoostProfile = 'balanced' | 'rich' | 'night'
+type AudioBoostProfile = 'auto' | 'dialogue' | 'night' | 'laptop' | 'cinema'
+type AudioBoostIntensity = 'low' | 'medium' | 'high'
 
 const SUBTITLE_OVERLAY_Z_INDEX = 35
 const SEEK_PREVIEW_BUCKET_SECONDS = 5
@@ -28,46 +28,108 @@ const AUDIO_BOOST_PROFILES: Record<AudioBoostProfile, {
   label: string
   detail: string
   bassGain: number
+  lowMidGain: number
   dialogGain: number
+  presenceGain: number
   airGain: number
   compressorThreshold: number
   compressorKnee: number
   compressorRatio: number
+  compressorAttack: number
+  compressorRelease: number
+  limiterThreshold: number
   outputGain: number
 }> = {
-  balanced: {
-    label: 'Cinema',
-    detail: 'Warm bass, clear voices',
-    bassGain: 3.5,
-    dialogGain: 2.5,
-    airGain: 1.8,
-    compressorThreshold: -22,
-    compressorKnee: 24,
-    compressorRatio: 3.2,
-    outputGain: 1.08
-  },
-  rich: {
-    label: 'Rich',
-    detail: 'Fuller bass and detail',
-    bassGain: 5.5,
-    dialogGain: 2.0,
-    airGain: 2.4,
-    compressorThreshold: -20,
+  auto: {
+    label: 'Auto',
+    detail: 'Voices + leveler',
+    bassGain: 2.8,
+    lowMidGain: -2.8,
+    dialogGain: 4.6,
+    presenceGain: 2.2,
+    airGain: 1.5,
+    compressorThreshold: -30,
     compressorKnee: 22,
-    compressorRatio: 3.5,
-    outputGain: 1.12
+    compressorRatio: 5.2,
+    compressorAttack: 0.006,
+    compressorRelease: 0.22,
+    limiterThreshold: -3.5,
+    outputGain: 1.22
+  },
+  dialogue: {
+    label: 'Dialogue',
+    detail: 'Lift voices',
+    bassGain: 0.8,
+    lowMidGain: -4.2,
+    dialogGain: 6.4,
+    presenceGain: 3.4,
+    airGain: 1.0,
+    compressorThreshold: -31,
+    compressorKnee: 20,
+    compressorRatio: 4.8,
+    compressorAttack: 0.005,
+    compressorRelease: 0.18,
+    limiterThreshold: -3.5,
+    outputGain: 1.18
   },
   night: {
     label: 'Night',
-    detail: 'Level volume, lift dialogue',
-    bassGain: 1.5,
-    dialogGain: 4.2,
-    airGain: 1.0,
-    compressorThreshold: -28,
+    detail: 'Tame loud scenes',
+    bassGain: -1.4,
+    lowMidGain: -2.4,
+    dialogGain: 5.4,
+    presenceGain: 1.8,
+    airGain: 0.8,
+    compressorThreshold: -34,
     compressorKnee: 30,
-    compressorRatio: 5.0,
-    outputGain: 1.0
+    compressorRatio: 8.0,
+    compressorAttack: 0.004,
+    compressorRelease: 0.28,
+    limiterThreshold: -6,
+    outputGain: 1.14
+  },
+  laptop: {
+    label: 'Laptop',
+    detail: 'Small speakers',
+    bassGain: 1.8,
+    lowMidGain: -5.0,
+    dialogGain: 5.4,
+    presenceGain: 4.0,
+    airGain: 2.0,
+    compressorThreshold: -32,
+    compressorKnee: 20,
+    compressorRatio: 5.8,
+    compressorAttack: 0.004,
+    compressorRelease: 0.2,
+    limiterThreshold: -3.8,
+    outputGain: 1.26
+  },
+  cinema: {
+    label: 'Cinema',
+    detail: 'Bigger impact',
+    bassGain: 5.4,
+    lowMidGain: -1.8,
+    dialogGain: 3.2,
+    presenceGain: 1.6,
+    airGain: 2.8,
+    compressorThreshold: -26,
+    compressorKnee: 22,
+    compressorRatio: 4.0,
+    compressorAttack: 0.008,
+    compressorRelease: 0.2,
+    limiterThreshold: -3,
+    outputGain: 1.2
   }
+}
+
+const AUDIO_BOOST_INTENSITIES: Record<AudioBoostIntensity, {
+  label: string
+  amount: number
+  outputScale: number
+}> = {
+  low: { label: 'Low', amount: 0.72, outputScale: 0.82 },
+  medium: { label: 'Med', amount: 1, outputScale: 1 },
+  high: { label: 'High', amount: 1.28, outputScale: 1.12 }
 }
 
 // ── VTT Parser (runs once per track selection, no React state) ──────────────
@@ -80,19 +142,39 @@ function parseVTTTime(s: string): number {
 function parseVTT(content: string): SubCue[] {
   const cues: SubCue[] = []
   // Normalize Windows CRLF line endings that FFmpeg produces on Windows
-  const normalized = content.replace(/\r\n/g, '\n').replace(/\r/g, '\n')
+  const normalized = content
+    .replace(/^\uFEFF/, '')
+    .replace(/\r\n/g, '\n')
+    .replace(/\r/g, '\n')
   const blocks = normalized.split(/\n\s*\n/)
   for (const block of blocks) {
     const lines = block.trim().split('\n')
+    if (
+      lines.length === 0 ||
+      lines[0].startsWith('WEBVTT') ||
+      lines[0].startsWith('NOTE') ||
+      lines[0].startsWith('STYLE') ||
+      lines[0].startsWith('REGION')
+    ) continue
+
     const arrowLine = lines.find(l => l.includes('-->'))
     if (!arrowLine) continue
-    const [startStr, endStr] = arrowLine.split('-->').map(s => s.trim())
+    const [startStr, endStr] = arrowLine.split('-->').map(s => s.trim().split(/\s+/)[0])
     const start = parseVTTTime(startStr)
     const end = parseVTTTime(endStr)
+    if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) continue
+
     const textLines = lines.slice(lines.indexOf(arrowLine) + 1).filter(l => l.trim() !== '' && !l.trim().match(/^\d+$/))
     if (textLines.length === 0) continue
     // Strip VTT tags like <c>, <i>, position cues etc.
-    const text = textLines.join('\n').replace(/<[^>]+>/g, '').trim()
+    const text = textLines
+      .join('\n')
+      .replace(/<[^>]+>/g, '')
+      .replace(/&nbsp;/g, ' ')
+      .replace(/&amp;/g, '&')
+      .replace(/&lt;/g, '<')
+      .replace(/&gt;/g, '>')
+      .trim()
     if (text) cues.push({ start, end, text })
   }
   return cues
@@ -110,8 +192,63 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
   const [currentTime, setCurrentTime] = useState(0)
   const [duration, setDuration] = useState(0)
 
-  const { isHost, roomId, participants, isConnecting, error, startHosting, joinRoom, leaveRoom, broadcastState, onReceiveSyncObj, debugLogs } = useWatchTogether()
+  const { isHost, roomId, participants, localPeerId, isConnecting, error, voiceError, voiceEnabled, isMicActive, remoteAudioStreams, startHosting, joinRoom, leaveRoom, broadcastState, startVoiceSession, setPushToTalkActive, onReceiveSyncObj, debugLogs } = useWatchTogether()
   const [showWatchTogetherState, setShowWatchTogetherState] = useState(false)
+  const [activeSpeakerId, setActiveSpeakerId] = useState<string | null>(null)
+  const [talkResumeCountdown, setTalkResumeCountdown] = useState<number | null>(null)
+  const talkResumeTimerRef = useRef<NodeJS.Timeout | null>(null)
+  const talkResumeIntervalRef = useRef<NodeJS.Timeout | null>(null)
+  const conversationWasPlayingRef = useRef(false)
+  const isPushToTalkActiveRef = useRef(false)
+  const activeSpeakerIdRef = useRef<string | null>(null)
+
+  const clearTalkResumeTimers = (updateState = true) => {
+    if (talkResumeTimerRef.current) {
+      clearTimeout(talkResumeTimerRef.current)
+      talkResumeTimerRef.current = null
+    }
+    if (talkResumeIntervalRef.current) {
+      clearInterval(talkResumeIntervalRef.current)
+      talkResumeIntervalRef.current = null
+    }
+    if (updateState) setTalkResumeCountdown(null)
+  }
+
+  const pauseForConversation = (speakerId: string | null) => {
+    clearTalkResumeTimers()
+    setActiveSpeakerId(speakerId)
+    activeSpeakerIdRef.current = speakerId
+    if (videoRef.current) {
+      conversationWasPlayingRef.current = !videoRef.current.paused
+      videoRef.current.pause()
+      setIsPlaying(false)
+      if (audioRef.current && audioRef.current.src) audioRef.current.pause()
+    }
+  }
+
+  const scheduleConversationResume = (shouldBroadcast: boolean) => {
+    setActiveSpeakerId(null)
+    activeSpeakerIdRef.current = null
+    if (!conversationWasPlayingRef.current) return
+
+    setTalkResumeCountdown(2)
+    talkResumeIntervalRef.current = setInterval(() => {
+      setTalkResumeCountdown(prev => {
+        if (prev === null || prev <= 1) return null
+        return prev - 1
+      })
+    }, 1000)
+
+    talkResumeTimerRef.current = setTimeout(() => {
+      clearTalkResumeTimers()
+      if (activeSpeakerIdRef.current || !videoRef.current) return
+      videoRef.current.play().catch(e => console.log(e))
+      setIsPlaying(true)
+      if (shouldBroadcast) {
+        broadcastState({ type: 'PLAY', time: videoRef.current.currentTime })
+      }
+    }, 1800)
+  }
 
   useEffect(() => {
     onReceiveSyncObj.current = (msg) => {
@@ -149,9 +286,20 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
             if (audioEl) audioEl.playbackRate = msg.rate;
           }
           break;
+        case 'TALK_START': {
+          const speaker = msg.speakerId || 'friend';
+          pauseForConversation(speaker);
+          if (isHost) {
+            broadcastState({ type: 'PAUSE', time: videoRef.current?.currentTime || msg.time });
+          }
+          break;
+        }
+        case 'TALK_END':
+          scheduleConversationResume(isHost);
+          break;
       }
     };
-  }, [onReceiveSyncObj]);
+  }, [broadcastState, isHost, onReceiveSyncObj]);
 
   useEffect(() => {
     let interval: NodeJS.Timeout;
@@ -169,12 +317,15 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
   const [currentVideo, setCurrentVideo] = useState<Video>(video)
   const [isSeeking, setIsSeeking] = useState(false)
   const [isFullscreen, setIsFullscreen] = useState(false)
+  const [isWindowFullscreen, setIsWindowFullscreen] = useState(false)
   const [isPiPActive, setIsPiPActive] = useState(false)
   const [isPiPSupported, setIsPiPSupported] = useState(false)
   const [isBuffering, setIsBuffering] = useState(false)
   const [audioTracks, setAudioTracks] = useState<any[]>([])
   const [selectedAudioId, setSelectedAudioId] = useState<string>('')
   const [hasVideoMetadata, setHasVideoMetadata] = useState(false)
+  const [audioProbeReady, setAudioProbeReady] = useState(false)
+  const [startupProgressReady, setStartupProgressReady] = useState(false)
   const [showMediaMenu, setShowMediaMenu] = useState(false)
   const [showAdvancedMenu, setShowAdvancedMenu] = useState(false)
   const [playbackRate, setPlaybackRate] = useState<number>(1)
@@ -218,6 +369,43 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
   const activeSubtitleCueIndexRef = useRef(-1)
   const subtitleOffsetStorageKeyRef = useRef<string | null>(null)
   const subtitleOffsetRef = useRef(0)
+
+  const getSpeakerLabel = (speakerId: string | null) => {
+    if (!speakerId) return 'Someone'
+    if (speakerId === localPeerId) return 'You'
+    if (speakerId.startsWith('mycinema-wt-')) return 'Host'
+    const guestIndex = participants.indexOf(speakerId)
+    return guestIndex >= 0 ? `Guest ${guestIndex + 1}` : 'Friend'
+  }
+
+  const beginPushToTalk = async () => {
+    if (!roomId || isPushToTalkActiveRef.current) return
+    const voiceReady = voiceEnabled || await startVoiceSession()
+    if (!voiceReady) return
+
+    isPushToTalkActiveRef.current = true
+    setPushToTalkActive(true)
+    const speakerId = localPeerId || (isHost && roomId ? `mycinema-wt-${roomId}` : 'you')
+    pauseForConversation(speakerId)
+    broadcastState({ type: 'TALK_START', time: videoRef.current?.currentTime || 0, speakerId })
+    if (isHost) {
+      broadcastState({ type: 'PAUSE', time: videoRef.current?.currentTime || 0 })
+    }
+  }
+
+  const endPushToTalk = () => {
+    if (!isPushToTalkActiveRef.current) return
+    isPushToTalkActiveRef.current = false
+    setPushToTalkActive(false)
+    broadcastState({ type: 'TALK_END', time: videoRef.current?.currentTime || 0, speakerId: localPeerId || undefined })
+    scheduleConversationResume(isHost)
+  }
+
+  useEffect(() => {
+    return () => {
+      clearTalkResumeTimers()
+    }
+  }, [])
   const [activeSubKey, setActiveSubKey] = useState<string | null>(null)
   const [subtitleOffsetMs, setSubtitleOffsetMs] = useState(0)
   const [subtitleLoading, setSubtitleLoading] = useState(false)
@@ -226,18 +414,25 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
   })
   const [qualitySharpnessEnabled, setQualitySharpnessEnabled] = useState(() => {
     const storedSharpness = localStorage.getItem('mycinema_ai_sharpness')
-    return storedSharpness !== null ? storedSharpness === 'true' : localStorage.getItem('mycinema_quality_boost') === 'true'
+    return storedSharpness === 'true'
   })
   const [qualityVibranceEnabled, setQualityVibranceEnabled] = useState(() => {
     const storedVibrance = localStorage.getItem('mycinema_ai_vibrance')
-    return storedVibrance !== null ? storedVibrance === 'true' : localStorage.getItem('mycinema_quality_boost') === 'true'
+    return storedVibrance === 'true'
   })
   const [audioBoostEnabled, setAudioBoostEnabled] = useState(() => {
     return localStorage.getItem('mycinema_audio_boost') === 'true'
   })
   const [audioBoostProfile, setAudioBoostProfile] = useState<AudioBoostProfile>(() => {
     const stored = localStorage.getItem('mycinema_audio_boost_profile')
-    return stored === 'rich' || stored === 'night' ? stored : 'balanced'
+    if (stored === 'balanced') return 'auto'
+    if (stored === 'rich') return 'cinema'
+    if (stored === 'dialogue' || stored === 'night' || stored === 'laptop' || stored === 'cinema' || stored === 'auto') return stored
+    return 'auto'
+  })
+  const [audioBoostIntensity, setAudioBoostIntensity] = useState<AudioBoostIntensity>(() => {
+    const stored = localStorage.getItem('mycinema_audio_boost_intensity')
+    return stored === 'low' || stored === 'high' ? stored : 'medium'
   })
   const [showInfoPanel, setShowInfoPanel] = useState(false)
   const [showEpisodesPanel, setShowEpisodesPanel] = useState(false)
@@ -263,6 +458,146 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
   const seekPreviewThumbRequestRef = useRef(0)
   const lastSeekPreviewBucketRef = useRef<number | null>(null)
   const [videoAspectRatio, setVideoAspectRatio] = useState(16 / 9)
+  const isAnyFullscreen = isFullscreen || isWindowFullscreen
+  const forceRestartRef = useRef(false)
+  const startupPlaybackTokenRef = useRef(0)
+  const startupPlaybackPendingRef = useRef(true)
+  const startupPlaybackLaunchingRef = useRef(false)
+  const startupResumeTimeRef = useRef(0)
+  const startupExternalAudioBarrierRef = useRef(false)
+  const startupDriftCorrectionUntilRef = useRef(0)
+  const lastRelaxedAudioSyncCheckRef = useRef(0)
+  const externalAudioSeekBarrierRef = useRef(false)
+  const externalAudioSeekTokenRef = useRef(0)
+  const suppressNextSeekSyncRef = useRef(false)
+  const seekWasPlayingRef = useRef(false)
+  const pendingControlledSeekTimeRef = useRef<number | null>(null)
+  const pendingControlledSeekResumeRef = useRef(false)
+  const playerSessionTokenRef = useRef(0)
+  const subtitleLoadTokenRef = useRef(0)
+  const isPlayerClosingRef = useRef(false)
+
+  const releaseMediaElement = (mediaEl: HTMLMediaElement | null) => {
+    if (!mediaEl) return
+    try {
+      mediaEl.pause()
+      mediaEl.removeAttribute('src')
+      mediaEl.load()
+    } catch (error) {
+      console.warn('[VideoPlayer] Media release failed:', error)
+    }
+  }
+
+  const clearPlayerRuntimeWork = (releaseMedia = false) => {
+    playerSessionTokenRef.current += 1
+    subtitleLoadTokenRef.current += 1
+    seekPreviewThumbRequestRef.current += 1
+    externalAudioSeekTokenRef.current += 1
+    startupPlaybackTokenRef.current += 1
+    startupPlaybackPendingRef.current = false
+    startupPlaybackLaunchingRef.current = false
+    startupExternalAudioBarrierRef.current = false
+    externalAudioSeekBarrierRef.current = false
+    suppressNextSeekSyncRef.current = false
+    pendingControlledSeekTimeRef.current = null
+    pendingControlledSeekResumeRef.current = false
+
+    clearTalkResumeTimers(false)
+
+    if (clickTimeoutRef.current) {
+      clearTimeout(clickTimeoutRef.current)
+      clickTimeoutRef.current = null
+    }
+    if (holdTimeoutRef.current) {
+      clearTimeout(holdTimeoutRef.current)
+      holdTimeoutRef.current = null
+    }
+    if (arrowHoldTimerRef.current) {
+      clearTimeout(arrowHoldTimerRef.current)
+      arrowHoldTimerRef.current = null
+    }
+    if (spaceHoldTimerRef.current) {
+      clearTimeout(spaceHoldTimerRef.current)
+      spaceHoldTimerRef.current = null
+    }
+    if (seekPreviewIntervalRef.current) {
+      clearInterval(seekPreviewIntervalRef.current)
+      seekPreviewIntervalRef.current = null
+    }
+    if (forwardIntervalRef.current) {
+      clearInterval(forwardIntervalRef.current)
+      forwardIntervalRef.current = null
+    }
+    if (seekPreviewThumbTimerRef.current) {
+      clearTimeout(seekPreviewThumbTimerRef.current)
+      seekPreviewThumbTimerRef.current = null
+    }
+    if (window.controlsTimeout) {
+      clearTimeout(window.controlsTimeout)
+    }
+    if (reverseRafRef.current !== null) {
+      cancelAnimationFrame(reverseRafRef.current)
+      reverseRafRef.current = null
+    }
+    if (subtitleRafRef.current !== null) {
+      cancelAnimationFrame(subtitleRafRef.current)
+      subtitleRafRef.current = null
+    }
+    if (speedToastRef.current) {
+      speedToastRef.current.remove()
+      speedToastRef.current = null
+    }
+    if (subtitleContainerRef.current) {
+      subtitleContainerRef.current.remove()
+      subtitleContainerRef.current = null
+      subtitleDivRef.current = null
+    }
+
+    subtitleCuesRef.current = []
+    activeSubKeyRef.current = null
+    activeSubtitleCueIndexRef.current = -1
+    lastSeekPreviewBucketRef.current = null
+    isPushToTalkActiveRef.current = false
+    activeSpeakerIdRef.current = null
+
+    if (releaseMedia) {
+      const doc = document as Document & {
+        pictureInPictureElement?: Element | null
+        exitPictureInPicture?: () => Promise<void>
+      }
+      if (doc.pictureInPictureElement === videoRef.current && doc.exitPictureInPicture) {
+        doc.exitPictureInPicture().catch(() => {})
+      }
+      if (document.fullscreenElement === playerShellRef.current) {
+        document.exitFullscreen().catch(() => {})
+      }
+      releaseMediaElement(audioRef.current)
+      releaseMediaElement(videoRef.current)
+    }
+  }
+
+  useEffect(() => {
+    isPlayerClosingRef.current = false
+
+    return () => {
+      isPlayerClosingRef.current = true
+      clearPlayerRuntimeWork(true)
+      leaveRoom()
+      if (audioCtxRef.current) {
+        audioCtxRef.current.close().catch(() => {})
+        audioCtxRef.current = null
+        videoSourceNodeRef.current = null
+        audioSourceNodeRef.current = null
+        bassFilterRef.current = null
+        clarityFilterRef.current = null
+        airFilterRef.current = null
+        compressorRef.current = null
+        limiterRef.current = null
+        boostGainRef.current = null
+        audioBoostChainConnectedRef.current = false
+      }
+    }
+  }, [])
 
   useEffect(() => {
     localStorage.setItem('mycinema_fps_boost', fpsBoostEnabled.toString())
@@ -298,17 +633,42 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
     localStorage.setItem('mycinema_audio_boost_profile', audioBoostProfile)
   }, [audioBoostProfile])
 
+  useEffect(() => {
+    localStorage.setItem('mycinema_audio_boost_intensity', audioBoostIntensity)
+  }, [audioBoostIntensity])
+
   // ─── Audio Boost Logic (Web Audio API) ──────────────────────────────────────
   const audioCtxRef = useRef<AudioContext | null>(null)
   const videoSourceNodeRef = useRef<MediaElementAudioSourceNode | null>(null)
   const audioSourceNodeRef = useRef<MediaElementAudioSourceNode | null>(null)
   const bassFilterRef = useRef<BiquadFilterNode | null>(null)
+  const lowMidFilterRef = useRef<BiquadFilterNode | null>(null)
   const clarityFilterRef = useRef<BiquadFilterNode | null>(null)
+  const presenceFilterRef = useRef<BiquadFilterNode | null>(null)
   const airFilterRef = useRef<BiquadFilterNode | null>(null)
   const compressorRef = useRef<DynamicsCompressorNode | null>(null)
   const limiterRef = useRef<DynamicsCompressorNode | null>(null)
   const boostGainRef = useRef<GainNode | null>(null)
   const audioBoostChainConnectedRef = useRef(false)
+
+  const getActiveAudioChannelCount = () => {
+    const fallback = embeddedAudio[0]?.channels || 2
+    if (!selectedAudioId) return fallback
+
+    const nativeMatch = selectedAudioId.match(/^nat-(\d+)$/)
+    if (nativeMatch) {
+      const nativeIndex = Number(nativeMatch[1])
+      return embeddedAudio[nativeIndex]?.channels || fallback
+    }
+
+    const externalMatch = selectedAudioId.match(/^ext-(\d+)$/)
+    if (externalMatch) {
+      const streamIndex = Number(externalMatch[1])
+      return embeddedAudio.find(track => track.index === streamIndex)?.channels || fallback
+    }
+
+    return fallback
+  }
 
   useEffect(() => {
     const setParam = (param: AudioParam, value: number, time: number, ramp = 0.08) => {
@@ -328,12 +688,26 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
           bassFilterRef.current.type = 'lowshelf'
           bassFilterRef.current.frequency.value = 115
         }
+
+        if (!lowMidFilterRef.current) {
+          lowMidFilterRef.current = ctx.createBiquadFilter()
+          lowMidFilterRef.current.type = 'peaking'
+          lowMidFilterRef.current.frequency.value = 360
+          lowMidFilterRef.current.Q.value = 1.05
+        }
         
         if (!clarityFilterRef.current) {
           clarityFilterRef.current = ctx.createBiquadFilter()
           clarityFilterRef.current.type = 'peaking'
-          clarityFilterRef.current.frequency.value = 2600
-          clarityFilterRef.current.Q.value = 1.1
+          clarityFilterRef.current.frequency.value = 1750
+          clarityFilterRef.current.Q.value = 1.0
+        }
+
+        if (!presenceFilterRef.current) {
+          presenceFilterRef.current = ctx.createBiquadFilter()
+          presenceFilterRef.current.type = 'peaking'
+          presenceFilterRef.current.frequency.value = 3400
+          presenceFilterRef.current.Q.value = 1.2
         }
 
         if (!airFilterRef.current) {
@@ -374,9 +748,11 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
         }
 
         if (!audioBoostChainConnectedRef.current) {
-          // Chain: bass warmth -> dialogue presence -> air/detail -> leveler -> limiter -> output.
-          bassFilterRef.current.connect(clarityFilterRef.current)
-          clarityFilterRef.current.connect(airFilterRef.current)
+          // Chain: bass warmth -> mud cut -> dialogue lift -> presence -> air -> leveler -> limiter.
+          bassFilterRef.current.connect(lowMidFilterRef.current)
+          lowMidFilterRef.current.connect(clarityFilterRef.current)
+          clarityFilterRef.current.connect(presenceFilterRef.current)
+          presenceFilterRef.current.connect(airFilterRef.current)
           airFilterRef.current.connect(compressorRef.current)
           compressorRef.current.connect(limiterRef.current)
           limiterRef.current.connect(boostGainRef.current)
@@ -399,28 +775,47 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
     if (audioCtxRef.current) {
       const now = audioCtxRef.current.currentTime
       const profile = AUDIO_BOOST_PROFILES[audioBoostProfile]
+      const intensity = AUDIO_BOOST_INTENSITIES[audioBoostIntensity]
       const active = audioBoostEnabled
+      const intensityAmount = active ? intensity.amount : 0
+      const channelCount = getActiveAudioChannelCount()
+      const surroundDialogLift = active && channelCount >= 6 ? 1.18 : 1
+      const scaledGain = (value: number) => value * intensityAmount
+      const scaledOutputGain = active
+        ? 1 + ((profile.outputGain - 1) * intensity.outputScale) + (channelCount >= 6 ? 0.04 : 0)
+        : 1.0
+      const scaledThreshold = active
+        ? profile.compressorThreshold + ((1 - intensity.amount) * 8)
+        : 0
 
       if (bassFilterRef.current) {
-        setParam(bassFilterRef.current.gain, active ? profile.bassGain : 0, now)
+        setParam(bassFilterRef.current.gain, scaledGain(profile.bassGain), now)
+      }
+      if (lowMidFilterRef.current) {
+        setParam(lowMidFilterRef.current.gain, scaledGain(profile.lowMidGain), now)
       }
       if (clarityFilterRef.current) {
-        setParam(clarityFilterRef.current.gain, active ? profile.dialogGain : 0, now)
+        setParam(clarityFilterRef.current.gain, scaledGain(profile.dialogGain * surroundDialogLift), now)
+      }
+      if (presenceFilterRef.current) {
+        setParam(presenceFilterRef.current.gain, scaledGain(profile.presenceGain * surroundDialogLift), now)
       }
       if (airFilterRef.current) {
-        setParam(airFilterRef.current.gain, active ? profile.airGain : 0, now)
+        setParam(airFilterRef.current.gain, scaledGain(profile.airGain), now)
       }
       if (compressorRef.current) {
-        setParam(compressorRef.current.threshold, active ? profile.compressorThreshold : 0, now)
+        setParam(compressorRef.current.threshold, scaledThreshold, now)
         setParam(compressorRef.current.knee, active ? profile.compressorKnee : 0, now)
-        setParam(compressorRef.current.ratio, active ? profile.compressorRatio : 1, now)
+        setParam(compressorRef.current.ratio, active ? 1 + ((profile.compressorRatio - 1) * intensity.amount) : 1, now)
+        setParam(compressorRef.current.attack, active ? profile.compressorAttack : 0.003, now)
+        setParam(compressorRef.current.release, active ? profile.compressorRelease : 0.25, now)
       }
       if (limiterRef.current) {
-        setParam(limiterRef.current.threshold, active ? -3 : 0, now)
+        setParam(limiterRef.current.threshold, active ? profile.limiterThreshold : 0, now)
         setParam(limiterRef.current.ratio, active ? 14 : 1, now)
       }
       if (boostGainRef.current) {
-        setParam(boostGainRef.current.gain, active ? profile.outputGain : 1.0, now)
+        setParam(boostGainRef.current.gain, scaledOutputGain, now)
       }
     }
 
@@ -431,7 +826,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
         audioCtxRef.current.suspend()
       }
     }
-  }, [audioBoostEnabled, audioBoostProfile, isPlaying])
+  }, [audioBoostEnabled, audioBoostProfile, audioBoostIntensity, isPlaying, selectedAudioId, embeddedAudio])
 
   useEffect(() => {
     return () => {
@@ -543,6 +938,113 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
     }
   }
 
+  const applyStartupResumeTime = () => {
+    const videoEl = videoRef.current
+    if (!videoEl) return
+
+    const rawTargetTime = Math.max(0, startupResumeTimeRef.current || 0)
+    if (rawTargetTime <= 0) return
+
+    const boundedTargetTime = Number.isFinite(videoEl.duration) && videoEl.duration > 0
+      ? Math.min(rawTargetTime, Math.max(videoEl.duration - 0.001, 0))
+      : rawTargetTime
+
+    videoEl.currentTime = boundedTargetTime
+    setCurrentTime(boundedTargetTime)
+    timeRef.current = boundedTargetTime
+  }
+
+  const releaseStartupVideoPlayback = async (token: number) => {
+    const videoEl = videoRef.current
+    if (!videoEl || token !== startupPlaybackTokenRef.current || !startupPlaybackPendingRef.current) return
+
+    startupPlaybackPendingRef.current = false
+    startupPlaybackLaunchingRef.current = false
+    applyStartupResumeTime()
+
+    try {
+      await videoEl.play()
+      if (audioCtxRef.current?.state === 'suspended') {
+        await audioCtxRef.current.resume()
+      }
+    } catch (error) {
+      console.error('Startup video play failed:', error)
+    }
+  }
+
+  const prepareExternalAudioTrack = (
+    trackIndex: number,
+    time: number,
+    isCurrentRequest: () => boolean
+  ): Promise<boolean> => {
+    const audioEl = audioRef.current
+    if (!audioEl || !isCurrentRequest()) return Promise.resolve(false)
+
+    const safeTime = Math.max(0, time || 0)
+    lastSeekTimeRef.current = safeTime
+    setLastSeekTime(safeTime)
+    audioEl.pause()
+    audioEl.volume = volume
+    audioEl.playbackRate = playbackRate
+    audioEl.src = `audio://file/${encodeURIComponent(currentVideo.file_path)}?track=${trackIndex}&time=${safeTime}`
+
+    return new Promise((resolve) => {
+      let settled = false
+      const finish = (ready: boolean) => {
+        if (settled) return
+        settled = true
+        audioEl.removeEventListener('canplay', handleReady)
+        audioEl.removeEventListener('loadeddata', handleReady)
+        audioEl.removeEventListener('error', handleError)
+        resolve(ready && isCurrentRequest())
+      }
+      const handleReady = () => finish(true)
+      const handleError = () => finish(false)
+
+      audioEl.addEventListener('canplay', handleReady, { once: true })
+      audioEl.addEventListener('loadeddata', handleReady, { once: true })
+      audioEl.addEventListener('error', handleError, { once: true })
+      audioEl.load()
+    })
+  }
+
+  const startStartupExternalAudioPlayback = async (trackIndex: number, token: number) => {
+    const videoEl = videoRef.current
+    const audioEl = audioRef.current
+    if (!videoEl || !audioEl || token !== startupPlaybackTokenRef.current || !startupPlaybackPendingRef.current) return
+
+    startupExternalAudioBarrierRef.current = true
+    videoEl.pause()
+    applyStartupResumeTime()
+
+    const ready = await prepareExternalAudioTrack(
+      trackIndex,
+      startupResumeTimeRef.current,
+      () => token === startupPlaybackTokenRef.current
+    )
+    if (!ready || token !== startupPlaybackTokenRef.current) {
+      startupExternalAudioBarrierRef.current = false
+      await releaseStartupVideoPlayback(token)
+      return
+    }
+
+    startupPlaybackPendingRef.current = false
+    startupPlaybackLaunchingRef.current = false
+    startupDriftCorrectionUntilRef.current = Date.now() + 5000
+    applyStartupResumeTime()
+
+    try {
+      await Promise.allSettled([audioEl.play(), videoEl.play()])
+      if (audioCtxRef.current?.state === 'suspended') {
+        await audioCtxRef.current.resume()
+      }
+    } catch (error) {
+      console.error('Startup external audio sync play failed:', error)
+    } finally {
+      startupExternalAudioBarrierRef.current = false
+    }
+  }
+
   const startExternalAudioTrack = (trackIndex: number, time: number, shouldPlay: boolean) => {
     const audioEl = audioRef.current
     if (!audioEl) return
@@ -561,11 +1063,70 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
     }
   }
 
-  const syncSelectedExternalAudio = (time: number, shouldPlay: boolean) => {
+  const syncSelectedExternalAudio = async (
+    time: number,
+    shouldPlay: boolean,
+    options: { keepVideoPlayingWhilePreparing?: boolean } = {}
+  ) => {
     const trackObj = availableAudio.find(a => a.id === selectedAudioId)
-    if (trackObj && !trackObj.native) {
-      startExternalAudioTrack(trackObj.index, time, shouldPlay)
+    const videoEl = videoRef.current
+    const audioEl = audioRef.current
+
+    if (!trackObj || trackObj.native || !videoEl || !audioEl) return
+
+    const syncToken = ++externalAudioSeekTokenRef.current
+    externalAudioSeekBarrierRef.current = true
+    setIsBuffering(false)
+    audioEl.pause()
+    const keepVideoPlaying = shouldPlay && options.keepVideoPlayingWhilePreparing
+    if (keepVideoPlaying) {
+      videoEl.play().catch(e => console.log('Video resume while audio sync prepares failed:', e))
+      setIsPlaying(true)
+    } else {
+      videoEl.pause()
     }
+
+    const ready = await prepareExternalAudioTrack(
+      trackObj.index,
+      time,
+      () => syncToken === externalAudioSeekTokenRef.current
+    )
+    if (!ready || syncToken !== externalAudioSeekTokenRef.current) {
+      externalAudioSeekBarrierRef.current = false
+      if (shouldPlay && syncToken === externalAudioSeekTokenRef.current) {
+        videoEl.play().catch(e => console.log('Video resume after audio seek failed:', e))
+      }
+      return
+    }
+
+    startupDriftCorrectionUntilRef.current = Date.now() + 3000
+    if (!shouldPlay) {
+      externalAudioSeekBarrierRef.current = false
+      return
+    }
+
+    try {
+      if (keepVideoPlaying) {
+        await audioEl.play()
+      } else {
+        await Promise.allSettled([audioEl.play(), videoEl.play()])
+      }
+    } finally {
+      externalAudioSeekBarrierRef.current = false
+    }
+  }
+
+  const getSelectedExternalAudioTrack = () => {
+    const trackObj = availableAudio.find(a => a.id === selectedAudioId)
+    return trackObj && !trackObj.native ? trackObj : null
+  }
+
+  const resumeNativeVideoAfterSeek = (shouldResume: boolean) => {
+    const videoEl = videoRef.current
+    if (!shouldResume || !videoEl || getSelectedExternalAudioTrack()) return
+
+    videoEl.play().catch(e => console.log('Video resume after seek failed:', e))
+    setIsPlaying(true)
   }
 
   useEffect(() => {
@@ -605,6 +1166,51 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
   }, [availableAudio, selectedAudioId, currentVideo.file_path, currentVideo.series_name, volume, playbackRate])
 
   useEffect(() => {
+    if (!hasVideoMetadata || !audioProbeReady || !startupProgressReady || !startupPlaybackPendingRef.current || startupPlaybackLaunchingRef.current) return
+
+    const token = startupPlaybackTokenRef.current
+    const seriesKey = currentVideo.type === 'series' && currentVideo.series_name ? currentVideo.series_name : 'global'
+    const savedPref = localStorage.getItem(`mycinema_audio_pref_${seriesKey}`)
+    let target = availableAudio[0] || null
+
+    if (savedPref) {
+      const match = availableAudio.find(a => a.label === savedPref)
+      if (match) target = match
+    }
+
+    if (!target) {
+      startupPlaybackLaunchingRef.current = true
+      void releaseStartupVideoPlayback(token)
+      return
+    }
+
+    startupPlaybackLaunchingRef.current = true
+    if (selectedAudioId !== target.id) {
+      setSelectedAudioId(target.id)
+    }
+
+    if (target.native) {
+      if (videoRef.current && (videoRef.current as any).audioTracks) {
+        const tracks = (videoRef.current as any).audioTracks
+        for (let i = 0; i < tracks.length; i++) {
+          tracks[i].enabled = i === target.index
+        }
+      }
+      if (videoRef.current) {
+        videoRef.current.muted = volume === 0
+        setTimeout(primeNativeAudioTrack, 60)
+      }
+      void releaseStartupVideoPlayback(token)
+      return
+    }
+
+    if (videoRef.current) {
+      videoRef.current.muted = true
+    }
+    void startStartupExternalAudioPlayback(target.index, token)
+  }, [availableAudio, audioProbeReady, currentVideo.series_name, currentVideo.type, hasVideoMetadata, selectedAudioId, startupProgressReady, volume])
+
+  useEffect(() => {
     if (seekPopup.show) {
       const timer = setTimeout(() => {
         setSeekPopup(prev => ({ ...prev, show: false }))
@@ -615,84 +1221,50 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
 
   useEffect(() => {
     let isCancelled = false
-    let mediaTrackTimer: ReturnType<typeof setTimeout> | null = null
     let metadataTrackLoader: (() => void) | null = null
     const startupVideoEl = videoRef.current
+    clearPlayerRuntimeWork(false)
+    const sessionToken = playerSessionTokenRef.current
 
     const fetchProgress = async () => {
       const progress = await window.api.getVideoProgress(currentVideo.id)
-      if (isCancelled) return
+      if (isCancelled || isPlayerClosingRef.current || sessionToken !== playerSessionTokenRef.current) return
       let targetTime = progress?.last_watched_time || 0
       
       if (progress?.completed) {
         targetTime = 0
       }
       
-      if (forceRestart) {
+      if (forceRestart || forceRestartRef.current) {
         targetTime = 0
+        forceRestartRef.current = false
         setForceRestart(false)
       }
 
-      if (videoRef.current && targetTime > 0) {
-        if (videoRef.current.readyState >= 1) {
-          videoRef.current.currentTime = targetTime
-          setCurrentTime(targetTime)
-          timeRef.current = targetTime
-          syncSelectedExternalAudio(targetTime, !videoRef.current.paused)
-        } else {
-          videoRef.current.addEventListener('loadedmetadata', () => {
-            if (videoRef.current) {
-              videoRef.current.currentTime = targetTime
-              setCurrentTime(targetTime)
-              timeRef.current = targetTime
-              syncSelectedExternalAudio(targetTime, !videoRef.current.paused)
-            }
-          }, { once: true })
-        }
+      startupResumeTimeRef.current = Math.max(0, targetTime)
+
+      if (videoRef.current && targetTime > 0 && videoRef.current.readyState >= 1) {
+        applyStartupResumeTime()
       }
+
+      if (!isCancelled) setStartupProgressReady(true)
     }
 
     const fetchMediaTracks = async () => {
       const srt = await window.api.getSubtitlePath(currentVideo.file_path)
-      if (isCancelled) return
+      if (isCancelled || isPlayerClosingRef.current || sessionToken !== playerSessionTokenRef.current) return
       if (srt) setSubtitlePath(srt)
       else setSubtitlePath(null)
 
       try {
         const [embeddedS, embeddedA] = await Promise.all([
            window.api.getEmbeddedSubtitles(currentVideo.file_path),
-           window.api.getEmbeddedAudio(currentVideo.file_path)
+            window.api.getEmbeddedAudio(currentVideo.file_path)
         ])
-        if (isCancelled) return
+        if (isCancelled || isPlayerClosingRef.current || sessionToken !== playerSessionTokenRef.current) return
         setEmbeddedSubs(embeddedS || [])
         setEmbeddedAudio(embeddedA || [])
-
-        // Pre-convert ALL subtitle tracks to static WebVTT files in the background
-        // This eliminates live FFmpeg streaming during playback which causes glitches
-        const newPaths = new Map<string, string>()
-        const conversionJobs: Promise<void>[] = []
-
-        if (srt) {
-          conversionJobs.push(
-            window.api.preConvertSubtitle(srt, 0, true).then((vttPath: string | null) => {
-              if (vttPath) newPaths.set('external-0', vttPath)
-            })
-          )
-        }
-
-        for (const sub of (embeddedS || [])) {
-          const key = `embedded-${sub.index}`
-          conversionJobs.push(
-            window.api.preConvertSubtitle(currentVideo.file_path, sub.index, false).then((vttPath: string | null) => {
-              if (vttPath) newPaths.set(key, vttPath)
-            })
-          )
-        }
-
-        await Promise.all(conversionJobs)
-        if (isCancelled) return
-        setConvertedSubPaths(newPaths)
-        console.log('[VideoPlayer] Pre-converted', newPaths.size, 'subtitle track(s)')
+        setAudioProbeReady(true)
 
         const seriesKey = currentVideo.type === 'series' && currentVideo.series_name ? currentVideo.series_name : 'global'
         const savedSubPref = localStorage.getItem(`mycinema_sub_pref_${seriesKey}`)
@@ -712,7 +1284,6 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
           await selectSubtitleTrack(restoredId, {
             closeMenu: false,
             persistPreference: false,
-            presetVttPath: newPaths.get(restoredId) || null,
             externalSubtitlePath: srt
           })
         } else {
@@ -720,6 +1291,8 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
         }
       } catch (err) {
         console.error('Failed to get embedded tracks:', err)
+        if (!isCancelled) setAudioProbeReady(true)
+      } finally {
       }
     }
 
@@ -731,10 +1304,22 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
     }
     lastSeekTimeRef.current = 0
     setLastSeekTime(0)
+    startupPlaybackTokenRef.current += 1
+    startupPlaybackPendingRef.current = true
+    startupPlaybackLaunchingRef.current = false
+    startupResumeTimeRef.current = 0
+    startupExternalAudioBarrierRef.current = false
+    startupDriftCorrectionUntilRef.current = 0
+    lastRelaxedAudioSyncCheckRef.current = 0
+    externalAudioSeekBarrierRef.current = false
+    externalAudioSeekTokenRef.current = 0
+    suppressNextSeekSyncRef.current = false
     // Reset audio track state so the availableAudio effect re-selects properly
     setSelectedAudioId('')
     setAudioTracks([])
     setHasVideoMetadata(false)
+    setAudioProbeReady(false)
+    setStartupProgressReady(false)
     setEmbeddedAudio([])
     setEmbeddedSubs([])
     clearActiveSubtitleSelection(false)
@@ -744,20 +1329,13 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
     checkNextEpisode(currentVideo)
     setIsPlaying(false)
     if (startupVideoEl) {
-      // Fix: Ensure volume is up and non-muted
       startupVideoEl.volume = volume
       startupVideoEl.muted = false
       startupVideoEl.load()
 
-      startupVideoEl.play().then(() => {
-        // Double check audio context resume for Audio Boost
-        if (audioCtxRef.current?.state === 'suspended') {
-          audioCtxRef.current.resume()
-        }
-      }).catch(e => console.error('Auto-play failed:', e))
-
       metadataTrackLoader = () => {
-        mediaTrackTimer = setTimeout(fetchMediaTracks, 1200)
+        applyStartupResumeTime()
+        void fetchMediaTracks()
       }
 
       if (startupVideoEl.readyState >= 1) {
@@ -779,13 +1357,28 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
 
     return () => {
       isCancelled = true
-      if (mediaTrackTimer) clearTimeout(mediaTrackTimer)
       if (startupVideoEl && metadataTrackLoader) {
         startupVideoEl.removeEventListener('loadedmetadata', metadataTrackLoader)
       }
       document.removeEventListener('fullscreenchange', handleFullscreenChange)
     }
   }, [currentVideo.id, currentVideo.file_path])
+
+  useEffect(() => {
+    let isMounted = true
+
+    window.api.isFullscreen()
+      .then((windowFullscreen) => {
+        if (isMounted) setIsWindowFullscreen(windowFullscreen)
+      })
+      .catch(() => {})
+
+    const unsubscribe = window.api.onFullscreenChanged(setIsWindowFullscreen)
+    return () => {
+      isMounted = false
+      unsubscribe()
+    }
+  }, [])
 
   useEffect(() => {
     const videoEl = videoRef.current
@@ -1092,7 +1685,12 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
       const active = document.activeElement as HTMLInputElement | null
       if (active?.tagName === 'INPUT' && active?.type !== 'range') return
 
-      if (['Space', 'ArrowUp', 'ArrowDown'].includes(e.code)) e.preventDefault()
+      if (['Space', 'ArrowUp', 'ArrowDown'].includes(e.code) || (roomId && e.code === 'KeyV')) e.preventDefault()
+
+      if (roomId && e.code === 'KeyV' && !e.repeat) {
+        beginPushToTalk()
+        return
+      }
 
       // Space hold = 2x speed
       if (e.code === 'Space' && !e.repeat) {
@@ -1177,8 +1775,13 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
           if (!e.repeat) {
             const currentT = videoRef.current?.currentTime ?? 0
             const nextT = Math.min(videoRef.current?.duration || 0, currentT + 10)
-            if (videoRef.current) videoRef.current.currentTime = nextT
-            handleCustomAudioSeekSync(nextT)
+            if (videoRef.current) {
+              seekWasPlayingRef.current = !videoRef.current.paused
+              pendingControlledSeekTimeRef.current = nextT
+              pendingControlledSeekResumeRef.current = seekWasPlayingRef.current
+              videoRef.current.currentTime = nextT
+              timeRef.current = nextT
+            }
             if (isHost) broadcastState({ type: 'SEEK', time: nextT });
             setSeekPopup({ show: true, text: '+10s', id: Date.now() })
 
@@ -1197,7 +1800,6 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
                 const pct = (seekPreviewRef.current / dur) * 100
                 setHoverTime(seekPreviewRef.current)
                 setHoverPosition(pct)
-                requestSeekPreviewThumbnail(seekPreviewRef.current)
               }, 100)
             }, 400)
           }
@@ -1206,8 +1808,13 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
           if (!e.repeat) {
             const currentT = videoRef.current?.currentTime ?? 0
             const nextT = Math.max(0, currentT - 10)
-            if (videoRef.current) videoRef.current.currentTime = nextT
-            handleCustomAudioSeekSync(nextT)
+            if (videoRef.current) {
+              seekWasPlayingRef.current = !videoRef.current.paused
+              pendingControlledSeekTimeRef.current = nextT
+              pendingControlledSeekResumeRef.current = seekWasPlayingRef.current
+              videoRef.current.currentTime = nextT
+              timeRef.current = nextT
+            }
             if (isHost) broadcastState({ type: 'SEEK', time: nextT });
             setSeekPopup({ show: true, text: '-10s', id: Date.now() })
 
@@ -1225,7 +1832,6 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
                 const pct = (seekPreviewRef.current / dur) * 100
                 setHoverTime(seekPreviewRef.current)
                 setHoverPosition(pct)
-                requestSeekPreviewThumbnail(seekPreviewRef.current)
               }, 100)
             }, 400)
           }
@@ -1339,6 +1945,11 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
         }
       }
 
+      if (roomId && e.code === 'KeyV') {
+        e.preventDefault()
+        endPushToTalk()
+      }
+
       // Cancel any pending arrow hold timer
       if (e.code === 'ArrowRight' || e.code === 'ArrowLeft') {
         if (arrowHoldTimerRef.current) { clearTimeout(arrowHoldTimerRef.current); arrowHoldTimerRef.current = null; }
@@ -1348,8 +1959,13 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
         if (seekPreviewIntervalRef.current) { clearInterval(seekPreviewIntervalRef.current); seekPreviewIntervalRef.current = null; }
         if (seekPreview !== null) {
           const finalT = seekPreviewRef.current
-          if (videoRef.current) videoRef.current.currentTime = finalT
-          handleCustomAudioSeekSync(finalT)
+          if (videoRef.current) {
+            pendingControlledSeekTimeRef.current = finalT
+            pendingControlledSeekResumeRef.current = seekWasPlayingRef.current
+            videoRef.current.currentTime = finalT
+            timeRef.current = finalT
+            resumeNativeVideoAfterSeek(seekWasPlayingRef.current)
+          }
           setSeekPreview(null)
           // Dismiss thumbnail preview
           setHoverTime(null)
@@ -1375,7 +1991,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
       window.removeEventListener('keyup', handleGlobalKeyUp)
       window.removeEventListener('mousedown', handleGlobalMouseDown)
     }
-  }, [currentVideo, hasNextEpisode, availableSubtitles, playbackRate, isHolding2x, isHoldingRev2x, volume, seekPreview])
+  }, [currentVideo, hasNextEpisode, availableSubtitles, playbackRate, isHolding2x, isHoldingRev2x, volume, seekPreview, roomId, voiceEnabled, localPeerId, isHost, isWindowFullscreen])
 
   useEffect(() => {
     if ('mediaSession' in navigator) {
@@ -1430,15 +2046,23 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
   useEffect(() => {
     const driftInterval = setInterval(() => {
       if (isPlaying && videoRef.current && audioRef.current && audioRef.current.src) {
+        const now = Date.now()
+        const isStartupWindow = now < startupDriftCorrectionUntilRef.current
+        if (!isStartupWindow) {
+          if (now - lastRelaxedAudioSyncCheckRef.current < 2000) return
+          lastRelaxedAudioSyncCheckRef.current = now
+        }
+
         const expectedTime = videoRef.current.currentTime - lastSeekTimeRef.current
         if (expectedTime >= 0) {
           const drift = audioRef.current.currentTime - expectedTime
-          if (Math.abs(drift) > 0.35) {
+          const threshold = isStartupWindow ? 0.08 : 0.35
+          if (Math.abs(drift) > threshold) {
             audioRef.current.currentTime = expectedTime
           }
         }
       }
-    }, 2000)
+    }, 150)
     return () => clearInterval(driftInterval)
   }, [isPlaying, lastSeekTime])
 
@@ -1451,6 +2075,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
       const episodes: Video[] = seriesEpisodes.length > 0 ? seriesEpisodes : await window.api.getSeriesInfo(currentVideo.series_name)
       const currentIndex = episodes.findIndex(e => e.id === currentVideo.id)
       if (currentIndex !== -1 && currentIndex < episodes.length - 1) {
+        forceRestartRef.current = true
         setForceRestart(true)
         setCurrentVideo(episodes[currentIndex + 1])
       } else {
@@ -1625,8 +2250,11 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
   ) => {
     const seriesKey = currentVideo.type === 'series' && currentVideo.series_name ? currentVideo.series_name : 'global'
     const { closeMenu = true, persistPreference = true, presetVttPath = null, externalSubtitlePath } = options
+    const loadToken = ++subtitleLoadTokenRef.current
+    const sessionToken = playerSessionTokenRef.current
 
     if (key === null) {
+      subtitleLoadTokenRef.current += 1
       if (persistPreference) {
         localStorage.setItem(`mycinema_sub_pref_${seriesKey}`, 'Off')
       }
@@ -1659,10 +2287,22 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
         const trackIndex = isExternal ? 0 : parseInt(key.replace('embedded-', ''), 10)
         const sourceFile = isExternal ? (externalSubtitlePath ?? subtitlePath ?? currentVideo.file_path) : currentVideo.file_path
         vttPath = await window.api.preConvertSubtitle(sourceFile, trackIndex, isExternal)
+        if (
+          isPlayerClosingRef.current ||
+          loadToken !== subtitleLoadTokenRef.current ||
+          sessionToken !== playerSessionTokenRef.current ||
+          activeSubKeyRef.current !== key
+        ) return
         if (vttPath) setConvertedSubPaths(prev => new Map(prev).set(key, vttPath!))
       }
 
       if (!vttPath) {
+        if (
+          isPlayerClosingRef.current ||
+          loadToken !== subtitleLoadTokenRef.current ||
+          sessionToken !== playerSessionTokenRef.current ||
+          activeSubKeyRef.current !== key
+        ) return
         clearRenderedSubtitle()
         setSubtitleLoading(false)
         return
@@ -1673,9 +2313,25 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
       const text = await res.text()
       
       // Guard: ignore stale response if user switched tracks during conversion
-      if (activeSubKeyRef.current !== key) return
+      if (
+        isPlayerClosingRef.current ||
+        loadToken !== subtitleLoadTokenRef.current ||
+        sessionToken !== playerSessionTokenRef.current ||
+        activeSubKeyRef.current !== key
+      ) return
       
-      subtitleCuesRef.current = parseVTT(text)
+      const parsedCues = parseVTT(text)
+      if (parsedCues.length === 0) {
+        console.warn('[Subtitle] Converted track has no readable cues:', key, vttPath)
+        activeSubKeyRef.current = null
+        setActiveSubKey(null)
+        subtitleCuesRef.current = []
+        clearRenderedSubtitle()
+        showTrackToast('subtitle', 'Not Readable')
+        return
+      }
+
+      subtitleCuesRef.current = parsedCues
       activeSubtitleCueIndexRef.current = -1
       if (videoRef.current) {
         renderSubtitleAtTime(videoRef.current.currentTime)
@@ -1685,7 +2341,12 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
       console.error('[Subtitle] Failed to load cues:', err)
       clearRenderedSubtitle()
     } finally {
-      if (activeSubKeyRef.current === key) setSubtitleLoading(false)
+      if (
+        !isPlayerClosingRef.current &&
+        loadToken === subtitleLoadTokenRef.current &&
+        sessionToken === playerSessionTokenRef.current &&
+        activeSubKeyRef.current === key
+      ) setSubtitleLoading(false)
     }
   }
 
@@ -1773,17 +2434,19 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
   const handleCustomAudioSeekSync = (time: number) => {
     const trackObj = availableAudio.find(a => a.id === selectedAudioId)
     if (trackObj && !trackObj.native && audioRef.current) {
-      startExternalAudioTrack(trackObj.index, time, !!videoRef.current && !videoRef.current.paused)
+      void syncSelectedExternalAudio(time, !!videoRef.current && !videoRef.current.paused)
     }
   }
 
   const seek = (seconds: number) => {
     if (!isHost && roomId !== null) return;
     if (videoRef.current) {
+      seekWasPlayingRef.current = !videoRef.current.paused
       const time = videoRef.current.currentTime + seconds
+      pendingControlledSeekTimeRef.current = time
+      pendingControlledSeekResumeRef.current = seekWasPlayingRef.current
       videoRef.current.currentTime = time
       timeRef.current = time
-      handleCustomAudioSeekSync(time)
       setSeekPopup(prev => ({ show: true, text: seconds > 0 ? `+${seconds}s` : `${seconds}s`, id: prev.id + 1 }))
       if (isHost) broadcastState({ type: 'SEEK', time });
     }
@@ -1793,24 +2456,28 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
     const time = parseFloat(e.target.value)
     setCurrentTime(time)
     timeRef.current = time
-    if (videoRef.current) {
+    if (videoRef.current && !isSeeking) {
       videoRef.current.currentTime = time
     }
   }
 
   const handleSeekMouseUp = (e: React.MouseEvent<HTMLInputElement> | React.TouchEvent<HTMLInputElement>) => {
     if (!isHost && roomId !== null) return;
-    setIsSeeking(false)
     const time = parseFloat((e.target as HTMLInputElement).value)
     if (videoRef.current) {
+      setIsSeeking(false)
+      pendingControlledSeekTimeRef.current = time
+      pendingControlledSeekResumeRef.current = seekWasPlayingRef.current
       videoRef.current.currentTime = time
       timeRef.current = time
-      handleCustomAudioSeekSync(time)
       if (isHost) broadcastState({ type: 'SEEK', time });
     }
   }
 
   const handleSeekMouseDown = () => {
+    if (videoRef.current) {
+      seekWasPlayingRef.current = !videoRef.current.paused
+    }
     setIsSeeking(true)
   }
 
@@ -1895,13 +2562,30 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
     setSeekPreviewLoading(false)
   }
 
-  const toggleFullscreen = () => {
-    if (playerShellRef.current) {
-      if (!document.fullscreenElement) {
-        playerShellRef.current.requestFullscreen()
-      } else {
-        document.exitFullscreen()
+  const toggleFullscreen = async () => {
+    try {
+      const hasDocumentFullscreen = !!document.fullscreenElement
+      const hasWindowFullscreen = await window.api.isFullscreen().catch(() => isWindowFullscreen)
+
+      if (hasDocumentFullscreen || hasWindowFullscreen) {
+        if (hasDocumentFullscreen) {
+          await document.exitFullscreen().catch(() => {})
+        }
+
+        if (hasWindowFullscreen) {
+          const nextState = await window.api.toggleFullscreen()
+          setIsWindowFullscreen(nextState)
+        }
+
+        setShowControls(true)
+        clearTimeout(window.controlsTimeout)
+        window.controlsTimeout = setTimeout(() => setShowControls(false), 3000)
+        return
       }
+
+      await playerShellRef.current?.requestFullscreen()
+    } catch (err) {
+      console.error('Fullscreen toggle failed:', err)
     }
   }
 
@@ -2051,7 +2735,17 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
           const time = videoRef.current.currentTime
           setCurrentTime(time)
           timeRef.current = time
-          syncSelectedExternalAudio(time, !videoRef.current.paused)
+          if (pendingControlledSeekTimeRef.current !== null) {
+            const shouldResume = pendingControlledSeekResumeRef.current
+            pendingControlledSeekTimeRef.current = null
+            pendingControlledSeekResumeRef.current = false
+            resumeNativeVideoAfterSeek(shouldResume)
+            void syncSelectedExternalAudio(time, shouldResume, { keepVideoPlayingWhilePreparing: true })
+          } else if (suppressNextSeekSyncRef.current) {
+            suppressNextSeekSyncRef.current = false
+          } else {
+            void syncSelectedExternalAudio(time, !videoRef.current.paused)
+          }
           activeSubtitleCueIndexRef.current = -1
           renderSubtitleAtTime(time)
         }}
@@ -2065,17 +2759,21 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
         onPlay={() => { 
           setIsPlaying(true); 
           const trackObj = availableAudio.find(a => a.id === selectedAudioId);
-          if (trackObj && !trackObj.native && audioRef.current) {
+          if (trackObj && !trackObj.native && audioRef.current && !startupExternalAudioBarrierRef.current && !externalAudioSeekBarrierRef.current) {
             startExternalAudioTrack(trackObj.index, videoRef.current?.currentTime || 0, true)
           }
         }}
         onPause={() => { setIsPlaying(false); if (audioRef.current && audioRef.current.src) audioRef.current.pause(); }}
         onEnded={handleEnded}
-        onWaiting={() => { setIsBuffering(true); if (audioRef.current && audioRef.current.src) audioRef.current.pause(); }}
+        onWaiting={() => {
+          if (startupExternalAudioBarrierRef.current || externalAudioSeekBarrierRef.current) return
+          setIsBuffering(true)
+          if (audioRef.current && audioRef.current.src) audioRef.current.pause()
+        }}
         onPlaying={() => { 
           setIsBuffering(false); 
           const trackObj = availableAudio.find(a => a.id === selectedAudioId);
-          if (trackObj && !trackObj.native && audioRef.current) {
+          if (trackObj && !trackObj.native && audioRef.current && !startupExternalAudioBarrierRef.current && !externalAudioSeekBarrierRef.current) {
             if (!audioRef.current.src) {
               startExternalAudioTrack(trackObj.index, videoRef.current?.currentTime || 0, true)
             } else {
@@ -2114,25 +2812,18 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
           const error = (e.target as HTMLVideoElement).error
           console.error('Video Error Details:', error?.message, error?.code)
         }}
-          autoPlay
         >
         </video>
 
-        <FPSBoostRenderer
-          videoRef={videoRef}
-          enabled={fpsBoostEnabled}
-          aspectMode={aspectMode}
-          isPlaying={isPlaying}
-        />
-
-        <QualityBoostRenderer
-          videoRef={videoRef}
-          enabled={qualitySharpnessEnabled || qualityVibranceEnabled}
-          sharpnessEnabled={qualitySharpnessEnabled}
-          vibranceEnabled={qualityVibranceEnabled}
-          aspectMode={aspectMode}
-          isPlaying={isPlaying}
-        />
+        {(fpsBoostEnabled || qualitySharpnessEnabled || qualityVibranceEnabled) && (
+          <AIEnhancementRenderer
+            videoRef={videoRef}
+            fpsBoostEnabled={fpsBoostEnabled}
+            sharpnessEnabled={qualitySharpnessEnabled}
+            vibranceEnabled={qualityVibranceEnabled}
+            aspectMode={aspectMode}
+          />
+        )}
       </div>
 
       <style>{`
@@ -2211,6 +2902,59 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
       {isBuffering && (
         <div className="absolute inset-0 flex items-center justify-center bg-black/20 pointer-events-none">
           <div className="w-16 h-16 border-4 border-primary border-t-transparent rounded-full animate-spin" />
+        </div>
+      )}
+
+      {roomId && (
+        <div className="absolute bottom-32 left-1/2 z-50 -translate-x-1/2 video-controls">
+          <div className="flex flex-col items-center gap-2">
+            {(activeSpeakerId || talkResumeCountdown !== null || voiceError) && (
+              <div className={`rounded-full border px-4 py-2 text-sm font-bold shadow-2xl backdrop-blur-xl ${
+                voiceError
+                  ? 'border-red-400/30 bg-red-950/70 text-red-200'
+                  : activeSpeakerId
+                    ? 'border-indigo-300/25 bg-black/65 text-white'
+                    : 'border-white/10 bg-black/55 text-white/80'
+              }`}>
+                {voiceError
+                  ? voiceError
+                  : activeSpeakerId
+                    ? `${getSpeakerLabel(activeSpeakerId)} paused to speak`
+                    : `Resuming in ${talkResumeCountdown}...`}
+              </div>
+            )}
+            <button
+              onPointerDown={(e) => {
+                e.stopPropagation()
+                beginPushToTalk()
+              }}
+              onPointerUp={(e) => {
+                e.stopPropagation()
+                endPushToTalk()
+              }}
+              onPointerLeave={(e) => {
+                e.stopPropagation()
+                endPushToTalk()
+              }}
+              onPointerCancel={(e) => {
+                e.stopPropagation()
+                endPushToTalk()
+              }}
+              className={`h-14 min-w-[220px] rounded-full border px-5 shadow-2xl backdrop-blur-xl transition-all active:scale-95 ${
+                isMicActive
+                  ? 'border-indigo-300/40 bg-indigo-500 text-white shadow-indigo-500/30'
+                  : 'border-white/10 bg-black/55 text-white hover:bg-black/75'
+              }`}
+              title="Hold V to pause and talk"
+            >
+              <span className="flex items-center justify-center gap-3">
+                {isMicActive ? <Mic size={20} /> : <MicOff size={20} />}
+                <span className="text-sm font-black uppercase tracking-wide">
+                  {isMicActive ? 'Speaking' : voiceEnabled ? 'Hold V to Talk' : 'Enable Mic'}
+                </span>
+              </span>
+            </button>
+          </div>
         </div>
       )}
 
@@ -2710,7 +3454,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
                         <Volume2 size={18} className={audioBoostEnabled ? "text-primary" : "text-white/30"} />
                         <div className="text-left">
                           <p className="text-[13px] font-bold tracking-tight">Audio Boost</p>
-                          <p className="text-[10px] opacity-50 font-medium">Clearer & Bass Boost</p>
+                          <p className="text-[10px] opacity-50 font-medium">Dialogue & loudness</p>
                         </div>
                       </div>
                       <div className={`flex-shrink-0 w-8 h-4.5 rounded-full relative transition-colors duration-300 ${audioBoostEnabled ? 'bg-primary' : 'bg-white/10'}`}>
@@ -2719,25 +3463,45 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
                     </button>
 
                     {audioBoostEnabled && (
-                      <div className="grid grid-cols-3 gap-1.5 px-1 pb-2">
-                        {(Object.entries(AUDIO_BOOST_PROFILES) as [AudioBoostProfile, typeof AUDIO_BOOST_PROFILES[AudioBoostProfile]][]).map(([profileKey, profile]) => (
-                          <button
-                            key={profileKey}
-                            onClick={(e) => {
-                              e.stopPropagation()
-                              setAudioBoostProfile(profileKey)
-                            }}
-                            className={`min-w-0 rounded-lg px-2 py-2 text-left transition-all duration-200 ${
-                              audioBoostProfile === profileKey
-                                ? 'bg-primary/15 text-primary ring-1 ring-primary/30'
-                                : 'bg-white/5 text-white/55 hover:bg-white/10 hover:text-white'
-                            }`}
-                            title={profile.detail}
-                          >
-                            <p className="truncate text-[11px] font-black uppercase tracking-wide">{profile.label}</p>
-                            <p className="truncate text-[9px] font-semibold opacity-55">{profile.detail}</p>
-                          </button>
-                        ))}
+                      <div className="space-y-2 px-1 pb-2">
+                        <div className="grid grid-cols-2 gap-1.5">
+                          {(Object.entries(AUDIO_BOOST_PROFILES) as [AudioBoostProfile, typeof AUDIO_BOOST_PROFILES[AudioBoostProfile]][]).map(([profileKey, profile]) => (
+                            <button
+                              key={profileKey}
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                setAudioBoostProfile(profileKey)
+                              }}
+                              className={`min-w-0 rounded-lg px-2 py-2 text-left transition-all duration-200 ${
+                                audioBoostProfile === profileKey
+                                  ? 'bg-primary/15 text-primary ring-1 ring-primary/30'
+                                  : 'bg-white/5 text-white/55 hover:bg-white/10 hover:text-white'
+                              }`}
+                              title={profile.detail}
+                            >
+                              <p className="truncate text-[11px] font-black uppercase tracking-wide">{profile.label}</p>
+                              <p className="truncate text-[9px] font-semibold opacity-55">{profile.detail}</p>
+                            </button>
+                          ))}
+                        </div>
+                        <div className="grid grid-cols-3 gap-1.5">
+                          {(Object.entries(AUDIO_BOOST_INTENSITIES) as [AudioBoostIntensity, typeof AUDIO_BOOST_INTENSITIES[AudioBoostIntensity]][]).map(([intensityKey, intensity]) => (
+                            <button
+                              key={intensityKey}
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                setAudioBoostIntensity(intensityKey)
+                              }}
+                              className={`rounded-lg px-2 py-1.5 text-center text-[10px] font-black uppercase tracking-wide transition-all duration-200 ${
+                                audioBoostIntensity === intensityKey
+                                  ? 'bg-white/15 text-white ring-1 ring-white/25'
+                                  : 'bg-white/5 text-white/45 hover:bg-white/10 hover:text-white/70'
+                              }`}
+                            >
+                              {intensity.label}
+                            </button>
+                          ))}
+                        </div>
                       </div>
                     )}
 
@@ -2834,8 +3598,8 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
               <PictureInPicture2 size={24} />
             </button>
 
-            <button onClick={toggleFullscreen} className="text-white hover:text-primary transition-colors" title={isFullscreen ? "Exit Fullscreen" : "Fullscreen"}>
-              {isFullscreen ? <Minimize size={24} /> : <Maximize size={24} />}
+            <button onClick={toggleFullscreen} className="text-white hover:text-primary transition-colors" title={isAnyFullscreen ? "Exit Fullscreen" : "Fullscreen"}>
+              {isAnyFullscreen ? <Minimize size={24} /> : <Maximize size={24} />}
             </button>
 
 
@@ -2844,6 +3608,20 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
       </div>
       {/* Hidden Custom Audio Extraction Pipeliner */}
       <audio ref={audioRef} style={{ display: 'none' }} />
+      {remoteAudioStreams.map(({ peerId, stream }) => (
+        <audio
+          key={peerId}
+          ref={(node) => {
+            if (node && node.srcObject !== stream) {
+              node.srcObject = stream
+              node.play().catch(e => console.log('Remote voice play failed:', e))
+            }
+          }}
+          autoPlay
+          playsInline
+          style={{ display: 'none' }}
+        />
+      ))}
 
       {/* ─── Episodes Slide-in Panel ─────────────────────────────────────── */}
       <div
@@ -2876,6 +3654,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
                     e.stopPropagation()
                     if (isActive) return
                     setShowEpisodesPanel(false)
+                    forceRestartRef.current = true
                     setForceRestart(true)
                     setCurrentVideo(episode)
                   }}

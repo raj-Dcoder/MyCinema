@@ -1,7 +1,6 @@
 import React, { useState, useEffect, useLayoutEffect, useRef } from 'react'
-import { motion, AnimatePresence } from 'framer-motion'
-import clsx from 'clsx'
-import { Home as HomeIcon, Film, Tv, Settings as SettingsIcon, Video as VideoIcon, Download as DownloadIcon, ChevronLeft, ChevronRight, Menu, Bookmark, Clock, Heart, User, Search as SearchIcon, Bell, Settings, RefreshCw, Maximize2, Sparkles, Zap, ShieldCheck, Wrench, Check, Share2 } from 'lucide-react'
+import { AnimatePresence } from 'framer-motion'
+import { Home as HomeIcon, Film, Tv, Settings as SettingsIcon, Video as VideoIcon, Download as DownloadIcon, Menu, Bookmark, Clock, Heart, Settings, RefreshCw, Maximize2 } from 'lucide-react'
 import { Video } from './types'
 import Home from './pages/Home'
 import Videos from './pages/Videos'
@@ -13,72 +12,9 @@ import History from './pages/History'
 import SettingsPage from './pages/Settings'
 import VideoPlayer from './components/VideoPlayer'
 import DetailScreen from './components/DetailScreen'
+import WhatsNewOnboarding, { LATEST_RELEASE } from './components/WhatsNewOnboarding'
 import Download from './pages/Download'
 import appLogo from './assets/mycinema-logo.png'
-
-const LATEST_RELEASE = {
-  version: '1.22.0',
-  eyebrow: 'What\'s New',
-  headline: 'Share links, sharper seeking, and cleaner libraries.',
-  summary: 'This release adds MyCinema share links, better source sharing, seek previews, local-video handling, and stronger download reliability.',
-  steps: [
-    {
-      icon: Share2,
-      title: 'Share Links',
-      description: 'Movies, series, and exact download sources are easier to send and reopen.',
-      color: 'from-blue-500 to-cyan-400',
-      iconColor: 'text-cyan-400',
-      items: [
-        'Detail pages can create MyCinema links with WhatsApp, Telegram, copy-link, and copy-text actions.',
-        'Shared links can reopen the desktop app directly through the new mycinema:// protocol.'
-      ]
-    },
-    {
-      icon: DownloadIcon,
-      title: 'Downloads & Sources',
-      description: 'Source picking, sharing, and download controls are more exact.',
-      color: 'from-emerald-400 to-teal-500',
-      iconColor: 'text-emerald-400',
-      items: [
-        'Completed downloads can share the exact selected mirror so friends can open the same source.',
-        'Series source filters now separate season packs from episode results and add Hindi availability counts.'
-      ]
-    },
-    {
-      icon: Zap,
-      title: 'Player & Library',
-      description: 'Local playback and scanned libraries behave more naturally.',
-      color: 'from-violet-500 to-fuchsia-400',
-      iconColor: 'text-fuchsia-300',
-      items: [
-        'Hovering the progress bar now shows cached ffmpeg thumbnail previews instead of loading a second video element.',
-        'Personal clips, recordings, lectures, and short videos now stay in Videos instead of being forced into Movies.'
-      ]
-    },
-    {
-      icon: Sparkles,
-      title: 'Discovery Polish',
-      description: 'Home and details now present fresher, cleaner context.',
-      color: 'from-amber-400 to-orange-500',
-      iconColor: 'text-amber-400',
-      items: [
-        'India discovery is split into separate movie and series rails with a stricter recent OTT window.',
-        'Details add vibe tags, a tighter action layout, and better behavior for external TMDB-backed titles.'
-      ]
-    },
-    {
-      icon: ShieldCheck,
-      title: 'Security & Reliability',
-      description: 'Share, preview, and download paths received tighter guardrails.',
-      color: 'from-amber-400 to-orange-500',
-      iconColor: 'text-amber-400',
-      items: [
-        'Shared links validate media type, TMDB ID, and magnet payloads before opening source data.',
-        'Seek preview IPC checks local paths, download pause/resume avoids stale progress, and shutdown cleanup clears torrent timers.'
-      ]
-    }
-  ]
-}
 
 const getWhatsNewStorageKey = (version: string) => `mycinema_whats_new_seen_${version}`
 const SIDEBAR_EXPANDED_STORAGE_KEY = 'mycinema_sidebar_expanded'
@@ -277,12 +213,20 @@ const App: React.FC = () => {
   }
 
   const handleWhatsNewNext = () => {
-    if (whatsNewStep < LATEST_RELEASE.steps.length - 1) {
+    if (whatsNewStep < LATEST_RELEASE.slides.length - 1) {
       setWhatsNewStep(step => step + 1)
       return
     }
 
     closeWhatsNew()
+  }
+
+  const handleWhatsNewPrevious = () => {
+    setWhatsNewStep(step => Math.max(0, step - 1))
+  }
+
+  const handleWhatsNewStepChange = (step: number) => {
+    setWhatsNewStep(Math.min(Math.max(step, 0), LATEST_RELEASE.slides.length - 1))
   }
 
   const clearWindowControlsHideTimer = () => {
@@ -574,138 +518,17 @@ const App: React.FC = () => {
         />
       )}
 
-      {/* What's New Modal */}
+      {/* What's New Onboarding */}
       <AnimatePresence>
-        {showWhatsNew && (() => {
-          const step = LATEST_RELEASE.steps[whatsNewStep]
-          const StepIcon = step.icon
-          const isLastStep = whatsNewStep === LATEST_RELEASE.steps.length - 1
-
-          return (
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              className="fixed inset-0 z-[200] flex items-center justify-center p-4 sm:p-6"
-            >
-              <div
-                className="absolute inset-0 bg-[#05070c]/32 backdrop-blur-[14px] [backdrop-filter:blur(14px)_saturate(0.72)_brightness(0.72)]"
-                onClick={closeWhatsNew}
-              />
-              <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_50%_42%,rgba(255,255,255,0.08),rgba(5,7,12,0.1)_34%,rgba(0,0,0,0.34)_100%)]" />
-              <div className="pointer-events-none absolute inset-0 opacity-[0.07] [background-image:linear-gradient(90deg,rgba(255,255,255,0.5)_1px,transparent_1px),linear-gradient(0deg,rgba(255,255,255,0.5)_1px,transparent_1px)] [background-size:6px_6px]" />
-              <div className="pointer-events-none absolute inset-0 shadow-[inset_0_0_120px_rgba(0,0,0,0.46)]" />
-
-              <motion.div
-                initial={{ scale: 0.9, y: 20, opacity: 0 }}
-                animate={{ scale: 1, y: 0, opacity: 1 }}
-                exit={{ scale: 0.95, y: 10, opacity: 0 }}
-                transition={{ type: 'spring', stiffness: 300, damping: 30 }}
-                className="relative w-full max-w-xl overflow-hidden rounded-2xl border border-white/10 bg-[#090d14] shadow-2xl"
-              >
-                <div className="pointer-events-none absolute inset-0 overflow-hidden">
-                  <AnimatePresence mode="wait">
-                    <motion.div
-                      key={whatsNewStep}
-                      initial={{ opacity: 0, scale: 0.8 }}
-                      animate={{ opacity: 0.08, scale: 1.25 }}
-                      exit={{ opacity: 0 }}
-                      transition={{ duration: 1 }}
-                      className={clsx(
-                        'absolute right-0 top-0 h-80 w-80 -translate-y-1/2 translate-x-1/3 rounded-full bg-gradient-to-br blur-[100px]',
-                        step.color
-                      )}
-                    />
-                  </AnimatePresence>
-                </div>
-
-                <div className="relative p-6 sm:p-8">
-                  <div className="mb-5 flex items-start justify-between gap-4">
-                    <div>
-                      <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-white/35">
-                        {LATEST_RELEASE.eyebrow} / v{LATEST_RELEASE.version}
-                      </p>
-                      <h2 className="mt-2 text-lg font-semibold tracking-tight text-white">{LATEST_RELEASE.headline}</h2>
-                    </div>
-                    <button
-                      onClick={closeWhatsNew}
-                      className="rounded-lg px-2 py-1 text-xs font-semibold uppercase tracking-wider text-zinc-500 transition-colors hover:bg-white/5 hover:text-white"
-                    >
-                      Skip
-                    </button>
-                  </div>
-
-                  <div className="mb-6 flex gap-1.5">
-                    {LATEST_RELEASE.steps.map((_, idx) => (
-                      <div key={idx} className="h-1 w-10 overflow-hidden rounded-full bg-white/10">
-                        {idx <= whatsNewStep && (
-                          <motion.div
-                            layoutId="whatsNewProgressIndicator"
-                            className={clsx('h-full bg-gradient-to-r', step.color)}
-                            initial={{ width: idx < whatsNewStep ? '100%' : '0%' }}
-                            animate={{ width: '100%' }}
-                            transition={{ duration: 0.4 }}
-                          />
-                        )}
-                      </div>
-                    ))}
-                  </div>
-
-                  <div className="min-h-[215px]">
-                    <AnimatePresence mode="wait">
-                      <motion.div
-                        key={whatsNewStep}
-                        initial={{ opacity: 0, x: 20 }}
-                        animate={{ opacity: 1, x: 0 }}
-                        exit={{ opacity: 0, x: -20 }}
-                        transition={{ duration: 0.3 }}
-                        className="flex flex-col items-start gap-4"
-                      >
-                        <div className={clsx('rounded-xl border border-white/10 bg-white/[0.04] p-3', step.iconColor)}>
-                          <StepIcon size={26} strokeWidth={1.6} />
-                        </div>
-                        <div>
-                          <h3 className="mb-2 text-2xl font-semibold tracking-tight text-white">{step.title}</h3>
-                          <p className="max-w-lg text-sm leading-6 text-zinc-400">{step.description}</p>
-                        </div>
-                        <div className="w-full space-y-2 border-t border-white/10 pt-3">
-                          {step.items.map(item => (
-                            <div key={item} className="flex gap-3">
-                              <span className={clsx('mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-current', step.iconColor)} />
-                              <p className="text-[13px] leading-5 text-white/68">{item}</p>
-                            </div>
-                          ))}
-                        </div>
-                      </motion.div>
-                    </AnimatePresence>
-                  </div>
-
-                  <div className="mt-7 flex items-center justify-between">
-                    <div className="text-xs text-zinc-500">
-                      Step {whatsNewStep + 1} of {LATEST_RELEASE.steps.length}
-                    </div>
-                    <button
-                      onClick={handleWhatsNewNext}
-                      className={clsx(
-                        'group relative inline-flex items-center gap-2 overflow-hidden rounded-full px-5 py-2.5 text-sm transition-all duration-300',
-                        isLastStep
-                          ? 'bg-white text-black shadow-[0_0_20px_rgba(255,255,255,0.3)] hover:bg-zinc-200'
-                          : 'border border-white/10 bg-white/10 text-white hover:border-white/30 hover:bg-white/20'
-                      )}
-                    >
-                      <span className="font-medium">{isLastStep ? 'Get Started' : 'Next'}</span>
-                      {isLastStep ? (
-                        <Check size={18} className="transition-transform group-hover:scale-110" />
-                      ) : (
-                        <ChevronRight size={18} className="transition-transform group-hover:translate-x-1" />
-                      )}
-                    </button>
-                  </div>
-                </div>
-              </motion.div>
-            </motion.div>
-          )
-        })()}
+        {showWhatsNew && (
+          <WhatsNewOnboarding
+            currentStep={whatsNewStep}
+            onNext={handleWhatsNewNext}
+            onPrevious={handleWhatsNewPrevious}
+            onStepChange={handleWhatsNewStepChange}
+            onClose={closeWhatsNew}
+          />
+        )}
       </AnimatePresence>
     </div>
   )

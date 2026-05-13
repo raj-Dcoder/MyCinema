@@ -107,3 +107,123 @@
   font-weight: 600;
   text-shadow: 0 1px 2px rgba(0, 0, 0, 0.8);
 }
+
+@keyframes whats-new-particle {
+  0%, 100% {
+    opacity: 0.18;
+    transform: translate3d(0, 0, 0);
+  }
+  42% {
+    opacity: 0.82;
+    transform: translate3d(14px, -22px, 0);
+  }
+  72% {
+    opacity: 0.34;
+    transform: translate3d(-10px, -38px, 0);
+  }
+}
+
+@keyframes whats-new-energy-bar {
+  0%, 100% { height: 28%; }
+  35% { height: 100%; }
+  62% { height: 48%; }
+}
+
+@keyframes whats-new-live-dot {
+  0%, 100% {
+    opacity: 0.55;
+    box-shadow: 0 0 0 rgba(255, 255, 255, 0);
+  }
+  50% {
+    opacity: 1;
+    box-shadow: 0 0 18px currentColor;
+  }
+}
+
+@keyframes whats-new-float {
+  0%, 100% { transform: translate3d(0, 0, 0) rotate(var(--wn-rotate, 0deg)); }
+  50% { transform: translate3d(0, -14px, 0) rotate(var(--wn-rotate, 0deg)); }
+}
+
+@keyframes whats-new-doodle {
+  0%, 100% { transform: translate3d(0, 0, 0) rotate(-4deg); }
+  50% { transform: translate3d(9px, -7px, 0) rotate(3deg); }
+}
+
+@keyframes whats-new-progress-scan {
+  0% { filter: brightness(0.78); }
+  50% { filter: brightness(1.35); }
+  100% { filter: brightness(0.78); }
+}
+
+@keyframes whats-new-swipe-cue {
+  0%, 100% {
+    opacity: 0.22;
+    transform: translateX(-4px);
+  }
+  50% {
+    opacity: 0.9;
+    transform: translateX(4px);
+  }
+}
+
+@keyframes whats-new-sweep {
+  0% { transform: translateX(-110%); }
+  100% { transform: translateX(110%); }
+}
+
+@keyframes whats-new-orbit {
+  0% { transform: rotate(0deg) scale(1); }
+  50% { transform: rotate(180deg) scale(1.04); }
+  100% { transform: rotate(360deg) scale(1); }
+}
+
+.whats-new-particle {
+  animation: whats-new-particle 8s ease-in-out infinite;
+}
+
+.whats-new-energy-bar {
+  animation: whats-new-energy-bar 1.08s ease-in-out infinite;
+}
+
+.whats-new-live-dot {
+  animation: whats-new-live-dot 1.25s ease-in-out infinite;
+}
+
+.whats-new-float {
+  --wn-rotate: 0deg;
+  animation: whats-new-float 5.5s ease-in-out infinite;
+}
+
+.whats-new-float-slow {
+  --wn-rotate: -8deg;
+  animation: whats-new-float 7s ease-in-out infinite;
+}
+
+.whats-new-doodle {
+  animation: whats-new-doodle 4.8s ease-in-out infinite;
+}
+
+.whats-new-progress-scan {
+  animation: whats-new-progress-scan 1.8s ease-in-out infinite;
+}
+
+.whats-new-button-sheen {
+  background: linear-gradient(110deg, transparent 18%, rgba(255,255,255,0.5), transparent 82%);
+}
+
+.whats-new-swipe-cue {
+  animation: whats-new-swipe-cue 1.05s ease-in-out infinite;
+}
+
+.whats-new-sweep {
+  animation: whats-new-sweep 2.6s ease-in-out infinite;
+}
+
+.whats-new-orbit {
+  animation: whats-new-orbit 16s linear infinite;
+}
+
+.whats-new-orbit-reverse {
+  animation: whats-new-orbit 13s linear infinite reverse;
+}

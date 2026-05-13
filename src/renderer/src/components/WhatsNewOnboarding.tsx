@@ -44,7 +44,7 @@ type WhatsNewSlide = {
 }
 
 export const LATEST_RELEASE = {
-  version: '1.22.0',
+  version: '1.22.1',
   eyebrow: 'What\'s New',
   slides: [
     {

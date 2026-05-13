@@ -1,3 +1,14 @@
+# MyCinema v1.22.1
+
+Patch release that ships the performance-improvement build as a new version after v1.22.0, keeping the experimental Watch Party branch out of this release.
+
+### Release Focus
+- **Performance Branch Release**: Merged the performance-improvement branch into `master` and released it as the new v1.22.1 build.
+- **Watch Together Voice Polish**: Includes the push-to-talk Watch Together flow, isolated two-client dev profiles, and conversation pause/resume behavior from the performance branch.
+- **Player & Source Responsiveness**: Ships the unified AI enhancement renderer, richer audio boost controls, throttled source progress updates, and safer media cleanup in the packaged build.
+
+***
+
 # MyCinema v1.22.0
 
 Feature release focused on shareable MyCinema links, exact source handoff, smarter local libraries, seek previews, and sturdier download controls.

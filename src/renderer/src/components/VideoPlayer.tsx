@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react'
+import React, { useCallback, useEffect, useRef, useState } from 'react'
 import { Play, Pause, Rewind, FastForward, X, Maximize, Minimize, Volume2, VolumeX, Subtitles, Music, SkipForward as SkipNext, ArrowLeft, MessageSquareText, AlertTriangle, Check, Monitor, RectangleHorizontal, Crop, FolderOpen, Info, Film, HardDrive, ChevronDown, ChevronUp, ListVideo, Users, Search, Globe, Loader2, Download, RotateCcw, Zap, Sparkles, Wand2, PictureInPicture2, Mic, MicOff } from 'lucide-react'
 import { Video } from '../types'
 import { useWatchTogether } from '../hooks/useWatchTogether'
@@ -23,6 +23,12 @@ type AudioBoostIntensity = 'low' | 'medium' | 'high'
 const SUBTITLE_OVERLAY_Z_INDEX = 35
 const SEEK_PREVIEW_BUCKET_SECONDS = 5
 const SEEK_PREVIEW_DEBOUNCE_MS = 90
+const HIGH_SPEED_PERFORMANCE_RATE = 1.5
+const HIGH_SPEED_QUALITY_SAMPLE_MS = 1500
+const HIGH_SPEED_MIN_FRAME_SAMPLE = 24
+const HIGH_SPEED_DROPPED_FRAME_LIMIT = 8
+const HIGH_SPEED_DROPPED_FRAME_RATIO = 0.18
+const BUFFERING_INDICATOR_DELAY_MS = 450
 
 const AUDIO_BOOST_PROFILES: Record<AudioBoostProfile, {
   label: string
@@ -333,6 +339,8 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
   const [seekPopup, setSeekPopup] = useState<{ show: boolean, text: string, id: number }>({ show: false, text: '', id: 0 })
   const [volumePopup, setVolumePopup] = useState<{ show: boolean, volume: number, isMuted: boolean, id: number }>({ show: false, volume: 1, isMuted: false, id: 0 })
   const [speedPopup, setSpeedPopup] = useState<{ show: boolean, rate: number, id: number }>({ show: false, rate: 1, id: 0 })
+  const [performanceNotice, setPerformanceNotice] = useState<{ show: boolean, text: string, id: number }>({ show: false, text: '', id: 0 })
+  const [highSpeedPerformanceMode, setHighSpeedPerformanceMode] = useState(false)
   const ASPECT_MODES: ('contain' | 'cover' | 'fill')[] = ['contain', 'cover', 'fill'];
   const [aspectMode, setAspectMode] = useState<('contain' | 'cover' | 'fill')>('contain');
   const [trackPopup, setTrackPopup] = useState<{ show: boolean, type: 'audio' | 'subtitle' | 'subtitleSync' | 'aspect', text: string, id: number }>({ show: false, type: 'subtitle', text: '', id: 0 })
@@ -360,6 +368,9 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
   const lastReverseStepRef = useRef<number>(0)
   const spaceHoldTimerRef = useRef<NodeJS.Timeout | null>(null)
   const speedToastRef = useRef<HTMLDivElement | null>(null)
+  const highSpeedNoticeLockRef = useRef(false)
+  const highSpeedQualityRef = useRef<{ dropped: number; total: number } | null>(null)
+  const bufferingIndicatorTimerRef = useRef<NodeJS.Timeout | null>(null)
   const lastTimeUpdateRef = useRef(0)
   const subtitleRafRef = useRef<number | null>(null)
   // Custom subtitle renderer refs — never triggers React re-renders
@@ -476,6 +487,43 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
   const playerSessionTokenRef = useRef(0)
   const subtitleLoadTokenRef = useRef(0)
   const isPlayerClosingRef = useRef(false)
+  const highSpeedPlaybackActive = playbackRate >= HIGH_SPEED_PERFORMANCE_RATE || isHolding2x
+  const highSpeedDisplayRate = isHolding2x ? 2 : playbackRate
+  const highSpeedMotionPaused = fpsBoostEnabled && highSpeedPlaybackActive && highSpeedPerformanceMode
+  const effectiveFpsBoostEnabled = fpsBoostEnabled && !highSpeedMotionPaused
+  const effectiveSharpnessEnabled = qualitySharpnessEnabled
+  const effectiveVibranceEnabled = qualityVibranceEnabled
+
+  const activateHighSpeedPerformanceMode = useCallback((message?: string) => {
+    if (!fpsBoostEnabled) return
+
+    setHighSpeedPerformanceMode(true)
+    if (highSpeedNoticeLockRef.current) return
+
+    highSpeedNoticeLockRef.current = true
+    setPerformanceNotice({
+      show: true,
+      text: message || `FPS Boost eased for smoother ${highSpeedDisplayRate}x playback`,
+      id: Date.now()
+    })
+  }, [fpsBoostEnabled, highSpeedDisplayRate])
+
+  const showBufferingIndicatorSoon = useCallback(() => {
+    if (bufferingIndicatorTimerRef.current || isBuffering) return
+
+    bufferingIndicatorTimerRef.current = setTimeout(() => {
+      bufferingIndicatorTimerRef.current = null
+      setIsBuffering(true)
+    }, BUFFERING_INDICATOR_DELAY_MS)
+  }, [isBuffering])
+
+  const hideBufferingIndicator = useCallback(() => {
+    if (bufferingIndicatorTimerRef.current) {
+      clearTimeout(bufferingIndicatorTimerRef.current)
+      bufferingIndicatorTimerRef.current = null
+    }
+    setIsBuffering(false)
+  }, [])
 
   const releaseMediaElement = (mediaEl: HTMLMediaElement | null) => {
     if (!mediaEl) return
@@ -552,6 +600,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
       subtitleContainerRef.current = null
       subtitleDivRef.current = null
     }
+    hideBufferingIndicator()
 
     subtitleCuesRef.current = []
     activeSubKeyRef.current = null
@@ -636,6 +685,64 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
   useEffect(() => {
     localStorage.setItem('mycinema_audio_boost_intensity', audioBoostIntensity)
   }, [audioBoostIntensity])
+
+  useEffect(() => {
+    if (!performanceNotice.show) return
+
+    const timer = setTimeout(() => {
+      setPerformanceNotice(prev => ({ ...prev, show: false }))
+    }, 2600)
+
+    return () => clearTimeout(timer)
+  }, [performanceNotice.id, performanceNotice.show])
+
+  useEffect(() => {
+    if (!highSpeedPlaybackActive || !fpsBoostEnabled) {
+      setHighSpeedPerformanceMode(false)
+      highSpeedNoticeLockRef.current = false
+      highSpeedQualityRef.current = null
+      return
+    }
+  }, [fpsBoostEnabled, highSpeedPlaybackActive])
+
+  useEffect(() => {
+    if (!isPlaying || !highSpeedPlaybackActive || !fpsBoostEnabled || highSpeedMotionPaused) {
+      highSpeedQualityRef.current = null
+      return
+    }
+
+    const timer = setInterval(() => {
+      const videoEl = videoRef.current as (HTMLVideoElement & {
+        getVideoPlaybackQuality?: () => { droppedVideoFrames?: number; totalVideoFrames?: number }
+      }) | null
+      if (!videoEl || typeof videoEl.getVideoPlaybackQuality !== 'function') return
+
+      const quality = videoEl.getVideoPlaybackQuality()
+      const dropped = quality.droppedVideoFrames ?? 0
+      const total = quality.totalVideoFrames ?? 0
+      const previous = highSpeedQualityRef.current
+      highSpeedQualityRef.current = { dropped, total }
+      if (!previous) return
+
+      const droppedDelta = dropped - previous.dropped
+      const totalDelta = total - previous.total
+      if (
+        totalDelta >= HIGH_SPEED_MIN_FRAME_SAMPLE &&
+        droppedDelta >= HIGH_SPEED_DROPPED_FRAME_LIMIT &&
+        droppedDelta / totalDelta >= HIGH_SPEED_DROPPED_FRAME_RATIO
+      ) {
+        activateHighSpeedPerformanceMode('Dropped frames detected; FPS Boost eased while sharpness stays on')
+      }
+    }, HIGH_SPEED_QUALITY_SAMPLE_MS)
+
+    return () => clearInterval(timer)
+  }, [
+    activateHighSpeedPerformanceMode,
+    fpsBoostEnabled,
+    highSpeedMotionPaused,
+    highSpeedPlaybackActive,
+    isPlaying
+  ])
 
   // ─── Audio Boost Logic (Web Audio API) ──────────────────────────────────────
   const audioCtxRef = useRef<AudioContext | null>(null)
@@ -1076,7 +1183,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
 
     const syncToken = ++externalAudioSeekTokenRef.current
     externalAudioSeekBarrierRef.current = true
-    setIsBuffering(false)
+    hideBufferingIndicator()
     audioEl.pause()
     const keepVideoPlaying = shouldPlay && options.keepVideoPlayingWhilePreparing
     if (keepVideoPlaying) {
@@ -2572,9 +2679,12 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
           await document.exitFullscreen().catch(() => {})
         }
 
-        if (hasWindowFullscreen) {
+        const stillWindowFullscreen = await window.api.isFullscreen().catch(() => hasWindowFullscreen)
+        if (stillWindowFullscreen) {
           const nextState = await window.api.toggleFullscreen()
           setIsWindowFullscreen(nextState)
+        } else if (hasWindowFullscreen) {
+          setIsWindowFullscreen(false)
         }
 
         setShowControls(true)
@@ -2767,11 +2877,14 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
         onEnded={handleEnded}
         onWaiting={() => {
           if (startupExternalAudioBarrierRef.current || externalAudioSeekBarrierRef.current) return
-          setIsBuffering(true)
+          showBufferingIndicatorSoon()
+          if (highSpeedPlaybackActive && fpsBoostEnabled) {
+            activateHighSpeedPerformanceMode('Buffering at high speed; FPS Boost eased to help playback catch up')
+          }
           if (audioRef.current && audioRef.current.src) audioRef.current.pause()
         }}
         onPlaying={() => { 
-          setIsBuffering(false); 
+          hideBufferingIndicator(); 
           const trackObj = availableAudio.find(a => a.id === selectedAudioId);
           if (trackObj && !trackObj.native && audioRef.current && !startupExternalAudioBarrierRef.current && !externalAudioSeekBarrierRef.current) {
             if (!audioRef.current.src) {
@@ -2781,6 +2894,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
             }
           }
         }}
+        onCanPlay={hideBufferingIndicator}
         onLoadedMetadata={() => {
           if (videoRef.current) {
             setHasVideoMetadata(true)
@@ -2815,12 +2929,12 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
         >
         </video>
 
-        {(fpsBoostEnabled || qualitySharpnessEnabled || qualityVibranceEnabled) && (
+        {(effectiveFpsBoostEnabled || effectiveSharpnessEnabled || effectiveVibranceEnabled) && (
           <AIEnhancementRenderer
             videoRef={videoRef}
-            fpsBoostEnabled={fpsBoostEnabled}
-            sharpnessEnabled={qualitySharpnessEnabled}
-            vibranceEnabled={qualityVibranceEnabled}
+            fpsBoostEnabled={effectiveFpsBoostEnabled}
+            sharpnessEnabled={effectiveSharpnessEnabled}
+            vibranceEnabled={effectiveVibranceEnabled}
             aspectMode={aspectMode}
           />
         )}
@@ -2873,6 +2987,18 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
           <div className="bg-black/60 text-white font-bold w-24 h-24 rounded-full backdrop-blur-md flex flex-col justify-center items-center animate-seek shadow-2xl border border-white/10 space-y-1">
             <FastForward size={32} />
             <span className="text-lg tracking-wider">{speedPopup.rate}x</span>
+          </div>
+        </div>
+      )}
+
+      {performanceNotice.show && (
+        <div
+          key={`performance-${performanceNotice.id}`}
+          className="absolute top-20 left-1/2 z-[60] -translate-x-1/2 animate-in fade-in zoom-in duration-200 pointer-events-none"
+        >
+          <div className="flex items-center space-x-2 rounded-xl border border-emerald-400/20 bg-black/70 px-4 py-2.5 text-white shadow-2xl backdrop-blur-xl">
+            <Zap size={18} className="text-emerald-300" />
+            <span className="max-w-[320px] text-center text-xs font-bold tracking-wide">{performanceNotice.text}</span>
           </div>
         </div>
       )}
@@ -3428,9 +3554,20 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
                   </div>
                   
                   <div className="p-2 space-y-1">
+                    {highSpeedMotionPaused && (
+                      <div className="mx-1 mb-2 rounded-xl border border-emerald-400/15 bg-emerald-400/10 px-3 py-2">
+                        <p className="text-[10px] font-black uppercase tracking-widest text-emerald-200">Performance Mode</p>
+                        <p className="mt-0.5 text-[10px] font-medium leading-snug text-white/55">FPS Boost resumes below {HIGH_SPEED_PERFORMANCE_RATE}x. Sharpness and vibrance stay on.</p>
+                      </div>
+                    )}
+
                     {/* FPS Boost Toggle */}
                     <button
-                      onClick={(e) => { e.stopPropagation(); setFpsBoostEnabled(!fpsBoostEnabled); }}
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        const nextEnabled = !fpsBoostEnabled
+                        setFpsBoostEnabled(nextEnabled)
+                      }}
                       className={`w-full flex items-center justify-between px-3 py-3 rounded-xl transition-all duration-200 group ${fpsBoostEnabled ? 'bg-primary/10 text-primary' : 'text-white/60 hover:bg-white/5 hover:text-white'}`}
                     >
                       <div className="flex items-center space-x-3">
@@ -3507,7 +3644,11 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
 
                     {/* AI Sharpness Toggle */}
                     <button
-                      onClick={(e) => { e.stopPropagation(); setQualitySharpnessEnabled(!qualitySharpnessEnabled); }}
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        const nextEnabled = !qualitySharpnessEnabled
+                        setQualitySharpnessEnabled(nextEnabled)
+                      }}
                       className={`w-full flex items-center justify-between px-3 py-3 rounded-xl transition-all duration-200 group ${qualitySharpnessEnabled ? 'bg-primary/10 text-primary' : 'text-white/60 hover:bg-white/5 hover:text-white'}`}
                     >
                       <div className="flex items-center space-x-3">
@@ -3524,7 +3665,11 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
 
                     {/* AI Vibrance Toggle */}
                     <button
-                      onClick={(e) => { e.stopPropagation(); setQualityVibranceEnabled(!qualityVibranceEnabled); }}
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        const nextEnabled = !qualityVibranceEnabled
+                        setQualityVibranceEnabled(nextEnabled)
+                      }}
                       className={`w-full flex items-center justify-between px-3 py-3 rounded-xl transition-all duration-200 group ${qualityVibranceEnabled ? 'bg-primary/10 text-primary' : 'text-white/60 hover:bg-white/5 hover:text-white'}`}
                     >
                       <div className="flex items-center space-x-3">
@@ -3598,7 +3743,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
               <PictureInPicture2 size={24} />
             </button>
 
-            <button onClick={toggleFullscreen} className="text-white hover:text-primary transition-colors" title={isAnyFullscreen ? "Exit Fullscreen" : "Fullscreen"}>
+            <button onClick={(e) => { e.stopPropagation(); toggleFullscreen(); }} className="text-white hover:text-primary transition-colors" title={isAnyFullscreen ? "Exit Fullscreen" : "Fullscreen"}>
               {isAnyFullscreen ? <Minimize size={24} /> : <Maximize size={24} />}
             </button>
 

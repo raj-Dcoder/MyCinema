@@ -432,6 +432,7 @@ const Home: React.FC<HomeProps> = ({ onPlay, onShowDetail, onNavigate, refreshKe
   const searchInputRef = useRef<HTMLInputElement>(null)
   const searchBoxRef = useRef<HTMLDivElement>(null)
   const searchCacheRef = useRef<Map<string, Video[]>>(new Map())
+  const snapshotTimerRef = useRef<number | null>(null)
   const isSearchOpenRef = useRef(false)
   const suppressContentClickUntilRef = useRef(0)
   const didRunInitialRefreshRef = useRef(false)
@@ -516,16 +517,30 @@ const Home: React.FC<HomeProps> = ({ onPlay, onShowDetail, onNavigate, refreshKe
   }, [isSearchOpen])
 
   useEffect(() => {
-    writeHomeSnapshot({
-      continueWatching,
-      recentMovies,
-      recentSeries,
-      trendingMovies,
-      trendingSeries,
-      trendingIndiaMovies,
-      trendingIndiaSeries,
-      featured
-    })
+    if (snapshotTimerRef.current) {
+      window.clearTimeout(snapshotTimerRef.current)
+    }
+
+    snapshotTimerRef.current = window.setTimeout(() => {
+      writeHomeSnapshot({
+        continueWatching,
+        recentMovies,
+        recentSeries,
+        trendingMovies,
+        trendingSeries,
+        trendingIndiaMovies,
+        trendingIndiaSeries,
+        featured
+      })
+      snapshotTimerRef.current = null
+    }, 600)
+
+    return () => {
+      if (snapshotTimerRef.current) {
+        window.clearTimeout(snapshotTimerRef.current)
+        snapshotTimerRef.current = null
+      }
+    }
   }, [continueWatching, recentMovies, recentSeries, trendingMovies, trendingSeries, trendingIndiaMovies, trendingIndiaSeries, featured])
 
   const suppressNextHomeClick = () => {

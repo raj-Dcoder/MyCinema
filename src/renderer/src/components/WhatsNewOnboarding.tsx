@@ -45,106 +45,56 @@ type WhatsNewSlide = {
 }
 
 export const LATEST_RELEASE = {
-  version: '1.22.2',
+  version: '1.22.3',
   eyebrow: 'What\'s New',
   slides: [
     {
       id: 'reveal',
       layout: 'reveal',
       icon: Sparkles,
-      kicker: 'Release notes fixed',
-      headline: 'Here is what really changed.',
-      highlight: 'really changed',
-      support: 'This version refreshes the in-app release story so the popup matches the actual fixes and improvements shipped in the latest build.',
+      kicker: 'Player feel',
+      headline: 'Movie night feels smoother.',
+      highlight: 'smoother',
+      support: 'Tiny loading flashes are quieter, and fullscreen exits cleanly now.',
       bullets: [
-        'New v1.22.2 marker so the updated popup appears once for users.',
-        'Release slides now call out the real performance, player, source, and cleanup work.',
-        'The release stays on the performance build already merged into master.'
+        'FPS Boost, AI Sharpness, and AI Vibrance can stay on together.',
+        'The buffering spinner waits before appearing, so micro-hiccups stay invisible.',
+        'The fullscreen button now exits in one click.'
       ],
-      signal: 'v1.22.2 live',
-      cta: 'Start tour',
+      signal: 'Smoother',
+      cta: 'Feel it',
       mood: {
-        name: 'celebration',
-        gradient: 'from-orange-300 via-pink-500 to-violet-500',
-        text: 'text-pink-200',
-        border: 'border-pink-300/30',
-        shadow: 'shadow-[0_0_64px_rgba(236,72,153,0.34)]',
-        backdrop: 'linear-gradient(135deg, rgba(249,115,22,0.18), transparent 30%), linear-gradient(225deg, rgba(168,85,247,0.24), transparent 42%), linear-gradient(180deg, rgba(236,72,153,0.1), transparent 60%)',
-        cursor: 'rgba(236,72,153,0.24)'
-      }
-    },
-    {
-      id: 'share',
-      layout: 'share',
-      icon: Share2,
-      kicker: 'Sharing & links',
-      headline: 'Shared links carry more context.',
-      highlight: 'more context',
-      support: 'Movies, series, and completed downloads can now create richer MyCinema links for cleaner handoff between people and devices.',
-      bullets: [
-        'Detail pages support WhatsApp, Telegram, copy-link, and copy-message sharing.',
-        'Deep links open back into MyCinema through the mycinema:// protocol.',
-        'Exact source metadata can pin the shared mirror while fresh providers refresh.'
-      ],
-      signal: 'Handoff ready',
-      cta: 'Next',
-      mood: {
-        name: 'sharing',
-        gradient: 'from-blue-400 via-cyan-300 to-teal-300',
+        name: 'player',
+        gradient: 'from-cyan-300 via-blue-400 to-violet-400',
         text: 'text-cyan-200',
         border: 'border-cyan-300/30',
-        shadow: 'shadow-[0_0_72px_rgba(34,211,238,0.32)]',
-        backdrop: 'linear-gradient(120deg, rgba(37,99,235,0.24), transparent 36%), linear-gradient(250deg, rgba(45,212,191,0.18), transparent 48%), linear-gradient(180deg, rgba(8,47,73,0.55), transparent 62%)',
+        shadow: 'shadow-[0_0_72px_rgba(34,211,238,0.3)]',
+        backdrop: 'linear-gradient(135deg, rgba(14,165,233,0.22), transparent 34%), linear-gradient(225deg, rgba(124,58,237,0.24), transparent 46%), linear-gradient(180deg, rgba(8,47,73,0.28), transparent 64%)',
         cursor: 'rgba(34,211,238,0.24)'
       }
     },
     {
-      id: 'discovery',
+      id: 'performance',
       layout: 'discovery',
-      icon: Tv,
-      kicker: 'Watch Together',
-      headline: 'Pause the movie to talk.',
-      highlight: 'talk',
-      support: 'Watch Together now has a cleaner conversation flow for rooms, so speaking does not fight the movie audio.',
+      icon: Zap,
+      kicker: 'Speed pass',
+      headline: 'Browsing carries less weight.',
+      highlight: 'less weight',
+      support: 'Home rows, artwork, and previews now do less background work.',
       bullets: [
-        'Hold-to-talk enables the mic only while speaking.',
-        'Playback pauses for the active speaker and resumes after the conversation pause.',
-        'Host and guest dev profiles make two-client testing safer without profile conflicts.'
+        'Home snapshots wait briefly instead of writing during every row update.',
+        'Hero and card artwork use leaner image sizes with async loading.',
+        'Video rails load metadata first instead of eager full previews.'
       ],
-      signal: 'Talk mode',
-      cta: 'Next',
+      signal: 'Lighter',
+      cta: 'Nice',
       mood: {
-        name: 'discovery',
-        gradient: 'from-violet-400 via-fuchsia-400 to-pink-400',
-        text: 'text-fuchsia-200',
-        border: 'border-fuchsia-300/30',
-        shadow: 'shadow-[0_0_72px_rgba(217,70,239,0.32)]',
-        backdrop: 'linear-gradient(140deg, rgba(109,40,217,0.28), transparent 36%), linear-gradient(250deg, rgba(244,114,182,0.22), transparent 46%), linear-gradient(180deg, rgba(49,46,129,0.34), transparent 64%)',
-        cursor: 'rgba(217,70,239,0.24)'
-      }
-    },
-    {
-      id: 'downloads',
-      layout: 'downloads',
-      icon: DownloadIcon,
-      kicker: 'Sources & downloads',
-      headline: 'Source results feel lighter.',
-      highlight: 'lighter',
-      support: 'Download and detail source panels now do less UI thrash while still surfacing richer filters and healthier results.',
-      bullets: [
-        'Torrent providers run with controlled concurrency instead of flooding at once.',
-        'Source progress updates are batched so large result lists feel smoother.',
-        'Season packs, episodes, Hindi signals, and pause/resume states are clearer.'
-      ],
-      signal: 'Less waiting',
-      cta: 'Next',
-      mood: {
-        name: 'downloads',
-        gradient: 'from-emerald-300 via-green-400 to-teal-300',
+        name: 'performance',
+        gradient: 'from-emerald-300 via-lime-300 to-yellow-200',
         text: 'text-emerald-200',
         border: 'border-emerald-300/30',
-        shadow: 'shadow-[0_0_72px_rgba(52,211,153,0.32)]',
-        backdrop: 'linear-gradient(130deg, rgba(22,163,74,0.22), transparent 36%), linear-gradient(260deg, rgba(45,212,191,0.18), transparent 48%), linear-gradient(180deg, rgba(6,78,59,0.28), transparent 64%)',
+        shadow: 'shadow-[0_0_72px_rgba(52,211,153,0.3)]',
+        backdrop: 'linear-gradient(130deg, rgba(22,163,74,0.22), transparent 36%), linear-gradient(260deg, rgba(250,204,21,0.16), transparent 48%), linear-gradient(180deg, rgba(6,78,59,0.28), transparent 64%)',
         cursor: 'rgba(52,211,153,0.22)'
       }
     },
@@ -152,17 +102,17 @@ export const LATEST_RELEASE = {
       id: 'security',
       layout: 'security',
       icon: ShieldCheck,
-      kicker: 'Fixes & safety',
-      headline: 'Cleanup is more careful.',
-      highlight: 'more careful',
-      support: 'Several quiet fixes reduce stale work, unsafe paths, and accidental download deletion edge cases.',
+      kicker: 'Local care',
+      headline: 'Library work stays calm.',
+      highlight: 'stays calm',
+      support: 'Scanning and preview work are batched, capped, and kept local.',
       bullets: [
-        'Shared payloads validate media type, TMDB ID, and magnet source data.',
-        'Seek thumbnails stay behind the local safe-path check before ffmpeg runs.',
-        'Single-episode deletion targets the right files instead of broad folders.'
+        'Folder scans batch library refreshes instead of interrupting every file.',
+        'Missing-file cleanup happens during scanner work, not normal browsing.',
+        'Seek preview jobs are capped while staying inside local file handling.'
       ],
-      signal: 'Guarded',
-      cta: 'Next',
+      signal: 'Scoped',
+      cta: 'Watch now',
       mood: {
         name: 'security',
         gradient: 'from-yellow-200 via-lime-300 to-emerald-300',
@@ -171,31 +121,6 @@ export const LATEST_RELEASE = {
         shadow: 'shadow-[0_0_72px_rgba(190,242,100,0.26)]',
         backdrop: 'linear-gradient(135deg, rgba(202,138,4,0.2), transparent 34%), linear-gradient(245deg, rgba(163,230,53,0.18), transparent 50%), linear-gradient(180deg, rgba(63,98,18,0.2), transparent 66%)',
         cursor: 'rgba(190,242,100,0.22)'
-      }
-    },
-    {
-      id: 'finish',
-      layout: 'celebrate',
-      icon: Zap,
-      kicker: 'Player polish',
-      headline: 'Playback got the good fixes.',
-      highlight: 'good fixes',
-      support: 'The player update focuses on smoother startup, more reliable rendering, better audio controls, and less leftover async work.',
-      bullets: [
-        'FPS boost, sharpness, and vibrance now share one safer WebGL renderer.',
-        'Audio Boost adds Auto, Dialogue, Night, Laptop, and Cinema profiles with intensity.',
-        'Subtitle loading, external audio sync, fullscreen state, and player cleanup are sturdier.'
-      ],
-      signal: 'Ready to watch',
-      cta: 'Done',
-      mood: {
-        name: 'finish',
-        gradient: 'from-orange-300 via-pink-400 to-purple-400',
-        text: 'text-orange-100',
-        border: 'border-orange-300/30',
-        shadow: 'shadow-[0_0_72px_rgba(251,146,60,0.32)]',
-        backdrop: 'linear-gradient(125deg, rgba(251,146,60,0.24), transparent 34%), linear-gradient(250deg, rgba(168,85,247,0.22), transparent 48%), linear-gradient(180deg, rgba(190,24,93,0.16), transparent 66%)',
-        cursor: 'rgba(251,146,60,0.24)'
       }
     }
   ] satisfies WhatsNewSlide[]
@@ -364,7 +289,7 @@ const RevealVisual = ({ slide }: { slide: WhatsNewSlide }) => (
     </div>
     <div className={clsx('relative flex h-56 w-56 items-center justify-center rounded-[3rem] border bg-black/40 backdrop-blur-2xl', slide.mood.border, slide.mood.shadow)}>
       <span className={clsx('absolute inset-5 rounded-[2.2rem] bg-gradient-to-br opacity-20 blur-2xl', slide.mood.gradient)} />
-      <span className="relative text-[74px] font-black leading-none tracking-normal text-white">1.22.2</span>
+      <span className="relative text-[74px] font-black leading-none tracking-normal text-white">{LATEST_RELEASE.version}</span>
       <Sparkles className={clsx('absolute -right-5 -top-5', slide.mood.text)} size={44} />
     </div>
   </div>

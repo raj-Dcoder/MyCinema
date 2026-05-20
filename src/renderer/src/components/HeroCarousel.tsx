@@ -12,7 +12,7 @@ interface HeroCarouselProps {
 const getHeroImageUrl = (path?: string | null) => {
   if (!path) return ''
   if (path.startsWith('https://image.tmdb.org/t/p/')) {
-    return path.replace(/\/t\/p\/[^/]+\//, '/t/p/original/')
+    return path.replace(/\/t\/p\/[^/]+\//, '/t/p/w1280/')
   }
   return path.startsWith('http') ? path : `media://file/${encodeURIComponent(path)}`
 }
@@ -63,33 +63,46 @@ const HeroCarousel: React.FC<HeroCarouselProps> = ({ items, onPlay, onShowDetail
       }}
     >
       {/* Background Backdrops */}
-      {items.map((item, idx) => (
-        <div
-          key={item.tmdb_id || item.id}
-          className={`absolute inset-0 transition-all duration-1000 ease-in-out ${
-            idx === currentIndex ? 'opacity-100 scale-100' : 'opacity-0 scale-110'
-          }`}
-        >
-          <img
-            src={getHeroImageUrl(item.backdrop_path || item.poster_path)}
-            className="absolute inset-0 h-full w-full scale-110 object-cover object-center blur-2xl opacity-70"
-            alt=""
-            decoding="async"
-            fetchPriority={idx === currentIndex ? 'high' : 'auto'}
-          />
-          <img
-            src={getHeroImageUrl(item.backdrop_path || item.poster_path)}
-            className="relative z-10 h-full w-full object-cover object-[center_28%]"
-            alt=""
-            decoding="async"
-            fetchPriority={idx === currentIndex ? 'high' : 'auto'}
-          />
-          {/* Overlays */}
-          <div className="absolute inset-0 z-20 bg-gradient-to-r from-black/88 via-black/42 to-black/5" />
-          <div className="absolute inset-0 z-20 bg-gradient-to-t from-[#05080d] via-transparent to-black/20" />
-          <div className="absolute inset-y-0 right-0 z-20 w-1/4 bg-gradient-to-l from-black/55 to-transparent" />
-        </div>
-      ))}
+      {items.map((item, idx) => {
+        const previousIndex = (currentIndex - 1 + items.length) % items.length
+        const nextIndex = (currentIndex + 1) % items.length
+        const shouldRenderVisuals = idx === currentIndex || idx === previousIndex || idx === nextIndex
+        const imageUrl = shouldRenderVisuals ? getHeroImageUrl(item.backdrop_path || item.poster_path) : ''
+
+        return (
+          <div
+            key={item.tmdb_id || item.id}
+            className={`absolute inset-0 transition-all duration-1000 ease-in-out ${
+              idx === currentIndex ? 'opacity-100 scale-100' : 'opacity-0 scale-110'
+            }`}
+          >
+            {shouldRenderVisuals && (
+              <>
+                <img
+                  src={imageUrl}
+                  className="absolute inset-0 h-full w-full scale-110 object-cover object-center blur-2xl opacity-70"
+                  alt=""
+                  loading={idx === currentIndex ? 'eager' : 'lazy'}
+                  decoding="async"
+                  fetchPriority={idx === currentIndex ? 'high' : 'auto'}
+                />
+                <img
+                  src={imageUrl}
+                  className="relative z-10 h-full w-full object-cover object-[center_28%]"
+                  alt=""
+                  loading={idx === currentIndex ? 'eager' : 'lazy'}
+                  decoding="async"
+                  fetchPriority={idx === currentIndex ? 'high' : 'auto'}
+                />
+                {/* Overlays */}
+                <div className="absolute inset-0 z-20 bg-gradient-to-r from-black/88 via-black/42 to-black/5" />
+                <div className="absolute inset-0 z-20 bg-gradient-to-t from-[#05080d] via-transparent to-black/20" />
+                <div className="absolute inset-y-0 right-0 z-20 w-1/4 bg-gradient-to-l from-black/55 to-transparent" />
+              </>
+            )}
+          </div>
+        )
+      })}
 
       {/* Content */}
       <div className="absolute inset-0 flex flex-col justify-end px-8 pb-16 pt-24 md:px-16 md:pb-20 md:pt-20 space-y-3">

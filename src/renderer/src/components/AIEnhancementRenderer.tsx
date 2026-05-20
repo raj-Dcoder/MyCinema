@@ -8,11 +8,16 @@ interface AIEnhancementRendererProps {
   aspectMode: 'contain' | 'cover' | 'fill'
 }
 
-const MAX_QUALITY_DPR = 1.5
+const MAX_QUALITY_DPR = Number.POSITIVE_INFINITY
 const MAX_FPS_BOOST_DPR = 1.25
+const SHARPNESS_AMOUNT = 0.55
 
-const syncCanvasSize = (canvas: HTMLCanvasElement, fpsBoostEnabled: boolean) => {
-  const maxDpr = fpsBoostEnabled ? MAX_FPS_BOOST_DPR : MAX_QUALITY_DPR
+const syncCanvasSize = (
+  canvas: HTMLCanvasElement,
+  fpsBoostEnabled: boolean,
+  qualityEnabled: boolean
+) => {
+  const maxDpr = qualityEnabled ? MAX_QUALITY_DPR : fpsBoostEnabled ? MAX_FPS_BOOST_DPR : MAX_QUALITY_DPR
   const dpr = Math.min(window.devicePixelRatio || 1, maxDpr)
   const width = Math.max(1, Math.round(canvas.clientWidth * dpr))
   const height = Math.max(1, Math.round(canvas.clientHeight * dpr))
@@ -200,11 +205,12 @@ const AIEnhancementRenderer: React.FC<AIEnhancementRendererProps> = ({
 
       if (u_sharpenAmount > 0.001) {
         vec2 step = 1.0 / u_resolution;
-        vec4 left = sourceAt(v_texCoord + vec2(-step.x, 0.0));
-        vec4 right = sourceAt(v_texCoord + vec2(step.x, 0.0));
-        vec4 top = sourceAt(v_texCoord + vec2(0.0, -step.y));
-        vec4 bottom = sourceAt(v_texCoord + vec2(0.0, step.y));
-        vec4 edge = 4.0 * center - left - right - top - bottom;
+        vec4 sharpCenter = texture2D(u_image0, v_texCoord);
+        vec4 left = texture2D(u_image0, v_texCoord + vec2(-step.x, 0.0));
+        vec4 right = texture2D(u_image0, v_texCoord + vec2(step.x, 0.0));
+        vec4 top = texture2D(u_image0, v_texCoord + vec2(0.0, -step.y));
+        vec4 bottom = texture2D(u_image0, v_texCoord + vec2(0.0, step.y));
+        vec4 edge = 4.0 * sharpCenter - left - right - top - bottom;
         color += u_sharpenAmount * edge.rgb;
       }
 
@@ -327,7 +333,7 @@ const AIEnhancementRenderer: React.FC<AIEnhancementRendererProps> = ({
     }
 
     const updateGeometry = () => {
-      const resized = syncCanvasSize(canvas, fpsBoostEnabled)
+      const resized = syncCanvasSize(canvas, fpsBoostEnabled, sharpnessEnabled || vibranceEnabled)
       const key = [
         canvas.width,
         canvas.height,
@@ -441,7 +447,7 @@ const AIEnhancementRenderer: React.FC<AIEnhancementRendererProps> = ({
         gl.uniform1i(locations.uImage1, 1)
         gl.uniform2f(locations.uResolution, video.videoWidth || canvas.width, video.videoHeight || canvas.height)
         gl.uniform1f(locations.uBlend, blend)
-        gl.uniform1f(locations.uSharpenAmount, sharpnessEnabled ? 0.35 : 0)
+        gl.uniform1f(locations.uSharpenAmount, sharpnessEnabled ? SHARPNESS_AMOUNT : 0)
         gl.uniform1f(locations.uVibranceAmount, vibranceEnabled ? 0.25 : 0)
 
         gl.activeTexture(gl.TEXTURE0)
@@ -522,7 +528,7 @@ const AIEnhancementRenderer: React.FC<AIEnhancementRendererProps> = ({
   ])
 
   return (
-    <div className="absolute inset-0 pointer-events-none">
+    <div className="absolute inset-0 z-10 pointer-events-none">
       <canvas
         ref={canvasRef}
         className={`absolute inset-0 h-full w-full ${

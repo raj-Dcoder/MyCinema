@@ -201,7 +201,6 @@ function attachFolderWatcher(folderPath: string): void {
     console.log(`[Watcher] Change detected in "${folderPath}" — rescanning…`)
     try {
       await scanFolder(folderPath)
-      BrowserWindow.getAllWindows().forEach(w => w.webContents.send('library-updated'))
     } catch (err) {
       console.error('[Watcher] Rescan error:', err)
     }
@@ -895,6 +894,7 @@ app.on('open-url', (event, url) => {
   }
 })
 
+const MAX_SEEK_PREVIEW_JOBS = 2
 const seekPreviewJobs = new Map<string, Promise<string | null>>()
 
 function getSeekPreviewCachePath(filePath: string, time: number): string | null {
@@ -931,6 +931,7 @@ function generateSeekPreviewThumbnail(filePath: string, time: number): Promise<s
 
   const existingJob = seekPreviewJobs.get(localPath)
   if (existingJob) return existingJob
+  if (seekPreviewJobs.size >= MAX_SEEK_PREVIEW_JOBS) return Promise.resolve(null)
 
   const job = new Promise<string | null>((resolve) => {
     fs.mkdirSync(path.dirname(localPath), { recursive: true })
@@ -1110,24 +1111,7 @@ ipcMain.handle('select-folder', async () => {
 })
 
 ipcMain.handle('get-videos', () => {
-  const allVideos = db.getVideos();
-  const validVideos: any[] = [];
-  
-  for (const video of allVideos as any[]) {
-    if (fs.existsSync(video.file_path)) {
-      validVideos.push(video);
-    } else {
-      console.log(`[Auto-Prune] Intercepted missing file: ${video.file_path}`);
-      db.deleteVideo(video.id);
-      
-      if (video.poster_path && video.poster_path.includes('-snap.jpg')) {
-        if (fs.existsSync(video.poster_path)) {
-          try { fs.unlinkSync(video.poster_path); } catch (e) {}
-        }
-      }
-    }
-  }
-  return validVideos;
+  return db.getVideos();
 })
 
 ipcMain.handle('get-video-progress', (_, videoId) => {
@@ -1143,18 +1127,7 @@ ipcMain.on('update-video-progress', (_, videoId, time, completed, isClosing) => 
 })
 
 ipcMain.handle('get-continue-watching', () => {
-  const cwVideos = db.getContinueWatching();
-  const validCw: any[] = [];
-  
-  for (const video of cwVideos as any[]) {
-    if (fs.existsSync(video.file_path)) {
-      validCw.push(video);
-    } else {
-      // Auto-pruner handles DB deletion cleanly through other views too
-      db.deleteVideo(video.id);
-    }
-  }
-  return validCw;
+  return db.getContinueWatching();
 })
 
 ipcMain.handle('get-series-info', (_, seriesName) => {

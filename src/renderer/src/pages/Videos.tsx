@@ -79,7 +79,7 @@ const VideoClipCard: React.FC<{
             className="h-full w-full object-cover"
             muted
             playsInline
-            preload="auto"
+            preload="metadata"
           />
         ) : posterUrl ? (
           <img

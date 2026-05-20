@@ -12,7 +12,7 @@ interface VideoCardProps {
 
 const getHighQualityTmdbImageUrl = (url: string) => {
   return url.startsWith('https://image.tmdb.org/t/p/')
-    ? url.replace(/\/t\/p\/(w342|w500|w780|w1280|original)\//, '/t/p/w780/')
+    ? url.replace(/\/t\/p\/(w342|w500|w780|w1280|original)\//, '/t/p/w500/')
     : url
 }
 
@@ -90,7 +90,13 @@ const VideoCard: React.FC<VideoCardProps> = ({ video, onPlay, onShowDetail, isCo
       >
         <div className="relative w-24 aspect-video rounded-xl overflow-hidden bg-secondary flex-shrink-0 isolate transform-gpu [clip-path:inset(0_round_0.75rem)]">
           {backdropUrl || posterUrl ? (
-            <img src={backdropUrl || posterUrl || ''} className="w-full h-full object-cover" alt="" />
+            <img
+              src={backdropUrl || posterUrl || ''}
+              className="w-full h-full object-cover"
+              alt=""
+              loading="lazy"
+              decoding="async"
+            />
           ) : (
             <div className="w-full h-full bg-neutral-800" />
           )}
@@ -135,6 +141,8 @@ const VideoCard: React.FC<VideoCardProps> = ({ video, onPlay, onShowDetail, isCo
             src={posterUrl} 
             alt={title}
             className="block h-full w-full object-cover transform-gpu transition-transform duration-500 [backface-visibility:hidden] group-hover:scale-110"
+            loading="lazy"
+            decoding="async"
           />
         ) : (
           <div className="h-full w-full flex items-center justify-center p-4 text-center">

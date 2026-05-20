@@ -1,3 +1,28 @@
+# MyCinema v1.22.3
+
+Patch release focused on reducing UI lag while keeping player enhancements sharp and responsive.
+
+### Player Experience
+- **Stackable Visual Enhancements**: FPS Boost, AI Sharpness, and AI Vibrance can now stay enabled together instead of one mode turning another off.
+- **Sharper AI Sharpness**: Sharpness now renders at full quality when quality boosts are active, samples the current frame directly, and uses a stronger edge pass so the toggle is visibly effective.
+- **Less Intrusive Buffering UI**: The buffering spinner now waits briefly before appearing, preventing tiny playback hiccups from flashing a loading indicator over the movie.
+- **Fullscreen Exit Fix**: The player fullscreen/minimize button now exits the active fullscreen state in one click instead of sometimes requiring a second press.
+
+### Performance & Responsiveness
+- **Lighter Home Rendering**: Home snapshots are written after a short debounce, reducing repeated storage work during rapid row updates.
+- **Lean Artwork Loading**: Hero and card images now use smaller TMDB sizes and lazy/async loading for offscreen artwork.
+- **Calmer Video Rails**: Video clip previews now load metadata instead of preloading full video content in browsing views.
+- **Throttled Seek Preview Work**: Seek thumbnail generation is capped so preview requests cannot pile up too aggressively.
+
+### Library Reliability
+- **Debounced Library Refreshes**: Folder scans now batch library-updated notifications instead of broadcasting after every processed file.
+- **Cleaner Missing-File Pruning**: Missing local files are pruned during scanner work instead of every library read, keeping normal browsing calls lighter.
+
+### Security & Privacy
+- **Local File Work Stays Scoped**: Library pruning and seek-preview generation remain local main-process work, with preview generation limited to a small number of concurrent jobs.
+
+***
+
 # MyCinema v1.22.2
 
 Patch release focused on making the in-app What's New experience accurately describe the latest release.

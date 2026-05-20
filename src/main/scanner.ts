@@ -22,6 +22,34 @@ ffmpeg.setFfprobePath(ffprobePath)
 ffmpeg.setFfmpegPath(ffmpegPath)
 
 const VIDEO_EXTENSIONS = ['.mp4', '.mkv', '.avi', '.mov', '.webm']
+const LIBRARY_UPDATE_DEBOUNCE_MS = 1200
+
+function normalizeVideoPath(filePath: string) {
+  return path.normalize(filePath).toLowerCase()
+}
+
+function sendLibraryUpdated() {
+  BrowserWindow.getAllWindows().forEach(w => w.webContents.send('library-updated'))
+}
+
+function createLibraryUpdateNotifier() {
+  let timer: ReturnType<typeof setTimeout> | null = null
+
+  const flush = () => {
+    if (timer) {
+      clearTimeout(timer)
+      timer = null
+    }
+    sendLibraryUpdated()
+  }
+
+  const schedule = () => {
+    if (timer) return
+    timer = setTimeout(flush, LIBRARY_UPDATE_DEBOUNCE_MS)
+  }
+
+  return { schedule, flush }
+}
 
 async function getVideoDuration(filePath: string): Promise<number> {
   return new Promise((resolve) => {
@@ -201,13 +229,18 @@ export async function extractOfflineThumbnail(videoPath: string, videoId: number
 }
 
 export async function scanFolder(rootPath: string) {
+  const libraryUpdates = createLibraryUpdateNotifier()
   const allInitialVideos = getVideos()
+  const videoByPath = new Map(
+    (allInitialVideos as any[]).map(video => [normalizeVideoPath(video.file_path), video])
+  )
 
   // 1. Purge globally deleted files from the database before adding new ones
   for (const dbVideo of allInitialVideos as any[]) {
     if (!fs.existsSync(dbVideo.file_path)) {
       console.log(`[Scanner] Purging physically deleted file from DB: ${dbVideo.file_path}`)
       deleteVideo(dbVideo.id)
+      videoByPath.delete(normalizeVideoPath(dbVideo.file_path))
       
       // Reclaim disk space if it was a dynamically generated extraction
       if (dbVideo.poster_path && dbVideo.poster_path.includes('-snap.jpg')) {
@@ -215,7 +248,7 @@ export async function scanFolder(rootPath: string) {
           fs.unlinkSync(dbVideo.poster_path)
         }
       }
-      BrowserWindow.getAllWindows().forEach(w => w.webContents.send('library-updated'))
+      libraryUpdates.schedule()
     }
   }
 
@@ -254,8 +287,9 @@ export async function scanFolder(rootPath: string) {
       metadata.type = 'movie'
     }
 
-    const existingBeforeScan = allInitialVideos.find((v: any) => path.normalize(v.file_path) === path.normalize(filePath))
-    addVideo({
+    const normalizedFilePath = normalizeVideoPath(filePath)
+    const existingBeforeScan = videoByPath.get(normalizedFilePath)
+    const addResult = addVideo({
       ...metadata,
       file_path: filePath,
       duration: duration,
@@ -263,8 +297,25 @@ export async function scanFolder(rootPath: string) {
       tmdb_id: tmdbIdFromDownload
     })
 
-    const allVideos = getVideos()
-    const currentVideoNode = allVideos.find((v: any) => path.normalize(v.file_path) === path.normalize(filePath))
+    const insertedId = Number((addResult as any)?.lastInsertRowid || 0)
+    const currentVideoNode = existingBeforeScan
+      ? {
+          ...existingBeforeScan,
+          ...metadata,
+          file_path: filePath,
+          duration,
+          poster_path: localPoster || existingBeforeScan.poster_path,
+          tmdb_id: tmdbIdFromDownload || existingBeforeScan.tmdb_id
+        }
+      : {
+          ...metadata,
+          id: insertedId,
+          file_path: filePath,
+          duration,
+          poster_path: localPoster,
+          tmdb_id: tmdbIdFromDownload
+        }
+    videoByPath.set(normalizedFilePath, currentVideoNode)
     const videoId = currentVideoNode ? currentVideoNode.id : 0
 
     if (videoId > 0) {
@@ -292,7 +343,7 @@ export async function scanFolder(rootPath: string) {
           vote_average: null,
           release_year: null
         })
-        BrowserWindow.getAllWindows().forEach(w => w.webContents.send('library-updated'))
+        libraryUpdates.schedule()
         continue
       }
       
@@ -404,12 +455,11 @@ export async function scanFolder(rootPath: string) {
       }
     }
     
-    // Broadcast update after each file is processed (smooth UI updates during full scan)
-    BrowserWindow.getAllWindows().forEach(w => w.webContents.send('library-updated'))
+    libraryUpdates.schedule()
   }
   
   // Final broadcast just in case
-  BrowserWindow.getAllWindows().forEach(w => w.webContents.send('library-updated'))
+  libraryUpdates.flush()
 }
 
 export async function getEmbeddedSubtitles(filePath: string): Promise<any[]> {

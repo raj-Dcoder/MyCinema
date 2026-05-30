@@ -1,6 +1,6 @@
 {
   "name": "mycinema",
-  "version": "1.22.3",
+  "version": "1.23.0",
   "main": "./out/main/index.js",
   "scripts": {
     "dev": "electron-vite dev",
@@ -9,7 +9,10 @@
     "build": "electron-vite build",
     "preview": "electron-vite preview",
     "pack": "electron-builder --dir",
-    "dist": "electron-builder",
+    "dist": "electron-builder --config.win.forceCodeSigning=true",
+    "dist:local": "electron-builder --publish never --config.win.forceCodeSigning=false",
+    "release:publish": "electron-builder --publish always --config.win.forceCodeSigning=true",
+    "verify:installer-signature": "pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/verify-windows-signature.ps1",
     "postinstall": "electron-builder install-app-deps"
   },
   "keywords": [],

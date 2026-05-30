@@ -37,6 +37,8 @@ const api = {
   fetchTrendingIndia: (type: 'movie' | 'series' = 'movie') => ipcRenderer.invoke('fetch-trending-india', type),
   getTmdbTrailer: (params: { tmdbId?: number | null; title: string; type: 'movie' | 'series'; year?: number | null; seasonNumber?: number | null; preferLatestSeason?: boolean }) =>
     ipcRenderer.invoke('get-tmdb-trailer', params),
+  getIntroDbSegments: (params: { imdbId?: string | null; tmdbId?: number | null; season?: number | null; episode?: number | null; filePath?: string | null; duration?: number | null }) =>
+    ipcRenderer.invoke('get-introdb-segments', params),
   getPendingSharedMediaTarget: () => ipcRenderer.invoke('get-pending-shared-media-target'),
   getSharedMediaByTmdbId: (type: 'movie' | 'series', tmdbId: number) => ipcRenderer.invoke('get-shared-media-by-tmdb-id', type, tmdbId),
   onOpenSharedMedia: (callback: (target: { type: 'movie' | 'series'; tmdbId: number; source?: any }) => void) => {

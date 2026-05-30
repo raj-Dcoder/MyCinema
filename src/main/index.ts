@@ -1955,6 +1955,10 @@ ipcMain.handle('get-tmdb-trailer', async (_, params: { tmdbId?: number | null; t
   return await tmdb.fetchTmdbTrailer(params)
 })
 
+ipcMain.handle('get-introdb-segments', async (_, params: { imdbId?: string | null; tmdbId?: number | null; season?: number | null; episode?: number | null; filePath?: string | null; duration?: number | null }) => {
+  return await getIntroDbSegments(params || {})
+})
+
 ipcMain.handle('get-pending-shared-media-target', () => {
   const target = pendingSharedMediaTarget
   pendingSharedMediaTarget = null
@@ -2431,15 +2435,316 @@ function isTorrentSourceRequestActive(event: Electron.IpcMainInvokeEvent | null,
   return activeTorrentSourceRequests.get(event.sender.id) === requestId
 }
 
+type IntroDbSegmentType = 'intro' | 'recap' | 'outro'
+type SkipSegmentSource = 'theintrodb' | 'introdb' | 'chapters'
+
+type IntroDbSegment = {
+  type: IntroDbSegmentType
+  startSec: number
+  endSec: number
+  confidence: number | null
+  submissionCount: number | null
+  updatedAt: string | null
+  source: SkipSegmentSource
+}
+
+type IntroDbSegmentsResult = {
+  imdbId: string | null
+  season: number | null
+  episode: number | null
+  segments: IntroDbSegment[]
+  sources: SkipSegmentSource[]
+  error?: string
+}
+
+const TMDB_IMDB_CACHE_TTL = 1000 * 60 * 60 * 24 * 7
+const INTRODB_SEGMENT_CACHE_TTL = 1000 * 60 * 60 * 12
+const tmdbImdbIdCache = new Map<string, { imdbId: string; timestamp: number }>()
+const introDbSegmentCache = new Map<string, { result: IntroDbSegmentsResult; timestamp: number }>()
+
+function readTimedCache<T>(cache: Map<string, { timestamp: number } & T>, key: string, ttlMs: number): T | null {
+  const cached = cache.get(key)
+  if (!cached || Date.now() - cached.timestamp > ttlMs) return null
+  const { timestamp: _timestamp, ...value } = cached
+  return value as T
+}
+
 async function getImdbIdForTmdb(mediaType: string, tmdbId: number): Promise<string> {
+  if (!TMDB_API_KEY || !tmdbId) return ''
+
+  const cacheKey = `${mediaType}:${tmdbId}`
+  const cached = readTimedCache<{ imdbId: string }>(tmdbImdbIdCache, cacheKey, TMDB_IMDB_CACHE_TTL)
+  if (cached) return cached.imdbId
+
   try {
     const extUrl = `https://api.themoviedb.org/3/${mediaType}/${tmdbId}/external_ids?api_key=${TMDB_API_KEY}`
     const extData: any = await nodeHttpGet(extUrl)
-    return extData?.imdb_id || ''
+    const imdbId = typeof extData?.imdb_id === 'string' ? extData.imdb_id : ''
+    tmdbImdbIdCache.set(cacheKey, { imdbId, timestamp: Date.now() })
+    return imdbId
   } catch (e) {
-    console.error('[Torrent] Failed to get IMDB ID:', e)
+    console.error('[TMDB] Failed to get IMDb ID:', e)
     return ''
   }
+}
+
+function normalizeImdbId(value: unknown): string {
+  if (typeof value !== 'string') return ''
+  const trimmed = value.trim()
+  return /^tt\d+$/i.test(trimmed) ? trimmed.toLowerCase() : ''
+}
+
+function parseIntroDbTime(value: unknown): number | null {
+  if (typeof value === 'number') return Number.isFinite(value) ? value : null
+  if (typeof value !== 'string') return null
+
+  const trimmed = value.trim()
+  if (!trimmed) return null
+
+  const numeric = Number(trimmed)
+  if (Number.isFinite(numeric)) return numeric
+
+  const parts = trimmed.split(':').map(part => Number(part))
+  if (parts.some(part => !Number.isFinite(part))) return null
+  if (parts.length === 2) return parts[0] * 60 + parts[1]
+  if (parts.length === 3) return parts[0] * 3600 + parts[1] * 60 + parts[2]
+  return null
+}
+
+function parseMillisToSeconds(value: unknown): number | null {
+  if (typeof value === 'number') return Number.isFinite(value) ? value / 1000 : null
+  if (typeof value === 'string') {
+    const parsed = Number(value)
+    return Number.isFinite(parsed) ? parsed / 1000 : null
+  }
+  return null
+}
+
+function parseIntroDbSegment(type: IntroDbSegmentType, raw: any): IntroDbSegment | null {
+  if (!raw) return null
+
+  const startSec = parseIntroDbTime(raw.start_sec ?? raw.start)
+  const endSec = parseIntroDbTime(raw.end_sec ?? raw.end)
+  if (startSec === null || endSec === null || endSec <= startSec) return null
+
+  return {
+    type,
+    startSec,
+    endSec,
+    confidence: typeof raw.confidence === 'number' ? raw.confidence : null,
+    submissionCount: typeof raw.submission_count === 'number' ? raw.submission_count : null,
+    updatedAt: typeof raw.updated_at === 'string' ? raw.updated_at : null,
+    source: 'introdb'
+  }
+}
+
+function parseTheIntroDbSegment(type: IntroDbSegmentType, raw: any, durationSec: number | null): IntroDbSegment | null {
+  if (!raw) return null
+
+  const startSec = parseMillisToSeconds(raw.start_ms) ?? (type === 'intro' ? 0 : null)
+  let endSec = parseMillisToSeconds(raw.end_ms)
+  if (endSec === null && type === 'outro') {
+    endSec = durationSec && durationSec > 0 ? durationSec : (startSec !== null ? startSec + 180 : null)
+  }
+
+  if (startSec === null || endSec === null || endSec <= startSec) return null
+
+  return {
+    type,
+    startSec,
+    endSec,
+    confidence: null,
+    submissionCount: null,
+    updatedAt: null,
+    source: 'theintrodb'
+  }
+}
+
+function normalizeChapterTitle(value: unknown): string {
+  return String(value || '')
+    .toLowerCase()
+    .replace(/[_-]+/g, ' ')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim()
+}
+
+function classifyChapterTitle(value: unknown): IntroDbSegmentType | null {
+  const normalized = normalizeChapterTitle(value)
+  if (!normalized) return null
+
+  const tokens = new Set(normalized.split(/\s+/).filter(Boolean))
+  if (tokens.has('recap') || normalized.includes('previously on') || normalized.includes('last time')) return 'recap'
+  if (
+    tokens.has('outro') ||
+    tokens.has('credits') ||
+    tokens.has('ending') ||
+    tokens.has('ed') ||
+    normalized.includes('end credits') ||
+    normalized.includes('closing credits')
+  ) return 'outro'
+  if (
+    tokens.has('intro') ||
+    tokens.has('opening') ||
+    tokens.has('op') ||
+    normalized.includes('title sequence') ||
+    normalized.includes('opening credits')
+  ) return 'intro'
+
+  return null
+}
+
+function addMissingSegmentTypes(target: IntroDbSegment[], candidates: IntroDbSegment[]): void {
+  for (const candidate of candidates) {
+    if (!target.some(segment => segment.type === candidate.type)) {
+      target.push(candidate)
+    }
+  }
+}
+
+function uniqueSegmentSources(segments: IntroDbSegment[]): SkipSegmentSource[] {
+  return Array.from(new Set(segments.map(segment => segment.source)))
+}
+
+async function getIntroDbSegments(params: {
+  imdbId?: string | null
+  tmdbId?: number | null
+  season?: number | null
+  episode?: number | null
+  filePath?: string | null
+  duration?: number | null
+}): Promise<IntroDbSegmentsResult> {
+  const season = Number(params.season)
+  const episode = Number(params.episode)
+  const tmdbId = Number(params.tmdbId)
+  const durationSec = Number.isFinite(Number(params.duration)) && Number(params.duration) > 0 ? Number(params.duration) : null
+  const filePath = typeof params.filePath === 'string' ? params.filePath : null
+
+  if (!Number.isFinite(season) || !Number.isFinite(episode) || season < 0 || episode <= 0) {
+    return { imdbId: null, season: null, episode: null, segments: [], sources: [] }
+  }
+
+  const safeFileKey = filePath ? crypto.createHash('sha1').update(path.normalize(filePath).toLowerCase()).digest('hex') : 'none'
+  const cacheKey = `skip-segments:${Number.isFinite(tmdbId) && tmdbId > 0 ? tmdbId : 'no-tmdb'}:${normalizeImdbId(params.imdbId) || 'no-imdb'}:${season}:${episode}:${safeFileKey}:${durationSec || 'no-duration'}`
+  const cached = readTimedCache<{ result: IntroDbSegmentsResult }>(introDbSegmentCache, cacheKey, INTRODB_SEGMENT_CACHE_TTL)
+  if (cached) return cached.result
+
+  const segments: IntroDbSegment[] = []
+  let imdbId = normalizeImdbId(params.imdbId)
+
+  if (Number.isFinite(tmdbId) && tmdbId > 0) {
+    addMissingSegmentTypes(segments, await fetchTheIntroDbSegments(tmdbId, season, episode, durationSec))
+  }
+
+  if (!imdbId && Number.isFinite(tmdbId) && tmdbId > 0) {
+    imdbId = normalizeImdbId(await getImdbIdForTmdb('tv', tmdbId))
+  }
+
+  if (imdbId && segments.length < 3) {
+    addMissingSegmentTypes(segments, await fetchIntroDbSegments(imdbId, season, episode))
+  }
+
+  if (filePath && segments.length < 3) {
+    addMissingSegmentTypes(segments, await getChapterSkipSegments(filePath, durationSec))
+  }
+
+  segments.sort((a, b) => a.startSec - b.startSec)
+  const result = { imdbId: imdbId || null, season, episode, segments, sources: uniqueSegmentSources(segments) }
+  introDbSegmentCache.set(cacheKey, { result, timestamp: Date.now() })
+  return result
+}
+
+async function fetchTheIntroDbSegments(
+  tmdbId: number,
+  season: number,
+  episode: number,
+  durationSec: number | null
+): Promise<IntroDbSegment[]> {
+  try {
+    const query = new URLSearchParams({
+      tmdb_id: String(tmdbId),
+      season: String(season),
+      episode: String(episode)
+    })
+    const data: any = await nodeHttpGet(`https://api.theintrodb.org/v2/media?${query.toString()}`, 7000)
+    const rawIntro = Array.isArray(data?.intro) ? data.intro : []
+    const rawCredits = Array.isArray(data?.credits) ? data.credits : []
+    const rawRecap = Array.isArray(data?.recap) ? data.recap : []
+
+    return [
+      ...rawRecap.map((segment: any) => parseTheIntroDbSegment('recap', segment, durationSec)),
+      ...rawIntro.map((segment: any) => parseTheIntroDbSegment('intro', segment, durationSec)),
+      ...rawCredits.map((segment: any) => parseTheIntroDbSegment('outro', segment, durationSec))
+    ]
+      .filter((segment): segment is IntroDbSegment => segment !== null)
+      .sort((a, b) => a.startSec - b.startSec)
+  } catch (e) {
+    console.warn('[TheIntroDB] Failed to fetch skip segments:', e)
+    return []
+  }
+}
+
+async function fetchIntroDbSegments(imdbId: string, season: number, episode: number): Promise<IntroDbSegment[]> {
+  try {
+    const query = new URLSearchParams({
+      imdb_id: imdbId,
+      season: String(season),
+      episode: String(episode)
+    })
+    const data: any = await nodeHttpGet(`https://api.introdb.app/segments?${query.toString()}`, 7000)
+    return (['recap', 'intro', 'outro'] as IntroDbSegmentType[])
+      .map(type => parseIntroDbSegment(type, data?.[type]))
+      .filter((segment): segment is IntroDbSegment => segment !== null)
+      .sort((a, b) => a.startSec - b.startSec)
+  } catch (e) {
+    console.warn('[IntroDB] Failed to fetch skip segments:', e)
+    return []
+  }
+}
+
+async function getChapterSkipSegments(filePath: string, durationSec: number | null): Promise<IntroDbSegment[]> {
+  if (!isSafeFilePath(filePath) || !fs.existsSync(filePath)) return []
+
+  return new Promise((resolve) => {
+    ffmpeg.ffprobe(filePath, (err, metadata) => {
+      if (err) {
+        console.warn('[Chapters] Failed to inspect skip chapters:', err.message)
+        resolve([])
+        return
+      }
+
+      const metadataDuration = parseIntroDbTime(metadata.format?.duration)
+      const inferredDuration = durationSec || (metadataDuration && metadataDuration > 0 ? metadataDuration : null)
+
+      const chapters = Array.isArray((metadata as any).chapters) ? (metadata as any).chapters : []
+      const segments = chapters
+        .map((chapter: any) => {
+          const type = classifyChapterTitle(chapter?.tags?.title || chapter?.title)
+          if (!type) return null
+
+          const startSec = parseIntroDbTime(chapter.start_time ?? chapter.start)
+          let endSec = parseIntroDbTime(chapter.end_time ?? chapter.end)
+          if (endSec !== null && endSec > 100000 && startSec !== null && startSec < 100000) {
+            endSec = endSec / 1000
+          }
+          if (endSec === null && type === 'outro' && inferredDuration) endSec = inferredDuration
+          if (startSec === null || endSec === null || endSec <= startSec) return null
+
+          return {
+            type,
+            startSec,
+            endSec,
+            confidence: null,
+            submissionCount: null,
+            updatedAt: null,
+            source: 'chapters' as SkipSegmentSource
+          }
+        })
+        .filter((segment: IntroDbSegment | null): segment is IntroDbSegment => segment !== null)
+        .sort((a: IntroDbSegment, b: IntroDbSegment) => a.startSec - b.startSec)
+
+      resolve(segments)
+    })
+  })
 }
 
 async function fetchYtsSources(imdbId: string): Promise<any[]> {

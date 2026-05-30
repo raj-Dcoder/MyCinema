@@ -32,6 +32,9 @@ protocols:
 win:
   icon: build/icon.ico
   target: nsis
+  verifyUpdateCodeSignature: true
+  signingHashAlgorithms:
+    - sha256
 nsis:
   oneClick: false
   allowToChangeInstallationDirectory: true

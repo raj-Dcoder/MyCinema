@@ -1,6 +1,6 @@
 # Installation Guide: MyCinema 🎬
 
-If you see a "Microsoft Defender SmartScreen" or "Windows protected your PC" warning when trying to install MyCinema, don't worry! This happens because the app is new and doesn't have a paid digital signature yet.
+If you see a "Microsoft Defender SmartScreen" or "Windows protected your PC" warning when trying to install MyCinema, download only from the official GitHub release page and confirm the filename/version matches the release notes. This warning appears on unsigned or low-reputation Windows installers because Microsoft cannot yet fully verify the publisher or download reputation.
 
 ### How to Install
 
@@ -17,4 +17,4 @@ If you see a "Microsoft Defender SmartScreen" or "Windows protected your PC" war
 ---
 
 ### Why does this happen?
-To remove this warning, a developer must pay for a "Code Signing Certificate" from Microsoft, which costs hundreds of dollars per year. For this small project, we haven't purchased one yet. Rest assured, the app is safe!
+Windows uses code-signing and download reputation to decide whether an installer should be trusted immediately. MyCinema releases are being moved to a signed-release workflow so Windows can show a verified publisher instead of `Publisher: Unknown`.

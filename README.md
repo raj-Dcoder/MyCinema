@@ -37,8 +37,10 @@ An offline-first desktop application for locally stored movies and TV series, bu
 5. **Build Executable**:
    ```bash
    npm run build
-   npm run dist
+   npm run dist:local
    ```
+
+For public Windows releases, configure code signing first and use `npm run dist` or `npm run release:publish`. See `docs/WINDOWS_CODE_SIGNING.md`.
 
 ## Folder Structure
 

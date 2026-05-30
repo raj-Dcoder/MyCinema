@@ -20,6 +20,7 @@ export interface Video {
   vote_average?: number
   release_year?: number
   tmdb_id?: number
+  imdb_id?: string
   isExternal?: boolean
   is_favorite?: boolean
   is_watchlist?: boolean

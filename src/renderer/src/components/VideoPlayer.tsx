@@ -19,6 +19,23 @@ import {
 
 type AudioBoostProfile = 'auto' | 'dialogue' | 'night' | 'laptop' | 'cinema'
 type AudioBoostIntensity = 'low' | 'medium' | 'high'
+type IntroDbSegmentType = 'intro' | 'recap' | 'outro'
+
+interface IntroDbSegment {
+  type: IntroDbSegmentType
+  startSec: number
+  endSec: number
+  confidence: number | null
+  submissionCount: number | null
+  updatedAt: string | null
+  source: 'theintrodb' | 'introdb' | 'chapters'
+}
+
+interface AutoSkipTransitionState {
+  show: boolean
+  label: string
+  id: number
+}
 
 const SUBTITLE_OVERLAY_Z_INDEX = 35
 const SEEK_PREVIEW_BUCKET_SECONDS = 5
@@ -29,6 +46,13 @@ const HIGH_SPEED_MIN_FRAME_SAMPLE = 24
 const HIGH_SPEED_DROPPED_FRAME_LIMIT = 8
 const HIGH_SPEED_DROPPED_FRAME_RATIO = 0.18
 const BUFFERING_INDICATOR_DELAY_MS = 450
+const INTRODB_SKIP_PROMPT_LEAD_SECONDS = 3
+const INTRODB_SKIP_END_PADDING_SECONDS = 0.15
+const INTRODB_AUTO_SKIP_STORAGE_KEY = 'mycinema_introdb_auto_skip'
+const INTRODB_AUTO_SKIP_SEEK_TRANSITION_MS = 180
+const INTRODB_AUTO_SKIP_NEXT_TRANSITION_MS = 240
+const INTRODB_AUTO_SKIP_CONFIRMATION_MS = 700
+const INTRODB_RECAP_PROMPT_VISIBLE_SECONDS = 8
 
 const AUDIO_BOOST_PROFILES: Record<AudioBoostProfile, {
   label: string
@@ -186,6 +210,22 @@ function parseVTT(content: string): SubCue[] {
   return cues
 }
 
+function getIntroDbSegmentKey(segment: IntroDbSegment): string {
+  return `${segment.type}:${segment.startSec}:${segment.endSec}`
+}
+
+function getIntroDbSegmentLabel(type: IntroDbSegmentType): string {
+  if (type === 'recap') return 'Recap'
+  if (type === 'outro') return 'Outro'
+  return 'Intro'
+}
+
+function getIntroDbSegmentAccentClass(type: IntroDbSegmentType): string {
+  if (type === 'recap') return 'bg-sky-300/70'
+  if (type === 'outro') return 'bg-emerald-300/70'
+  return 'bg-amber-300/70'
+}
+
 interface VideoPlayerProps {
   video: Video
   onClose: () => void
@@ -202,11 +242,13 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
   const [showWatchTogetherState, setShowWatchTogetherState] = useState(false)
   const [activeSpeakerId, setActiveSpeakerId] = useState<string | null>(null)
   const [talkResumeCountdown, setTalkResumeCountdown] = useState<number | null>(null)
+  const shouldShowTalkControl = roomId !== null && (showControls || isMicActive || activeSpeakerId !== null || talkResumeCountdown !== null || voiceError !== null)
   const talkResumeTimerRef = useRef<NodeJS.Timeout | null>(null)
   const talkResumeIntervalRef = useRef<NodeJS.Timeout | null>(null)
   const conversationWasPlayingRef = useRef(false)
   const isPushToTalkActiveRef = useRef(false)
   const activeSpeakerIdRef = useRef<string | null>(null)
+  const allowGuestPlaybackEventRef = useRef(false)
 
   const clearTalkResumeTimers = (updateState = true) => {
     if (talkResumeTimerRef.current) {
@@ -226,6 +268,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
     activeSpeakerIdRef.current = speakerId
     if (videoRef.current) {
       conversationWasPlayingRef.current = !videoRef.current.paused
+      allowGuestPlaybackEventRef.current = true
       videoRef.current.pause()
       setIsPlaying(false)
       if (audioRef.current && audioRef.current.src) audioRef.current.pause()
@@ -248,6 +291,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
     talkResumeTimerRef.current = setTimeout(() => {
       clearTalkResumeTimers()
       if (activeSpeakerIdRef.current || !videoRef.current) return
+      allowGuestPlaybackEventRef.current = true
       videoRef.current.play().catch(e => console.log(e))
       setIsPlaying(true)
       if (shouldBroadcast) {
@@ -261,6 +305,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
       switch (msg.type) {
         case 'PLAY':
           if (videoRef.current) {
+            allowGuestPlaybackEventRef.current = true;
             videoRef.current.currentTime = msg.time;
             videoRef.current.play().catch(e => console.log(e));
             setIsPlaying(true);
@@ -268,6 +313,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
           break;
         case 'PAUSE':
           if (videoRef.current) {
+            allowGuestPlaybackEventRef.current = true;
             videoRef.current.pause();
             setIsPlaying(false);
             videoRef.current.currentTime = msg.time;
@@ -343,7 +389,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
   const [highSpeedPerformanceMode, setHighSpeedPerformanceMode] = useState(false)
   const ASPECT_MODES: ('contain' | 'cover' | 'fill')[] = ['contain', 'cover', 'fill'];
   const [aspectMode, setAspectMode] = useState<('contain' | 'cover' | 'fill')>('contain');
-  const [trackPopup, setTrackPopup] = useState<{ show: boolean, type: 'audio' | 'subtitle' | 'subtitleSync' | 'aspect', text: string, id: number }>({ show: false, type: 'subtitle', text: '', id: 0 })
+  const [trackPopup, setTrackPopup] = useState<{ show: boolean, type: 'audio' | 'subtitle' | 'subtitleSync' | 'aspect' | 'skip', text: string, id: number }>({ show: false, type: 'subtitle', text: '', id: 0 })
   const [seekPreview, setSeekPreview] = useState<number | null>(null)
   const seekPreviewRef = useRef<number>(0)
   const [embeddedSubs, setEmbeddedSubs] = useState<any[]>([])
@@ -445,6 +491,9 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
     const stored = localStorage.getItem('mycinema_audio_boost_intensity')
     return stored === 'low' || stored === 'high' ? stored : 'medium'
   })
+  const [autoSkipIntroOutroEnabled, setAutoSkipIntroOutroEnabled] = useState(() => {
+    return localStorage.getItem(INTRODB_AUTO_SKIP_STORAGE_KEY) !== 'false'
+  })
   const [showInfoPanel, setShowInfoPanel] = useState(false)
   const [showEpisodesPanel, setShowEpisodesPanel] = useState(false)
   const [seriesEpisodes, setSeriesEpisodes] = useState<Video[]>([])
@@ -452,6 +501,9 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
   const [infoLoading, setInfoLoading] = useState(false)
   const [showAllAudioInfo, setShowAllAudioInfo] = useState(false)
   const [showSubtitleSyncPanel, setShowSubtitleSyncPanel] = useState(false)
+  const [introDbSegments, setIntroDbSegments] = useState<IntroDbSegment[]>([])
+  const [dismissedIntroDbSegmentKeys, setDismissedIntroDbSegmentKeys] = useState<Set<string>>(new Set())
+  const [autoSkipTransition, setAutoSkipTransition] = useState<AutoSkipTransitionState | null>(null)
   
   // Online subtitle search state
   const [onlineSubResults, setOnlineSubResults] = useState<any[]>([])
@@ -487,12 +539,48 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
   const playerSessionTokenRef = useRef(0)
   const subtitleLoadTokenRef = useRef(0)
   const isPlayerClosingRef = useRef(false)
+  const autoSkipInFlightKeyRef = useRef<string | null>(null)
+  const autoSkipTransitionTimerRef = useRef<NodeJS.Timeout | null>(null)
   const highSpeedPlaybackActive = playbackRate >= HIGH_SPEED_PERFORMANCE_RATE || isHolding2x
   const highSpeedDisplayRate = isHolding2x ? 2 : playbackRate
   const highSpeedMotionPaused = fpsBoostEnabled && highSpeedPlaybackActive && highSpeedPerformanceMode
   const effectiveFpsBoostEnabled = fpsBoostEnabled && !highSpeedMotionPaused
   const effectiveSharpnessEnabled = qualitySharpnessEnabled
   const effectiveVibranceEnabled = qualityVibranceEnabled
+  const canControlPlayback = isHost || roomId === null
+  const activeIntroDbSegment = canControlPlayback
+    ? introDbSegments.find(segment => {
+        const key = getIntroDbSegmentKey(segment)
+        const segmentEnd = duration > 0 ? Math.min(segment.endSec, duration) : segment.endSec
+        const promptStart = Math.max(0, segment.startSec - INTRODB_SKIP_PROMPT_LEAD_SECONDS)
+        const promptEnd = segment.type === 'recap'
+          ? Math.min(segmentEnd - 0.25, segment.startSec + INTRODB_RECAP_PROMPT_VISIBLE_SECONDS)
+          : segmentEnd - 0.25
+        return !dismissedIntroDbSegmentKeys.has(key) &&
+          currentTime >= promptStart &&
+          currentTime < promptEnd
+      }) || null
+    : null
+  const activeIntroDbSegmentCanAutoSkip = activeIntroDbSegment?.type === 'intro' || activeIntroDbSegment?.type === 'outro'
+  const activeIntroDbAutoSkipCountdown = activeIntroDbSegment && activeIntroDbSegmentCanAutoSkip
+    ? Math.max(0, Math.ceil(activeIntroDbSegment.startSec - currentTime))
+    : 0
+  const activeIntroDbSegmentIsOutroAdvance = activeIntroDbSegment?.type === 'outro' && hasNextEpisode
+  const activeIntroDbWatchLabel = activeIntroDbSegment
+    ? activeIntroDbSegment.type === 'outro'
+      ? 'Watch Credits'
+      : `Watch ${getIntroDbSegmentLabel(activeIntroDbSegment.type)}`
+    : ''
+  const activeIntroDbActionLabel = activeIntroDbSegment
+    ? activeIntroDbSegmentIsOutroAdvance
+      ? 'Next Episode'
+      : activeIntroDbSegment.type === 'outro'
+        ? 'Skip Credits'
+        : `Skip ${getIntroDbSegmentLabel(activeIntroDbSegment.type)}`
+    : ''
+  const activeIntroDbAutoSkipProgress = activeIntroDbSegment && activeIntroDbSegmentCanAutoSkip && autoSkipIntroOutroEnabled
+    ? Math.max(0, Math.min(1, 1 - ((activeIntroDbSegment.startSec - currentTime) / INTRODB_SKIP_PROMPT_LEAD_SECONDS)))
+    : 0
 
   const activateHighSpeedPerformanceMode = useCallback((message?: string) => {
     if (!fpsBoostEnabled) return
@@ -580,6 +668,10 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
       clearTimeout(seekPreviewThumbTimerRef.current)
       seekPreviewThumbTimerRef.current = null
     }
+    if (autoSkipTransitionTimerRef.current) {
+      clearTimeout(autoSkipTransitionTimerRef.current)
+      autoSkipTransitionTimerRef.current = null
+    }
     if (window.controlsTimeout) {
       clearTimeout(window.controlsTimeout)
     }
@@ -608,6 +700,8 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
     lastSeekPreviewBucketRef.current = null
     isPushToTalkActiveRef.current = false
     activeSpeakerIdRef.current = null
+    autoSkipInFlightKeyRef.current = null
+    setAutoSkipTransition(null)
 
     if (releaseMedia) {
       const doc = document as Document & {
@@ -667,6 +761,63 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
   }, [currentVideo.file_path])
 
   useEffect(() => {
+    let isCancelled = false
+    setIntroDbSegments([])
+    setDismissedIntroDbSegmentKeys(new Set())
+    setAutoSkipTransition(null)
+    autoSkipInFlightKeyRef.current = null
+    if (autoSkipTransitionTimerRef.current) {
+      clearTimeout(autoSkipTransitionTimerRef.current)
+      autoSkipTransitionTimerRef.current = null
+    }
+
+    if (
+      currentVideo.type !== 'series' ||
+      currentVideo.season == null ||
+      currentVideo.episode == null ||
+      (!currentVideo.imdb_id && !currentVideo.tmdb_id && !currentVideo.file_path)
+    ) {
+      return () => {
+        isCancelled = true
+      }
+    }
+
+    window.api.getIntroDbSegments({
+      imdbId: currentVideo.imdb_id || null,
+      tmdbId: currentVideo.tmdb_id || null,
+      season: currentVideo.season,
+      episode: currentVideo.episode,
+      filePath: currentVideo.file_path || null,
+      duration: currentVideo.duration || duration || null
+    })
+      .then(result => {
+        if (isCancelled) return
+        setIntroDbSegments((result?.segments || []).filter(segment =>
+          Number.isFinite(segment.startSec) &&
+          Number.isFinite(segment.endSec) &&
+          segment.endSec > segment.startSec
+        ))
+      })
+      .catch(err => {
+        if (!isCancelled) setIntroDbSegments([])
+        console.warn('[VideoPlayer] IntroDB lookup failed:', err)
+      })
+
+    return () => {
+      isCancelled = true
+    }
+  }, [
+    currentVideo.episode,
+    currentVideo.id,
+    currentVideo.imdb_id,
+    currentVideo.file_path,
+    currentVideo.season,
+    currentVideo.tmdb_id,
+    currentVideo.type,
+    duration
+  ])
+
+  useEffect(() => {
     localStorage.setItem('mycinema_ai_sharpness', qualitySharpnessEnabled.toString())
   }, [qualitySharpnessEnabled])
 
@@ -685,6 +836,10 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
   useEffect(() => {
     localStorage.setItem('mycinema_audio_boost_intensity', audioBoostIntensity)
   }, [audioBoostIntensity])
+
+  useEffect(() => {
+    localStorage.setItem(INTRODB_AUTO_SKIP_STORAGE_KEY, autoSkipIntroOutroEnabled.toString())
+  }, [autoSkipIntroOutroEnabled])
 
   useEffect(() => {
     if (!performanceNotice.show) return
@@ -1665,7 +1820,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
     }, 1000)
   }
 
-  const showTrackToast = (type: 'audio' | 'subtitle' | 'subtitleSync' | 'aspect', text: string) => {
+  const showTrackToast = (type: 'audio' | 'subtitle' | 'subtitleSync' | 'aspect' | 'skip', text: string) => {
     const id = Date.now()
     setTrackPopup({ show: true, type, text, id })
     setTimeout(() => {
@@ -1791,6 +1946,11 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
       // Only block shortcuts for actual text inputs (not range sliders, checkboxes etc)
       const active = document.activeElement as HTMLInputElement | null
       if (active?.tagName === 'INPUT' && active?.type !== 'range') return
+
+      if (!isHost && roomId !== null && ['Space', 'ArrowLeft', 'ArrowRight'].includes(e.code)) {
+        e.preventDefault()
+        return
+      }
 
       if (['Space', 'ArrowUp', 'ArrowDown'].includes(e.code) || (roomId && e.code === 'KeyV')) e.preventDefault()
 
@@ -2033,6 +2193,11 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
       const active = document.activeElement as HTMLInputElement | null
       if (active?.tagName === 'INPUT' && active?.type !== 'range') return
 
+      if (!isHost && roomId !== null && ['Space', 'ArrowLeft', 'ArrowRight'].includes(e.code)) {
+        e.preventDefault()
+        return
+      }
+
       // Space hold/tap logic on keyup
       if (e.code === 'Space') {
         if (spaceHoldTimerRef.current) { 
@@ -2103,12 +2268,14 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
   useEffect(() => {
     if ('mediaSession' in navigator) {
       navigator.mediaSession.setActionHandler('play', () => {
+        if (!isHost && roomId !== null) return
         if (videoRef.current && videoRef.current.paused) {
           videoRef.current.play()
           setIsPlaying(true)
         }
       })
       navigator.mediaSession.setActionHandler('pause', () => {
+        if (!isHost && roomId !== null) return
         if (videoRef.current && !videoRef.current.paused) {
           videoRef.current.pause()
           setIsPlaying(false)
@@ -2125,7 +2292,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
         }
       }
     }
-  }, [])
+  }, [isHost, roomId])
 
   useEffect(() => {
     const interval = setInterval(() => {
@@ -2545,19 +2712,128 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
     }
   }
 
+  const seekToTime = (time: number) => {
+    if (!isHost && roomId !== null) return;
+    if (videoRef.current) {
+      const durationLimit = Number.isFinite(videoRef.current.duration) ? videoRef.current.duration : durationRef.current
+      const boundedTime = durationLimit > 0
+        ? Math.max(0, Math.min(time, durationLimit))
+        : Math.max(0, time)
+      seekWasPlayingRef.current = !videoRef.current.paused
+      pendingControlledSeekTimeRef.current = boundedTime
+      pendingControlledSeekResumeRef.current = seekWasPlayingRef.current
+      videoRef.current.currentTime = boundedTime
+      timeRef.current = boundedTime
+      setCurrentTime(boundedTime)
+      if (isHost) broadcastState({ type: 'SEEK', time: boundedTime });
+    }
+  }
+
   const seek = (seconds: number) => {
     if (!isHost && roomId !== null) return;
     if (videoRef.current) {
-      seekWasPlayingRef.current = !videoRef.current.paused
       const time = videoRef.current.currentTime + seconds
-      pendingControlledSeekTimeRef.current = time
-      pendingControlledSeekResumeRef.current = seekWasPlayingRef.current
-      videoRef.current.currentTime = time
-      timeRef.current = time
+      seekToTime(time)
       setSeekPopup(prev => ({ show: true, text: seconds > 0 ? `+${seconds}s` : `${seconds}s`, id: prev.id + 1 }))
-      if (isHost) broadcastState({ type: 'SEEK', time });
     }
   }
+
+  const dismissIntroDbSegment = (segment: IntroDbSegment) => {
+    setDismissedIntroDbSegmentKeys(prev => {
+      const next = new Set(prev)
+      next.add(getIntroDbSegmentKey(segment))
+      return next
+    })
+  }
+
+  const performIntroDbSkip = (segment: IntroDbSegment) => {
+    const targetTime = segment.endSec + INTRODB_SKIP_END_PADDING_SECONDS
+    const isOutroAdvance = segment.type === 'outro' && hasNextEpisode
+    if (isOutroAdvance) {
+      const completedAt = durationRef.current || duration || segment.endSec
+      timeRef.current = completedAt
+      window.api.updateVideoProgress(currentVideo.id, completedAt, true, true)
+      playNextEpisode()
+      return
+    }
+
+    seekToTime(targetTime)
+  }
+
+  const skipIntroDbSegment = (segment: IntroDbSegment, options: { automatic?: boolean } = {}) => {
+    const isOutroAdvance = segment.type === 'outro' && hasNextEpisode
+
+    if (options.automatic) {
+      const id = Date.now()
+      const transitionMs = isOutroAdvance ? INTRODB_AUTO_SKIP_NEXT_TRANSITION_MS : INTRODB_AUTO_SKIP_SEEK_TRANSITION_MS
+
+      if (autoSkipTransitionTimerRef.current) {
+        clearTimeout(autoSkipTransitionTimerRef.current)
+        autoSkipTransitionTimerRef.current = null
+      }
+      setAutoSkipTransition(null)
+
+      autoSkipTransitionTimerRef.current = setTimeout(() => {
+        dismissIntroDbSegment(segment)
+        performIntroDbSkip(segment)
+        if (isOutroAdvance) {
+          autoSkipTransitionTimerRef.current = null
+          return
+        }
+
+        setAutoSkipTransition({
+          show: true,
+          label: segment.type === 'outro'
+            ? 'Credits skipped'
+            : `${getIntroDbSegmentLabel(segment.type)} skipped`,
+          id
+        })
+        autoSkipTransitionTimerRef.current = setTimeout(() => {
+          autoSkipTransitionTimerRef.current = null
+          setAutoSkipTransition(prev => prev?.id === id ? null : prev)
+        }, INTRODB_AUTO_SKIP_CONFIRMATION_MS)
+      }, transitionMs)
+      return
+    }
+
+    dismissIntroDbSegment(segment)
+    performIntroDbSkip(segment)
+  }
+
+  const toggleAutoSkipIntroOutro = (e?: React.MouseEvent) => {
+    e?.stopPropagation()
+    const next = !autoSkipIntroOutroEnabled
+    setAutoSkipIntroOutroEnabled(next)
+    showTrackToast('skip', next ? 'Auto Skip On' : 'Auto Skip Off')
+  }
+
+  useEffect(() => {
+    if (
+      !autoSkipIntroOutroEnabled ||
+      !activeIntroDbSegment ||
+      !activeIntroDbSegmentCanAutoSkip ||
+      !canControlPlayback ||
+      !isPlaying ||
+      isSeeking ||
+      currentTime < activeIntroDbSegment.startSec ||
+      currentTime >= activeIntroDbSegment.endSec - 0.25
+    ) {
+      return
+    }
+
+    const segmentKey = getIntroDbSegmentKey(activeIntroDbSegment)
+    if (autoSkipInFlightKeyRef.current === segmentKey) return
+    autoSkipInFlightKeyRef.current = segmentKey
+    skipIntroDbSegment(activeIntroDbSegment, { automatic: true })
+  }, [
+    activeIntroDbSegment,
+    activeIntroDbSegmentCanAutoSkip,
+    autoSkipIntroOutroEnabled,
+    canControlPlayback,
+    currentTime,
+    isPlaying,
+    isSeeking
+  ])
 
   const handleSeekChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const time = parseFloat(e.target.value)
@@ -2866,14 +3142,27 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
             durationRef.current = nextDuration || 1
           }
         }}
-        onPlay={() => { 
+        onPlay={() => {
+          if (!isHost && roomId !== null && !allowGuestPlaybackEventRef.current) {
+            videoRef.current?.pause()
+            return
+          }
+          allowGuestPlaybackEventRef.current = false
           setIsPlaying(true); 
           const trackObj = availableAudio.find(a => a.id === selectedAudioId);
           if (trackObj && !trackObj.native && audioRef.current && !startupExternalAudioBarrierRef.current && !externalAudioSeekBarrierRef.current) {
             startExternalAudioTrack(trackObj.index, videoRef.current?.currentTime || 0, true)
           }
         }}
-        onPause={() => { setIsPlaying(false); if (audioRef.current && audioRef.current.src) audioRef.current.pause(); }}
+        onPause={() => {
+          if (!isHost && roomId !== null && !allowGuestPlaybackEventRef.current) {
+            videoRef.current?.play().catch(e => console.log('Guest local pause blocked:', e))
+            return
+          }
+          allowGuestPlaybackEventRef.current = false
+          setIsPlaying(false)
+          if (audioRef.current && audioRef.current.src) audioRef.current.pause()
+        }}
         onEnded={handleEnded}
         onWaiting={() => {
           if (startupExternalAudioBarrierRef.current || externalAudioSeekBarrierRef.current) return
@@ -2948,6 +3237,15 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
           100% { opacity: 0; transform: scale(1.15); }
         }
         .animate-seek { animation: seekAnim 1.2s ease-in-out forwards; }
+        @keyframes autoSkipReceipt {
+          0% { opacity: 0; transform: translateY(6px) scale(0.98); }
+          16% { opacity: 1; transform: translateY(0) scale(1); }
+          72% { opacity: 1; transform: translateY(0) scale(1); }
+          100% { opacity: 0; transform: translateY(-4px) scale(0.99); }
+        }
+        .auto-skip-receipt {
+          animation: autoSkipReceipt ${INTRODB_AUTO_SKIP_CONFIRMATION_MS}ms ease forwards;
+        }
       `}</style>
 
       {/* Subtitle overlay is now injected imperatively via useEffect below — not rendered as JSX */}
@@ -3010,13 +3308,14 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
           className="absolute pointer-events-none z-50 bottom-32 left-1/2 -translate-x-1/2"
         >
           <div className="bg-black/60 text-white font-bold backdrop-blur-md items-center animate-seek shadow-2xl border border-white/10 flex flex-row space-x-2 px-5 py-2.5 rounded-full">
-            {trackPopup.type === 'audio' ? <Music size={20} className="text-primary" /> 
+            {trackPopup.type === 'skip' ? <SkipNext size={20} className="text-primary" />
+             : trackPopup.type === 'audio' ? <Music size={20} className="text-primary" />
              : trackPopup.type === 'subtitle' || trackPopup.type === 'subtitleSync' ? <Subtitles size={20} className="text-primary" />
              : trackPopup.type === 'aspect' && aspectMode === 'cover' ? <Crop size={20} className="text-primary" />
              : trackPopup.type === 'aspect' && aspectMode === 'fill' ? <RectangleHorizontal size={20} className="text-primary" />
              : <Monitor size={20} className="text-primary" />}
             <span className="text-sm font-bold tracking-wide text-center" style={{ maxWidth: '280px' }}>
-              {trackPopup.type === 'audio' ? 'Audio' : trackPopup.type === 'aspect' ? 'Aspect' : trackPopup.type === 'subtitleSync' ? 'Subtitle Sync' : 'Subtitle'}: {trackPopup.text}
+              {trackPopup.type === 'skip' ? 'Auto Skip' : trackPopup.type === 'audio' ? 'Audio' : trackPopup.type === 'aspect' ? 'Aspect' : trackPopup.type === 'subtitleSync' ? 'Subtitle Sync' : 'Subtitle'}: {trackPopup.text}
             </span>
           </div>
         </div>
@@ -3031,9 +3330,55 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
         </div>
       )}
 
-      {roomId && (
-        <div className="absolute bottom-32 left-1/2 z-50 -translate-x-1/2 video-controls">
-          <div className="flex flex-col items-center gap-2">
+      {autoSkipTransition?.show && (
+        <div
+          key={`auto-skip-${autoSkipTransition.id}`}
+          className={`pointer-events-none absolute ${shouldShowTalkControl ? 'bottom-52' : 'bottom-32'} right-10 z-[70] flex max-w-[calc(100%-5rem)] justify-end`}
+        >
+          <div className="auto-skip-receipt flex h-9 items-center gap-2 rounded-full border border-white/10 bg-black/60 px-3.5 text-[12px] font-bold text-white/75 shadow-2xl backdrop-blur-xl">
+            <Check size={14} strokeWidth={3} className="text-primary" />
+            <span className="whitespace-nowrap">{autoSkipTransition.label}</span>
+          </div>
+        </div>
+      )}
+
+      {activeIntroDbSegment && (
+        <div className={`absolute ${shouldShowTalkControl ? 'bottom-52' : 'bottom-32'} right-10 z-[60] flex max-w-[calc(100%-5rem)] items-center justify-end gap-4 video-controls animate-in fade-in slide-in-from-bottom-2 duration-200`}>
+          <button
+            onClick={(e) => {
+              e.stopPropagation()
+              dismissIntroDbSegment(activeIntroDbSegment)
+            }}
+            className="h-14 min-w-[136px] rounded-lg border border-white/10 bg-[#2b2b2d]/95 px-6 text-[15px] font-extrabold text-white/75 shadow-2xl backdrop-blur-xl transition-all hover:bg-[#353537] hover:text-white active:scale-95"
+            title={`Keep watching ${activeIntroDbSegment.type === 'outro' ? 'credits' : getIntroDbSegmentLabel(activeIntroDbSegment.type).toLowerCase()}`}
+          >
+            <span className="block truncate">{activeIntroDbWatchLabel}</span>
+          </button>
+          <button
+            onClick={(e) => {
+              e.stopPropagation()
+              skipIntroDbSegment(activeIntroDbSegment)
+            }}
+            className="relative h-14 min-w-[148px] overflow-hidden rounded-lg bg-white/90 px-6 text-[15px] font-extrabold text-black shadow-2xl transition-all hover:bg-white active:scale-95"
+            title={`${activeIntroDbActionLabel}${autoSkipIntroOutroEnabled && activeIntroDbSegmentCanAutoSkip && activeIntroDbAutoSkipCountdown > 0 ? ` automatically in ${activeIntroDbAutoSkipCountdown}s` : ''}`}
+          >
+            {autoSkipIntroOutroEnabled && activeIntroDbSegmentCanAutoSkip && (
+              <span
+                className="absolute inset-y-0 left-0 bg-black/10 transition-[width] duration-200 ease-linear"
+                style={{ width: `${activeIntroDbAutoSkipProgress * 100}%` }}
+              />
+            )}
+            <span className="relative flex items-center justify-center gap-2 whitespace-nowrap">
+              <Play size={18} fill="currentColor" />
+              <span className="truncate">{activeIntroDbActionLabel}</span>
+            </span>
+          </button>
+        </div>
+      )}
+
+      {shouldShowTalkControl && (
+        <div className="absolute bottom-32 right-10 z-50 video-controls">
+          <div className="flex flex-col items-end gap-2">
             {(activeSpeakerId || talkResumeCountdown !== null || voiceError) && (
               <div className={`rounded-full border px-4 py-2 text-sm font-bold shadow-2xl backdrop-blur-xl ${
                 voiceError
@@ -3066,18 +3411,22 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
                 e.stopPropagation()
                 endPushToTalk()
               }}
-              className={`h-14 min-w-[220px] rounded-full border px-5 shadow-2xl backdrop-blur-xl transition-all active:scale-95 ${
+              className={`h-12 rounded-full border shadow-2xl backdrop-blur-xl transition-all active:scale-95 ${
                 isMicActive
-                  ? 'border-indigo-300/40 bg-indigo-500 text-white shadow-indigo-500/30'
-                  : 'border-white/10 bg-black/55 text-white hover:bg-black/75'
+                  ? 'min-w-[150px] border-indigo-300/40 bg-indigo-500 px-5 text-white shadow-indigo-500/30'
+                  : voiceEnabled || voiceError || activeSpeakerId || talkResumeCountdown !== null
+                    ? 'min-w-[150px] border-white/10 bg-black/55 px-5 text-white hover:bg-black/75'
+                    : 'w-12 border-white/10 bg-black/45 text-white/80 hover:bg-black/70 hover:text-white'
               }`}
               title="Hold V to pause and talk"
             >
               <span className="flex items-center justify-center gap-3">
                 {isMicActive ? <Mic size={20} /> : <MicOff size={20} />}
-                <span className="text-sm font-black uppercase tracking-wide">
-                  {isMicActive ? 'Speaking' : voiceEnabled ? 'Hold V to Talk' : 'Enable Mic'}
-                </span>
+                {(isMicActive || voiceEnabled || voiceError || activeSpeakerId || talkResumeCountdown !== null) && (
+                  <span className="text-sm font-black uppercase tracking-wide">
+                    {isMicActive ? 'Speaking' : voiceEnabled ? 'Hold V' : 'Enable Mic'}
+                  </span>
+                )}
               </span>
             </button>
           </div>
@@ -3428,6 +3777,21 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
             className="absolute left-0 top-1/2 -translate-y-1/2 h-1 bg-primary rounded-full transition-[height] group-hover/progress:h-1.5 duration-100" 
             style={{ width: `${((seekPreview ?? currentTime) / duration) * 100}%` }}
           />
+          {duration > 0 && introDbSegments.map(segment => {
+            const startPercent = Math.max(0, Math.min(100, (segment.startSec / duration) * 100))
+            const endPercent = Math.max(startPercent, Math.min(100, (segment.endSec / duration) * 100))
+            return (
+              <div
+                key={getIntroDbSegmentKey(segment)}
+                className={`absolute top-1/2 -translate-y-1/2 rounded-full h-1.5 pointer-events-none ${getIntroDbSegmentAccentClass(segment.type)}`}
+                style={{
+                  left: `${startPercent}%`,
+                  width: `${Math.max(0.35, endPercent - startPercent)}%`
+                }}
+                title={`${getIntroDbSegmentLabel(segment.type)} ${formatTime(segment.startSec)} - ${formatTime(segment.endSec)}`}
+              />
+            )
+          })}
           {/* Seek Preview Ghost Indicator */}
           {seekPreview !== null && duration > 0 && (
             <>
@@ -3559,6 +3923,29 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
                         <p className="text-[10px] font-black uppercase tracking-widest text-emerald-200">Performance Mode</p>
                         <p className="mt-0.5 text-[10px] font-medium leading-snug text-white/55">FPS Boost resumes below {HIGH_SPEED_PERFORMANCE_RATE}x. Sharpness and vibrance stay on.</p>
                       </div>
+                    )}
+
+                    {currentVideo.type === 'series' && canControlPlayback && (
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          toggleAutoSkipIntroOutro()
+                        }}
+                        aria-pressed={autoSkipIntroOutroEnabled}
+                        className={`w-full flex items-center justify-between px-3 py-3 rounded-xl transition-all duration-200 group ${autoSkipIntroOutroEnabled ? 'bg-primary/10 text-primary' : 'text-white/60 hover:bg-white/5 hover:text-white'}`}
+                        title={`Auto Skip Intro/Outro ${autoSkipIntroOutroEnabled ? 'On' : 'Off'}`}
+                      >
+                        <div className="flex items-center space-x-3">
+                          <SkipNext size={18} className={autoSkipIntroOutroEnabled ? "text-primary" : "text-white/30"} />
+                          <div className="text-left">
+                            <p className="text-[13px] font-bold tracking-tight">Auto Skip</p>
+                            <p className="text-[10px] opacity-50 font-medium">Intros & credits</p>
+                          </div>
+                        </div>
+                        <div className={`flex-shrink-0 w-10 h-5 rounded-full relative transition-colors duration-300 ${autoSkipIntroOutroEnabled ? 'bg-primary' : 'bg-white/10'}`}>
+                          <div className={`absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white transition-transform duration-300 ${autoSkipIntroOutroEnabled ? 'translate-x-5' : 'translate-x-0'}`} />
+                        </div>
+                      </button>
                     )}
 
                     {/* FPS Boost Toggle */}

@@ -33,7 +33,7 @@ Do not include:
 
 ## Electron Builder Note
 
-`electron-builder --publish always` usually uses release metadata from the package/build configuration.
+`npm run release:publish` usually uses release metadata from the package/build configuration.
 
 If the generated GitHub release body is empty or incomplete after publishing, use `.tmp-release-body.md` in `16-published-release-verification.md` to update the release body with the GitHub API or `gh` CLI.
 

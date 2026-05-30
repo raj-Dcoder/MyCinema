@@ -45,82 +45,107 @@ type WhatsNewSlide = {
 }
 
 export const LATEST_RELEASE = {
-  version: '1.22.3',
+  version: '1.23.0',
   eyebrow: 'What\'s New',
   slides: [
     {
-      id: 'reveal',
+      id: 'smart-skip',
       layout: 'reveal',
-      icon: Sparkles,
-      kicker: 'Player feel',
-      headline: 'Movie night feels smoother.',
-      highlight: 'smoother',
-      support: 'Tiny loading flashes are quieter, and fullscreen exits cleanly now.',
+      icon: Play,
+      kicker: 'Smart skip',
+      headline: 'Skip the slow parts.',
+      highlight: 'slow parts',
+      support: 'Intros and credits can move aside before the mood breaks.',
       bullets: [
-        'FPS Boost, AI Sharpness, and AI Vibrance can stay on together.',
-        'The buffering spinner waits before appearing, so micro-hiccups stay invisible.',
-        'The fullscreen button now exits in one click.'
+        'Auto Skip handles intros and credits while recaps stay manual.',
+        'A progress wipe shows when the jump is about to happen.',
+        'Tiny receipts confirm the skip without covering the scene.'
       ],
-      signal: 'Smoother',
-      cta: 'Feel it',
-      mood: {
-        name: 'player',
-        gradient: 'from-cyan-300 via-blue-400 to-violet-400',
-        text: 'text-cyan-200',
-        border: 'border-cyan-300/30',
-        shadow: 'shadow-[0_0_72px_rgba(34,211,238,0.3)]',
-        backdrop: 'linear-gradient(135deg, rgba(14,165,233,0.22), transparent 34%), linear-gradient(225deg, rgba(124,58,237,0.24), transparent 46%), linear-gradient(180deg, rgba(8,47,73,0.28), transparent 64%)',
-        cursor: 'rgba(34,211,238,0.24)'
-      }
-    },
-    {
-      id: 'performance',
-      layout: 'discovery',
-      icon: Zap,
-      kicker: 'Speed pass',
-      headline: 'Browsing carries less weight.',
-      highlight: 'less weight',
-      support: 'Home rows, artwork, and previews now do less background work.',
-      bullets: [
-        'Home snapshots wait briefly instead of writing during every row update.',
-        'Hero and card artwork use leaner image sizes with async loading.',
-        'Video rails load metadata first instead of eager full previews.'
-      ],
-      signal: 'Lighter',
-      cta: 'Nice',
-      mood: {
-        name: 'performance',
-        gradient: 'from-emerald-300 via-lime-300 to-yellow-200',
-        text: 'text-emerald-200',
-        border: 'border-emerald-300/30',
-        shadow: 'shadow-[0_0_72px_rgba(52,211,153,0.3)]',
-        backdrop: 'linear-gradient(130deg, rgba(22,163,74,0.22), transparent 36%), linear-gradient(260deg, rgba(250,204,21,0.16), transparent 48%), linear-gradient(180deg, rgba(6,78,59,0.28), transparent 64%)',
-        cursor: 'rgba(52,211,153,0.22)'
-      }
-    },
-    {
-      id: 'security',
-      layout: 'security',
-      icon: ShieldCheck,
-      kicker: 'Local care',
-      headline: 'Library work stays calm.',
-      highlight: 'stays calm',
-      support: 'Scanning and preview work are batched, capped, and kept local.',
-      bullets: [
-        'Folder scans batch library refreshes instead of interrupting every file.',
-        'Missing-file cleanup happens during scanner work, not normal browsing.',
-        'Seek preview jobs are capped while staying inside local file handling.'
-      ],
-      signal: 'Scoped',
+      signal: 'Auto ready',
       cta: 'Watch now',
       mood: {
-        name: 'security',
-        gradient: 'from-yellow-200 via-lime-300 to-emerald-300',
-        text: 'text-lime-200',
-        border: 'border-lime-300/30',
-        shadow: 'shadow-[0_0_72px_rgba(190,242,100,0.26)]',
-        backdrop: 'linear-gradient(135deg, rgba(202,138,4,0.2), transparent 34%), linear-gradient(245deg, rgba(163,230,53,0.18), transparent 50%), linear-gradient(180deg, rgba(63,98,18,0.2), transparent 66%)',
-        cursor: 'rgba(190,242,100,0.22)'
+        name: 'smart-skip',
+        gradient: 'from-rose-300 via-fuchsia-300 to-cyan-300',
+        text: 'text-rose-200',
+        border: 'border-rose-300/30',
+        shadow: 'shadow-[0_0_72px_rgba(244,114,182,0.3)]',
+        backdrop: 'linear-gradient(135deg, rgba(225,29,72,0.2), transparent 34%), linear-gradient(235deg, rgba(34,211,238,0.18), transparent 48%), linear-gradient(180deg, rgba(88,28,135,0.22), transparent 66%)',
+        cursor: 'rgba(244,114,182,0.22)'
+      }
+    },
+    {
+      id: 'recap-choice',
+      layout: 'share',
+      icon: Sparkles,
+      kicker: 'Recap flow',
+      headline: 'Recaps stay your choice.',
+      highlight: 'your choice',
+      support: 'Watch or skip recaps during the opening window, then continue cleanly.',
+      bullets: [
+        'Watch Recap and Skip Recap appear only when they are useful.',
+        'Ignored recap prompts fade out instead of camping on the screen.',
+        'Skip controls sit bottom-right like a modern streaming player.'
+      ],
+      signal: 'Your call',
+      cta: 'Nice',
+      mood: {
+        name: 'recap',
+        gradient: 'from-sky-300 via-indigo-300 to-violet-300',
+        text: 'text-sky-200',
+        border: 'border-sky-300/30',
+        shadow: 'shadow-[0_0_72px_rgba(125,211,252,0.28)]',
+        backdrop: 'linear-gradient(130deg, rgba(14,165,233,0.22), transparent 36%), linear-gradient(260deg, rgba(99,102,241,0.2), transparent 48%), linear-gradient(180deg, rgba(30,41,59,0.3), transparent 64%)',
+        cursor: 'rgba(125,211,252,0.22)'
+      }
+    },
+    {
+      id: 'coverage',
+      layout: 'discovery',
+      icon: Tv,
+      kicker: 'Episode cues',
+      headline: 'More episodes get markers.',
+      highlight: 'markers',
+      support: 'Online skip data and local chapters team up for better coverage.',
+      bullets: [
+        'TheIntroDB and IntroDB are checked for intro, recap, and credit ranges.',
+        'Embedded chapter names can fill gaps when online timing is missing.',
+        'Detected segments appear as subtle markers on the progress bar.'
+      ],
+      signal: 'Detected',
+      cta: 'Show me',
+      mood: {
+        name: 'coverage',
+        gradient: 'from-emerald-300 via-teal-300 to-yellow-200',
+        text: 'text-emerald-200',
+        border: 'border-emerald-300/30',
+        shadow: 'shadow-[0_0_72px_rgba(45,212,191,0.28)]',
+        backdrop: 'linear-gradient(130deg, rgba(16,185,129,0.22), transparent 36%), linear-gradient(260deg, rgba(250,204,21,0.16), transparent 48%), linear-gradient(180deg, rgba(6,78,59,0.26), transparent 64%)',
+        cursor: 'rgba(45,212,191,0.22)'
+      }
+    },
+    {
+      id: 'signed-release',
+      layout: 'security',
+      icon: ShieldCheck,
+      kicker: 'Release trust',
+      headline: 'Release builds earn trust.',
+      highlight: 'trust',
+      support: 'Signing checks help public installers show safer Windows publisher behavior.',
+      bullets: [
+        'Public Windows releases now require code signing before packaging.',
+        'Installer and app signatures can be verified before publishing.',
+        'Install guidance points users back to official GitHub releases.'
+      ],
+      signal: 'Signed path',
+      cta: 'I trust it',
+      mood: {
+        name: 'signed-release',
+        gradient: 'from-yellow-200 via-orange-300 to-emerald-300',
+        text: 'text-yellow-200',
+        border: 'border-yellow-300/30',
+        shadow: 'shadow-[0_0_72px_rgba(250,204,21,0.26)]',
+        backdrop: 'linear-gradient(135deg, rgba(202,138,4,0.2), transparent 34%), linear-gradient(245deg, rgba(16,185,129,0.18), transparent 50%), linear-gradient(180deg, rgba(63,98,18,0.2), transparent 66%)',
+        cursor: 'rgba(250,204,21,0.22)'
       }
     }
   ] satisfies WhatsNewSlide[]

@@ -55,6 +55,22 @@ interface Api {
   fetchTrending: (type: 'movie' | 'series') => Promise<any[]>
   fetchTrendingIndia: (type?: 'movie' | 'series') => Promise<any[]>
   getTmdbTrailer: (params: { tmdbId?: number | null; title: string; type: 'movie' | 'series'; year?: number | null; seasonNumber?: number | null; preferLatestSeason?: boolean }) => Promise<any | null>
+  getIntroDbSegments: (params: { imdbId?: string | null; tmdbId?: number | null; season?: number | null; episode?: number | null; filePath?: string | null; duration?: number | null }) => Promise<{
+    imdbId: string | null
+    season: number | null
+    episode: number | null
+    segments: Array<{
+      type: 'intro' | 'recap' | 'outro'
+      startSec: number
+      endSec: number
+      confidence: number | null
+      submissionCount: number | null
+      updatedAt: string | null
+      source: 'theintrodb' | 'introdb' | 'chapters'
+    }>
+    sources: Array<'theintrodb' | 'introdb' | 'chapters'>
+    error?: string
+  }>
   getPendingSharedMediaTarget: () => Promise<{ type: 'movie' | 'series'; tmdbId: number; source?: any } | null>
   getSharedMediaByTmdbId: (type: 'movie' | 'series', tmdbId: number) => Promise<any | null>
   onOpenSharedMedia: (callback: (target: { type: 'movie' | 'series'; tmdbId: number; source?: any }) => void) => () => void

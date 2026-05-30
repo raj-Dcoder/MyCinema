@@ -20,10 +20,11 @@ Tell the user:
 2. release-prep commit hash
 3. whether `npm run build` passed
 4. whether `git push` succeeded
-5. whether `electron-builder --publish always` succeeded
-6. whether the GitHub release body was verified or updated
-7. release URL, if available
-8. any remaining risks or manual checks
+5. whether `npm run release:publish` succeeded
+6. whether `npm run verify:installer-signature` reported valid Windows signatures
+7. whether the GitHub release body was verified or updated
+8. release URL, if available
+9. any remaining risks or manual checks
 
 Keep the report short and clear.
 
@@ -51,6 +52,7 @@ Released version:
 Commit:
 Build:
 Publish:
+Signature:
 GitHub body:
 Remaining work:
 ```

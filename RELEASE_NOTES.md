@@ -1,3 +1,29 @@
+# MyCinema v1.23.0
+
+Feature release focused on smarter episode skipping, calmer player controls, and a safer signed-release path.
+
+### Smart Episode Skipping
+- **Intro, Recap, And Credits Detection**: Series episodes can now load skip ranges from TheIntroDB, IntroDB, or embedded local chapters.
+- **Auto Skip For Intros And Credits**: The player can automatically jump past intros and credits while keeping recaps as a manual viewer choice.
+- **Timeline Segment Markers**: Detected intro, recap, and credits sections now appear as subtle markers on the playback bar.
+
+### Player Experience
+- **OTT-Style Skip Controls**: Skip prompts now use compact bottom-right `Watch` and `Skip` actions instead of heavy centered dialogs.
+- **Smoother Auto Skip Feedback**: Automatic skips use a short progress wipe and tiny confirmation receipt so the transition feels intentional.
+- **Quieter Recap Prompting**: Recap controls appear briefly near the start of a recap, then get out of the way if ignored.
+- **Cleaner Watch Together Controls**: Push-to-talk controls are more compact, and guests are guarded from locally overriding host playback.
+
+### Release & Installation
+- **Signed Release Workflow**: Public Windows packaging now requires code signing for release builds and verifies SHA-256 update signatures.
+- **Signature Verification Script**: Release packaging can now check the installer and unpacked app executable signatures before publishing.
+- **Safer Install Guidance**: Installation docs now direct users to official GitHub releases and explain Windows publisher warnings more clearly.
+
+### Security & Privacy
+- **Scoped Skip Metadata Lookups**: Intro and credits lookups use episode identifiers, while local chapter fallback stays behind safe file-path checks.
+- **Credential Handling Stays External**: GitHub tokens and code-signing certificate secrets remain environment variables and are not stored in the repo.
+
+***
+
 # MyCinema v1.22.3
 
 Patch release focused on reducing UI lag while keeping player enhancements sharp and responsive.

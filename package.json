@@ -12,6 +12,7 @@
     "dist": "electron-builder --config.win.forceCodeSigning=true",
     "dist:local": "electron-builder --publish never --config.win.forceCodeSigning=false",
     "release:publish": "electron-builder --publish always --config.win.forceCodeSigning=true",
+    "release:publish:unsigned": "electron-builder --publish always --config.win.forceCodeSigning=false",
     "verify:installer-signature": "pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/verify-windows-signature.ps1",
     "postinstall": "electron-builder install-app-deps"
   },

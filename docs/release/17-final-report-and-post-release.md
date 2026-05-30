@@ -21,10 +21,11 @@ Tell the user:
 3. whether `npm run build` passed
 4. whether `git push` succeeded
 5. whether `npm run release:publish` succeeded
-6. whether `npm run verify:installer-signature` reported valid Windows signatures
-7. whether the GitHub release body was verified or updated
-8. release URL, if available
-9. any remaining risks or manual checks
+6. release mode: signed or explicitly approved unsigned
+7. whether `npm run verify:installer-signature` reported valid Windows signatures, or why signature verification was skipped
+8. whether the GitHub release body was verified or updated
+9. release URL, if available
+10. any remaining risks or manual checks
 
 Keep the report short and clear.
 
@@ -52,6 +53,7 @@ Released version:
 Commit:
 Build:
 Publish:
+Mode:
 Signature:
 GitHub body:
 Remaining work:

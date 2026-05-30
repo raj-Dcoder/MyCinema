@@ -14,8 +14,8 @@ Feature release focused on smarter episode skipping, calmer player controls, and
 - **Cleaner Watch Together Controls**: Push-to-talk controls are more compact, and guests are guarded from locally overriding host playback.
 
 ### Release & Installation
-- **Signed Release Workflow**: Public Windows packaging now requires code signing for release builds and verifies SHA-256 update signatures.
-- **Signature Verification Script**: Release packaging can now check the installer and unpacked app executable signatures before publishing.
+- **Signed-Ready Release Workflow**: Public Windows packaging now has a signed path plus an explicit owner-approved unsigned fallback.
+- **Signature Verification Script**: Signed release packaging can now check the installer and unpacked app executable signatures before publishing.
 - **Safer Install Guidance**: Installation docs now direct users to official GitHub releases and explain Windows publisher warnings more clearly.
 
 ### Security & Privacy

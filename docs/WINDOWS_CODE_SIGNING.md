@@ -51,6 +51,16 @@ npm run release:publish
 
 `npm run dist` and `npm run release:publish` pass `forceCodeSigning=true`, so they should fail if Electron Builder cannot sign the Windows app.
 
+## Unsigned GitHub Fallback
+
+If the project owner explicitly approves an unsigned GitHub release because no paid certificate or cloud signing service is available yet, use:
+
+```powershell
+npm run release:publish:unsigned
+```
+
+This is a temporary fallback, not the preferred public release path. Windows may show `Unknown Publisher` or Microsoft Defender SmartScreen warnings for unsigned installers. Keep the release on the official GitHub release page and tell users to verify the filename and version before installing.
+
 ## Verify The Signature
 
 After building, run:

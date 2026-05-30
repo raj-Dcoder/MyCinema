@@ -41,6 +41,7 @@ An offline-first desktop application for locally stored movies and TV series, bu
    ```
 
 For public Windows releases, configure code signing first and use `npm run dist` or `npm run release:publish`. See `docs/WINDOWS_CODE_SIGNING.md`.
+If signing credentials are unavailable and the project owner explicitly approves an unsigned GitHub release, use `npm run release:publish:unsigned` and expect Windows publisher warnings.
 
 ## Folder Structure
 

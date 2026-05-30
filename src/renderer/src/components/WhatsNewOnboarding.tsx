@@ -128,16 +128,16 @@ export const LATEST_RELEASE = {
       layout: 'security',
       icon: ShieldCheck,
       kicker: 'Release trust',
-      headline: 'Release builds earn trust.',
-      highlight: 'trust',
-      support: 'Signing checks help public installers show safer Windows publisher behavior.',
+      headline: 'Release paths stay honest.',
+      highlight: 'honest',
+      support: 'Signed builds are ready, with clear warnings when unsigned.',
       bullets: [
-        'Public Windows releases now require code signing before packaging.',
-        'Installer and app signatures can be verified before publishing.',
+        'Signed publishing stays available when certificate credentials exist.',
+        'Unsigned GitHub releases now require explicit owner approval.',
         'Install guidance points users back to official GitHub releases.'
       ],
-      signal: 'Signed path',
-      cta: 'I trust it',
+      signal: 'Clear path',
+      cta: 'Got it',
       mood: {
         name: 'signed-release',
         gradient: 'from-yellow-200 via-orange-300 to-emerald-300',

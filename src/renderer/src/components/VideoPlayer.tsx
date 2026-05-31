@@ -37,6 +37,15 @@ interface AutoSkipTransitionState {
   id: number
 }
 
+interface SeriesSubtitleStatus {
+  label: string
+  current: number
+  total: number
+  ready: number
+  failed: number
+  done: boolean
+}
+
 const SUBTITLE_OVERLAY_Z_INDEX = 35
 const SEEK_PREVIEW_BUCKET_SECONDS = 5
 const SEEK_PREVIEW_DEBOUNCE_MS = 90
@@ -53,6 +62,7 @@ const INTRODB_AUTO_SKIP_SEEK_TRANSITION_MS = 180
 const INTRODB_AUTO_SKIP_NEXT_TRANSITION_MS = 240
 const INTRODB_AUTO_SKIP_CONFIRMATION_MS = 700
 const INTRODB_RECAP_PROMPT_VISIBLE_SECONDS = 8
+const SERIES_SUBTITLE_AUTO_LOAD_VALUE = 'external'
 
 const AUDIO_BOOST_PROFILES: Record<AudioBoostProfile, {
   label: string
@@ -226,6 +236,14 @@ function getIntroDbSegmentAccentClass(type: IntroDbSegmentType): string {
   return 'bg-amber-300/70'
 }
 
+function getPreferenceSeriesKey(video: Video) {
+  return video.type === 'series' && video.series_name ? video.series_name : 'global'
+}
+
+function getSeriesSubtitleAutoLoadStorageKey(seriesKey: string) {
+  return `mycinema_series_subtitle_auto_${seriesKey}`
+}
+
 interface VideoPlayerProps {
   video: Video
   onClose: () => void
@@ -237,6 +255,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
   const [isPlaying, setIsPlaying] = useState(false)
   const [currentTime, setCurrentTime] = useState(0)
   const [duration, setDuration] = useState(0)
+  const [showControls, setShowControls] = useState(true)
 
   const { isHost, roomId, participants, localPeerId, isConnecting, error, voiceError, voiceEnabled, isMicActive, remoteAudioStreams, startHosting, joinRoom, leaveRoom, broadcastState, startVoiceSession, setPushToTalkActive, onReceiveSyncObj, debugLogs } = useWatchTogether()
   const [showWatchTogetherState, setShowWatchTogetherState] = useState(false)
@@ -363,10 +382,11 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
     return () => clearInterval(interval);
   }, [isHost, isPlaying, broadcastState]);
   const [forceRestart, setForceRestart] = useState(false)
-  const [showControls, setShowControls] = useState(true)
   const [subtitlePath, setSubtitlePath] = useState<string | null>(null)
   const [volume, setVolume] = useState(1)
   const [currentVideo, setCurrentVideo] = useState<Video>(video)
+  const currentVideoRef = useRef<Video>(video)
+  currentVideoRef.current = currentVideo
   const [isSeeking, setIsSeeking] = useState(false)
   const [isFullscreen, setIsFullscreen] = useState(false)
   const [isWindowFullscreen, setIsWindowFullscreen] = useState(false)
@@ -511,6 +531,8 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
   const [onlineSubError, setOnlineSubError] = useState<string | null>(null)
   const [showOnlineSearch, setShowOnlineSearch] = useState(false)
   const [downloadingSubId, setDownloadingSubId] = useState<number | null>(null)
+  const [seriesSubtitleStatus, setSeriesSubtitleStatus] = useState<SeriesSubtitleStatus | null>(null)
+  const [seriesSubtitleRefreshToken, setSeriesSubtitleRefreshToken] = useState(0)
   
   const playerShellRef = useRef<HTMLDivElement>(null)
   const [hoverTime, setHoverTime] = useState<number | null>(null)
@@ -539,6 +561,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
   const playerSessionTokenRef = useRef(0)
   const subtitleLoadTokenRef = useRef(0)
   const isPlayerClosingRef = useRef(false)
+  const seriesSubtitleStatusTimerRef = useRef<NodeJS.Timeout | null>(null)
   const autoSkipInFlightKeyRef = useRef<string | null>(null)
   const autoSkipTransitionTimerRef = useRef<NodeJS.Timeout | null>(null)
   const highSpeedPlaybackActive = playbackRate >= HIGH_SPEED_PERFORMANCE_RATE || isHolding2x
@@ -672,6 +695,10 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
       clearTimeout(autoSkipTransitionTimerRef.current)
       autoSkipTransitionTimerRef.current = null
     }
+    if (seriesSubtitleStatusTimerRef.current) {
+      clearTimeout(seriesSubtitleStatusTimerRef.current)
+      seriesSubtitleStatusTimerRef.current = null
+    }
     if (window.controlsTimeout) {
       clearTimeout(window.controlsTimeout)
     }
@@ -702,6 +729,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
     activeSpeakerIdRef.current = null
     autoSkipInFlightKeyRef.current = null
     setAutoSkipTransition(null)
+    setSeriesSubtitleStatus(null)
 
     if (releaseMedia) {
       const doc = document as Document & {
@@ -1528,11 +1556,14 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
         setEmbeddedAudio(embeddedA || [])
         setAudioProbeReady(true)
 
-        const seriesKey = currentVideo.type === 'series' && currentVideo.series_name ? currentVideo.series_name : 'global'
+        const seriesKey = getPreferenceSeriesKey(currentVideo)
         const savedSubPref = localStorage.getItem(`mycinema_sub_pref_${seriesKey}`)
+        const seriesSubtitleAutoLoad = localStorage.getItem(getSeriesSubtitleAutoLoadStorageKey(seriesKey))
         let restoredId = null
         
-        if (savedSubPref && savedSubPref !== 'Off') {
+        if (srt && currentVideo.type === 'series' && seriesSubtitleAutoLoad === SERIES_SUBTITLE_AUTO_LOAD_VALUE && savedSubPref !== 'Off') {
+          restoredId = 'external-0'
+        } else if (savedSubPref && savedSubPref !== 'Off') {
           const tempSubs: any[] = []
           if (srt) tempSubs.push({ id: 'external-0', label: 'External SRT' })
           for (const sub of (embeddedS || [])) {
@@ -1828,6 +1859,22 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
     }, 1500)
   }
 
+  const updateSeriesSubtitleStatus = (status: SeriesSubtitleStatus, autoClear = false) => {
+    if (seriesSubtitleStatusTimerRef.current) {
+      clearTimeout(seriesSubtitleStatusTimerRef.current)
+      seriesSubtitleStatusTimerRef.current = null
+    }
+
+    setSeriesSubtitleStatus(status)
+
+    if (autoClear) {
+      seriesSubtitleStatusTimerRef.current = setTimeout(() => {
+        setSeriesSubtitleStatus(null)
+        seriesSubtitleStatusTimerRef.current = null
+      }, 6500)
+    }
+  }
+
   const clearRenderedSubtitle = () => {
     activeSubtitleCueIndexRef.current = -1
     if (subtitleDivRef.current) {
@@ -1879,6 +1926,12 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
       : 0
 
     applySubtitleOffset(storedOffset, { persist: false })
+  }
+
+  const getSubtitleConversionCacheKey = (key: string, sourceFile: string) => {
+    return key === 'external-0'
+      ? `external:${sourceFile}`
+      : `embedded:${currentVideo.file_path}:${key}`
   }
 
   const clearActiveSubtitleSelection = (closeMenu = true) => {
@@ -2471,7 +2524,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
     const trackObj = availableAudio.find(a => a.id === trackId)
     if (!trackObj) return
 
-    const seriesKey = currentVideo.type === 'series' && currentVideo.series_name ? currentVideo.series_name : 'global'
+    const seriesKey = getPreferenceSeriesKey(currentVideo)
     localStorage.setItem(`mycinema_audio_pref_${seriesKey}`, trackObj.label)
 
     if (trackObj.native) {
@@ -2522,7 +2575,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
       externalSubtitlePath?: string | null
     } = {}
   ) => {
-    const seriesKey = currentVideo.type === 'series' && currentVideo.series_name ? currentVideo.series_name : 'global'
+    const seriesKey = getPreferenceSeriesKey(currentVideo)
     const { closeMenu = true, persistPreference = true, presetVttPath = null, externalSubtitlePath } = options
     const loadToken = ++subtitleLoadTokenRef.current
     const sessionToken = playerSessionTokenRef.current
@@ -2531,6 +2584,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
       subtitleLoadTokenRef.current += 1
       if (persistPreference) {
         localStorage.setItem(`mycinema_sub_pref_${seriesKey}`, 'Off')
+        localStorage.removeItem(getSeriesSubtitleAutoLoadStorageKey(seriesKey))
       }
       clearActiveSubtitleSelection(closeMenu)
       return
@@ -2540,6 +2594,9 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
     if (persistPreference) {
       const trackLabel = trackObj?.label || (key === 'external-0' ? 'External SRT' : key)
       localStorage.setItem(`mycinema_sub_pref_${seriesKey}`, trackLabel)
+      if (key === 'external-0' && currentVideo.type === 'series') {
+        localStorage.setItem(getSeriesSubtitleAutoLoadStorageKey(seriesKey), SERIES_SUBTITLE_AUTO_LOAD_VALUE)
+      }
     }
 
     setActiveSubKey(key)
@@ -2551,15 +2608,16 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
     clearRenderedSubtitle()
 
     try {
-      let vttPath = presetVttPath || convertedSubPaths.get(key) || null
+      const isExternal = key === 'external-0'
+      const trackIndex = isExternal ? 0 : parseInt(key.replace('embedded-', ''), 10)
+      const sourceFile = isExternal ? (externalSubtitlePath ?? subtitlePath ?? currentVideo.file_path) : currentVideo.file_path
+      const conversionCacheKey = getSubtitleConversionCacheKey(key, sourceFile)
+      let vttPath = presetVttPath || convertedSubPaths.get(conversionCacheKey) || null
       if (presetVttPath) {
-        setConvertedSubPaths(prev => new Map(prev).set(key, presetVttPath))
+        setConvertedSubPaths(prev => new Map(prev).set(conversionCacheKey, presetVttPath))
       }
 
       if (!vttPath) {
-        const isExternal = key === 'external-0'
-        const trackIndex = isExternal ? 0 : parseInt(key.replace('embedded-', ''), 10)
-        const sourceFile = isExternal ? (externalSubtitlePath ?? subtitlePath ?? currentVideo.file_path) : currentVideo.file_path
         vttPath = await window.api.preConvertSubtitle(sourceFile, trackIndex, isExternal)
         if (
           isPlayerClosingRef.current ||
@@ -2567,7 +2625,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
           sessionToken !== playerSessionTokenRef.current ||
           activeSubKeyRef.current !== key
         ) return
-        if (vttPath) setConvertedSubPaths(prev => new Map(prev).set(key, vttPath!))
+        if (vttPath) setConvertedSubPaths(prev => new Map(prev).set(conversionCacheKey, vttPath!))
       }
 
       if (!vttPath) {
@@ -2624,7 +2682,262 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
     }
   }
 
+  useEffect(() => {
+    if (seriesSubtitleRefreshToken === 0) return
+
+    let isCancelled = false
+    const videoToRefresh = currentVideo
+
+    const refreshExternalSubtitle = async () => {
+      const seriesKey = getPreferenceSeriesKey(videoToRefresh)
+      if (
+        videoToRefresh.type !== 'series' ||
+        localStorage.getItem(getSeriesSubtitleAutoLoadStorageKey(seriesKey)) !== SERIES_SUBTITLE_AUTO_LOAD_VALUE ||
+        localStorage.getItem(`mycinema_sub_pref_${seriesKey}`) === 'Off'
+      ) {
+        return
+      }
+
+      const srt = await window.api.getSubtitlePath(videoToRefresh.file_path)
+      if (
+        isCancelled ||
+        isPlayerClosingRef.current ||
+        currentVideoRef.current.id !== videoToRefresh.id ||
+        !srt
+      ) {
+        return
+      }
+
+      setSubtitlePath(srt)
+      await selectSubtitleTrack('external-0', {
+        closeMenu: false,
+        persistPreference: false,
+        externalSubtitlePath: srt,
+      })
+    }
+
+    void refreshExternalSubtitle()
+
+    return () => {
+      isCancelled = true
+    }
+  }, [seriesSubtitleRefreshToken, currentVideo.id, currentVideo.file_path, currentVideo.series_name])
+
   // ─── Online Subtitle Search (OpenSubtitles) ──────────────────────────────────
+  const getSubtitleSearchLanguage = (sub?: any) => {
+    const language = typeof sub?.language === 'string' ? sub.language.trim().toLowerCase() : ''
+    return language && language !== 'unknown' ? language : 'en,hi'
+  }
+
+  const buildOnlineSubtitleSearchParams = (targetVideo: Video, languages = 'en,hi') => {
+    const params: any = {
+      languages,
+      videoFilePath: targetVideo.file_path,
+    }
+
+    const videoAny = targetVideo as any
+    if (videoAny.tmdb_id) {
+      params.tmdbId = videoAny.tmdb_id
+      params.mediaType = targetVideo.type === 'series' ? 'tv' : 'movie'
+    } else {
+      params.query = targetVideo.type === 'series' && targetVideo.series_name
+        ? targetVideo.series_name
+        : targetVideo.title
+    }
+
+    if (targetVideo.type === 'series') {
+      if (targetVideo.season) params.season = targetVideo.season
+      if (targetVideo.episode) params.episode = targetVideo.episode
+    }
+
+    return params
+  }
+
+  const pickBestSubtitleForLanguage = (results: any[], languages: string) => {
+    const preferredLanguages = languages
+      .split(',')
+      .map(language => language.trim().toLowerCase())
+      .filter(Boolean)
+
+    if (preferredLanguages.length === 0) return results[0]
+
+    return results.find(result =>
+      preferredLanguages.includes(String(result.language || '').toLowerCase())
+    ) || results[0]
+  }
+
+  const downloadSeriesSubtitles = async (selectedSub: any, sourceVideo: Video) => {
+    if (sourceVideo.type !== 'series' || !sourceVideo.series_name) return
+
+    let episodes: Video[] = []
+    try {
+      episodes = await window.api.getSeriesInfo(sourceVideo.series_name)
+    } catch (error) {
+      console.error('[OpenSubtitles] Failed to load series episodes:', error)
+      return
+    }
+
+    const seenPaths = new Set<string>([sourceVideo.file_path])
+    const targets = episodes.filter(episode => {
+      if (!episode.file_path || seenPaths.has(episode.file_path)) return false
+      seenPaths.add(episode.file_path)
+      return episode.type === 'series' && Boolean(episode.season) && Boolean(episode.episode)
+    })
+
+    if (targets.length === 0) return
+
+    const languages = getSubtitleSearchLanguage(selectedSub)
+    const total = targets.length + 1
+    let downloaded = 0
+    let skipped = 0
+    let failed = 0
+
+    if (!isPlayerClosingRef.current) {
+      showTrackToast('subtitle', 'Downloading series subtitles')
+      updateSeriesSubtitleStatus({
+        label: 'Starting series subtitle downloads',
+        current: 1,
+        total,
+        ready: 1,
+        failed: 0,
+        done: false,
+      })
+    }
+
+    for (const [index, episode] of targets.entries()) {
+      const current = index + 2
+      const episodeLabel = `S${String(episode.season).padStart(2, '0')} E${String(episode.episode).padStart(2, '0')}`
+
+      if (!isPlayerClosingRef.current) {
+        updateSeriesSubtitleStatus({
+          label: `Checking ${episodeLabel}`,
+          current,
+          total,
+          ready: downloaded + skipped + 1,
+          failed,
+          done: false,
+        })
+      }
+
+      try {
+        const existingSubtitle = await window.api.getSubtitlePath(episode.file_path)
+        if (existingSubtitle) {
+          skipped += 1
+          if (currentVideoRef.current.id === episode.id) {
+            setSeriesSubtitleRefreshToken(token => token + 1)
+          }
+          if (!isPlayerClosingRef.current) {
+            updateSeriesSubtitleStatus({
+              label: `${episodeLabel} already ready`,
+              current,
+              total,
+              ready: downloaded + skipped + 1,
+              failed,
+              done: false,
+            })
+          }
+          continue
+        }
+
+        const response = await window.api.searchOnlineSubtitles(
+          buildOnlineSubtitleSearchParams(episode, languages)
+        )
+
+        if (response?.error) {
+          failed += 1
+          if (!isPlayerClosingRef.current) {
+            updateSeriesSubtitleStatus({
+              label: `${episodeLabel} missing`,
+              current,
+              total,
+              ready: downloaded + skipped + 1,
+              failed,
+              done: false,
+            })
+          }
+          continue
+        }
+
+        const match = pickBestSubtitleForLanguage(response?.results || [], languages)
+        if (!match?.fileId) {
+          failed += 1
+          if (!isPlayerClosingRef.current) {
+            updateSeriesSubtitleStatus({
+              label: `${episodeLabel} missing`,
+              current,
+              total,
+              ready: downloaded + skipped + 1,
+              failed,
+              done: false,
+            })
+          }
+          continue
+        }
+
+        const result = await window.api.downloadOnlineSubtitle({
+          fileId: match.fileId,
+          videoFilePath: episode.file_path,
+          fileName: match.fileName,
+        })
+
+        if (result?.error) {
+          failed += 1
+        } else {
+          downloaded += 1
+          if (currentVideoRef.current.id === episode.id) {
+            setSeriesSubtitleRefreshToken(token => token + 1)
+          }
+        }
+
+        if (!isPlayerClosingRef.current) {
+          updateSeriesSubtitleStatus({
+            label: result?.error ? `${episodeLabel} missing` : `${episodeLabel} downloaded`,
+            current,
+            total,
+            ready: downloaded + skipped + 1,
+            failed,
+            done: false,
+          })
+        }
+      } catch (error) {
+        console.error('[OpenSubtitles] Series subtitle download failed:', error)
+        failed += 1
+        if (!isPlayerClosingRef.current) {
+          updateSeriesSubtitleStatus({
+            label: `${episodeLabel} missing`,
+            current,
+            total,
+            ready: downloaded + skipped + 1,
+            failed,
+            done: false,
+          })
+        }
+      }
+    }
+
+    if (isPlayerClosingRef.current) return
+
+    const ready = downloaded + skipped + 1
+    const finalLabel = failed > 0
+      ? `${ready}/${total} ready, ${failed} missing`
+      : `${ready}/${total} ready`
+
+    updateSeriesSubtitleStatus({
+      label: finalLabel,
+      current: total,
+      total,
+      ready,
+      failed,
+      done: true,
+    }, true)
+
+    if (failed > 0) {
+      showTrackToast('subtitle', `Series subtitles ${ready}/${total}`)
+    } else {
+      showTrackToast('subtitle', `Series subtitles ${ready}/${total}`)
+    }
+  }
+
   const searchOnlineSubs = async () => {
     setOnlineSubLoading(true)
     setOnlineSubError(null)
@@ -2632,28 +2945,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
     setShowOnlineSearch(true)
 
     try {
-      const params: any = {
-        languages: 'en,hi',
-        videoFilePath: currentVideo.file_path,
-      }
-
-      // Prefer TMDB ID search for accuracy
-      const videoAny = currentVideo as any
-      if (videoAny.tmdb_id) {
-        params.tmdbId = videoAny.tmdb_id
-        params.mediaType = currentVideo.type === 'series' ? 'tv' : 'movie'
-      } else {
-        // Fallback to title-based search
-        params.query = currentVideo.type === 'series' && currentVideo.series_name
-          ? currentVideo.series_name
-          : currentVideo.title
-      }
-
-      if (currentVideo.type === 'series') {
-        if (currentVideo.season) params.season = currentVideo.season
-        if (currentVideo.episode) params.episode = currentVideo.episode
-      }
-
+      const params = buildOnlineSubtitleSearchParams(currentVideo)
       const response = await window.api.searchOnlineSubtitles(params)
 
       if (response.error) {
@@ -2695,6 +2987,9 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
         presetVttPath: result.vttPath || null,
         externalSubtitlePath: result.srtPath
       })
+      if (currentVideo.type === 'series') {
+        void downloadSeriesSubtitles(sub, currentVideo)
+      }
       setShowMediaMenu(false)
       showTrackToast('subtitle', `Downloaded (${sub.language.toUpperCase()})`)
     } catch (err: any) {
@@ -3297,6 +3592,31 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
           <div className="flex items-center space-x-2 rounded-xl border border-emerald-400/20 bg-black/70 px-4 py-2.5 text-white shadow-2xl backdrop-blur-xl">
             <Zap size={18} className="text-emerald-300" />
             <span className="max-w-[320px] text-center text-xs font-bold tracking-wide">{performanceNotice.text}</span>
+          </div>
+        </div>
+      )}
+
+      {seriesSubtitleStatus && (
+        <div className="pointer-events-none absolute top-20 left-1/2 z-[60] -translate-x-1/2 animate-in fade-in zoom-in duration-200">
+          <div className="flex max-w-[min(92vw,440px)] items-center gap-3 rounded-xl border border-white/10 bg-black/70 px-4 py-3 text-white shadow-2xl backdrop-blur-xl">
+            <Subtitles size={18} className={seriesSubtitleStatus.done && seriesSubtitleStatus.failed === 0 ? 'text-emerald-300' : 'text-primary'} />
+            <div className="min-w-0">
+              <p className="text-[9px] font-black uppercase tracking-[0.2em] text-white/35">
+                Series subtitles
+              </p>
+              <p className="mt-0.5 truncate text-xs font-bold tracking-wide text-white/85">
+                {seriesSubtitleStatus.label}
+              </p>
+            </div>
+            <span className={`ml-auto shrink-0 rounded-full px-2.5 py-1 text-[11px] font-black tabular-nums ${
+              seriesSubtitleStatus.done
+                ? seriesSubtitleStatus.failed > 0
+                  ? 'bg-amber-400/15 text-amber-200'
+                  : 'bg-emerald-400/15 text-emerald-200'
+                : 'bg-primary/15 text-primary'
+            }`}>
+              {seriesSubtitleStatus.ready}/{seriesSubtitleStatus.total}
+            </span>
           </div>
         </div>
       )}

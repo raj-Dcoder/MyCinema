@@ -1306,6 +1306,107 @@ function tokenizeSubtitleName(value: string): string[] {
     )
 }
 
+type EpisodeSignature = {
+  season?: number
+  episode: number
+}
+
+function parseSeasonNumber(value: string): number | null {
+  const match =
+    value.match(/\bseason[\s._-]*(\d{1,2})\b/i) ||
+    value.match(/\bs(\d{1,2})\b/i)
+
+  if (!match) return null
+  const season = Number(match[1])
+  return Number.isFinite(season) ? season : null
+}
+
+function parseEpisodeSignature(value: string): EpisodeSignature | null {
+  const normalized = value.toLowerCase()
+  const seasonEpisodeMatch =
+    normalized.match(/\bs(\d{1,2})[\s._-]*e(\d{1,3})\b/i) ||
+    normalized.match(/\bseason[\s._-]*(\d{1,2})[\s._-]*(?:episode|ep)[\s._-]*(\d{1,3})\b/i) ||
+    normalized.match(/\b(\d{1,2})x(\d{1,3})\b/i)
+
+  if (seasonEpisodeMatch) {
+    const season = Number(seasonEpisodeMatch[1])
+    const episode = Number(seasonEpisodeMatch[2])
+    if (Number.isFinite(season) && Number.isFinite(episode)) {
+      return { season, episode }
+    }
+  }
+
+  const episodeSeasonMatch = normalized.match(/\b(?:episode|ep)[\s._-]*(\d{1,3})\b[\s\S]*?\bseason[\s._-]*(\d{1,2})\b/i)
+  if (episodeSeasonMatch) {
+    const episode = Number(episodeSeasonMatch[1])
+    const season = Number(episodeSeasonMatch[2])
+    if (Number.isFinite(season) && Number.isFinite(episode)) {
+      return { season, episode }
+    }
+  }
+
+  const episodeOnlyMatch =
+    normalized.match(/\b(?:episode|ep)[\s._-]*(\d{1,3})\b/i) ||
+    normalized.match(/\be(\d{1,3})\b/i)
+
+  if (episodeOnlyMatch) {
+    const episode = Number(episodeOnlyMatch[1])
+    if (Number.isFinite(episode)) return { episode }
+  }
+
+  return null
+}
+
+function getEpisodeSignature(filePath: string): EpisodeSignature | null {
+  const baseName = path.basename(filePath, path.extname(filePath))
+  const parentDir = path.basename(path.dirname(filePath))
+  const signature = parseEpisodeSignature(baseName)
+  const parentSeason = parseSeasonNumber(parentDir)
+
+  if (signature) {
+    return {
+      season: signature.season ?? parentSeason ?? undefined,
+      episode: signature.episode,
+    }
+  }
+
+  if (!parentSeason) return null
+  const leadingEpisodeMatch = baseName.match(/^(?:episode|ep)?[\s._-]*(\d{1,3})(?:\D|$)/i)
+  if (!leadingEpisodeMatch) return null
+
+  const episode = Number(leadingEpisodeMatch[1])
+  return Number.isFinite(episode) ? { season: parentSeason, episode } : null
+}
+
+function isSubtitleEpisodeCompatible(videoFilePath: string, subtitlePath: string): boolean {
+  const videoBaseName = path.basename(videoFilePath, path.extname(videoFilePath)).toLowerCase()
+  const subtitleFileName = path.basename(subtitlePath).toLowerCase()
+  const subtitleBaseName = path.basename(subtitlePath, path.extname(subtitlePath)).toLowerCase()
+
+  if (
+    subtitleFileName.includes('.opensubtitles.') &&
+    !subtitleBaseName.startsWith(`${videoBaseName}.opensubtitles.`)
+  ) {
+    return false
+  }
+
+  const videoSignature = getEpisodeSignature(videoFilePath)
+  if (!videoSignature) return true
+
+  const subtitleSignature = getEpisodeSignature(subtitlePath)
+  if (!subtitleSignature) return true
+
+  if (
+    videoSignature.season !== undefined &&
+    subtitleSignature.season !== undefined &&
+    videoSignature.season !== subtitleSignature.season
+  ) {
+    return false
+  }
+
+  return videoSignature.episode === subtitleSignature.episode
+}
+
 function scoreSubtitleCandidate(videoFilePath: string, subtitlePath: string): number {
   const videoBaseName = path.basename(videoFilePath, path.extname(videoFilePath)).toLowerCase()
   const subtitleFileName = path.basename(subtitlePath).toLowerCase()
@@ -1359,6 +1460,7 @@ function findBestExternalSubtitle(videoFilePath: string): string | null {
 
   const rankedCandidates = Array.from(candidatePaths)
     .filter(candidate => fs.existsSync(candidate))
+    .filter(candidate => isSubtitleEpisodeCompatible(videoFilePath, candidate))
     .map(candidate => ({ candidate, score: scoreSubtitleCandidate(videoFilePath, candidate) }))
     .sort((a, b) => b.score - a.score)
 

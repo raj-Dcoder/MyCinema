@@ -92,7 +92,7 @@ const api = {
   openDownloadsFolder: () => ipcRenderer.invoke('open-downloads-folder'),
   getDownloadsStorage: () => ipcRenderer.invoke('get-downloads-storage'),
   // OpenSubtitles API
-  searchOnlineSubtitles: (params: { query?: string; tmdbId?: number; season?: number; episode?: number; languages?: string; mediaType?: string }) =>
+  searchOnlineSubtitles: (params: { query?: string; tmdbId?: number; season?: number; episode?: number; languages?: string; mediaType?: string; videoFilePath?: string }) =>
     ipcRenderer.invoke('search-opensubtitles', params),
   downloadOnlineSubtitle: (params: { fileId: number; videoFilePath: string; fileName?: string }) =>
     ipcRenderer.invoke('download-opensubtitle', params),

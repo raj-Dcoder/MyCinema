@@ -1,3 +1,21 @@
+# MyCinema v1.23.1
+
+Patch release focused on making downloaded series subtitles follow every episode correctly.
+
+### Series Subtitles
+- **Whole-Series Subtitle Downloads**: Downloading an online subtitle for one series episode now checks the rest of the local series and downloads matching subtitles where available.
+- **Correct Episode Loading**: Changing episodes now loads that episode's own downloaded subtitle instead of reusing the previous or last episode's subtitle.
+- **Visible Download Progress**: The player now shows series subtitle progress while episodes are checked, downloaded, skipped, or missing.
+
+### Reliability
+- **Episode-Safe Subtitle Matching**: External subtitle lookup rejects mismatched episode sidecars and keeps OpenSubtitles downloads tied to the video basename they were saved for.
+- **Source-Specific Subtitle Cache**: Converted subtitle files are cached by their real subtitle path, preventing `External SRT` from pointing at another episode's cached cues.
+
+### Security & Privacy
+- **Scoped Subtitle File Use**: Subtitle matching remains local and safe-path gated, with downloaded OpenSubtitles sidecars restricted to their matching episode filename.
+
+***
+
 # MyCinema v1.23.0
 
 Feature release focused on smarter episode skipping, calmer player controls, and a safer signed-release path.

@@ -45,107 +45,82 @@ type WhatsNewSlide = {
 }
 
 export const LATEST_RELEASE = {
-  version: '1.23.0',
+  version: '1.23.1',
   eyebrow: 'What\'s New',
   slides: [
     {
-      id: 'smart-skip',
+      id: 'series-subtitles',
       layout: 'reveal',
-      icon: Play,
-      kicker: 'Smart skip',
-      headline: 'Skip the slow parts.',
-      highlight: 'slow parts',
-      support: 'Intros and credits can move aside before the mood breaks.',
+      icon: DownloadIcon,
+      kicker: 'Subtitles',
+      headline: 'One download covers episodes.',
+      highlight: 'covers episodes',
+      support: 'Grab one subtitle and MyCinema checks the rest of the series.',
       bullets: [
-        'Auto Skip handles intros and credits while recaps stay manual.',
-        'A progress wipe shows when the jump is about to happen.',
-        'Tiny receipts confirm the skip without covering the scene.'
+        'Series subtitle downloads continue across local seasons and episodes.',
+        'Episodes with matching subtitles are skipped instead of duplicated.',
+        'Missing subtitle results are counted clearly at the end.'
       ],
-      signal: 'Auto ready',
-      cta: 'Watch now',
+      signal: 'Series scan',
+      cta: 'Load them',
       mood: {
-        name: 'smart-skip',
-        gradient: 'from-rose-300 via-fuchsia-300 to-cyan-300',
-        text: 'text-rose-200',
-        border: 'border-rose-300/30',
-        shadow: 'shadow-[0_0_72px_rgba(244,114,182,0.3)]',
-        backdrop: 'linear-gradient(135deg, rgba(225,29,72,0.2), transparent 34%), linear-gradient(235deg, rgba(34,211,238,0.18), transparent 48%), linear-gradient(180deg, rgba(88,28,135,0.22), transparent 66%)',
-        cursor: 'rgba(244,114,182,0.22)'
+        name: 'series-subtitles',
+        gradient: 'from-cyan-300 via-sky-300 to-emerald-300',
+        text: 'text-cyan-200',
+        border: 'border-cyan-300/30',
+        shadow: 'shadow-[0_0_72px_rgba(34,211,238,0.3)]',
+        backdrop: 'linear-gradient(135deg, rgba(14,165,233,0.22), transparent 34%), linear-gradient(235deg, rgba(16,185,129,0.18), transparent 48%), linear-gradient(180deg, rgba(8,47,73,0.24), transparent 66%)',
+        cursor: 'rgba(34,211,238,0.22)'
       }
     },
     {
-      id: 'recap-choice',
-      layout: 'share',
-      icon: Sparkles,
-      kicker: 'Recap flow',
-      headline: 'Recaps stay your choice.',
-      highlight: 'your choice',
-      support: 'Watch or skip recaps during the opening window, then continue cleanly.',
+      id: 'episode-load',
+      layout: 'downloads',
+      icon: Check,
+      kicker: 'Episode flow',
+      headline: 'Next episode stays synced.',
+      highlight: 'stays synced',
+      support: 'Changing episodes now loads that episode\'s own downloaded subtitle.',
       bullets: [
-        'Watch Recap and Skip Recap appear only when they are useful.',
-        'Ignored recap prompts fade out instead of camping on the screen.',
-        'Skip controls sit bottom-right like a modern streaming player.'
+        'Downloaded subtitles auto-load when you move through the series.',
+        'External SRT no longer points at another episode cache.',
+        'Late background downloads refresh the current episode when ready.'
       ],
-      signal: 'Your call',
-      cta: 'Nice',
+      signal: 'Locked in',
+      cta: 'Play next',
       mood: {
-        name: 'recap',
-        gradient: 'from-sky-300 via-indigo-300 to-violet-300',
-        text: 'text-sky-200',
-        border: 'border-sky-300/30',
-        shadow: 'shadow-[0_0_72px_rgba(125,211,252,0.28)]',
-        backdrop: 'linear-gradient(130deg, rgba(14,165,233,0.22), transparent 36%), linear-gradient(260deg, rgba(99,102,241,0.2), transparent 48%), linear-gradient(180deg, rgba(30,41,59,0.3), transparent 64%)',
-        cursor: 'rgba(125,211,252,0.22)'
-      }
-    },
-    {
-      id: 'coverage',
-      layout: 'discovery',
-      icon: Tv,
-      kicker: 'Episode cues',
-      headline: 'More episodes get markers.',
-      highlight: 'markers',
-      support: 'Online skip data and local chapters team up for better coverage.',
-      bullets: [
-        'TheIntroDB and IntroDB are checked for intro, recap, and credit ranges.',
-        'Embedded chapter names can fill gaps when online timing is missing.',
-        'Detected segments appear as subtle markers on the progress bar.'
-      ],
-      signal: 'Detected',
-      cta: 'Show me',
-      mood: {
-        name: 'coverage',
-        gradient: 'from-emerald-300 via-teal-300 to-yellow-200',
+        name: 'episode-load',
+        gradient: 'from-lime-200 via-emerald-300 to-teal-300',
         text: 'text-emerald-200',
         border: 'border-emerald-300/30',
-        shadow: 'shadow-[0_0_72px_rgba(45,212,191,0.28)]',
-        backdrop: 'linear-gradient(130deg, rgba(16,185,129,0.22), transparent 36%), linear-gradient(260deg, rgba(250,204,21,0.16), transparent 48%), linear-gradient(180deg, rgba(6,78,59,0.26), transparent 64%)',
-        cursor: 'rgba(45,212,191,0.22)'
+        shadow: 'shadow-[0_0_72px_rgba(52,211,153,0.28)]',
+        backdrop: 'linear-gradient(130deg, rgba(16,185,129,0.22), transparent 36%), linear-gradient(260deg, rgba(20,184,166,0.18), transparent 48%), linear-gradient(180deg, rgba(6,78,59,0.24), transparent 64%)',
+        cursor: 'rgba(52,211,153,0.22)'
       }
     },
     {
-      id: 'signed-release',
+      id: 'safe-matching',
       layout: 'security',
       icon: ShieldCheck,
-      kicker: 'Release trust',
-      headline: 'Release paths stay honest.',
-      highlight: 'honest',
-      support: 'Signed builds are ready, with clear warnings when unsigned.',
+      kicker: 'Matching',
+      headline: 'No more subtitle mixups.',
+      highlight: 'subtitle mixups',
+      support: 'Episode files keep their own subtitle sidecars and converted cues.',
       bullets: [
-        'Signed publishing stays available when certificate credentials exist.',
-        'Unsigned GitHub releases now require explicit owner approval.',
-        'Install guidance points users back to official GitHub releases.'
+        'Episode markers reject subtitles from other episodes.',
+        'OpenSubtitles sidecars must match the current video name.',
+        'Converted subtitle cache keys include the real subtitle path.'
       ],
-      signal: 'Clear path',
-      cta: 'Got it',
+      signal: 'Matched',
+      cta: 'Perfect',
       mood: {
-        name: 'signed-release',
-        gradient: 'from-yellow-200 via-orange-300 to-emerald-300',
-        text: 'text-yellow-200',
-        border: 'border-yellow-300/30',
-        shadow: 'shadow-[0_0_72px_rgba(250,204,21,0.26)]',
-        backdrop: 'linear-gradient(135deg, rgba(202,138,4,0.2), transparent 34%), linear-gradient(245deg, rgba(16,185,129,0.18), transparent 50%), linear-gradient(180deg, rgba(63,98,18,0.2), transparent 66%)',
-        cursor: 'rgba(250,204,21,0.22)'
+        name: 'safe-matching',
+        gradient: 'from-violet-300 via-fuchsia-300 to-rose-300',
+        text: 'text-violet-200',
+        border: 'border-violet-300/30',
+        shadow: 'shadow-[0_0_72px_rgba(216,180,254,0.28)]',
+        backdrop: 'linear-gradient(135deg, rgba(124,58,237,0.22), transparent 34%), linear-gradient(245deg, rgba(244,114,182,0.18), transparent 50%), linear-gradient(180deg, rgba(76,29,149,0.24), transparent 66%)',
+        cursor: 'rgba(216,180,254,0.22)'
       }
     }
   ] satisfies WhatsNewSlide[]

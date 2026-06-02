@@ -152,10 +152,42 @@ const Download: React.FC<DownloadProps> = ({ onShowDetail }) => {
   const sourceProgressTimerRef = useRef<number | null>(null)
   const [, startSourceTransition] = React.useTransition()
 
+  const cancelActiveSourceSearch = (markDone = true) => {
+    const requestId = sourceSearchRequestRef.current
+    if (requestId) {
+      void window.api.cancelTorrentSourceSearch(requestId).catch(() => {})
+      sourceSearchRequestRef.current = null
+    }
+    setLoadingSources(false)
+    pendingSourceProgressRef.current = null
+    if (sourceProgressTimerRef.current) {
+      window.clearTimeout(sourceProgressTimerRef.current)
+      sourceProgressTimerRef.current = null
+    }
+    if (markDone) {
+      setSourceSearchStatus(prev => ({ ...prev, done: true }))
+    }
+  }
+
   const [selectedSeason, setSelectedSeason] = useState<string>('all')
   const [selectedPackSeason, setSelectedPackSeason] = useState<string>('all')
   const [selectedEpisode, setSelectedEpisode] = useState<string>('all')
   const [hindiOnly, setHindiOnly] = useState<boolean>(false)
+
+  useEffect(() => {
+    return () => {
+      const requestId = sourceSearchRequestRef.current
+      if (requestId) {
+        void window.api.cancelTorrentSourceSearch(requestId).catch(() => {})
+        sourceSearchRequestRef.current = null
+      }
+      if (sourceProgressTimerRef.current) {
+        window.clearTimeout(sourceProgressTimerRef.current)
+        sourceProgressTimerRef.current = null
+      }
+      pendingSourceProgressRef.current = null
+    }
+  }, [])
 
   // ─── Unified Watchlist State ─────────────────────────────────────────────
   const [watchlist, setWatchlist] = useState<Video[]>([])
@@ -441,7 +473,10 @@ const Download: React.FC<DownloadProps> = ({ onShowDetail }) => {
           setSources(data.sources)
         }
         setSourceSearchStatus(nextStatus)
-        if (data.done) setLoadingSources(false)
+        if (data.done) {
+          setLoadingSources(false)
+          sourceSearchRequestRef.current = null
+        }
       })
     }
 
@@ -472,6 +507,9 @@ const Download: React.FC<DownloadProps> = ({ onShowDetail }) => {
 
   // ─── Fetch Torrent Sources ───────────────────────────────────────────────
   const handleSelectResult = async (item: TMDBResult) => {
+    if (sourceSearchRequestRef.current) {
+      cancelActiveSourceSearch(false)
+    }
     setSelectedItem(item)
     setLoadingSources(true)
     setSources([])
@@ -507,6 +545,7 @@ const Download: React.FC<DownloadProps> = ({ onShowDetail }) => {
     } finally {
       if (sourceSearchRequestRef.current === requestId) {
         setLoadingSources(false)
+        sourceSearchRequestRef.current = null
       }
     }
   }

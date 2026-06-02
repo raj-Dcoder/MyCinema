@@ -156,7 +156,6 @@ const Settings: React.FC = () => {
                   </button>
                 </div>
               )}
-              <p className="text-[10px] font-bold uppercase tracking-widest text-amber-500">Premium Member</p>
             </div>
           </div>
         </section>

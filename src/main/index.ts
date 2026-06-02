@@ -14,6 +14,7 @@ import path from 'path'
 import { pathToFileURL } from 'url'
 import https from 'https'
 import dns from 'dns'
+import { AsyncLocalStorage } from 'async_hooks'
 
 function isExpectedCloseAbort(error: unknown): boolean {
   const message = error instanceof Error
@@ -55,16 +56,32 @@ if (is.dev && devProfileRoot) {
   console.log(`[Dev] Using MyCinema profile: ${devProfileRoot}`)
 }
 
-function resolveHostname(hostname: string, timeoutMs: number = 1500): Promise<string> {
-  return new Promise((resolve) => {
+function resolveHostname(hostname: string, timeoutMs: number = 1500, signal?: AbortSignal): Promise<string> {
+  return new Promise((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(new DOMException('Aborted', 'AbortError'))
+      return
+    }
+
     let settled = false
+    const cleanup = () => {
+      clearTimeout(timer)
+      signal?.removeEventListener('abort', handleAbort)
+    }
     const finish = (value: string) => {
       if (settled) return
       settled = true
-      clearTimeout(timer)
+      cleanup()
       resolve(value)
     }
+    const handleAbort = () => {
+      if (settled) return
+      settled = true
+      cleanup()
+      reject(new DOMException('Aborted', 'AbortError'))
+    }
     const timer = setTimeout(() => finish(hostname), timeoutMs)
+    signal?.addEventListener('abort', handleAbort, { once: true })
 
     customDns.resolve4(hostname, (err, addresses) => {
       if (err || !addresses?.length) {
@@ -80,21 +97,58 @@ function resolveHostname(hostname: string, timeoutMs: number = 1500): Promise<st
   })
 }
 
+const torrentSourceAbortContext = new AsyncLocalStorage<AbortSignal>()
+
+function getActiveTorrentSourceSignal(): AbortSignal | undefined {
+  return torrentSourceAbortContext.getStore()
+}
+
+function isAbortError(error: unknown): boolean {
+  return error instanceof Error && (error.name === 'AbortError' || error.message === 'Aborted')
+}
+
 function parseHttpResponse(data: string): any {
   try { return JSON.parse(data) } catch { return data }
 }
 
 function nodeHttpsRequestOnce(
   url: string,
-  opts: { method?: string; headers?: Record<string, string>; body?: string; timeoutMs?: number; resolvedHost?: string; redirectsCount?: number } = {}
+  opts: { method?: string; headers?: Record<string, string>; body?: string; timeoutMs?: number; resolvedHost?: string; redirectsCount?: number; signal?: AbortSignal } = {}
 ): Promise<string> {
-  const { method = 'GET', headers = {}, body, timeoutMs = 10000, resolvedHost, redirectsCount = 0 } = opts
+  const { method = 'GET', headers = {}, body, timeoutMs = 10000, resolvedHost, redirectsCount = 0, signal = getActiveTorrentSourceSignal() } = opts
   return new Promise((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(new DOMException('Aborted', 'AbortError'))
+      return
+    }
+
     let req: any = null
+    let settled = false
+    const cleanup = () => {
+      clearTimeout(timer)
+      signal?.removeEventListener('abort', handleAbort)
+    }
+    const finishResolve = (value: string | Promise<string>) => {
+      if (settled) return
+      settled = true
+      cleanup()
+      resolve(value)
+    }
+    const finishReject = (err: unknown) => {
+      if (settled) return
+      settled = true
+      cleanup()
+      reject(err)
+    }
+    const handleAbort = () => {
+      if (req) req.destroy()
+      finishReject(new DOMException('Aborted', 'AbortError'))
+    }
     const timer = setTimeout(() => {
       if (req) req.destroy()
-      reject(new Error(`Timeout ${method} ${url} after ${timeoutMs}ms`))
+      finishReject(new Error(`Timeout ${method} ${url} after ${timeoutMs}ms`))
     }, timeoutMs)
+    signal?.addEventListener('abort', handleAbort, { once: true })
 
     try {
       const parsed = new URL(url)
@@ -120,7 +174,6 @@ function nodeHttpsRequestOnce(
         let data = ''
         res.on('data', (chunk: string) => { data += chunk })
         res.on('end', () => {
-          clearTimeout(timer)
           if (res.statusCode && [301, 302, 307, 308].includes(res.statusCode) && res.headers.location && redirectsCount < 3) {
             let redirectUrl = res.headers.location
             if (redirectUrl.startsWith('/')) {
@@ -129,26 +182,24 @@ function nodeHttpsRequestOnce(
             }
             const newOpts = { ...opts, redirectsCount: redirectsCount + 1 }
             delete newOpts.resolvedHost
-            resolve(nodeHttpsRequestOnce(redirectUrl, newOpts))
+            finishResolve(nodeHttpsRequestOnce(redirectUrl, newOpts))
             return
           }
           if (res.statusCode && res.statusCode >= 400) {
-            reject(new Error(`HTTP ${res.statusCode} fetching ${url}`))
+            finishReject(new Error(`HTTP ${res.statusCode} fetching ${url}`))
             return
           }
-          resolve(data)
+          finishResolve(data)
         })
       }).on('error', (err) => {
-        clearTimeout(timer)
-        reject(err)
+        finishReject(err)
       })
       req.setTimeout(timeoutMs, () => req.destroy(new Error(`Timeout ${method} ${url} after ${timeoutMs}ms`)))
 
       if (body) req.write(body)
       req.end()
     } catch (err) {
-      clearTimeout(timer)
-      reject(err)
+      finishReject(err)
     }
   })
 }
@@ -164,16 +215,22 @@ function nodeHttpGet(url: string, timeoutMs: number = 10000): Promise<any> {
 // Generic HTTPS request helper — supports GET/POST + custom headers (needed for OpenSubtitles API)
 async function nodeHttpRequest(
   url: string,
-  opts: { method?: string; headers?: Record<string, string>; body?: string; timeoutMs?: number } = {}
+  opts: { method?: string; headers?: Record<string, string>; body?: string; timeoutMs?: number; signal?: AbortSignal } = {}
 ): Promise<any> {
+  const signal = opts.signal || getActiveTorrentSourceSignal()
+  if (signal?.aborted) throw new DOMException('Aborted', 'AbortError')
   try {
-    return parseHttpResponse(await nodeHttpsRequestOnce(url, opts))
+    return parseHttpResponse(await nodeHttpsRequestOnce(url, { ...opts, signal }))
   } catch (directErr) {
+    if (signal?.aborted || isAbortError(directErr)) throw directErr
     const parsed = new URL(url)
-    const resolvedHost = await resolveHostname(parsed.hostname)
+    const resolvedHost = await resolveHostname(parsed.hostname, 1500, signal)
+    if (signal?.aborted) throw new DOMException('Aborted', 'AbortError')
     if (resolvedHost === parsed.hostname) throw directErr
-    console.log(`[DNS fallback] ${parsed.hostname} -> ${resolvedHost}`)
-    return parseHttpResponse(await nodeHttpsRequestOnce(url, { ...opts, resolvedHost }))
+    if (process.env.MYCINEMA_DEBUG_DNS === '1') {
+      console.log(`[DNS fallback] ${parsed.hostname} -> ${resolvedHost}`)
+    }
+    return parseHttpResponse(await nodeHttpsRequestOnce(url, { ...opts, resolvedHost, signal }))
   }
 }
 
@@ -2359,7 +2416,7 @@ function enrichMagnetWithTrackers(magnetUrl: string): string {
 
 const torrentSourceCache = new Map<string, { sources: any[]; timestamp: number }>()
 const TORRENT_SOURCE_CACHE_TTL_MS = 6 * 60 * 60 * 1000
-const activeTorrentSourceRequests = new Map<number, string>()
+const activeTorrentSourceRequests = new Map<number, { requestId: string; controller: AbortController }>()
 
 function getTorrentSourceCacheKey(title: string, year: string, mediaType: string, tmdbId: number): string {
   return `${mediaType}:${tmdbId}:${title.toLowerCase()}:${year || ''}`
@@ -2528,13 +2585,21 @@ function sendTorrentSourceProgress(
   payload: { sources: any[]; provider?: string; done?: boolean; cached?: boolean; completedProviders?: number; totalProviders?: number; error?: string }
 ) {
   if (!event || !requestId) return
-  if (activeTorrentSourceRequests.get(event.sender.id) !== requestId) return
+  if (activeTorrentSourceRequests.get(event.sender.id)?.requestId !== requestId) return
   event.sender.send('torrent-sources-progress', { requestId, ...payload })
 }
 
 function isTorrentSourceRequestActive(event: Electron.IpcMainInvokeEvent | null, requestId?: string): boolean {
   if (!event || !requestId) return true
-  return activeTorrentSourceRequests.get(event.sender.id) === requestId
+  const activeRequest = activeTorrentSourceRequests.get(event.sender.id)
+  return activeRequest?.requestId === requestId && !activeRequest.controller.signal.aborted
+}
+
+function clearTorrentSourceRequest(event: Electron.IpcMainInvokeEvent | null, requestId?: string): void {
+  if (!event || !requestId) return
+  if (activeTorrentSourceRequests.get(event.sender.id)?.requestId === requestId) {
+    activeTorrentSourceRequests.delete(event.sender.id)
+  }
 }
 
 type IntroDbSegmentType = 'intro' | 'recap' | 'outro'
@@ -3582,17 +3647,63 @@ async function fetchBtdigSources(title: string, year: string, mediaType: string)
   return allSources
 }
 
-function withTimeout<T>(promise: Promise<T>, timeoutMs: number, label: string): Promise<T> {
+function createChildAbortController(parentSignal?: AbortSignal): { controller: AbortController; release: () => void } {
+  const controller = new AbortController()
+  if (!parentSignal) return { controller, release: () => {} }
+
+  if (parentSignal.aborted) {
+    controller.abort()
+    return { controller, release: () => {} }
+  }
+
+  const abortChild = () => controller.abort()
+  parentSignal.addEventListener('abort', abortChild, { once: true })
+  const release = () => parentSignal.removeEventListener('abort', abortChild)
+  controller.signal.addEventListener('abort', release, { once: true })
+  return { controller, release }
+}
+
+function withTimeout<T>(run: () => Promise<T>, timeoutMs: number, label: string, parentSignal?: AbortSignal): Promise<T> {
+  const { controller, release } = createChildAbortController(parentSignal)
   return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error(`${label} timed out after ${timeoutMs}ms`)), timeoutMs)
-    promise
+    if (controller.signal.aborted) {
+      reject(new DOMException('Aborted', 'AbortError'))
+      return
+    }
+
+    let settled = false
+    const cleanup = () => {
+      clearTimeout(timer)
+      controller.signal.removeEventListener('abort', handleAbort)
+      release()
+    }
+    const finishResolve = (value: T) => {
+      if (settled) return
+      settled = true
+      cleanup()
+      resolve(value)
+    }
+    const finishReject = (err: unknown) => {
+      if (settled) return
+      settled = true
+      cleanup()
+      reject(err)
+    }
+    const handleAbort = () => {
+      finishReject(new DOMException('Aborted', 'AbortError'))
+    }
+    const timer = setTimeout(() => {
+      finishReject(new Error(`${label} timed out after ${timeoutMs}ms`))
+      controller.abort()
+    }, timeoutMs)
+
+    controller.signal.addEventListener('abort', handleAbort, { once: true })
+    torrentSourceAbortContext.run(controller.signal, run)
       .then((value) => {
-        clearTimeout(timer)
-        resolve(value)
+        finishResolve(value)
       })
       .catch((err) => {
-        clearTimeout(timer)
-        reject(err)
+        finishReject(err)
       })
   })
 }
@@ -3607,10 +3718,17 @@ async function searchTorrentSourcesProgressive(
   tmdbId: number,
   requestId?: string
 ): Promise<any[]> {
+  const previousRequest = event ? activeTorrentSourceRequests.get(event.sender.id) : null
+  if (previousRequest && previousRequest.requestId !== requestId) {
+    previousRequest.controller.abort()
+  }
+  const controller = new AbortController()
+  if (event && requestId) {
+    activeTorrentSourceRequests.set(event.sender.id, { requestId, controller })
+  }
+
+  return torrentSourceAbortContext.run(controller.signal, async () => {
   try {
-    if (event && requestId) {
-      activeTorrentSourceRequests.set(event.sender.id, requestId)
-    }
     console.log(`[Torrent] Searching sources for: "${title}" (${year}) type=${mediaType} tmdbId=${tmdbId}`)
     const cacheKey = getTorrentSourceCacheKey(title, year, mediaType, tmdbId)
     const cached = torrentSourceCache.get(cacheKey)
@@ -3671,7 +3789,7 @@ async function searchTorrentSourcesProgressive(
         const provider = pendingProviders.shift()!
         activeProviders.push({
           provider,
-          task: withTimeout(provider.run(), provider.timeoutMs, provider.name)
+          task: withTimeout(provider.run, provider.timeoutMs, provider.name, controller.signal)
             .then((sources) => ({ sources, error: null as string | null }))
             .catch((err: any) => ({ sources: [] as any[], error: err?.message || 'Provider failed' }))
         })
@@ -3682,6 +3800,13 @@ async function searchTorrentSourcesProgressive(
 
     while (activeProviders.length > 0) {
       if (!isTorrentSourceRequestActive(event, requestId)) {
+        sendTorrentSourceProgress(event, requestId, {
+          sources: normalizeTorrentSources(rawSources, mediaType),
+          done: true,
+          completedProviders,
+          totalProviders,
+          error: 'Source search canceled'
+        })
         return normalizeTorrentSources(rawSources, mediaType)
       }
 
@@ -3698,6 +3823,13 @@ async function searchTorrentSourcesProgressive(
       activeProviders.splice(index, 1)
 
       if (!isTorrentSourceRequestActive(event, requestId)) {
+        sendTorrentSourceProgress(event, requestId, {
+          sources: normalizeTorrentSources(rawSources, mediaType),
+          done: true,
+          completedProviders,
+          totalProviders,
+          error: 'Source search canceled'
+        })
         return normalizeTorrentSources(rawSources, mediaType)
       }
 
@@ -3739,15 +3871,41 @@ async function searchTorrentSourcesProgressive(
     })
     return finalSources
   } catch (err) {
+    if (controller.signal.aborted || isAbortError(err)) {
+      sendTorrentSourceProgress(event, requestId, {
+        sources: [],
+        done: true,
+        error: 'Source search canceled'
+      })
+      return []
+    }
     console.error('[Torrent] Source search error:', err)
     sendTorrentSourceProgress(event, requestId, { sources: [], done: true, error: 'Source search failed' })
     return []
+  } finally {
+    controller.abort()
+    clearTorrentSourceRequest(event, requestId)
   }
+  })
 }
 
 // ─── IPC: Search Torrent Sources ─────────────────────────────────────────────
 ipcMain.handle('search-torrent-sources', async (event, title: string, year: string, mediaType: string, tmdbId: number, requestId?: string) => {
   return searchTorrentSourcesProgressive(event, title, year, mediaType, tmdbId, requestId)
+})
+
+ipcMain.handle('cancel-torrent-source-search', async (event, requestId: string) => {
+  const activeRequest = activeTorrentSourceRequests.get(event.sender.id)
+  if (!activeRequest || activeRequest.requestId !== requestId) return false
+  activeRequest.controller.abort()
+  activeTorrentSourceRequests.delete(event.sender.id)
+  event.sender.send('torrent-sources-progress', {
+    requestId,
+    sources: [],
+    done: true,
+    error: 'Source search canceled'
+  })
+  return true
 })
 
 // ΓöÇΓöÇΓöÇ IPC: Start Torrent Download ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ

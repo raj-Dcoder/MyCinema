@@ -153,6 +153,17 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
   const [startedSourceMagnet, setStartedSourceMagnet] = useState<string | null>(null)
   const [sourceSearchStatus, setSourceSearchStatus] = useState({ found: 0, completed: 0, total: 0, cached: false, done: false })
   const sourceSearchRequestRef = useRef<string | null>(null)
+  const cancelActiveSourceSearch = (markDone = true) => {
+    const requestId = sourceSearchRequestRef.current
+    if (requestId) {
+      void window.api.cancelTorrentSourceSearch(requestId).catch(() => {})
+      sourceSearchRequestRef.current = null
+    }
+    setSearching(false)
+    if (markDone) {
+      setSourceSearchStatus(prev => ({ ...prev, done: true }))
+    }
+  }
   const isTmdbBacked = video.type === 'movie' || video.type === 'series'
   const isLocalMedia = !video.isExternal && Boolean(video.file_path)
   const displayTitle = video.type === 'series' && video.series_name ? video.series_name : video.title
@@ -240,6 +251,9 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
     const hasOnlySharedSource = Boolean(initialSharedSource?.magnet) && sources.length === 1 && sources[0]?.magnet === initialSharedSource.magnet
     if (!forceRefresh && hasSearched && sources.length > 0 && !hasOnlySharedSource) return
 
+    if (sourceSearchRequestRef.current) {
+      cancelActiveSourceSearch(false)
+    }
     setSearching(true)
     setHasSearched(true)
     if (!initialSharedSource?.magnet) {
@@ -284,6 +298,7 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
     } finally {
       if (sourceSearchRequestRef.current === requestId) {
         setSearching(false)
+        sourceSearchRequestRef.current = null
       }
     }
   }
@@ -291,6 +306,11 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
   const handleOpenDownloadOptions = async () => {
     setShowDownloadOptions(true)
     await handleSearchSources(false)
+  }
+
+  const handleCloseDownloadOptions = () => {
+    setShowDownloadOptions(false)
+    cancelActiveSourceSearch(true)
   }
 
   useEffect(() => {
@@ -318,7 +338,10 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
         cached: Boolean(data.cached),
         done: Boolean(data.done)
       })
-      if (data.done) setSearching(false)
+      if (data.done) {
+        setSearching(false)
+        sourceSearchRequestRef.current = null
+      }
     })
     return cleanup
   }, [])
@@ -499,6 +522,7 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
 
     return () => {
       cancelled = true
+      cancelActiveSourceSearch(true)
       if (trailerTimer) window.clearTimeout(trailerTimer)
     }
   }, [video, initialSharedSource, isLocalMedia])
@@ -1329,7 +1353,7 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
         <>
           <div
             className="fixed inset-0 z-[70] bg-black/25 animate-in fade-in duration-150"
-            onClick={() => setShowDownloadOptions(false)}
+            onClick={handleCloseDownloadOptions}
           />
           <aside className="fixed inset-y-0 right-0 z-[80] flex w-full max-w-[560px] flex-col border-l border-white/10 bg-[#0B0F16] shadow-2xl animate-in slide-in-from-right duration-300">
             <div className="border-b border-white/10 bg-[#0F141D]">
@@ -1375,7 +1399,7 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
                   </div>
                 </div>
                 <button
-                  onClick={() => setShowDownloadOptions(false)}
+                  onClick={handleCloseDownloadOptions}
                   className="shrink-0 rounded-lg border border-white/10 bg-white/[0.04] p-2 text-white/55 transition-colors hover:bg-white/[0.08] hover:text-white"
                   title="Close download options"
                 >

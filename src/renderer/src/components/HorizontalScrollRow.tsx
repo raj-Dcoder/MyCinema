@@ -4,13 +4,14 @@ import { ChevronLeft, ChevronRight } from 'lucide-react'
 interface HorizontalScrollRowProps {
   children: React.ReactNode
   contentClassName?: string
+  compact?: boolean
 }
 
 export type HorizontalScrollRowHandle = {
   scrollToStart: () => void
 }
 
-const HorizontalScrollRow = forwardRef<HorizontalScrollRowHandle, HorizontalScrollRowProps>(({ children, contentClassName = 'gap-4' }, ref) => {
+const HorizontalScrollRow = forwardRef<HorizontalScrollRowHandle, HorizontalScrollRowProps>(({ children, contentClassName = 'gap-4', compact = false }, ref) => {
   const scrollRef = useRef<HTMLDivElement>(null)
   const [showLeft, setShowLeft] = useState(false)
   const [showRight, setShowRight] = useState(false)
@@ -59,7 +60,7 @@ const HorizontalScrollRow = forwardRef<HorizontalScrollRowHandle, HorizontalScro
 
   return (
     <div
-      className="relative -mx-8 -mt-4"
+      className={`relative -mx-8 ${compact ? '-mt-2' : '-mt-4'}`}
       onMouseEnter={() => setIsHovered(true)}
       onMouseLeave={() => setIsHovered(false)}
     >
@@ -81,7 +82,7 @@ const HorizontalScrollRow = forwardRef<HorizontalScrollRowHandle, HorizontalScro
       {/* Scrollable row */}
       <div
         ref={scrollRef}
-        className={`flex overflow-x-auto px-8 pt-4 pb-6 scrollbar-hide scroll-smooth ${contentClassName}`}
+        className={`flex overflow-x-auto px-8 scrollbar-hide scroll-smooth ${compact ? 'pt-4 pb-4' : 'pt-4 pb-6'} ${contentClassName}`}
       >
         {children}
       </div>

@@ -63,6 +63,8 @@ const api = {
   searchTMDB: (query: string) => ipcRenderer.invoke('search-tmdb', query),
   searchTorrentSources: (title: string, year: string, mediaType: string, tmdbId: number, requestId?: string) =>
     ipcRenderer.invoke('search-torrent-sources', title, year, mediaType, tmdbId, requestId),
+  cancelTorrentSourceSearch: (requestId: string) =>
+    ipcRenderer.invoke('cancel-torrent-source-search', requestId),
   onTorrentSourcesProgress: (callback: (data: any) => void) => {
     const handler = (_event: any, data: any) => callback(data)
     ipcRenderer.on('torrent-sources-progress', handler)

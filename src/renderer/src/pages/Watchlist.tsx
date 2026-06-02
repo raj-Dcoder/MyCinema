@@ -181,33 +181,38 @@ const Watchlist: React.FC<WatchlistProps> = ({ onPlay, onShowDetail, refreshKey 
     fetchWatchlist()
   }, [refreshKey])
 
+  const totalTitles = items.length
+  const categoryCount = categories.length
+
   return (
-    <div className="space-y-10">
-      <div className="flex flex-col gap-6">
-        <div className="flex items-center gap-4">
-          <div className="p-4 bg-primary/10 rounded-2xl text-primary">
-            <Bookmark size={32} />
+    <div className="space-y-5">
+      <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(420px,680px)] xl:items-center">
+        <div className="flex min-w-0 items-center gap-3">
+          <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl border border-primary/20 bg-primary/10 text-primary">
+            <Bookmark size={24} />
           </div>
-          <div>
-            <h2 className="text-4xl font-black text-white tracking-tighter uppercase italic">Your Watchlist</h2>
-            <p className="text-white/30 font-bold text-sm tracking-wide">Search movies and series, then save them here for later</p>
+          <div className="min-w-0">
+            <h2 className="truncate text-2xl font-bold tracking-normal text-white md:text-3xl">Your Watchlist</h2>
+            <p className="text-[11px] font-medium text-white/40">
+              {totalTitles} saved title{totalTitles === 1 ? '' : 's'} / {categoryCount} list{categoryCount === 1 ? '' : 's'}
+            </p>
           </div>
         </div>
 
-        <div className="flex items-center bg-surface/80 backdrop-blur-xl border border-secondary rounded-2xl overflow-hidden focus-within:border-primary/50 transition-colors shadow-lg shadow-black/10">
-          <Search size={18} className="ml-5 text-muted flex-shrink-0" />
+        <div className="flex min-h-11 items-center overflow-hidden rounded-xl border border-white/10 bg-surface/80 shadow-lg shadow-black/10 transition-colors focus-within:border-primary/50">
+          <Search size={17} className="ml-4 flex-shrink-0 text-muted" />
           <input
             type="text"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
             placeholder="Search for a movie or series to add..."
-            className="flex-1 px-4 py-4 bg-transparent text-text text-sm outline-none placeholder:text-muted/60"
+            className="min-w-0 flex-1 bg-transparent px-3 py-3 text-sm text-text outline-none placeholder:text-muted/55"
           />
           {query && (
             <button
               onClick={clearSearch}
-              className="p-3 text-muted hover:text-text transition-colors"
+              className="p-3 text-muted transition-colors hover:text-text"
               title="Clear search"
             >
               <X size={16} />
@@ -216,7 +221,7 @@ const Watchlist: React.FC<WatchlistProps> = ({ onPlay, onShowDetail, refreshKey 
           <button
             onClick={handleSearch}
             disabled={searching || !query.trim()}
-            className="px-6 py-4 bg-primary/10 hover:bg-primary/20 text-primary font-medium text-sm transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+            className="self-stretch bg-primary/10 px-5 text-sm font-bold text-primary transition-colors hover:bg-primary/20 disabled:cursor-not-allowed disabled:opacity-40"
           >
             {searching ? <Loader2 size={16} className="animate-spin" /> : 'Search'}
           </button>
@@ -224,9 +229,9 @@ const Watchlist: React.FC<WatchlistProps> = ({ onPlay, onShowDetail, refreshKey 
       </div>
 
       {results.length > 0 && (
-        <div className="space-y-4">
+        <div className="space-y-3">
           <div className="flex items-center justify-between">
-            <h3 className="text-sm font-black text-white/50 uppercase tracking-widest">Search Results</h3>
+            <h3 className="text-sm font-semibold text-white/60">Search Results</h3>
             <button
               onClick={clearSearch}
               className="text-xs font-bold text-muted hover:text-primary transition-colors"
@@ -234,7 +239,7 @@ const Watchlist: React.FC<WatchlistProps> = ({ onPlay, onShowDetail, refreshKey 
               Back to Watchlist
             </button>
           </div>
-          <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-6">
+          <div className="grid grid-cols-3 gap-4 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-7 xl:grid-cols-8">
             {results.map(item => {
               const alreadyAdded = isInWatchlist(item.id)
               return (
@@ -297,33 +302,28 @@ const Watchlist: React.FC<WatchlistProps> = ({ onPlay, onShowDetail, refreshKey 
       )}
 
       {loading ? (
-        <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-6">
+        <div className="grid grid-cols-3 gap-4 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-7 xl:grid-cols-8">
           {[1,2,3,4,5,6].map(i => (
             <div key={i} className="aspect-[2/3] bg-white/5 rounded-2xl animate-pulse" />
           ))}
         </div>
       ) : results.length === 0 && items.length > 0 ? (
-        <div className="space-y-10">
+        <div className="space-y-6">
           {categories.map(category => {
             const categoryItems = items.filter(item => (item.category || 'Watchlist') === category)
             return (
-              <section key={category} className="space-y-4">
-                <div className="flex items-center gap-3">
-                  <div className="flex h-9 w-9 items-center justify-center rounded-xl border border-primary/20 bg-primary/10 text-primary">
-                    <Bookmark size={16} />
-                  </div>
-                  <div>
-                    <h3 className="text-lg font-black text-white uppercase italic tracking-tight">{category}</h3>
-                    <p className="text-[10px] font-bold uppercase tracking-widest text-white/30">
-                      {categoryItems.length} title{categoryItems.length === 1 ? '' : 's'}
-                    </p>
-                  </div>
+              <section key={category} className="space-y-2">
+                <div className="flex min-w-0 items-baseline gap-2 pl-0.5">
+                  <h3 className="truncate text-base font-bold tracking-normal text-white">{category}</h3>
+                  <span className="shrink-0 text-[11px] font-medium text-white/35">
+                    {categoryItems.length} title{categoryItems.length === 1 ? '' : 's'}
+                  </span>
                 </div>
-                <HorizontalScrollRow>
+                <HorizontalScrollRow compact contentClassName="gap-3">
                   {categoryItems.map(video => (
                     <div
                       key={`${video.isExternal ? 'external' : 'local'}-${video.tmdb_id || video.id}`}
-                      className="w-[calc((100vw-9rem)/2)] max-w-[220px] flex-shrink-0 sm:w-[190px] md:w-[200px] lg:w-[210px]"
+                      className="w-[132px] flex-shrink-0 sm:w-[146px] md:w-[154px] lg:w-[162px] xl:w-[170px]"
                     >
                       <VideoCard video={video} onPlay={onPlay} onShowDetail={onShowDetail} />
                     </div>
@@ -337,8 +337,8 @@ const Watchlist: React.FC<WatchlistProps> = ({ onPlay, onShowDetail, refreshKey 
         <div className="flex flex-col items-center justify-center py-40 text-center space-y-6 opacity-20">
           <Bookmark size={80} strokeWidth={1} />
           <div className="space-y-2">
-            <h3 className="text-2xl font-black uppercase italic">Watchlist is empty</h3>
-            <p className="text-sm font-bold uppercase tracking-widest">Search movies or series and add them to your list.</p>
+            <h3 className="text-2xl font-bold">Watchlist is empty</h3>
+            <p className="text-sm font-medium text-white/60">Search movies or series and add them to your list.</p>
           </div>
         </div>
       ) : (

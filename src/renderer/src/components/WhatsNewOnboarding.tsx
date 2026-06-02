@@ -45,26 +45,51 @@ type WhatsNewSlide = {
 }
 
 export const LATEST_RELEASE = {
-  version: '1.23.1',
+  version: '1.24.0',
   eyebrow: 'What\'s New',
   slides: [
     {
-      id: 'series-subtitles',
+      id: 'fullscreen-flow',
       layout: 'reveal',
-      icon: DownloadIcon,
-      kicker: 'Subtitles',
-      headline: 'One download covers episodes.',
-      highlight: 'covers episodes',
-      support: 'Grab one subtitle and MyCinema checks the rest of the series.',
+      icon: Zap,
+      kicker: 'Fullscreen',
+      headline: 'Exit fullscreen instantly.',
+      highlight: 'instantly',
+      support: 'Top-edge control appears fast, then disappears after the click.',
       bullets: [
-        'Series subtitle downloads continue across local seasons and episodes.',
-        'Episodes with matching subtitles are skipped instead of duplicated.',
-        'Missing subtitle results are counted clearly at the end.'
+        'Move to the top edge to reveal the centered fullscreen control.',
+        'The action hides after clicking so the opposite button does not flash.',
+        'Reveal timing is quicker and feels closer to modern streaming apps.'
       ],
-      signal: 'Series scan',
-      cta: 'Load them',
+      signal: 'Fast exit',
+      cta: 'Pop out',
       mood: {
-        name: 'series-subtitles',
+        name: 'fullscreen-flow',
+        gradient: 'from-rose-300 via-red-300 to-orange-300',
+        text: 'text-rose-200',
+        border: 'border-rose-300/30',
+        shadow: 'shadow-[0_0_72px_rgba(248,113,113,0.3)]',
+        backdrop: 'linear-gradient(135deg, rgba(225,29,72,0.24), transparent 34%), linear-gradient(235deg, rgba(251,146,60,0.18), transparent 48%), linear-gradient(180deg, rgba(127,29,29,0.24), transparent 66%)',
+        cursor: 'rgba(248,113,113,0.22)'
+      }
+    },
+    {
+      id: 'watchlist-density',
+      layout: 'discovery',
+      icon: Search,
+      kicker: 'Watchlist',
+      headline: 'More posters, less empty space.',
+      highlight: 'less empty space',
+      support: 'Rows are tighter, badges stay visible, and categories scan cleanly.',
+      bullets: [
+        'Saved-title cards are smaller without cropping poster badges.',
+        'Search and list counters now sit in a compact header.',
+        'Category headers dropped repeated icons for calmer scanning.'
+      ],
+      signal: 'More visible',
+      cta: 'Browse it',
+      mood: {
+        name: 'watchlist-density',
         gradient: 'from-cyan-300 via-sky-300 to-emerald-300',
         text: 'text-cyan-200',
         border: 'border-cyan-300/30',
@@ -74,53 +99,53 @@ export const LATEST_RELEASE = {
       }
     },
     {
-      id: 'episode-load',
-      layout: 'downloads',
-      icon: Check,
-      kicker: 'Episode flow',
-      headline: 'Next episode stays synced.',
-      highlight: 'stays synced',
-      support: 'Changing episodes now loads that episode\'s own downloaded subtitle.',
+      id: 'poppins-style',
+      layout: 'celebrate',
+      icon: Sparkles,
+      kicker: 'Style',
+      headline: 'Poppins lands everywhere.',
+      highlight: 'Poppins',
+      support: 'Screens, controls, subtitles, and overlays now share one polished typeface.',
       bullets: [
-        'Downloaded subtitles auto-load when you move through the series.',
-        'External SRT no longer points at another episode cache.',
-        'Late background downloads refresh the current episode when ready.'
+        'Poppins loads locally, so the app does not rely on remote fonts.',
+        'Buttons, inputs, subtitles, and player toasts inherit the same stack.',
+        'Premium labels were removed from profile areas for a cleaner look.'
       ],
-      signal: 'Locked in',
-      cta: 'Play next',
+      signal: 'Fresh type',
+      cta: 'Looks good',
       mood: {
-        name: 'episode-load',
+        name: 'poppins-style',
+        gradient: 'from-fuchsia-300 via-pink-300 to-amber-200',
+        text: 'text-fuchsia-200',
+        border: 'border-fuchsia-300/30',
+        shadow: 'shadow-[0_0_72px_rgba(244,114,182,0.28)]',
+        backdrop: 'linear-gradient(135deg, rgba(217,70,239,0.22), transparent 34%), linear-gradient(245deg, rgba(251,191,36,0.18), transparent 50%), linear-gradient(180deg, rgba(112,26,117,0.24), transparent 66%)',
+        cursor: 'rgba(244,114,182,0.22)'
+      }
+    },
+    {
+      id: 'source-cancel',
+      layout: 'security',
+      icon: ShieldCheck,
+      kicker: 'Sources',
+      headline: 'Closed means stopped.',
+      highlight: 'stopped',
+      support: 'Canceling panels now shuts down provider searches and stale progress.',
+      bullets: [
+        'Closing movie details cancels active torrent-source lookup work.',
+        'Provider timeouts abort in-flight requests instead of drifting later.',
+        'DNS fallback logs stay quiet unless debug mode is enabled.'
+      ],
+      signal: 'Clean stop',
+      cta: 'Nice',
+      mood: {
+        name: 'source-cancel',
         gradient: 'from-lime-200 via-emerald-300 to-teal-300',
         text: 'text-emerald-200',
         border: 'border-emerald-300/30',
         shadow: 'shadow-[0_0_72px_rgba(52,211,153,0.28)]',
         backdrop: 'linear-gradient(130deg, rgba(16,185,129,0.22), transparent 36%), linear-gradient(260deg, rgba(20,184,166,0.18), transparent 48%), linear-gradient(180deg, rgba(6,78,59,0.24), transparent 64%)',
         cursor: 'rgba(52,211,153,0.22)'
-      }
-    },
-    {
-      id: 'safe-matching',
-      layout: 'security',
-      icon: ShieldCheck,
-      kicker: 'Matching',
-      headline: 'No more subtitle mixups.',
-      highlight: 'subtitle mixups',
-      support: 'Episode files keep their own subtitle sidecars and converted cues.',
-      bullets: [
-        'Episode markers reject subtitles from other episodes.',
-        'OpenSubtitles sidecars must match the current video name.',
-        'Converted subtitle cache keys include the real subtitle path.'
-      ],
-      signal: 'Matched',
-      cta: 'Perfect',
-      mood: {
-        name: 'safe-matching',
-        gradient: 'from-violet-300 via-fuchsia-300 to-rose-300',
-        text: 'text-violet-200',
-        border: 'border-violet-300/30',
-        shadow: 'shadow-[0_0_72px_rgba(216,180,254,0.28)]',
-        backdrop: 'linear-gradient(135deg, rgba(124,58,237,0.22), transparent 34%), linear-gradient(245deg, rgba(244,114,182,0.18), transparent 50%), linear-gradient(180deg, rgba(76,29,149,0.24), transparent 66%)',
-        cursor: 'rgba(216,180,254,0.22)'
       }
     }
   ] satisfies WhatsNewSlide[]

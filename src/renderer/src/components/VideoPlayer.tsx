@@ -1741,7 +1741,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
       if (subtitleLoading) {
         const loadingSpan = document.createElement('span')
         loadingSpan.style.cssText = [
-          "font-family:'Inter',system-ui,sans-serif",
+          "font-family:'Poppins','Segoe UI Variable','Segoe UI',system-ui,sans-serif",
           'font-size:14px',
           'color:rgba(255,255,255,0.5)',
           'background:rgba(0,0,0,0.5)',
@@ -1753,7 +1753,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
       } else {
         const textDiv = document.createElement('div')
         textDiv.style.cssText = [
-          "font-family:'Inter',system-ui,sans-serif",
+          "font-family:'Poppins','Segoe UI Variable','Segoe UI',system-ui,sans-serif",
           'font-size:26px',
           'font-weight:600',
           'color:white',
@@ -2063,7 +2063,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
                 'border:1px solid rgba(255,255,255,0.08)',
                 'color:rgba(255,255,255,0.95)',
                 'font-size:13px',
-                'font-family:Inter,system-ui,sans-serif',
+                "font-family:'Poppins','Segoe UI Variable','Segoe UI',system-ui,sans-serif",
                 'font-weight:700',
                 'letter-spacing:0.04em',
                 'padding:7px 16px',

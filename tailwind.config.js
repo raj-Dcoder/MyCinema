@@ -6,6 +6,9 @@ module.exports = {
   ],
   theme: {
     extend: {
+      fontFamily: {
+        sans: ['Poppins', 'Segoe UI Variable', 'Segoe UI', 'system-ui', 'sans-serif'],
+      },
       colors: {
         background: '#141414',
         surface: '#181818',

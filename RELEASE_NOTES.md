@@ -1,3 +1,29 @@
+# MyCinema v1.24.0
+
+Feature release focused on smoother fullscreen control, a tighter Watchlist, and cleaner download-source cancellation.
+
+### Fullscreen Experience
+- **Top-Center Fullscreen Control**: The fullscreen exit control now appears from the top center when the pointer reaches the top edge, matching familiar streaming and browser patterns.
+- **Faster Exit Feedback**: The fullscreen control reveals more quickly and hides after use so switching fullscreen modes no longer shows the opposite action immediately under the cursor.
+- **Cleaner Profile Chrome**: Premium labels were removed from the sidebar and settings profile area so the account block feels quieter and less promotional.
+
+### Watchlist & Typography
+- **Compact Watchlist Layout**: Watchlist search, category rows, and saved-title cards now use less empty space while keeping poster art visible.
+- **No Cropped Cards**: Compact horizontal rows now keep enough vertical padding for badges and hover states, so ratings and poster tops are not clipped.
+- **Cleaner Category Headers**: Saved-list headers no longer repeat the same bookmark icon for every category, making custom lists easier to scan.
+- **Poppins App Font**: The renderer now loads Poppins locally and applies it across the app, including controls, subtitles, and player overlays.
+
+### Download Source Reliability
+- **Canceled Searches Really Stop**: Closing a movie detail screen or download-source panel now cancels the active source search instead of letting provider lookups continue in the background.
+- **Abort-Aware Provider Timeouts**: Torrent-source providers now abort their in-flight network work when a search is canceled or times out.
+- **Quieter DNS Fallbacks**: DNS fallback logs are hidden during normal use and only appear when `MYCINEMA_DEBUG_DNS=1` is enabled.
+
+### Security & Privacy
+- **Scoped Source Search IPC**: Torrent-source progress is tied to the active request ID, and stale or canceled source results are ignored instead of updating closed screens.
+- **Network Work Ends On Cancel**: DNS fallback and HTTPS helper paths now honor cancellation signals so abandoned searches stop touching external providers.
+
+***
+
 # MyCinema v1.23.1
 
 Patch release focused on making downloaded series subtitles follow every episode correctly.

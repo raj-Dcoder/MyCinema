@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useLayoutEffect, useRef } from 'react'
 import { AnimatePresence } from 'framer-motion'
-import { Home as HomeIcon, Film, Tv, Settings as SettingsIcon, Video as VideoIcon, Download as DownloadIcon, Menu, Bookmark, Clock, Heart, Settings, RefreshCw, Maximize2 } from 'lucide-react'
+import { Home as HomeIcon, Film, Tv, Settings as SettingsIcon, Video as VideoIcon, Download as DownloadIcon, Menu, Bookmark, Clock, Heart, Settings, RefreshCw, Maximize2, Minimize2 } from 'lucide-react'
 import { Video } from './types'
 import Home from './pages/Home'
 import Videos from './pages/Videos'
@@ -44,6 +44,8 @@ const App: React.FC = () => {
   const activeTabRef = useRef<AppTab>('home')
   const tabScrollPositionsRef = useRef<Partial<Record<AppTab, number>>>({})
   const windowControlsHideTimerRef = useRef<number | null>(null)
+  const windowControlsRevealLockedRef = useRef(false)
+  const windowControlsRevealUnlockTimerRef = useRef<number | null>(null)
 
   const getScrollElement = (tab: AppTab) => {
     return tab === 'home' ? homeScrollRef.current : activePageScrollRef.current
@@ -99,6 +101,13 @@ const App: React.FC = () => {
         setShowWindowControls(false)
       }
     })
+  }, [])
+
+  useEffect(() => {
+    return () => {
+      clearWindowControlsHideTimer()
+      clearWindowControlsRevealUnlockTimer()
+    }
   }, [])
 
   useEffect(() => {
@@ -236,7 +245,34 @@ const App: React.FC = () => {
     }
   }
 
+  const clearWindowControlsRevealUnlockTimer = () => {
+    if (windowControlsRevealUnlockTimerRef.current) {
+      window.clearTimeout(windowControlsRevealUnlockTimerRef.current)
+      windowControlsRevealUnlockTimerRef.current = null
+    }
+  }
+
+  const unlockWindowControlsReveal = () => {
+    windowControlsRevealLockedRef.current = false
+    clearWindowControlsRevealUnlockTimer()
+  }
+
+  const lockWindowControlsRevealBriefly = () => {
+    windowControlsRevealLockedRef.current = true
+    clearWindowControlsRevealUnlockTimer()
+    windowControlsRevealUnlockTimerRef.current = window.setTimeout(() => {
+      windowControlsRevealLockedRef.current = false
+      windowControlsRevealUnlockTimerRef.current = null
+    }, 350)
+  }
+
+  const hideWindowControlsNow = () => {
+    clearWindowControlsHideTimer()
+    setShowWindowControls(false)
+  }
+
   const revealWindowControls = () => {
+    if (windowControlsRevealLockedRef.current) return
     clearWindowControlsHideTimer()
     setShowWindowControls(true)
   }
@@ -253,30 +289,49 @@ const App: React.FC = () => {
     <>
       {launchFullscreen && (
         <>
+          <style>{`
+            @keyframes fullscreenControlPop {
+              0% { opacity: 0; transform: translate(-50%, -34px) scale(0.96); }
+              68% { opacity: 1; transform: translate(-50%, 3px) scale(1.02); }
+              100% { opacity: 1; transform: translate(-50%, 0) scale(1); }
+            }
+          `}</style>
           <div
-            className="fixed right-0 top-0 z-[259] h-2 w-16"
+            className="fixed left-1/2 top-0 z-[259] h-5 w-[min(36rem,100vw)] -translate-x-1/2"
             onMouseEnter={revealWindowControls}
-            onMouseLeave={hideWindowControlsSoon}
+            onMouseLeave={() => {
+              unlockWindowControlsReveal()
+              hideWindowControlsSoon()
+            }}
+            onPointerDown={revealWindowControls}
           />
           <div
-            className={`fixed right-1.5 top-1 z-[260] flex items-center rounded-lg border border-white/8 bg-black/45 p-1 shadow-[0_10px_32px_rgba(0,0,0,0.42)] backdrop-blur-xl transition-all duration-200 ease-out ${
-              showWindowControls ? 'translate-y-0 opacity-100' : '-translate-y-9 opacity-0 pointer-events-none'
+            className={`fixed left-1/2 top-4 z-[260] -translate-x-1/2 rounded-lg border border-white/10 bg-black/70 p-1.5 shadow-[0_16px_42px_rgba(0,0,0,0.46)] backdrop-blur-xl transition-[opacity,transform] duration-300 ease-out ${
+              showWindowControls ? 'translate-y-0 scale-100 opacity-100 animate-[fullscreenControlPop_220ms_ease-out_both]' : '-translate-y-10 scale-95 opacity-0 pointer-events-none'
             }`}
             onMouseEnter={revealWindowControls}
-            onMouseLeave={hideWindowControlsSoon}
+            onMouseLeave={() => {
+              unlockWindowControlsReveal()
+              hideWindowControlsSoon()
+            }}
+            onFocus={revealWindowControls}
+            onBlur={hideWindowControlsSoon}
           >
             <button
               type="button"
               title={isFullscreen ? 'Exit fullscreen' : 'Enter fullscreen'}
               aria-label={isFullscreen ? 'Exit fullscreen' : 'Enter fullscreen'}
-              onClick={async () => {
+              onClick={async (event) => {
+                lockWindowControlsRevealBriefly()
+                hideWindowControlsNow()
+                event.currentTarget.blur()
                 const nextState = await window.api.toggleFullscreen()
                 setIsFullscreen(nextState)
-                hideWindowControlsSoon()
               }}
-              className="flex h-5 w-5 items-center justify-center rounded-md text-white/55 transition-colors hover:bg-white/10 hover:text-white"
+              className="flex h-9 items-center gap-2 rounded-md px-3 text-sm font-semibold text-white/75 transition-all duration-150 hover:scale-[1.02] hover:bg-white/10 hover:text-white active:scale-95 focus:outline-none focus:ring-2 focus:ring-primary/60"
             >
-              <Maximize2 size={10} />
+              {isFullscreen ? <Minimize2 size={16} /> : <Maximize2 size={16} />}
+              <span>{isFullscreen ? 'Exit fullscreen' : 'Enter fullscreen'}</span>
             </button>
           </div>
         </>
@@ -451,9 +506,6 @@ const App: React.FC = () => {
               <>
                 <div className="flex-1 min-w-0">
                   <h4 className="text-sm font-bold text-white truncate italic">{userName}</h4>
-                  <p className="text-[10px] font-black text-amber-500 uppercase tracking-widest flex items-center gap-1">
-                    Premium <span className="text-[8px]">👑</span>
-                  </p>
                 </div>
                 <button 
                   onClick={() => navigateToTab('settings')}

@@ -17,6 +17,11 @@ import {
   type SubCue
 } from '../utils/subtitleSync'
 
+const isTorrentStreamPath = (filePath?: string | null) => Boolean(filePath?.startsWith('torrent://'))
+const getVideoSourceUrl = (filePath: string) => (
+  isTorrentStreamPath(filePath) ? filePath : `media://file/${encodeURIComponent(filePath)}`
+)
+
 type AudioBoostProfile = 'auto' | 'dialogue' | 'night' | 'laptop' | 'cinema'
 type AudioBoostIntensity = 'low' | 'medium' | 'high'
 type IntroDbSegmentType = 'intro' | 'recap' | 'outro'
@@ -387,6 +392,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
   const [currentVideo, setCurrentVideo] = useState<Video>(video)
   const currentVideoRef = useRef<Video>(video)
   currentVideoRef.current = currentVideo
+  const isTorrentStream = isTorrentStreamPath(currentVideo.file_path)
   const [isSeeking, setIsSeeking] = useState(false)
   const [isFullscreen, setIsFullscreen] = useState(false)
   const [isWindowFullscreen, setIsWindowFullscreen] = useState(false)
@@ -800,6 +806,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
     }
 
     if (
+      isTorrentStreamPath(currentVideo.file_path) ||
       currentVideo.type !== 'series' ||
       currentVideo.season == null ||
       currentVideo.episode == null ||
@@ -940,6 +947,35 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
   const limiterRef = useRef<DynamicsCompressorNode | null>(null)
   const boostGainRef = useRef<GainNode | null>(null)
   const audioBoostChainConnectedRef = useRef(false)
+
+  const forceTorrentNativeAudio = () => {
+    if (!isTorrentStreamPath(currentVideoRef.current.file_path)) return
+
+    const videoEl = videoRef.current
+    const audioEl = audioRef.current
+
+    if (audioEl) {
+      audioEl.pause()
+      audioEl.removeAttribute('src')
+      audioEl.load()
+    }
+
+    if (videoEl) {
+      videoEl.volume = volume
+      videoEl.muted = volume === 0
+
+      const tracks = (videoEl as any).audioTracks
+      if (tracks && tracks.length > 0) {
+        for (let i = 0; i < tracks.length; i++) {
+          tracks[i].enabled = i === 0
+        }
+      }
+    }
+
+    if (audioCtxRef.current?.state === 'suspended') {
+      audioCtxRef.current.resume().catch(() => {})
+    }
+  }
 
   const getActiveAudioChannelCount = () => {
     const fallback = embeddedAudio[0]?.channels || 2
@@ -1134,10 +1170,12 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
   }, [video])
 
   const handleOpenFolder = () => {
+    if (isTorrentStream) return
     window.api.openFolder(currentVideo.file_path)
   }
 
   const handleToggleInfoPanel = async () => {
+    if (isTorrentStream) return
     setShowEpisodesPanel(false)
     if (!showInfoPanel && !mediaInfo) {
       setInfoLoading(true)
@@ -1517,6 +1555,11 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
     const sessionToken = playerSessionTokenRef.current
 
     const fetchProgress = async () => {
+      if (isTorrentStreamPath(currentVideo.file_path) || currentVideo.id < 0) {
+        startupResumeTimeRef.current = 0
+        if (!isCancelled) setStartupProgressReady(true)
+        return
+      }
       const progress = await window.api.getVideoProgress(currentVideo.id)
       if (isCancelled || isPlayerClosingRef.current || sessionToken !== playerSessionTokenRef.current) return
       let targetTime = progress?.last_watched_time || 0
@@ -1541,6 +1584,17 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
     }
 
     const fetchMediaTracks = async () => {
+      if (isTorrentStreamPath(currentVideo.file_path)) {
+        setSubtitlePath(null)
+        setEmbeddedSubs([])
+        setEmbeddedAudio([])
+        setAudioTracks([])
+        setSelectedAudioId('')
+        setAudioProbeReady(true)
+        clearActiveSubtitleSelection(false)
+        forceTorrentNativeAudio()
+        return
+      }
       const srt = await window.api.getSubtitlePath(currentVideo.file_path)
       if (isCancelled || isPlayerClosingRef.current || sessionToken !== playerSessionTokenRef.current) return
       if (srt) setSubtitlePath(srt)
@@ -2348,6 +2402,8 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
   }, [isHost, roomId])
 
   useEffect(() => {
+    if (isTorrentStreamPath(currentVideo.file_path) || currentVideo.id < 0) return
+
     const interval = setInterval(() => {
       if (videoRef.current && !videoRef.current.paused) {
         const time = videoRef.current.currentTime
@@ -3045,6 +3101,10 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
     const targetTime = segment.endSec + INTRODB_SKIP_END_PADDING_SECONDS
     const isOutroAdvance = segment.type === 'outro' && hasNextEpisode
     if (isOutroAdvance) {
+      if (isTorrentStream || currentVideo.id < 0) {
+        playNextEpisode()
+        return
+      }
       const completedAt = durationRef.current || duration || segment.endSec
       timeRef.current = completedAt
       window.api.updateVideoProgress(currentVideo.id, completedAt, true, true)
@@ -3177,6 +3237,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
   }
 
   const requestSeekPreviewThumbnail = (time: number) => {
+    if (isTorrentStream) return
     if (!Number.isFinite(time)) return
 
     const bucketTime = Math.max(0, Math.floor(time / SEEK_PREVIEW_BUCKET_SECONDS) * SEEK_PREVIEW_BUCKET_SECONDS)
@@ -3392,7 +3453,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
       <div className="relative overflow-hidden bg-black" style={videoSurfaceStyle}>
         <video
           ref={videoRef}
-          src={`media://file/${encodeURIComponent(currentVideo.file_path)}`}
+          src={getVideoSourceUrl(currentVideo.file_path)}
           className={`h-full w-full outline-none ${showControls ? 'subs-up' : 'subs-down'} opacity-100`}
           style={{ 
             objectFit: videoObjectFit,
@@ -3438,6 +3499,9 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
           }
         }}
         onPlay={() => {
+          if (isTorrentStreamPath(currentVideo.file_path)) {
+            forceTorrentNativeAudio()
+          }
           if (!isHost && roomId !== null && !allowGuestPlaybackEventRef.current) {
             videoRef.current?.pause()
             return
@@ -3469,6 +3533,9 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
         }}
         onPlaying={() => { 
           hideBufferingIndicator(); 
+          if (isTorrentStreamPath(currentVideo.file_path)) {
+            forceTorrentNativeAudio()
+          }
           const trackObj = availableAudio.find(a => a.id === selectedAudioId);
           if (trackObj && !trackObj.native && audioRef.current && !startupExternalAudioBarrierRef.current && !externalAudioSeekBarrierRef.current) {
             if (!audioRef.current.src) {
@@ -3489,8 +3556,14 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
             durationRef.current = nextDuration || 1
             // Explicitly set volume on each new load to prevent silent starts
             videoRef.current.volume = volume
-            const activeAudio = availableAudio.find(a => a.id === selectedAudioId)
-            videoRef.current.muted = activeAudio && !activeAudio.native ? true : volume === 0
+            if (isTorrentStreamPath(currentVideo.file_path)) {
+              setSelectedAudioId('')
+              setEmbeddedAudio([])
+              setTimeout(forceTorrentNativeAudio, 0)
+            } else {
+              const activeAudio = availableAudio.find(a => a.id === selectedAudioId)
+              videoRef.current.muted = activeAudio && !activeAudio.native ? true : volume === 0
+            }
           }
           // @ts-ignore
           if (videoRef.current?.audioTracks) {
@@ -4188,13 +4261,15 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
             )}
 
             {/* Open Folder */}
-            <button
-              onClick={(e) => { e.stopPropagation(); handleOpenFolder(); }}
-              className="text-white hover:text-primary transition-colors"
-              title="Open in Explorer"
-            >
-              <FolderOpen size={22} className="opacity-90 hover:opacity-100" />
-            </button>
+            {!isTorrentStream && (
+              <button
+                onClick={(e) => { e.stopPropagation(); handleOpenFolder(); }}
+                className="text-white hover:text-primary transition-colors"
+                title="Open in Explorer"
+              >
+                <FolderOpen size={22} className="opacity-90 hover:opacity-100" />
+              </button>
+            )}
 
             {/* Watch Together */}
             <button
@@ -4206,13 +4281,15 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
             </button>
 
             {/* Media Info */}
-            <button
-              onClick={(e) => { e.stopPropagation(); handleToggleInfoPanel(); }}
-              className={`transition-colors ${showInfoPanel ? 'text-primary' : 'text-white hover:text-primary'}`}
-              title="Media Info (I)"
-            >
-              <Info size={22} className="opacity-90 hover:opacity-100" />
-            </button>
+            {!isTorrentStream && (
+              <button
+                onClick={(e) => { e.stopPropagation(); handleToggleInfoPanel(); }}
+                className={`transition-colors ${showInfoPanel ? 'text-primary' : 'text-white hover:text-primary'}`}
+                title="Media Info (I)"
+              >
+                <Info size={22} className="opacity-90 hover:opacity-100" />
+              </button>
+            )}
 
             <button 
               onClick={(e) => { e.stopPropagation(); cycleAspectRatio(); }}

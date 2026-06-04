@@ -210,90 +210,84 @@ const Videos: React.FC<VideosProps> = ({ onPlay }) => {
 
   const totalClips = clips.length
   const displayedClips = filteredClips.length
+  const sortLabel = sortBy === 'newest'
+    ? 'Newest'
+    : sortBy === 'name'
+      ? 'A-Z'
+      : sortBy === 'longest'
+        ? 'Longest'
+        : 'Shortest'
 
   return (
     <div className="space-y-10 animate-in fade-in duration-500 pb-20">
       {/* Header & Controls */}
-      <div className="flex flex-col gap-6 relative z-30">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <h2 className="text-3xl font-bold tracking-tight">Videos</h2>
+      <div className="relative z-30 flex flex-wrap items-start justify-between gap-5">
+        <div className="flex items-center gap-3">
+          <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-primary/10 text-primary">
+            <VideoIcon size={30} />
+          </div>
+          <div>
+            <h2 className="text-4xl font-black text-white tracking-tighter uppercase italic">Videos</h2>
             {totalClips > 0 && (
-              <span className="text-xs text-muted bg-secondary/50 px-2.5 py-1 rounded-lg font-bold border border-white/5 uppercase tracking-wider">
+              <span className="mt-1 inline-flex rounded-lg border border-white/5 bg-white/[0.035] px-2.5 py-1 text-[10px] font-black uppercase tracking-widest text-white/35">
                 {totalClips} clip{totalClips !== 1 ? 's' : ''}
               </span>
             )}
           </div>
-
-          <div className="flex items-center gap-2">
-             <button 
-               onClick={handleShuffle}
-               className="flex items-center gap-2 px-4 py-2 bg-secondary/30 hover:bg-secondary/60 rounded-xl transition-all font-bold text-xs uppercase tracking-widest border border-white/5"
-             >
-               <Shuffle size={14} className="text-primary" />
-               Shuffle
-             </button>
-             <button 
-               onClick={handlePlayAll}
-               className="flex items-center gap-2 px-4 py-2 bg-primary hover:bg-primary/80 text-white rounded-xl transition-all font-bold text-xs uppercase tracking-widest shadow-lg shadow-primary/20"
-             >
-               <CirclePlay size={14} />
-               Play All
-             </button>
-          </div>
         </div>
 
-        <div className="flex flex-wrap items-center justify-between gap-4 bg-secondary/20 p-4 rounded-2xl border border-white/5 backdrop-blur-sm">
-          <div className="relative flex-1 min-w-[300px] group">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-muted transition-colors group-focus-within:text-primary" size={18} />
-            <input
-              type="text"
-              placeholder="Search by title..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full bg-secondary/40 border border-white/10 focus:border-primary/50 focus:ring-1 focus:ring-primary/50 rounded-xl py-2.5 pl-10 pr-4 outline-none transition-all placeholder:text-muted/50 text-sm font-medium"
-            />
-            {searchQuery && (
-              <button 
-                onClick={() => setSearchQuery('')}
-                className="absolute right-3 top-1/2 -translate-y-1/2 text-muted hover:text-white transition-colors"
-                aria-label="Clear search"
-              >
-                <X size={16} />
-              </button>
-            )}
-          </div>
+        <div className="flex max-w-full flex-col items-stretch gap-3 lg:items-end">
+          <div className="flex flex-wrap items-center justify-end gap-3">
+            <button
+              onClick={handleShuffle}
+              disabled={filteredClips.length === 0}
+              className="flex h-11 items-center gap-2 rounded-xl border border-white/10 bg-white/[0.035] px-4 text-[10px] font-black uppercase tracking-widest text-white/70 transition-all hover:bg-white/5 hover:text-white disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              <Shuffle size={14} className="text-primary" />
+              Shuffle
+            </button>
+            <button
+              onClick={handlePlayAll}
+              disabled={filteredClips.length === 0}
+              className="flex h-11 items-center gap-2 rounded-xl bg-primary px-4 text-[10px] font-black uppercase tracking-widest text-white shadow-lg shadow-primary/20 transition-all hover:bg-primary/80 disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              <CirclePlay size={14} />
+              Play All
+            </button>
 
-          <div className="flex flex-wrap items-center gap-3">
-            <div className="flex items-center bg-background/50 p-1 rounded-xl border border-white/5">
-              {['All', 'Unwatched', 'Watched', 'Short (<5m)', 'Long (>20m)'].map(filter => (
+            <div className="group relative w-full sm:w-[270px]">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-white/30 transition-colors group-focus-within:text-primary" size={17} />
+              <input
+                type="text"
+                placeholder="Search videos"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="h-11 w-full rounded-xl border border-white/10 bg-white/[0.035] py-2 pl-10 pr-10 text-sm font-bold text-white outline-none transition-all placeholder:text-white/28 focus:border-primary/45 focus:bg-black/25 focus:ring-1 focus:ring-primary/35"
+              />
+              {searchQuery && (
                 <button
-                  key={filter}
-                  onClick={() => setActiveFilter(filter)}
-                  className={`px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-widest transition-all ${
-                    activeFilter === filter 
-                      ? 'bg-primary text-white shadow-lg' 
-                      : 'text-muted hover:text-white hover:bg-white/5'
-                  }`}
+                  onClick={() => setSearchQuery('')}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-white/35 transition-colors hover:text-white"
+                  aria-label="Clear search"
                 >
-                  {filter}
+                  <X size={16} />
                 </button>
-              ))}
+              )}
             </div>
 
             <div className="relative">
               <button
-                 onClick={() => setShowSortMenu(!showSortMenu)}
-                 className="flex items-center gap-2 px-4 py-2.5 bg-secondary/40 hover:bg-secondary/60 rounded-xl border border-white/10 transition-all text-[10px] font-bold uppercase tracking-widest"
+                onClick={() => setShowSortMenu(!showSortMenu)}
+                className="flex h-11 items-center gap-2 rounded-xl border border-white/10 bg-white/[0.035] px-4 text-[10px] font-black uppercase tracking-widest text-white/70 transition-all hover:bg-white/5 hover:text-white"
               >
                 <ArrowUpDown size={14} className="text-primary" />
-                Sort: {sortBy === 'newest' ? 'Newest' : sortBy === 'name' ? 'A-Z' : sortBy === 'longest' ? 'Longest' : 'Shortest'}
+                {sortLabel}
               </button>
               
               {showSortMenu && (
                 <>
                   <div className="fixed inset-0 z-[60]" onClick={() => setShowSortMenu(false)} />
-                  <div className="absolute right-0 mt-2 w-48 bg-surface/95 backdrop-blur-xl border border-white/10 rounded-xl shadow-2xl z-[70] p-1 overflow-hidden animate-in fade-in zoom-in duration-200">
+                  <div className="absolute right-0 z-[70] mt-2 w-52 overflow-hidden rounded-xl border border-white/10 bg-[#0b1018]/98 p-1 shadow-2xl backdrop-blur-xl">
                     {[
                       { id: 'newest', label: 'Recently Added' },
                       { id: 'name', label: 'Name (A-Z)' },
@@ -306,7 +300,7 @@ const Videos: React.FC<VideosProps> = ({ onPlay }) => {
                           setSortBy(option.id)
                           setShowSortMenu(false)
                         }}
-                        className="w-full flex items-center justify-between px-3 py-2 rounded-lg text-[10px] font-bold uppercase tracking-widest hover:bg-white/5 transition-colors"
+                        className="flex w-full items-center justify-between rounded-lg px-3 py-2 text-left text-[10px] font-black uppercase tracking-widest text-white/65 transition-colors hover:bg-white/5 hover:text-white"
                       >
                         {option.label}
                         {sortBy === option.id && <Check size={14} className="text-primary" />}
@@ -316,6 +310,22 @@ const Videos: React.FC<VideosProps> = ({ onPlay }) => {
                 </>
               )}
             </div>
+          </div>
+
+          <div className="flex max-w-full items-center gap-1 overflow-x-auto rounded-xl border border-white/5 bg-white/[0.03] p-1">
+            {['All', 'Unwatched', 'Watched', 'Short (<5m)', 'Long (>20m)'].map(filter => (
+              <button
+                key={filter}
+                onClick={() => setActiveFilter(filter)}
+                className={`shrink-0 rounded-lg px-3 py-1.5 text-[10px] font-black uppercase tracking-widest transition-all ${
+                  activeFilter === filter
+                    ? 'bg-primary text-white shadow-lg shadow-primary/20'
+                    : 'text-white/40 hover:bg-white/5 hover:text-white'
+                }`}
+              >
+                {filter}
+              </button>
+            ))}
           </div>
         </div>
       </div>

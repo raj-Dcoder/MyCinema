@@ -19,8 +19,16 @@ const History: React.FC<HistoryProps> = ({ onPlay, onShowDetail }) => {
     }
 
     try {
-      const data = await window.api.getContinueWatching() // History is basically Continue Watching
-      setItems(data)
+      const data: Video[] = await window.api.getVideos()
+      setItems(
+        data
+          .filter(video => Boolean(video.completed) || (video.last_watched_time || 0) > 0)
+          .sort((a, b) => {
+            const aTime = a.updated_at ? new Date(a.updated_at).getTime() : 0
+            const bTime = b.updated_at ? new Date(b.updated_at).getTime() : 0
+            return (Number.isFinite(bTime) ? bTime : 0) - (Number.isFinite(aTime) ? aTime : 0)
+          })
+      )
     } finally {
       setLoading(false)
       isInitialLoad.current = false
@@ -40,7 +48,7 @@ const History: React.FC<HistoryProps> = ({ onPlay, onShowDetail }) => {
         </div>
         <div>
           <h2 className="text-4xl font-black text-white tracking-tighter uppercase italic">History</h2>
-          <p className="text-white/30 font-bold text-sm tracking-wide">Pick up where you left off</p>
+          <p className="text-white/30 font-bold text-sm tracking-wide">Everything you have started or finished watching</p>
         </div>
       </div>
 
@@ -61,7 +69,7 @@ const History: React.FC<HistoryProps> = ({ onPlay, onShowDetail }) => {
           <Clock size={80} strokeWidth={1} />
           <div className="space-y-2">
             <h3 className="text-2xl font-black uppercase italic">History is clear</h3>
-            <p className="text-sm font-bold uppercase tracking-widest">Start watching something to build your history!</p>
+            <p className="text-sm font-bold uppercase tracking-widest">Start or finish something to build your history</p>
           </div>
         </div>
       )}

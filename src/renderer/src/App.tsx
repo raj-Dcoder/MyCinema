@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useLayoutEffect, useRef } from 'react'
 import { AnimatePresence } from 'framer-motion'
-import { Home as HomeIcon, Film, Tv, Settings as SettingsIcon, Video as VideoIcon, Download as DownloadIcon, Menu, Bookmark, Clock, Heart, Settings, RefreshCw, Maximize2, Minimize2 } from 'lucide-react'
+import { Home as HomeIcon, Film, Tv, Settings as SettingsIcon, Video as VideoIcon, Download as DownloadIcon, Menu, Bookmark, Clock, Heart, Settings, RefreshCw, Maximize2, Minimize2, Loader2, PauseCircle, AlertCircle, X } from 'lucide-react'
 import { Video } from './types'
 import Home from './pages/Home'
 import Videos from './pages/Videos'
@@ -18,8 +18,38 @@ import appLogo from './assets/mycinema-logo.png'
 
 const getWhatsNewStorageKey = (version: string) => `mycinema_whats_new_seen_${version}`
 const SIDEBAR_EXPANDED_STORAGE_KEY = 'mycinema_sidebar_expanded'
-const isDevPreview = import.meta.env.DEV
 type AppTab = 'home' | 'videos' | 'movies' | 'series' | 'download' | 'settings' | 'watchlist' | 'history' | 'favorites'
+
+type ActiveDownload = {
+  id: string
+  title?: string
+  name?: string | null
+  progress?: number
+  status?: 'downloading' | 'done' | 'error' | 'paused' | 'connecting' | 'pending' | string
+  downloadSpeed?: string
+  timeRemaining?: string
+  addedAt?: string
+}
+
+const getDownloadTime = (download: ActiveDownload) => {
+  const time = download.addedAt ? new Date(download.addedAt).getTime() : 0
+  return Number.isFinite(time) ? time : 0
+}
+
+const sortDownloadsForTray = (items: ActiveDownload[]) => (
+  [...items].sort((a, b) => {
+    const statusRank = (status?: string) => {
+      if (status === 'downloading' || status === 'connecting') return 0
+      if (status === 'paused' || status === 'pending') return 1
+      if (status === 'error') return 2
+      return 3
+    }
+
+    const statusDiff = statusRank(a.status) - statusRank(b.status)
+    if (statusDiff !== 0) return statusDiff
+    return getDownloadTime(b) - getDownloadTime(a)
+  })
+)
 
 const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState<AppTab>('home')
@@ -27,7 +57,7 @@ const App: React.FC = () => {
     return localStorage.getItem(SIDEBAR_EXPANDED_STORAGE_KEY) !== 'false'
   })
 
-  const [showWhatsNew, setShowWhatsNew] = useState(() => isDevPreview || localStorage.getItem(getWhatsNewStorageKey(LATEST_RELEASE.version)) !== 'true')
+  const [showWhatsNew, setShowWhatsNew] = useState(() => localStorage.getItem(getWhatsNewStorageKey(LATEST_RELEASE.version)) !== 'true')
   const [whatsNewStep, setWhatsNewStep] = useState(0)
 
   const [playingVideo, setPlayingVideo] = useState<Video | null>(null)
@@ -39,11 +69,14 @@ const App: React.FC = () => {
   const [isFullscreen, setIsFullscreen] = useState(true)
   const [launchFullscreen, setLaunchFullscreen] = useState(true)
   const [showWindowControls, setShowWindowControls] = useState(false)
+  const [activeDownloads, setActiveDownloads] = useState<ActiveDownload[]>([])
+  const [dismissedDownloadTrayIds, setDismissedDownloadTrayIds] = useState<Set<string>>(() => new Set())
   const homeScrollRef = useRef<HTMLDivElement | null>(null)
   const activePageScrollRef = useRef<HTMLDivElement | null>(null)
   const activeTabRef = useRef<AppTab>('home')
   const tabScrollPositionsRef = useRef<Partial<Record<AppTab, number>>>({})
   const windowControlsHideTimerRef = useRef<number | null>(null)
+  const windowControlsRevealTimerRef = useRef<number | null>(null)
   const windowControlsRevealLockedRef = useRef(false)
   const windowControlsRevealUnlockTimerRef = useRef<number | null>(null)
 
@@ -104,8 +137,41 @@ const App: React.FC = () => {
   }, [])
 
   useEffect(() => {
+    let cancelled = false
+
+    const refreshDownloads = () => {
+      window.api.getActiveDownloads()
+        .then((downloads: ActiveDownload[]) => {
+          if (!cancelled) setActiveDownloads(downloads || [])
+        })
+        .catch(err => console.error('[DownloadsTray] Failed to load downloads:', err))
+    }
+
+    refreshDownloads()
+
+    const cleanup = window.api.onTorrentProgress((data: ActiveDownload) => {
+      if (!data?.id) return
+      setActiveDownloads(prev => {
+        const index = prev.findIndex(download => download.id === data.id)
+        if (index === -1) return [data, ...prev]
+        const next = [...prev]
+        next[index] = { ...next[index], ...data }
+        return next
+      })
+    })
+    const cleanupDownloadsChanged = window.api.onDownloadsChanged(refreshDownloads)
+
+    return () => {
+      cancelled = true
+      cleanup()
+      cleanupDownloadsChanged()
+    }
+  }, [])
+
+  useEffect(() => {
     return () => {
       clearWindowControlsHideTimer()
+      clearWindowControlsRevealTimer()
       clearWindowControlsRevealUnlockTimer()
     }
   }, [])
@@ -214,9 +280,7 @@ const App: React.FC = () => {
   }
 
   const closeWhatsNew = () => {
-    if (!isDevPreview) {
-      localStorage.setItem(getWhatsNewStorageKey(LATEST_RELEASE.version), 'true')
-    }
+    localStorage.setItem(getWhatsNewStorageKey(LATEST_RELEASE.version), 'true')
     setShowWhatsNew(false)
     setWhatsNewStep(0)
   }
@@ -245,6 +309,13 @@ const App: React.FC = () => {
     }
   }
 
+  const clearWindowControlsRevealTimer = () => {
+    if (windowControlsRevealTimerRef.current) {
+      window.clearTimeout(windowControlsRevealTimerRef.current)
+      windowControlsRevealTimerRef.current = null
+    }
+  }
+
   const clearWindowControlsRevealUnlockTimer = () => {
     if (windowControlsRevealUnlockTimerRef.current) {
       window.clearTimeout(windowControlsRevealUnlockTimerRef.current)
@@ -259,6 +330,7 @@ const App: React.FC = () => {
 
   const lockWindowControlsRevealBriefly = () => {
     windowControlsRevealLockedRef.current = true
+    clearWindowControlsRevealTimer()
     clearWindowControlsRevealUnlockTimer()
     windowControlsRevealUnlockTimerRef.current = window.setTimeout(() => {
       windowControlsRevealLockedRef.current = false
@@ -267,17 +339,29 @@ const App: React.FC = () => {
   }
 
   const hideWindowControlsNow = () => {
+    clearWindowControlsRevealTimer()
     clearWindowControlsHideTimer()
     setShowWindowControls(false)
   }
 
   const revealWindowControls = () => {
     if (windowControlsRevealLockedRef.current) return
+    clearWindowControlsRevealTimer()
     clearWindowControlsHideTimer()
     setShowWindowControls(true)
   }
 
+  const revealWindowControlsAfterDwell = () => {
+    if (windowControlsRevealLockedRef.current || showWindowControls) return
+    clearWindowControlsRevealTimer()
+    windowControlsRevealTimerRef.current = window.setTimeout(() => {
+      windowControlsRevealTimerRef.current = null
+      revealWindowControls()
+    }, 260)
+  }
+
   const hideWindowControlsSoon = () => {
+    clearWindowControlsRevealTimer()
     clearWindowControlsHideTimer()
     windowControlsHideTimerRef.current = window.setTimeout(() => {
       setShowWindowControls(false)
@@ -297,13 +381,13 @@ const App: React.FC = () => {
             }
           `}</style>
           <div
-            className="fixed left-1/2 top-0 z-[259] h-5 w-[min(36rem,100vw)] -translate-x-1/2"
-            onMouseEnter={revealWindowControls}
+            className="fixed left-1/2 top-0 z-[259] h-2 w-[min(28rem,100vw)] -translate-x-1/2"
+            onMouseEnter={revealWindowControlsAfterDwell}
             onMouseLeave={() => {
+              clearWindowControlsRevealTimer()
               unlockWindowControlsReveal()
               hideWindowControlsSoon()
             }}
-            onPointerDown={revealWindowControls}
           />
           <div
             className={`fixed left-1/2 top-4 z-[260] -translate-x-1/2 rounded-lg border border-white/10 bg-black/70 p-1.5 shadow-[0_16px_42px_rgba(0,0,0,0.46)] backdrop-blur-xl transition-[opacity,transform] duration-300 ease-out ${
@@ -339,16 +423,28 @@ const App: React.FC = () => {
     </>
   )
 
+  const visibleDownloads = sortDownloadsForTray(activeDownloads.filter(download => (
+    download.status === 'downloading' ||
+    download.status === 'connecting' ||
+    download.status === 'paused' ||
+    download.status === 'pending' ||
+    download.status === 'error'
+  ) && !dismissedDownloadTrayIds.has(download.id)))
+  const trayDownload = visibleDownloads[0]
+  const trayProgress = Math.max(0, Math.min(100, Math.round(Number(trayDownload?.progress || 0))))
+  const trayTitle = trayDownload ? (trayDownload.name || trayDownload.title || 'Download') : ''
+  const shouldShowDownloadTray = Boolean(trayDownload && activeTab !== 'download' && !playingVideo)
+
   return (
     <div className="flex h-screen bg-[#05080d] text-text font-sans overflow-hidden">
       <WindowControls />
 
       {/* Sidebar */}
       <div className={`bg-[#0a0f18] flex flex-col border-r border-white/5 transition-all duration-300 ease-in-out ${isSidebarExpanded ? 'w-64' : 'w-20'}`}>
-        <div className="flex items-center justify-between p-6">
-          <div className={`flex items-center gap-3 overflow-hidden transition-all duration-300 ${isSidebarExpanded ? 'w-[160px] opacity-100' : 'w-0 opacity-0'}`}>
-            <img src={appLogo} alt="MyCinema" className="h-12 w-12 rounded-full object-cover shadow-lg shadow-blue-500/10" />
-            <span className="text-xl font-black text-white tracking-tight whitespace-nowrap">MyCinema</span>
+        <div className="flex items-center justify-between gap-3 px-4 py-6">
+          <div className={`flex min-w-0 flex-1 items-center gap-3 overflow-hidden transition-all duration-300 ${isSidebarExpanded ? 'max-w-[190px] opacity-100' : 'max-w-0 opacity-0'}`}>
+            <img src={appLogo} alt="MyCinema" className="h-11 w-11 flex-shrink-0 rounded-full object-cover shadow-lg shadow-blue-500/10" />
+            <span className="min-w-0 whitespace-nowrap text-xl font-black tracking-tight text-white">MyCinema</span>
           </div>
           <button 
             onClick={() => setIsSidebarExpanded(!isSidebarExpanded)}
@@ -544,6 +640,89 @@ const App: React.FC = () => {
           </div>
         )}
       </main>
+
+      {shouldShowDownloadTray && (
+        <div className="fixed bottom-5 right-5 z-[45] w-[min(360px,calc(100vw-2rem))] overflow-hidden rounded-2xl border border-white/10 bg-[#0b1018]/95 p-4 pr-11 text-left shadow-[0_18px_70px_rgba(0,0,0,0.55)] backdrop-blur-2xl transition-all hover:-translate-y-1 hover:border-primary/35 hover:bg-[#101722]">
+          <button
+            type="button"
+            aria-label="Close download tray"
+            title="Close"
+            onClick={() => {
+              if (!trayDownload?.id) return
+              setDismissedDownloadTrayIds(prev => {
+                const next = new Set(prev)
+                next.add(trayDownload.id)
+                return next
+              })
+            }}
+            className="absolute right-3 top-3 flex h-7 w-7 items-center justify-center rounded-lg text-white/38 transition-all hover:bg-white/10 hover:text-white active:scale-95"
+          >
+            <X size={15} />
+          </button>
+
+          <button
+            type="button"
+            onClick={() => navigateToTab('download')}
+            className="block w-full text-left"
+            title="Open downloads"
+          >
+            <div className="flex items-start gap-3">
+            <div className={`mt-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border ${
+              trayDownload?.status === 'error'
+                ? 'border-red-400/25 bg-red-500/12 text-red-300'
+                : trayDownload?.status === 'paused'
+                  ? 'border-amber-400/25 bg-amber-400/12 text-amber-200'
+                  : 'border-cyan-400/25 bg-cyan-400/12 text-cyan-200'
+            }`}>
+              {trayDownload?.status === 'error' ? (
+                <AlertCircle size={19} />
+              ) : trayDownload?.status === 'paused' ? (
+                <PauseCircle size={19} />
+              ) : (
+                <Loader2 size={19} className="animate-spin" />
+              )}
+            </div>
+
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center justify-between gap-3">
+                <p className="truncate text-sm font-black text-white">
+                  {trayTitle}
+                </p>
+                <span className="shrink-0 text-xs font-black text-primary">
+                  {trayProgress}%
+                </span>
+              </div>
+              <div className="mt-1 flex items-center justify-between gap-3 text-[10px] font-bold uppercase tracking-widest text-white/38">
+                <span>
+                  {trayDownload?.status === 'paused'
+                    ? 'Paused'
+                    : trayDownload?.status === 'error'
+                      ? 'Download error'
+                      : trayDownload?.status === 'connecting'
+                        ? 'Connecting'
+                        : 'Downloading'}
+                </span>
+                {visibleDownloads.length > 1 && (
+                  <span>{visibleDownloads.length - 1} more</span>
+                )}
+              </div>
+              <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-white/10">
+                <div
+                  className={`h-full rounded-full transition-all duration-300 ${
+                    trayDownload?.status === 'error'
+                      ? 'bg-red-400'
+                      : trayDownload?.status === 'paused'
+                        ? 'bg-amber-300'
+                        : 'bg-gradient-to-r from-cyan-300 to-primary'
+                  }`}
+                  style={{ width: `${trayProgress}%` }}
+                />
+              </div>
+            </div>
+            </div>
+          </button>
+        </div>
+      )}
 
       {/* Detail Screen Overlay */}
       {selectedVideo && (

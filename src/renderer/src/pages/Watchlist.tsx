@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react'
 import { Video } from '../types'
 import VideoCard from '../components/VideoCard'
 import HorizontalScrollRow from '../components/HorizontalScrollRow'
-import { Bookmark, BookmarkCheck, Film, Loader2, Search, Tv, X } from 'lucide-react'
+import { Bookmark, BookmarkCheck, Film, Loader2, Tv, X } from 'lucide-react'
 
 interface WatchlistProps {
   onPlay: (video: Video) => void
@@ -186,45 +186,15 @@ const Watchlist: React.FC<WatchlistProps> = ({ onPlay, onShowDetail, refreshKey 
 
   return (
     <div className="space-y-5">
-      <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(420px,680px)] xl:items-center">
-        <div className="flex min-w-0 items-center gap-3">
-          <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl border border-primary/20 bg-primary/10 text-primary">
-            <Bookmark size={24} />
-          </div>
-          <div className="min-w-0">
-            <h2 className="truncate text-2xl font-bold tracking-normal text-white md:text-3xl">Your Watchlist</h2>
-            <p className="text-[11px] font-medium text-white/40">
-              {totalTitles} saved title{totalTitles === 1 ? '' : 's'} / {categoryCount} list{categoryCount === 1 ? '' : 's'}
-            </p>
-          </div>
+      <div className="flex min-w-0 items-center gap-3">
+        <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl border border-primary/20 bg-primary/10 text-primary">
+          <Bookmark size={24} />
         </div>
-
-        <div className="flex min-h-11 items-center overflow-hidden rounded-xl border border-white/10 bg-surface/80 shadow-lg shadow-black/10 transition-colors focus-within:border-primary/50">
-          <Search size={17} className="ml-4 flex-shrink-0 text-muted" />
-          <input
-            type="text"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
-            placeholder="Search for a movie or series to add..."
-            className="min-w-0 flex-1 bg-transparent px-3 py-3 text-sm text-text outline-none placeholder:text-muted/55"
-          />
-          {query && (
-            <button
-              onClick={clearSearch}
-              className="p-3 text-muted transition-colors hover:text-text"
-              title="Clear search"
-            >
-              <X size={16} />
-            </button>
-          )}
-          <button
-            onClick={handleSearch}
-            disabled={searching || !query.trim()}
-            className="self-stretch bg-primary/10 px-5 text-sm font-bold text-primary transition-colors hover:bg-primary/20 disabled:cursor-not-allowed disabled:opacity-40"
-          >
-            {searching ? <Loader2 size={16} className="animate-spin" /> : 'Search'}
-          </button>
+        <div className="min-w-0">
+          <h2 className="truncate text-2xl font-bold tracking-normal text-white md:text-3xl">Your Watchlist</h2>
+          <p className="text-[11px] font-medium text-white/40">
+            {totalTitles} saved title{totalTitles === 1 ? '' : 's'} / {categoryCount} list{categoryCount === 1 ? '' : 's'}
+          </p>
         </div>
       </div>
 

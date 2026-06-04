@@ -45,26 +45,26 @@ type WhatsNewSlide = {
 }
 
 export const LATEST_RELEASE = {
-  version: '1.24.0',
+  version: '1.25.0',
   eyebrow: 'What\'s New',
   slides: [
     {
-      id: 'fullscreen-flow',
+      id: 'ready-home',
       layout: 'reveal',
-      icon: Zap,
-      kicker: 'Fullscreen',
-      headline: 'Exit fullscreen instantly.',
-      highlight: 'instantly',
-      support: 'Top-edge control appears fast, then disappears after the click.',
+      icon: Play,
+      kicker: 'Home',
+      headline: 'Pick up right from Home.',
+      highlight: 'right from Home',
+      support: 'Continue Watching now leads the screen, with new library additions close behind.',
       bullets: [
-        'Move to the top edge to reveal the centered fullscreen control.',
-        'The action hides after clicking so the opposite button does not flash.',
-        'Reveal timing is quicker and feels closer to modern streaming apps.'
+        'Your in-progress movies and series now take the main Home spotlight.',
+        'Recently added movies and series stay visible before trending discovery.',
+        'New libraries can add their media folder without hunting through Settings.'
       ],
-      signal: 'Fast exit',
-      cta: 'Pop out',
+      signal: 'Ready now',
+      cta: 'Watch now',
       mood: {
-        name: 'fullscreen-flow',
+        name: 'ready-home',
         gradient: 'from-rose-300 via-red-300 to-orange-300',
         text: 'text-rose-200',
         border: 'border-rose-300/30',
@@ -74,22 +74,22 @@ export const LATEST_RELEASE = {
       }
     },
     {
-      id: 'watchlist-density',
+      id: 'unified-search',
       layout: 'discovery',
       icon: Search,
-      kicker: 'Watchlist',
-      headline: 'More posters, less empty space.',
-      highlight: 'less empty space',
-      support: 'Rows are tighter, badges stay visible, and categories scan cleanly.',
+      kicker: 'Discovery',
+      headline: 'One search knows everything.',
+      highlight: 'everything',
+      support: 'See library, Watchlist, and online matches together before choosing what to do.',
       bullets: [
-        'Saved-title cards are smaller without cropping poster badges.',
-        'Search and list counters now sit in a compact header.',
-        'Category headers dropped repeated icons for calmer scanning.'
+        'Local titles are clearly marked and ready to play.',
+        'Saved Watchlist picks appear beside online discovery results.',
+        'Open any result to play, download, or choose a source.'
       ],
-      signal: 'More visible',
-      cta: 'Browse it',
+      signal: 'Search once',
+      cta: 'Find it',
       mood: {
-        name: 'watchlist-density',
+        name: 'unified-search',
         gradient: 'from-cyan-300 via-sky-300 to-emerald-300',
         text: 'text-cyan-200',
         border: 'border-cyan-300/30',
@@ -99,22 +99,22 @@ export const LATEST_RELEASE = {
       }
     },
     {
-      id: 'poppins-style',
-      layout: 'celebrate',
-      icon: Sparkles,
-      kicker: 'Style',
-      headline: 'Poppins lands everywhere.',
-      highlight: 'Poppins',
-      support: 'Screens, controls, subtitles, and overlays now share one polished typeface.',
+      id: 'play-while-downloading',
+      layout: 'downloads',
+      icon: DownloadIcon,
+      kicker: 'Downloads',
+      headline: 'Watch before downloads finish.',
+      highlight: 'before downloads finish',
+      support: 'Start an active torrent in the player while the rest keeps arriving.',
       bullets: [
-        'Poppins loads locally, so the app does not rely on remote fonts.',
-        'Buttons, inputs, subtitles, and player toasts inherit the same stack.',
-        'Premium labels were removed from profile areas for a cleaner look.'
+        'Title details now choose the right action for every download state.',
+        'Download Best starts the healthiest available source with one click.',
+        'Choose Source remains available when you want full control.'
       ],
-      signal: 'Fresh type',
-      cta: 'Looks good',
+      signal: 'Play sooner',
+      cta: 'Try it',
       mood: {
-        name: 'poppins-style',
+        name: 'play-while-downloading',
         gradient: 'from-fuchsia-300 via-pink-300 to-amber-200',
         text: 'text-fuchsia-200',
         border: 'border-fuchsia-300/30',
@@ -124,22 +124,47 @@ export const LATEST_RELEASE = {
       }
     },
     {
-      id: 'source-cancel',
+      id: 'library-control',
+      layout: 'celebrate',
+      icon: Film,
+      kicker: 'Library',
+      headline: 'Big libraries stay easy.',
+      highlight: 'stay easy',
+      support: 'Search, filter, and sort movies, series, and videos without losing screen space.',
+      bullets: [
+        'Compact controls help large collections stay quick to scan.',
+        'History now includes everything you started or finished watching.',
+        'Downloads remain visible from any screen through the global tray.'
+      ],
+      signal: 'Find faster',
+      cta: 'Browse it',
+      mood: {
+        name: 'library-control',
+        gradient: 'from-amber-200 via-orange-300 to-rose-300',
+        text: 'text-amber-200',
+        border: 'border-amber-300/30',
+        shadow: 'shadow-[0_0_72px_rgba(251,191,36,0.28)]',
+        backdrop: 'linear-gradient(135deg, rgba(245,158,11,0.22), transparent 34%), linear-gradient(245deg, rgba(244,63,94,0.18), transparent 50%), linear-gradient(180deg, rgba(120,53,15,0.24), transparent 66%)',
+        cursor: 'rgba(251,191,36,0.22)'
+      }
+    },
+    {
+      id: 'scoped-streaming',
       layout: 'security',
       icon: ShieldCheck,
-      kicker: 'Sources',
-      headline: 'Closed means stopped.',
-      highlight: 'stopped',
-      support: 'Canceling panels now shuts down provider searches and stale progress.',
+      kicker: 'Privacy',
+      headline: 'Streaming stays tightly scoped.',
+      highlight: 'tightly scoped',
+      support: 'Playback uses active download IDs, and folder access still requires your choice.',
       bullets: [
-        'Closing movie details cancels active torrent-source lookup work.',
-        'Provider timeouts abort in-flight requests instead of drifting later.',
-        'DNS fallback logs stay quiet unless debug mode is enabled.'
+        'Play While Downloading only serves torrents already active in MyCinema.',
+        'The renderer never sends an arbitrary local path for torrent playback.',
+        'Home folder setup still opens the explicit system folder picker.'
       ],
-      signal: 'Clean stop',
-      cta: 'Nice',
+      signal: 'User controlled',
+      cta: 'Let\'s go',
       mood: {
-        name: 'source-cancel',
+        name: 'scoped-streaming',
         gradient: 'from-lime-200 via-emerald-300 to-teal-300',
         text: 'text-emerald-200',
         border: 'border-emerald-300/30',

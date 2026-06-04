@@ -82,6 +82,12 @@ const api = {
     ipcRenderer.invoke('retry-torrent-download', id),
   getActiveDownloads: () => 
     ipcRenderer.invoke('get-active-downloads'),
+  prepareTorrentStream: (id: string) =>
+    ipcRenderer.invoke('prepare-torrent-stream', id),
+  onDownloadsChanged: (callback: () => void) => {
+    ipcRenderer.on('downloads-changed', callback)
+    return () => ipcRenderer.removeListener('downloads-changed', callback)
+  },
   onTorrentProgress: (callback: (data: any) => void) => {
     const handler = (_event: any, data: any) => callback(data)
     ipcRenderer.on('torrent-progress', handler)

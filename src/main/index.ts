@@ -2243,6 +2243,11 @@ ipcMain.handle('fetch-trending-india', async (_, type: 'movie' | 'series' = 'mov
   return await tmdb.fetchTrendingInIndia(type)
 })
 
+ipcMain.handle('get-tmdb-title-logo', async (_, type: 'movie' | 'series', tmdbId: number) => {
+  if (type !== 'movie' && type !== 'series') return null
+  return await tmdb.fetchTmdbTitleLogo(type, tmdbId)
+})
+
 ipcMain.handle('get-tmdb-trailer', async (_, params: { tmdbId?: number | null; title: string; type: 'movie' | 'series'; year?: number | null; seasonNumber?: number | null; preferLatestSeason?: boolean }) => {
   return await tmdb.fetchTmdbTrailer(params)
 })

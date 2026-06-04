@@ -1,3 +1,21 @@
+# MyCinema v1.25.1
+
+Patch release focused on calmer fullscreen controls and more cinematic hero titles.
+
+### Fullscreen Experience
+- **One Reveal Per Visit**: The fullscreen control now appears only once when the pointer reaches the top center, instead of repeatedly popping out while the pointer stays there.
+- **Stays Under The Cursor**: Once revealed, the fullscreen control remains visible while the pointer is over the top edge or the control itself.
+
+### Hero Carousel
+- **TMDB Title Logos First**: Continue Watching hero titles now use TMDB logo artwork whenever it is available.
+- **Readable Fallback Titles**: Written movie and series titles appear only when TMDB has no logo or the logo image cannot load.
+- **Cached Logo Lookups**: Title-logo results are cached so the carousel does not repeatedly request the same artwork.
+
+### Security & Privacy
+- **Scoped Logo Requests**: The new title-logo lookup accepts only a validated movie or series type plus a TMDB ID through the existing main-process boundary.
+
+***
+
 # MyCinema v1.25.0
 
 Feature release focused on making the path from finding a title to watching it feel immediate.

@@ -120,6 +120,8 @@ const youtubePlayableCache = new Map<string, { playable: boolean, timestamp: num
 const YOUTUBE_PLAYABLE_CACHE_TTL = 1000 * 60 * 60 * 12
 const tmdbTrailerCache = new Map<string, { trailer: TmdbTrailer | null, timestamp: number }>()
 const TMDB_TRAILER_CACHE_TTL = 1000 * 60 * 30
+const tmdbTitleLogoCache = new Map<string, { logoPath: string | null, timestamp: number }>()
+const TMDB_TITLE_LOGO_CACHE_TTL = 1000 * 60 * 60 * 24
 
 function getTmdbListCacheDir(): string {
   const dir = path.join(app.getPath('userData'), 'tmdb_list_cache')
@@ -301,6 +303,26 @@ async function fetchTitleLogo(
 }
 
 // ─── Public API ──────────────────────────────────────────────────────────────
+
+export async function fetchTmdbTitleLogo(type: 'movie' | 'series', tmdbId: number): Promise<string | null> {
+  const normalizedTmdbId = Number(tmdbId)
+  if (!Number.isFinite(normalizedTmdbId) || normalizedTmdbId <= 0) return null
+
+  const endpoint = type === 'series' ? 'tv' : 'movie'
+  const cacheKey = `${endpoint}:${normalizedTmdbId}`
+  const cached = tmdbTitleLogoCache.get(cacheKey)
+
+  if (cached && (Date.now() - cached.timestamp) < TMDB_TITLE_LOGO_CACHE_TTL) {
+    return cached.logoPath
+  }
+
+  const apiKey = getTmdbApiKey()
+  if (!apiKey) return null
+
+  const logoPath = await fetchTitleLogo(endpoint, normalizedTmdbId, apiKey)
+  tmdbTitleLogoCache.set(cacheKey, { logoPath, timestamp: Date.now() })
+  return logoPath
+}
 
 export async function fetchTrending(type: 'movie' | 'series'): Promise<any[]> {
   const cacheKey = `trending:${type}:week`

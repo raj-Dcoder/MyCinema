@@ -45,26 +45,26 @@ type WhatsNewSlide = {
 }
 
 export const LATEST_RELEASE = {
-  version: '1.25.0',
+  version: '1.25.1',
   eyebrow: 'What\'s New',
   slides: [
     {
-      id: 'ready-home',
+      id: 'calm-fullscreen',
       layout: 'reveal',
-      icon: Play,
-      kicker: 'Home',
-      headline: 'Pick up right from Home.',
-      highlight: 'right from Home',
-      support: 'Continue Watching now leads the screen, with new library additions close behind.',
+      icon: Zap,
+      kicker: 'Fullscreen',
+      headline: 'The top edge stays calm.',
+      highlight: 'stays calm',
+      support: 'Fullscreen controls reveal once, then remain steady while your pointer stays there.',
       bullets: [
-        'Your in-progress movies and series now take the main Home spotlight.',
-        'Recently added movies and series stay visible before trending discovery.',
-        'New libraries can add their media folder without hunting through Settings.'
+        'The control no longer keeps popping out under a stationary pointer.',
+        'It remains visible while you move between the top edge and the button.',
+        'Leave and return when you want to reveal it again.'
       ],
-      signal: 'Ready now',
-      cta: 'Watch now',
+      signal: 'One reveal',
+      cta: 'Nice',
       mood: {
-        name: 'ready-home',
+        name: 'calm-fullscreen',
         gradient: 'from-rose-300 via-red-300 to-orange-300',
         text: 'text-rose-200',
         border: 'border-rose-300/30',
@@ -74,22 +74,22 @@ export const LATEST_RELEASE = {
       }
     },
     {
-      id: 'unified-search',
+      id: 'hero-title-logos',
       layout: 'discovery',
-      icon: Search,
-      kicker: 'Discovery',
-      headline: 'One search knows everything.',
-      highlight: 'everything',
-      support: 'See library, Watchlist, and online matches together before choosing what to do.',
+      icon: Film,
+      kicker: 'Hero Titles',
+      headline: 'Title art takes the spotlight.',
+      highlight: 'Title art',
+      support: 'Continue Watching now prefers the official TMDB logo over plain written titles.',
       bullets: [
-        'Local titles are clearly marked and ready to play.',
-        'Saved Watchlist picks appear beside online discovery results.',
-        'Open any result to play, download, or choose a source.'
+        'Local hero items can now fetch the same logo artwork as discovery titles.',
+        'The carousel waits for TMDB before deciding to show plain text.',
+        'A readable written title remains available whenever artwork is missing.'
       ],
-      signal: 'Search once',
-      cta: 'Find it',
+      signal: 'Logo first',
+      cta: 'Looks good',
       mood: {
-        name: 'unified-search',
+        name: 'hero-title-logos',
         gradient: 'from-cyan-300 via-sky-300 to-emerald-300',
         text: 'text-cyan-200',
         border: 'border-cyan-300/30',
@@ -99,72 +99,22 @@ export const LATEST_RELEASE = {
       }
     },
     {
-      id: 'play-while-downloading',
-      layout: 'downloads',
-      icon: DownloadIcon,
-      kicker: 'Downloads',
-      headline: 'Watch before downloads finish.',
-      highlight: 'before downloads finish',
-      support: 'Start an active torrent in the player while the rest keeps arriving.',
-      bullets: [
-        'Title details now choose the right action for every download state.',
-        'Download Best starts the healthiest available source with one click.',
-        'Choose Source remains available when you want full control.'
-      ],
-      signal: 'Play sooner',
-      cta: 'Try it',
-      mood: {
-        name: 'play-while-downloading',
-        gradient: 'from-fuchsia-300 via-pink-300 to-amber-200',
-        text: 'text-fuchsia-200',
-        border: 'border-fuchsia-300/30',
-        shadow: 'shadow-[0_0_72px_rgba(244,114,182,0.28)]',
-        backdrop: 'linear-gradient(135deg, rgba(217,70,239,0.22), transparent 34%), linear-gradient(245deg, rgba(251,191,36,0.18), transparent 50%), linear-gradient(180deg, rgba(112,26,117,0.24), transparent 66%)',
-        cursor: 'rgba(244,114,182,0.22)'
-      }
-    },
-    {
-      id: 'library-control',
-      layout: 'celebrate',
-      icon: Film,
-      kicker: 'Library',
-      headline: 'Big libraries stay easy.',
-      highlight: 'stay easy',
-      support: 'Search, filter, and sort movies, series, and videos without losing screen space.',
-      bullets: [
-        'Compact controls help large collections stay quick to scan.',
-        'History now includes everything you started or finished watching.',
-        'Downloads remain visible from any screen through the global tray.'
-      ],
-      signal: 'Find faster',
-      cta: 'Browse it',
-      mood: {
-        name: 'library-control',
-        gradient: 'from-amber-200 via-orange-300 to-rose-300',
-        text: 'text-amber-200',
-        border: 'border-amber-300/30',
-        shadow: 'shadow-[0_0_72px_rgba(251,191,36,0.28)]',
-        backdrop: 'linear-gradient(135deg, rgba(245,158,11,0.22), transparent 34%), linear-gradient(245deg, rgba(244,63,94,0.18), transparent 50%), linear-gradient(180deg, rgba(120,53,15,0.24), transparent 66%)',
-        cursor: 'rgba(251,191,36,0.22)'
-      }
-    },
-    {
-      id: 'scoped-streaming',
+      id: 'scoped-logo-lookup',
       layout: 'security',
       icon: ShieldCheck,
       kicker: 'Privacy',
-      headline: 'Streaming stays tightly scoped.',
-      highlight: 'tightly scoped',
-      support: 'Playback uses active download IDs, and folder access still requires your choice.',
+      headline: 'Artwork requests stay scoped.',
+      highlight: 'stay scoped',
+      support: 'Logo lookups use only a validated media type and TMDB title ID.',
       bullets: [
-        'Play While Downloading only serves torrents already active in MyCinema.',
-        'The renderer never sends an arbitrary local path for torrent playback.',
-        'Home folder setup still opens the explicit system folder picker.'
+        'Movie and series logo requests pass through the existing main-process boundary.',
+        'Invalid media types are rejected before a TMDB lookup begins.',
+        'Results are cached to avoid unnecessary repeated network requests.'
       ],
-      signal: 'User controlled',
+      signal: 'Validated lookup',
       cta: 'Let\'s go',
       mood: {
-        name: 'scoped-streaming',
+        name: 'scoped-logo-lookup',
         gradient: 'from-lime-200 via-emerald-300 to-teal-300',
         text: 'text-emerald-200',
         border: 'border-emerald-300/30',

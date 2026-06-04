@@ -1,3 +1,39 @@
+# MyCinema v1.25.0
+
+Feature release focused on making the path from finding a title to watching it feel immediate.
+
+### Home & Discovery
+- **Continue Watching Leads Home**: Home now opens around titles already in progress, while recently added movies and series stay close behind.
+- **One Search Across MyCinema**: Home search now combines local library, Watchlist, and online results so users do not need to search separate screens.
+- **Folder Setup Where It Matters**: New libraries can add a media folder directly from Home instead of discovering the option later in Settings.
+- **Clearer Content Sections**: Recently added and trending rails now say exactly whether they contain movies, series, global titles, or India trends.
+
+### Downloads & Playback
+- **Play While Downloading**: Active torrent downloads can open in the player before the file has finished downloading.
+- **Detail Page Command Center**: Title details now show the right action for the current state, including Download Best, Choose Source, download progress, and Play While Downloading.
+- **Downloads Stay Visible**: A compact global tray keeps active, paused, and failed downloads visible outside the Downloads screen, with a close action when it is not needed.
+- **Useful Downloads Dashboard**: The Downloads screen now shows queue status, storage, completed items, failures, and a meaningful empty state.
+
+### Library & History
+- **Faster Library Browsing**: Movies, Series, and Videos now have compact search, filter, and sort controls for larger collections.
+- **Real Viewing History**: History now includes titles that were started or completed instead of duplicating only Continue Watching.
+- **Cleaner Watchlist Focus**: Duplicate search controls were removed so discovery starts from the unified Home search.
+
+### Reliability & Polish
+- **Removed Downloads Disappear Promptly**: Deleting a download now refreshes download indicators across Home and other screens.
+- **Torrent Audio Starts Correctly**: Play While Downloading now resets the player to the torrent video's native audio track when playback begins.
+- **Calmer Fullscreen Exit Control**: The top-edge fullscreen control waits for intentional pointer dwell and no longer keeps appearing during normal playback.
+- **Sidebar Brand Stays Visible**: The MyCinema name no longer gets clipped in the expanded sidebar.
+
+### Security & Privacy
+- **Active Download Streams Only**: Play While Downloading resolves an active download ID in the main process instead of accepting arbitrary renderer file paths.
+- **Folder Access Remains Explicit**: The new Home setup action still uses the existing folder picker, so MyCinema scans only the media folder the user selects.
+
+### Developer & Release Workflow
+- **Documented Delivery Handoff**: The repository now documents the implementation-to-release workflow and its gate-by-gate handoff.
+
+***
+
 # MyCinema v1.24.0
 
 Feature release focused on smoother fullscreen control, a tighter Watchlist, and cleaner download-source cancellation.

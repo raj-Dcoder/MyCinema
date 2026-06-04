@@ -429,6 +429,18 @@ protocol.registerSchemesAsPrivileged([
       corsEnabled: true,
       stream: true
     }
+  },
+  {
+    scheme: 'torrent',
+    privileges: {
+      standard: true,
+      secure: true,
+      bypassCSP: true,
+      allowServiceWorkers: false,
+      supportFetchAPI: true,
+      corsEnabled: true,
+      stream: true
+    }
   }
 ])
 
@@ -607,6 +619,74 @@ function parseRangeHeader(range: string, fileSize: number): { start: number; end
   return { start, end: Math.min(end, fileSize - 1) }
 }
 
+function getContentTypeForPath(filePath: string): string {
+  const ext = path.extname(filePath).toLowerCase()
+  if (ext === '.jpg' || ext === '.jpeg') return 'image/jpeg'
+  if (ext === '.png') return 'image/png'
+  if (ext === '.webp') return 'image/webp'
+  if (ext === '.mkv') return 'video/x-matroska'
+  if (ext === '.webm') return 'video/webm'
+  if (ext === '.avi') return 'video/x-msvideo'
+  if (ext === '.mov') return 'video/quicktime'
+  if (ext === '.m4v') return 'video/mp4'
+  return 'video/mp4'
+}
+
+function waitForTorrentReady(torrent: any, timeoutMs = 25000): Promise<void> {
+  if (!torrent || torrent.destroyed) return Promise.reject(new Error('Torrent is not active'))
+  if (torrent.ready || (Array.isArray(torrent.files) && torrent.files.length > 0)) return Promise.resolve()
+
+  return new Promise((resolve, reject) => {
+    const cleanup = () => {
+      clearTimeout(timer)
+      torrent.removeListener?.('ready', onReady)
+      torrent.removeListener?.('error', onError)
+    }
+    const onReady = () => {
+      cleanup()
+      resolve()
+    }
+    const onError = (err: Error) => {
+      cleanup()
+      reject(err)
+    }
+    const timer = setTimeout(() => {
+      cleanup()
+      reject(new Error('Torrent metadata is not ready yet'))
+    }, timeoutMs)
+
+    torrent.once?.('ready', onReady)
+    torrent.once?.('error', onError)
+  })
+}
+
+function getPlayableTorrentFile(torrent: any): any | null {
+  if (!torrent || !Array.isArray(torrent.files)) return null
+  const videoFiles = torrent.files.filter((file: any) => isVideoFilePath(file?.path || file?.name))
+  if (videoFiles.length === 0) return null
+  return videoFiles.sort((a: any, b: any) => (b.length || 0) - (a.length || 0))[0]
+}
+
+async function getPreparedTorrentFile(downloadId: string): Promise<any> {
+  const torrent = activeTorrents.get(downloadId)
+  if (!torrent || torrent.destroyed) throw new Error('Download is not active')
+
+  await waitForTorrentReady(torrent)
+  const file = getPlayableTorrentFile(torrent)
+  if (!file) throw new Error('No playable video file found in this torrent')
+
+  try {
+    for (const other of torrent.files || []) {
+      if (other === file) other.select?.()
+      else other.deselect?.()
+    }
+  } catch (err) {
+    console.warn('[TorrentStream] Could not reprioritize torrent files:', err)
+  }
+
+  return file
+}
+
 function registerMediaProtocol(): void {
   protocol.handle('media', (request) => {
     try {
@@ -642,14 +722,7 @@ function registerMediaProtocol(): void {
       const fileSize = stat.size
       const range = request.headers.get('range')
 
-      let contentType = 'video/mp4'
-      const ext = path.extname(normalizedPath).toLowerCase()
-      if (ext === '.jpg' || ext === '.jpeg') contentType = 'image/jpeg'
-      else if (ext === '.png') contentType = 'image/png'
-      else if (ext === '.webp') contentType = 'image/webp'
-      else if (ext === '.mkv') contentType = 'video/x-matroska'
-      else if (ext === '.webm') contentType = 'video/webm'
-      else if (ext === '.avi') contentType = 'video/x-msvideo'
+      const contentType = getContentTypeForPath(normalizedPath)
 
       if (range) {
         const parsedRange = parseRangeHeader(range, fileSize)
@@ -700,6 +773,66 @@ function registerMediaProtocol(): void {
     } catch (error) {
       console.error('Failed to fetch media:', error)
       return new Response('Error', { status: 500 })
+    }
+  })
+
+  protocol.handle('torrent', async (request) => {
+    try {
+      const url = new URL(request.url)
+      if (url.hostname !== 'stream') return new Response('Not Found', { status: 404 })
+
+      const downloadId = decodeURIComponent(url.pathname.replace(/^\/+/, ''))
+      if (!downloadId) return new Response('Missing download id', { status: 400 })
+
+      const file = await getPreparedTorrentFile(downloadId)
+      const fileSize = Number(file.length || 0)
+      if (!fileSize) return new Response('File is not ready', { status: 503 })
+
+      const range = request.headers.get('range')
+      const contentType = getContentTypeForPath(file.path || file.name || '')
+
+      if (range) {
+        const parsedRange = parseRangeHeader(range, fileSize)
+        if (!parsedRange) {
+          return new Response(null, {
+            status: 416,
+            statusText: 'Range Not Satisfiable',
+            headers: {
+              'Content-Range': `bytes */${fileSize}`,
+              'Accept-Ranges': 'bytes',
+              'Cache-Control': 'no-cache'
+            }
+          })
+        }
+
+        const { start, end } = parsedRange
+        const chunksize = (end - start) + 1
+        const stream = file.createReadStream({ start, end })
+        return new Response(stream as any, {
+          status: 206,
+          statusText: 'Partial Content',
+          headers: {
+            'Content-Range': `bytes ${start}-${end}/${fileSize}`,
+            'Accept-Ranges': 'bytes',
+            'Content-Length': chunksize.toString(),
+            'Content-Type': contentType,
+            'Cache-Control': 'no-cache'
+          }
+        })
+      }
+
+      const stream = file.createReadStream()
+      return new Response(stream as any, {
+        headers: {
+          'Content-Length': fileSize.toString(),
+          'Accept-Ranges': 'bytes',
+          'Content-Type': contentType,
+          'Cache-Control': 'no-cache'
+        }
+      })
+    } catch (error: any) {
+      console.error('[TorrentStream] Failed to serve torrent stream:', error)
+      return new Response(error?.message || 'Torrent stream unavailable', { status: 503 })
     }
   })
 }
@@ -4154,6 +4287,20 @@ ipcMain.handle('get-active-downloads', async () => {
   return db.getDownloads()
 })
 
+ipcMain.handle('prepare-torrent-stream', async (_, id: string) => {
+  try {
+    const file = await getPreparedTorrentFile(id)
+    return {
+      url: `torrent://stream/${encodeURIComponent(id)}`,
+      fileName: file.name || file.path || 'Torrent video',
+      size: file.length || 0
+    }
+  } catch (err: any) {
+    console.error('[TorrentStream] Prepare failed:', err)
+    return { error: err?.message || 'Torrent stream unavailable' }
+  }
+})
+
 function normalizeTorrentRelativePath(relativePath: string): string {
   return path.normalize(relativePath).replace(/^(\.\.(\\|\/|$))+/, '')
 }
@@ -4503,6 +4650,7 @@ ipcMain.handle('remove-download', async (_, id: string, deleteFile: boolean = fa
     
     // 2. Delete download row from DB
     db.removeDownloadRow(id)
+    BrowserWindow.getAllWindows().forEach(w => w.webContents.send('downloads-changed'))
 
     // 3. Optionally hard delete physical files and related library metadata
     if (deleteFile) {

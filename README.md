@@ -43,6 +43,12 @@ An offline-first desktop application for locally stored movies and TV series, bu
 For public Windows releases, configure code signing first and use `npm run dist` or `npm run release:publish`. See `docs/WINDOWS_CODE_SIGNING.md`.
 If signing credentials are unavailable and the project owner explicitly approves an unsigned GitHub release, use `npm run release:publish:unsigned` and expect Windows publisher warnings.
 
+## Project Workflow
+
+When reporting a problem, bug, issue, or feature, use `docs/DELIVERY_WORKFLOW.md`. It defines the gate-by-gate process for analysis, branch setup, implementation, verification, user acceptance, and the handoff to release.
+
+For deployment or release, start with `docs/release/00-release-map.md` after all implementation items are accepted.
+
 ## Folder Structure
 
 - `src/main/`: Electron main process (database, scanner, API logic).

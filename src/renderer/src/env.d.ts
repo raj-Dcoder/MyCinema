@@ -97,6 +97,8 @@ interface Api {
   pauseResumeTorrent: (id: string) => Promise<boolean>
   retryTorrentDownload: (id: string) => Promise<boolean>
   getActiveDownloads: () => Promise<any[]>
+  prepareTorrentStream: (id: string) => Promise<{ url?: string; fileName?: string; size?: number; error?: string }>
+  onDownloadsChanged: (callback: () => void) => () => void
   onTorrentProgress: (callback: (data: any) => void) => () => void
   // File utilities
   openFolder: (filePath: string) => Promise<void>

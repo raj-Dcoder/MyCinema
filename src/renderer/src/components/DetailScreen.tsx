@@ -35,6 +35,25 @@ const InfoRow: React.FC<{ label: string; value: string | null | undefined }> = (
 
 type TrailerSeasonSelection = 'latest' | 'series' | number
 
+type ActiveDownload = {
+  id: string
+  title?: string
+  name?: string | null
+  progress?: number
+  status?: 'downloading' | 'paused' | 'completed' | 'error' | string
+  downloadSpeed?: string
+  timeRemaining?: string
+  tmdbId?: number
+}
+
+const getTorrentStreamErrorMessage = (error?: string | null) => {
+  if (!error) return 'Stream is not ready yet.'
+  if (error.includes('No handler registered') || error.includes('prepare-torrent-stream')) {
+    return 'Play While Downloading needs the updated app process. Restart MyCinema and try again.'
+  }
+  return error
+}
+
 type VibeRule = {
   label: string
   tokens: string[]
@@ -107,6 +126,13 @@ const getMoctaleUrl = (video: Video) => {
   return `https://www.moctale.in/content/${slug}${video.release_year ? `-${video.release_year}` : ''}`
 }
 
+const normalizeMatchText = (value?: string | null) => (
+  (value || '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim()
+)
+
 const MYCINEMA_SHARE_BASE_URL = (
   import.meta.env.VITE_MYCINEMA_SHARE_BASE_URL ||
   'https://mycinema-share.rajveersinghranaofficial.workers.dev'
@@ -151,6 +177,10 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
   const [showDownloadOptions, setShowDownloadOptions] = useState(false)
   const [startingSourceMagnet, setStartingSourceMagnet] = useState<string | null>(null)
   const [startedSourceMagnet, setStartedSourceMagnet] = useState<string | null>(null)
+  const [startingBestDownload, setStartingBestDownload] = useState(false)
+  const [startingTorrentStream, setStartingTorrentStream] = useState(false)
+  const [torrentStreamError, setTorrentStreamError] = useState<string | null>(null)
+  const [activeDownloads, setActiveDownloads] = useState<ActiveDownload[]>([])
   const [sourceSearchStatus, setSourceSearchStatus] = useState({ found: 0, completed: 0, total: 0, cached: false, done: false })
   const sourceSearchRequestRef = useRef<string | null>(null)
   const cancelActiveSourceSearch = (markDone = true) => {
@@ -167,6 +197,20 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
   const isTmdbBacked = video.type === 'movie' || video.type === 'series'
   const isLocalMedia = !video.isExternal && Boolean(video.file_path)
   const displayTitle = video.type === 'series' && video.series_name ? video.series_name : video.title
+  const normalizedDisplayTitle = normalizeMatchText(displayTitle)
+  const matchingDownload = activeDownloads.find(download => {
+    if (video.tmdb_id && download.tmdbId === video.tmdb_id) return true
+    const downloadTitle = normalizeMatchText([download.title, download.name].filter(Boolean).join(' '))
+    return Boolean(normalizedDisplayTitle && downloadTitle && (
+      downloadTitle.includes(normalizedDisplayTitle) || normalizedDisplayTitle.includes(downloadTitle)
+    ))
+  })
+  const downloadProgress = Math.max(0, Math.min(100, Number(matchingDownload?.progress || 0)))
+  const roundedDownloadProgress = Math.round(downloadProgress)
+  const isDownloadPaused = matchingDownload?.status === 'paused'
+  const isDownloadConnecting = matchingDownload?.status === 'connecting' || matchingDownload?.status === 'pending'
+  const isDownloadComplete = matchingDownload?.status === 'completed' || matchingDownload?.status === 'done' || downloadProgress >= 100
+  const isDownloadActive = Boolean(matchingDownload && !isDownloadComplete)
 
   const handleToggleFavorite = async () => {
     const newValue = await window.api.toggleFavorite(video.id)
@@ -246,10 +290,10 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
     }
   }
 
-  const handleSearchSources = async (forceRefresh: boolean = false) => {
-    if (!isTmdbBacked || !video.tmdb_id || (searching && !forceRefresh)) return
+  const handleSearchSources = async (forceRefresh: boolean = false): Promise<any[]> => {
+    if (!isTmdbBacked || !video.tmdb_id || (searching && !forceRefresh)) return []
     const hasOnlySharedSource = Boolean(initialSharedSource?.magnet) && sources.length === 1 && sources[0]?.magnet === initialSharedSource.magnet
-    if (!forceRefresh && hasSearched && sources.length > 0 && !hasOnlySharedSource) return
+    if (!forceRefresh && hasSearched && sources.length > 0 && !hasOnlySharedSource) return sources
 
     if (sourceSearchRequestRef.current) {
       cancelActiveSourceSearch(false)
@@ -290,11 +334,13 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
         })
         setSourceSearchStatus(prev => ({ ...prev, found: results.length + (initialSharedSource?.magnet ? 1 : 0), done: true }))
       }
+      return results || []
     } catch (err) {
       console.error('Failed to search sources:', err)
       if (sourceSearchRequestRef.current === requestId) {
         setSourceSearchStatus(prev => ({ ...prev, done: true }))
       }
+      return []
     } finally {
       if (sourceSearchRequestRef.current === requestId) {
         setSearching(false)
@@ -346,17 +392,109 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
     return cleanup
   }, [])
 
+  useEffect(() => {
+    let cancelled = false
+
+    window.api.getActiveDownloads()
+      .then((downloads: ActiveDownload[]) => {
+        if (!cancelled) setActiveDownloads(downloads || [])
+      })
+      .catch(err => console.error('[DetailScreen] Failed to load active downloads:', err))
+
+    const cleanup = window.api.onTorrentProgress((data: ActiveDownload) => {
+      if (!data?.id) return
+      setActiveDownloads(prev => {
+        const index = prev.findIndex(download => download.id === data.id)
+        if (index === -1) return [data, ...prev]
+        const next = [...prev]
+        next[index] = { ...next[index], ...data }
+        return next
+      })
+    })
+
+    return () => {
+      cancelled = true
+      cleanup()
+    }
+  }, [])
+
   const handleDownloadSource = async (source: any) => {
     setStartingSourceMagnet(source.magnet)
     try {
       const torrentId = await window.api.startTorrentDownload(source.magnet, video.title, video.tmdb_id, source.title)
       if (torrentId) {
         setStartedSourceMagnet(source.magnet)
+        window.api.getActiveDownloads()
+          .then((downloads: ActiveDownload[]) => setActiveDownloads(downloads || []))
+          .catch(err => console.error('[DetailScreen] Failed to refresh downloads:', err))
       }
     } catch (err) {
       console.error('Failed to start download:', err)
     } finally {
       setStartingSourceMagnet(null)
+    }
+  }
+
+  const handleDownloadBest = async () => {
+    if (!isTmdbBacked || !video.tmdb_id || isDownloadActive || startingBestDownload) return
+
+    setStartingBestDownload(true)
+    try {
+      const results = await handleSearchSources(true)
+      const bestSource = [...results]
+        .filter(source => source?.magnet)
+        .sort((a, b) => getTorrentSourceHealthScore(b) - getTorrentSourceHealthScore(a))[0]
+
+      if (bestSource) {
+        await handleDownloadSource(bestSource)
+      } else {
+        setShowDownloadOptions(true)
+      }
+    } finally {
+      setStartingBestDownload(false)
+    }
+  }
+
+  const handleResumeDownload = async () => {
+    if (!matchingDownload?.id) return
+    const nextStatus = matchingDownload.status === 'paused' ? 'downloading' : 'paused'
+    setActiveDownloads(prev => prev.map(download => (
+      download.id === matchingDownload.id ? { ...download, status: nextStatus } : download
+    )))
+    try {
+      await window.api.pauseResumeTorrent(matchingDownload.id)
+    } catch (err) {
+      console.error('[DetailScreen] Resume download failed:', err)
+      window.api.getActiveDownloads()
+        .then((downloads: ActiveDownload[]) => setActiveDownloads(downloads || []))
+        .catch(refreshErr => console.error('[DetailScreen] Failed to refresh downloads:', refreshErr))
+    }
+  }
+
+  const handlePlayTorrentStream = async () => {
+    if (!matchingDownload?.id || isDownloadPaused || isDownloadConnecting) return
+
+    setTorrentStreamError(null)
+    setStartingTorrentStream(true)
+    try {
+      const result = await window.api.prepareTorrentStream(matchingDownload.id)
+      if (!result?.url) {
+        setTorrentStreamError(getTorrentStreamErrorMessage(result?.error))
+        return
+      }
+
+      onPlay({
+        ...video,
+        id: -Math.abs(Date.now()),
+        title: displayTitle,
+        file_path: result.url,
+        duration: 0,
+        isExternal: false
+      })
+    } catch (err: any) {
+      setTorrentStreamError(getTorrentStreamErrorMessage(err?.message))
+    } finally {
+      setStartingTorrentStream(false)
     }
   }
 
@@ -484,6 +622,9 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
     setShowDownloadOptions(false)
     setStartingSourceMagnet(null)
     setStartedSourceMagnet(null)
+    setStartingBestDownload(false)
+    setStartingTorrentStream(false)
+    setTorrentStreamError(null)
 
     if (initialSharedSource?.magnet) {
       setSources([{ ...initialSharedSource, seeds: initialSharedSource.seeds || 0, peers: initialSharedSource.peers || 0, type: 'shared' }])
@@ -682,6 +823,16 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
   const genres = splitGenres(video.genres)
   const visibleVibes = getVibeTags(video, genres)
   const sharePayload = getSharePayload()
+  const downloadPrimaryLabel = isDownloadActive
+    ? isDownloadPaused
+      ? `Resume ${roundedDownloadProgress}%`
+      : isDownloadConnecting
+        ? `Connecting ${roundedDownloadProgress}%`
+        : 'Play While Downloading'
+    : startingBestDownload
+      ? 'Finding Best...'
+      : 'Download Best'
+  const canUseDownloadPrimary = Boolean(video.tmdb_id) && !isDownloadComplete && (!isDownloadActive || isDownloadPaused || !isDownloadConnecting)
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 md:p-8 bg-black/90 backdrop-blur-md animate-in fade-in duration-300">
@@ -788,7 +939,7 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
 
             {/* Actions */}
             <div className="flex flex-wrap items-center gap-3 pt-1">
-              {!video.isExternal ? (
+              {isLocalMedia ? (
                 <button 
                   onClick={() => onPlay(video)}
                   className="flex min-h-14 items-center gap-3 bg-red-600 hover:bg-red-700 text-white px-8 rounded-2xl font-black text-sm tracking-widest transition-all shadow-[0_10px_30px_rgba(220,38,38,0.4)] hover:scale-105 active:scale-95 group uppercase italic"
@@ -797,18 +948,45 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
                   Play Now
                 </button>
               ) : (
-                <button 
-                  onClick={handleOpenDownloadOptions}
-                  disabled={searching || !video.tmdb_id}
-                  className="flex min-h-14 items-center gap-3 bg-primary hover:bg-primary/80 text-white px-8 rounded-2xl font-black text-sm tracking-widest transition-all shadow-[0_10px_30px_rgba(229,9,20,0.4)] hover:scale-105 active:scale-95 group uppercase italic disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  {searching ? (
-                    <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                  ) : (
-                    <Download size={20} className="group-hover:scale-110 transition-transform" />
+                <>
+                  <button
+                    onClick={isDownloadPaused ? handleResumeDownload : isDownloadActive ? handlePlayTorrentStream : handleDownloadBest}
+                    disabled={!canUseDownloadPrimary || startingBestDownload || startingTorrentStream || (searching && !isDownloadPaused)}
+                    className={`flex min-h-14 items-center gap-3 px-8 rounded-2xl font-black text-sm tracking-widest transition-all shadow-[0_10px_30px_rgba(229,9,20,0.34)] hover:scale-105 active:scale-95 group uppercase italic disabled:cursor-not-allowed ${
+                      isDownloadActive && !isDownloadPaused
+                        ? 'bg-emerald-500/15 text-emerald-200 border border-emerald-300/20 hover:bg-emerald-500/22 disabled:opacity-60'
+                        : 'bg-primary hover:bg-primary/80 text-white disabled:opacity-55'
+                    }`}
+                  >
+                    {startingBestDownload || startingTorrentStream ? (
+                      <Loader2 size={20} className="animate-spin" />
+                    ) : isDownloadActive ? (
+                      isDownloadPaused || isDownloadConnecting ? (
+                        <Download size={20} className={isDownloadPaused ? 'group-hover:scale-110 transition-transform' : ''} />
+                      ) : (
+                        <Play fill="currentColor" size={20} className="group-hover:scale-110 transition-transform" />
+                      )
+                    ) : (
+                      <Zap size={20} className="group-hover:scale-110 transition-transform" />
+                    )}
+                    {downloadPrimaryLabel}
+                  </button>
+
+                  <button
+                    onClick={handleOpenDownloadOptions}
+                    disabled={searching && sources.length === 0}
+                    className="flex min-h-14 items-center gap-3 rounded-2xl border border-white/10 bg-white/[0.055] px-6 text-sm font-black uppercase italic tracking-widest text-white/70 transition-all hover:scale-105 hover:bg-white/[0.09] hover:text-white active:scale-95 disabled:cursor-wait disabled:opacity-55"
+                  >
+                    {searching && sources.length === 0 ? <Loader2 size={19} className="animate-spin" /> : <Download size={19} />}
+                    Choose Source
+                  </button>
+
+                  {isDownloadActive && (
+                    <div className="basis-full text-[11px] font-bold text-white/42">
+                      {torrentStreamError || `${roundedDownloadProgress}% downloaded${matchingDownload?.downloadSpeed ? ` / ${matchingDownload.downloadSpeed}` : ''}`}
+                    </div>
                   )}
-                  {searching ? 'Finding...' : 'Download'}
-                </button>
+                </>
               )}
               
               <div className="flex items-center gap-2">

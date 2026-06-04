@@ -1,8 +1,12 @@
 # 00 Release Map
 
-This is the map for moving MyCinema from coding to a published release.
+This is the map for moving MyCinema from accepted implementation work to a published release.
 
 The process is intentionally numbered. The number tells the user and the agent where the release is, what has been completed, and what must not happen yet.
+
+Before starting this release map, complete the delivery loop in `../DELIVERY_WORKFLOW.md`: intake, solution analysis, branch setup, implementation, verification, user acceptance, and the "no more items" checkpoint.
+
+For the normal handoff from `../DELIVERY_WORKFLOW.md`, release preparation starts at `04-release-record.md`. Gates `01-03` remain available when this release map is used to drive coding from scratch, but they are already covered by the delivery workflow.
 
 ## Tracking Policy
 
@@ -26,11 +30,13 @@ Never run the full release process blindly.
 
 The agent must complete one numbered file, show evidence, and stop at the approval gate. Continue only when the user explicitly asks to proceed to the next numbered file.
 
+Do not start release preparation just because one implementation is finished. First ask whether the user has another problem, bug, issue, or feature for the same release. Start this map only after the user says there are no more items or explicitly asks to release.
+
 ## Sequence
 
-1. `01-work-planning.md` - define the intended code change before implementation.
-2. `02-coding-standards.md` - make code changes safely and consistently.
-3. `03-developer-verification.md` - verify the code before release preparation.
+1. `01-work-planning.md` - define the intended code change before implementation when the delivery workflow was not already used.
+2. `02-coding-standards.md` - make code changes safely and consistently when the delivery workflow was not already used.
+3. `03-developer-verification.md` - verify the code before release preparation when the delivery workflow was not already used.
 4. `04-release-record.md` - create or update the local release record.
 5. `05-release-preflight.md` - inspect Git state and repository readiness.
 6. `06-change-analysis.md` - analyze real changes since the last release point.

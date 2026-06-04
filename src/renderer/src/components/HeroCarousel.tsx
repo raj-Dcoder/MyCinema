@@ -16,9 +16,16 @@ const getHeroImageUrl = (path?: string | null) => {
   return path.startsWith('http') ? path : `media://file/${encodeURIComponent(path)}`
 }
 
+const getHeroItemKey = (video: Video) => `${video.type}:${video.tmdb_id || video.id}`
+const hasOwnLogoResolution = (logoPaths: Record<string, string | null>, key: string) => (
+  Object.prototype.hasOwnProperty.call(logoPaths, key)
+)
+
 const HeroCarousel: React.FC<HeroCarouselProps> = ({ items, onPlay, onShowDetail }) => {
   const [currentIndex, setCurrentIndex] = useState(0)
   const [isAutoPlaying, setIsAutoPlaying] = useState(true)
+  const [resolvedLogoPaths, setResolvedLogoPaths] = useState<Record<string, string | null>>({})
+  const [failedLogoKeys, setFailedLogoKeys] = useState<Set<string>>(() => new Set())
 
   useEffect(() => {
     if (!isAutoPlaying || items.length === 0) return
@@ -27,6 +34,45 @@ const HeroCarousel: React.FC<HeroCarouselProps> = ({ items, onPlay, onShowDetail
     }, 8000)
     return () => clearInterval(interval)
   }, [isAutoPlaying, items.length])
+
+  useEffect(() => {
+    const logoCandidates = items.filter(item => (
+      item.type !== 'video' &&
+      Boolean(item.tmdb_id) &&
+      !item.logo_path &&
+      !hasOwnLogoResolution(resolvedLogoPaths, getHeroItemKey(item))
+    ))
+
+    if (logoCandidates.length === 0) return
+    let cancelled = false
+
+    Promise.all(logoCandidates.map(async item => {
+      const key = getHeroItemKey(item)
+      const tmdbId = item.tmdb_id
+      if (!tmdbId || item.type === 'video') return [key, null] as const
+
+      try {
+        const logoPath = await window.api.getTmdbTitleLogo(item.type, tmdbId)
+        return [key, logoPath] as const
+      } catch (error) {
+        console.error(`[HeroCarousel] Failed to fetch title logo for ${key}:`, error)
+        return [key, null] as const
+      }
+    })).then(entries => {
+      if (cancelled) return
+      setResolvedLogoPaths(previous => {
+        const next = { ...previous }
+        entries.forEach(([key, logoPath]) => {
+          next[key] = logoPath
+        })
+        return next
+      })
+    })
+
+    return () => {
+      cancelled = true
+    }
+  }, [items, resolvedLogoPaths])
 
   if (items.length === 0) {
     return (
@@ -37,7 +83,12 @@ const HeroCarousel: React.FC<HeroCarouselProps> = ({ items, onPlay, onShowDetail
   }
 
   const current = items[currentIndex]
+  const currentKey = getHeroItemKey(current)
   const displayTitle = current.type === 'series' && current.series_name ? current.series_name : current.title
+  const canResolveTmdbLogo = current.type !== 'video' && Boolean(current.tmdb_id)
+  const logoLookupComplete = Boolean(current.logo_path) || !canResolveTmdbLogo || hasOwnLogoResolution(resolvedLogoPaths, currentKey)
+  const resolvedLogoPath = current.logo_path || resolvedLogoPaths[currentKey] || null
+  const visibleLogoPath = failedLogoKeys.has(currentKey) ? null : resolvedLogoPath
   const progressPercent = current.last_watched_time && current.duration
     ? Math.min(100, Math.max(0, (current.last_watched_time / current.duration) * 100))
     : 0
@@ -117,17 +168,26 @@ const HeroCarousel: React.FC<HeroCarouselProps> = ({ items, onPlay, onShowDetail
 
       {/* Content */}
       <div className="absolute inset-0 flex flex-col justify-end px-8 pb-16 pt-24 md:px-16 md:pb-20 md:pt-20 space-y-3">
-        {current.logo_path ? (
+        {visibleLogoPath ? (
           <img
-            src={getHeroImageUrl(current.logo_path)}
+            src={getHeroImageUrl(visibleLogoPath)}
             alt={displayTitle}
             className="max-h-28 w-auto max-w-[min(620px,74vw)] object-contain object-left drop-shadow-[0_8px_28px_rgba(0,0,0,0.8)] animate-in fade-in slide-in-from-left-8 duration-700 delay-100"
             decoding="async"
+            onError={() => {
+              setFailedLogoKeys(previous => {
+                const next = new Set(previous)
+                next.add(currentKey)
+                return next
+              })
+            }}
           />
-        ) : (
+        ) : logoLookupComplete ? (
           <h2 className="text-4xl md:text-5xl font-black text-white tracking-tighter uppercase italic leading-[0.9] max-w-2xl animate-in fade-in slide-in-from-left-8 duration-700 delay-100">
             {displayTitle}
           </h2>
+        ) : (
+          <div className="h-14 md:h-20" aria-hidden="true" />
         )}
 
         <div className="flex items-center gap-3 text-white/60 font-bold text-xs animate-in fade-in slide-in-from-left-12 duration-700 delay-200">

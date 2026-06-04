@@ -54,6 +54,7 @@ interface Api {
   clearAllData: () => Promise<boolean>
   fetchTrending: (type: 'movie' | 'series') => Promise<any[]>
   fetchTrendingIndia: (type?: 'movie' | 'series') => Promise<any[]>
+  getTmdbTitleLogo: (type: 'movie' | 'series', tmdbId: number) => Promise<string | null>
   getTmdbTrailer: (params: { tmdbId?: number | null; title: string; type: 'movie' | 'series'; year?: number | null; seasonNumber?: number | null; preferLatestSeason?: boolean }) => Promise<any | null>
   getIntroDbSegments: (params: { imdbId?: string | null; tmdbId?: number | null; season?: number | null; episode?: number | null; filePath?: string | null; duration?: number | null }) => Promise<{
     imdbId: string | null

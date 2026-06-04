@@ -77,8 +77,9 @@ const App: React.FC = () => {
   const tabScrollPositionsRef = useRef<Partial<Record<AppTab, number>>>({})
   const windowControlsHideTimerRef = useRef<number | null>(null)
   const windowControlsRevealTimerRef = useRef<number | null>(null)
-  const windowControlsRevealLockedRef = useRef(false)
-  const windowControlsRevealUnlockTimerRef = useRef<number | null>(null)
+  const windowControlsTopEdgeHoveredRef = useRef(false)
+  const windowControlsPanelHoveredRef = useRef(false)
+  const windowControlsRevealConsumedRef = useRef(false)
 
   const getScrollElement = (tab: AppTab) => {
     return tab === 'home' ? homeScrollRef.current : activePageScrollRef.current
@@ -172,7 +173,6 @@ const App: React.FC = () => {
     return () => {
       clearWindowControlsHideTimer()
       clearWindowControlsRevealTimer()
-      clearWindowControlsRevealUnlockTimer()
     }
   }, [])
 
@@ -316,28 +316,6 @@ const App: React.FC = () => {
     }
   }
 
-  const clearWindowControlsRevealUnlockTimer = () => {
-    if (windowControlsRevealUnlockTimerRef.current) {
-      window.clearTimeout(windowControlsRevealUnlockTimerRef.current)
-      windowControlsRevealUnlockTimerRef.current = null
-    }
-  }
-
-  const unlockWindowControlsReveal = () => {
-    windowControlsRevealLockedRef.current = false
-    clearWindowControlsRevealUnlockTimer()
-  }
-
-  const lockWindowControlsRevealBriefly = () => {
-    windowControlsRevealLockedRef.current = true
-    clearWindowControlsRevealTimer()
-    clearWindowControlsRevealUnlockTimer()
-    windowControlsRevealUnlockTimerRef.current = window.setTimeout(() => {
-      windowControlsRevealLockedRef.current = false
-      windowControlsRevealUnlockTimerRef.current = null
-    }, 350)
-  }
-
   const hideWindowControlsNow = () => {
     clearWindowControlsRevealTimer()
     clearWindowControlsHideTimer()
@@ -345,17 +323,21 @@ const App: React.FC = () => {
   }
 
   const revealWindowControls = () => {
-    if (windowControlsRevealLockedRef.current) return
     clearWindowControlsRevealTimer()
     clearWindowControlsHideTimer()
     setShowWindowControls(true)
   }
 
   const revealWindowControlsAfterDwell = () => {
-    if (windowControlsRevealLockedRef.current || showWindowControls) return
+    windowControlsTopEdgeHoveredRef.current = true
+    clearWindowControlsHideTimer()
+    if (windowControlsRevealConsumedRef.current || showWindowControls) return
+
+    windowControlsRevealConsumedRef.current = true
     clearWindowControlsRevealTimer()
     windowControlsRevealTimerRef.current = window.setTimeout(() => {
       windowControlsRevealTimerRef.current = null
+      if (!windowControlsTopEdgeHoveredRef.current) return
       revealWindowControls()
     }, 260)
   }
@@ -364,9 +346,32 @@ const App: React.FC = () => {
     clearWindowControlsRevealTimer()
     clearWindowControlsHideTimer()
     windowControlsHideTimerRef.current = window.setTimeout(() => {
+      if (windowControlsTopEdgeHoveredRef.current || windowControlsPanelHoveredRef.current) {
+        windowControlsHideTimerRef.current = null
+        return
+      }
+
       setShowWindowControls(false)
+      windowControlsRevealConsumedRef.current = false
       windowControlsHideTimerRef.current = null
     }, 500)
+  }
+
+  const handleWindowControlsTopEdgeLeave = () => {
+    windowControlsTopEdgeHoveredRef.current = false
+    clearWindowControlsRevealTimer()
+    hideWindowControlsSoon()
+  }
+
+  const handleWindowControlsPanelEnter = () => {
+    windowControlsPanelHoveredRef.current = true
+    windowControlsRevealConsumedRef.current = true
+    revealWindowControls()
+  }
+
+  const handleWindowControlsPanelLeave = () => {
+    windowControlsPanelHoveredRef.current = false
+    hideWindowControlsSoon()
   }
 
   const WindowControls = () => (
@@ -383,21 +388,14 @@ const App: React.FC = () => {
           <div
             className="fixed left-1/2 top-0 z-[259] h-2 w-[min(28rem,100vw)] -translate-x-1/2"
             onMouseEnter={revealWindowControlsAfterDwell}
-            onMouseLeave={() => {
-              clearWindowControlsRevealTimer()
-              unlockWindowControlsReveal()
-              hideWindowControlsSoon()
-            }}
+            onMouseLeave={handleWindowControlsTopEdgeLeave}
           />
           <div
-            className={`fixed left-1/2 top-4 z-[260] -translate-x-1/2 rounded-lg border border-white/10 bg-black/70 p-1.5 shadow-[0_16px_42px_rgba(0,0,0,0.46)] backdrop-blur-xl transition-[opacity,transform] duration-300 ease-out ${
+            className={`fixed left-1/2 top-2 z-[260] -translate-x-1/2 rounded-lg border border-white/10 bg-black/70 p-1.5 shadow-[0_16px_42px_rgba(0,0,0,0.46)] backdrop-blur-xl transition-[opacity,transform] duration-300 ease-out ${
               showWindowControls ? 'translate-y-0 scale-100 opacity-100 animate-[fullscreenControlPop_220ms_ease-out_both]' : '-translate-y-10 scale-95 opacity-0 pointer-events-none'
             }`}
-            onMouseEnter={revealWindowControls}
-            onMouseLeave={() => {
-              unlockWindowControlsReveal()
-              hideWindowControlsSoon()
-            }}
+            onMouseEnter={handleWindowControlsPanelEnter}
+            onMouseLeave={handleWindowControlsPanelLeave}
             onFocus={revealWindowControls}
             onBlur={hideWindowControlsSoon}
           >
@@ -406,7 +404,7 @@ const App: React.FC = () => {
               title={isFullscreen ? 'Exit fullscreen' : 'Enter fullscreen'}
               aria-label={isFullscreen ? 'Exit fullscreen' : 'Enter fullscreen'}
               onClick={async (event) => {
-                lockWindowControlsRevealBriefly()
+                windowControlsRevealConsumedRef.current = true
                 hideWindowControlsNow()
                 event.currentTarget.blur()
                 const nextState = await window.api.toggleFullscreen()

@@ -45,26 +45,26 @@ type WhatsNewSlide = {
 }
 
 export const LATEST_RELEASE = {
-  version: '1.25.1',
+  version: '1.25.2',
   eyebrow: 'What\'s New',
   slides: [
     {
-      id: 'calm-fullscreen',
+      id: 'cached-title-logos',
       layout: 'reveal',
       icon: Zap,
-      kicker: 'Fullscreen',
-      headline: 'The top edge stays calm.',
-      highlight: 'stays calm',
-      support: 'Fullscreen controls reveal once, then remain steady while your pointer stays there.',
+      kicker: 'Speed',
+      headline: 'Logos load like locals.',
+      highlight: 'like locals',
+      support: 'Title artwork is cached after the first successful TMDB lookup.',
       bullets: [
-        'The control no longer keeps popping out under a stationary pointer.',
-        'It remains visible while you move between the top edge and the button.',
-        'Leave and return when you want to reveal it again.'
+        'Reopening MyCinema no longer repeats the same slow title-logo request.',
+        'Hero, detail, and trending artwork share one cached result.',
+        'Titles without logo art are remembered briefly to avoid repeated waits.'
       ],
-      signal: 'One reveal',
-      cta: 'Nice',
+      signal: 'Cached',
+      cta: 'Fast now',
       mood: {
-        name: 'calm-fullscreen',
+        name: 'cached-title-logos',
         gradient: 'from-rose-300 via-red-300 to-orange-300',
         text: 'text-rose-200',
         border: 'border-rose-300/30',
@@ -74,22 +74,22 @@ export const LATEST_RELEASE = {
       }
     },
     {
-      id: 'hero-title-logos',
+      id: 'detail-title-art',
       layout: 'discovery',
       icon: Film,
-      kicker: 'Hero Titles',
-      headline: 'Title art takes the spotlight.',
+      kicker: 'Details',
+      headline: 'Title art follows you.',
       highlight: 'Title art',
-      support: 'Continue Watching now prefers the official TMDB logo over plain written titles.',
+      support: 'Detail pages now match the cinematic logo treatment from Home.',
       bullets: [
-        'Local hero items can now fetch the same logo artwork as discovery titles.',
-        'The carousel waits for TMDB before deciding to show plain text.',
-        'A readable written title remains available whenever artwork is missing.'
+        'Movie and series detail screens fetch missing TMDB logos automatically.',
+        'The written title stays visible while artwork resolves in the background.',
+        'Broken logo images fall back cleanly to readable text.'
       ],
-      signal: 'Logo first',
+      signal: 'Matched',
       cta: 'Looks good',
       mood: {
-        name: 'hero-title-logos',
+        name: 'detail-title-art',
         gradient: 'from-cyan-300 via-sky-300 to-emerald-300',
         text: 'text-cyan-200',
         border: 'border-cyan-300/30',
@@ -99,22 +99,22 @@ export const LATEST_RELEASE = {
       }
     },
     {
-      id: 'scoped-logo-lookup',
+      id: 'scoped-artwork-cache',
       layout: 'security',
       icon: ShieldCheck,
       kicker: 'Privacy',
-      headline: 'Artwork requests stay scoped.',
-      highlight: 'stay scoped',
-      support: 'Logo lookups use only a validated media type and TMDB title ID.',
+      headline: 'Artwork stays scoped.',
+      highlight: 'stays scoped',
+      support: 'Cached logos live under app data and safe media serving.',
       bullets: [
-        'Movie and series logo requests pass through the existing main-process boundary.',
-        'Invalid media types are rejected before a TMDB lookup begins.',
-        'Results are cached to avoid unnecessary repeated network requests.'
+        'Logo files are stored under MyCinema user data, not random folders.',
+        'Local cached SVG and GIF artwork is served with correct image types.',
+        'Lookups still require a validated media type and TMDB title ID.'
       ],
-      signal: 'Validated lookup',
+      signal: 'Safe cache',
       cta: 'Let\'s go',
       mood: {
-        name: 'scoped-logo-lookup',
+        name: 'scoped-artwork-cache',
         gradient: 'from-lime-200 via-emerald-300 to-teal-300',
         text: 'text-emerald-200',
         border: 'border-emerald-300/30',

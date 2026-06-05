@@ -624,6 +624,8 @@ function getContentTypeForPath(filePath: string): string {
   if (ext === '.jpg' || ext === '.jpeg') return 'image/jpeg'
   if (ext === '.png') return 'image/png'
   if (ext === '.webp') return 'image/webp'
+  if (ext === '.svg') return 'image/svg+xml'
+  if (ext === '.gif') return 'image/gif'
   if (ext === '.mkv') return 'video/x-matroska'
   if (ext === '.webm') return 'video/webm'
   if (ext === '.avi') return 'video/x-msvideo'

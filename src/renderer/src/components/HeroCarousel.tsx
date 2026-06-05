@@ -16,6 +16,11 @@ const getHeroImageUrl = (path?: string | null) => {
   return path.startsWith('http') ? path : `media://file/${encodeURIComponent(path)}`
 }
 
+const getHeroLogoUrl = (path?: string | null) => {
+  if (!path) return ''
+  return path.startsWith('http') ? path : `media://file/${encodeURIComponent(path)}`
+}
+
 const getHeroItemKey = (video: Video) => `${video.type}:${video.tmdb_id || video.id}`
 const hasOwnLogoResolution = (logoPaths: Record<string, string | null>, key: string) => (
   Object.prototype.hasOwnProperty.call(logoPaths, key)
@@ -26,6 +31,7 @@ const HeroCarousel: React.FC<HeroCarouselProps> = ({ items, onPlay, onShowDetail
   const [isAutoPlaying, setIsAutoPlaying] = useState(true)
   const [resolvedLogoPaths, setResolvedLogoPaths] = useState<Record<string, string | null>>({})
   const [failedLogoKeys, setFailedLogoKeys] = useState<Set<string>>(() => new Set())
+  const [slowLogoKeys, setSlowLogoKeys] = useState<Set<string>>(() => new Set())
 
   useEffect(() => {
     if (!isAutoPlaying || items.length === 0) return
@@ -36,12 +42,19 @@ const HeroCarousel: React.FC<HeroCarouselProps> = ({ items, onPlay, onShowDetail
   }, [isAutoPlaying, items.length])
 
   useEffect(() => {
-    const logoCandidates = items.filter(item => (
-      item.type !== 'video' &&
-      Boolean(item.tmdb_id) &&
-      !item.logo_path &&
-      !hasOwnLogoResolution(resolvedLogoPaths, getHeroItemKey(item))
-    ))
+    const candidateMap = new Map<string, Video>()
+    items.forEach(item => {
+      const key = getHeroItemKey(item)
+      if (
+        item.type !== 'video' &&
+        Boolean(item.tmdb_id) &&
+        !item.logo_path &&
+        !hasOwnLogoResolution(resolvedLogoPaths, key)
+      ) {
+        candidateMap.set(key, item)
+      }
+    })
+    const logoCandidates = Array.from(candidateMap.values())
 
     if (logoCandidates.length === 0) return
     let cancelled = false
@@ -74,6 +87,31 @@ const HeroCarousel: React.FC<HeroCarouselProps> = ({ items, onPlay, onShowDetail
     }
   }, [items, resolvedLogoPaths])
 
+  const logoWaitItem = items[currentIndex]
+  const logoWaitKey = logoWaitItem ? getHeroItemKey(logoWaitItem) : ''
+  const shouldWaitForLogo = Boolean(
+    logoWaitItem &&
+    logoWaitItem.type !== 'video' &&
+    logoWaitItem.tmdb_id &&
+    !logoWaitItem.logo_path &&
+    !failedLogoKeys.has(logoWaitKey) &&
+    !hasOwnLogoResolution(resolvedLogoPaths, logoWaitKey)
+  )
+
+  useEffect(() => {
+    if (!shouldWaitForLogo || !logoWaitKey) return
+
+    const timer = window.setTimeout(() => {
+      setSlowLogoKeys(previous => {
+        const next = new Set(previous)
+        next.add(logoWaitKey)
+        return next
+      })
+    }, 1500)
+
+    return () => window.clearTimeout(timer)
+  }, [shouldWaitForLogo, logoWaitKey])
+
   if (items.length === 0) {
     return (
       <div className="w-full min-h-[570px] h-[73vh] max-h-[800px] bg-white/5 animate-pulse flex items-center justify-center">
@@ -89,6 +127,7 @@ const HeroCarousel: React.FC<HeroCarouselProps> = ({ items, onPlay, onShowDetail
   const logoLookupComplete = Boolean(current.logo_path) || !canResolveTmdbLogo || hasOwnLogoResolution(resolvedLogoPaths, currentKey)
   const resolvedLogoPath = current.logo_path || resolvedLogoPaths[currentKey] || null
   const visibleLogoPath = failedLogoKeys.has(currentKey) ? null : resolvedLogoPath
+  const shouldShowTextFallback = logoLookupComplete || slowLogoKeys.has(currentKey)
   const progressPercent = current.last_watched_time && current.duration
     ? Math.min(100, Math.max(0, (current.last_watched_time / current.duration) * 100))
     : 0
@@ -170,7 +209,7 @@ const HeroCarousel: React.FC<HeroCarouselProps> = ({ items, onPlay, onShowDetail
       <div className="absolute inset-0 flex flex-col justify-end px-8 pb-16 pt-24 md:px-16 md:pb-20 md:pt-20 space-y-3">
         {visibleLogoPath ? (
           <img
-            src={getHeroImageUrl(visibleLogoPath)}
+            src={getHeroLogoUrl(visibleLogoPath)}
             alt={displayTitle}
             className="max-h-28 w-auto max-w-[min(620px,74vw)] object-contain object-left drop-shadow-[0_8px_28px_rgba(0,0,0,0.8)] animate-in fade-in slide-in-from-left-8 duration-700 delay-100"
             decoding="async"
@@ -182,7 +221,7 @@ const HeroCarousel: React.FC<HeroCarouselProps> = ({ items, onPlay, onShowDetail
               })
             }}
           />
-        ) : logoLookupComplete ? (
+        ) : shouldShowTextFallback ? (
           <h2 className="text-4xl md:text-5xl font-black text-white tracking-tighter uppercase italic leading-[0.9] max-w-2xl animate-in fade-in slide-in-from-left-8 duration-700 delay-100">
             {displayTitle}
           </h2>

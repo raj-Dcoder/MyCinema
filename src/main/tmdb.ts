@@ -121,7 +121,14 @@ const YOUTUBE_PLAYABLE_CACHE_TTL = 1000 * 60 * 60 * 12
 const tmdbTrailerCache = new Map<string, { trailer: TmdbTrailer | null, timestamp: number }>()
 const TMDB_TRAILER_CACHE_TTL = 1000 * 60 * 30
 const tmdbTitleLogoCache = new Map<string, { logoPath: string | null, timestamp: number }>()
-const TMDB_TITLE_LOGO_CACHE_TTL = 1000 * 60 * 60 * 24
+const TMDB_TITLE_LOGO_CACHE_TTL = 1000 * 60 * 60 * 24 * 30
+const TMDB_TITLE_LOGO_NEGATIVE_CACHE_TTL = 1000 * 60 * 60 * 24
+
+type TmdbTitleLogoDiskCache = {
+  logoPath: string | null
+  remoteUrl?: string | null
+  timestamp: number
+}
 
 function getTmdbListCacheDir(): string {
   const dir = path.join(app.getPath('userData'), 'tmdb_list_cache')
@@ -132,6 +139,119 @@ function getTmdbListCacheDir(): string {
 function getTmdbListCachePath(key: string): string {
   const safeKey = crypto.createHash('sha1').update(key).digest('hex')
   return path.join(getTmdbListCacheDir(), `${safeKey}.json`)
+}
+
+function getTmdbTitleLogoCacheDir(): string {
+  const dir = path.join(getCacheDir(), 'title_logos')
+  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true })
+  return dir
+}
+
+function getTmdbTitleLogoRecordPath(key: string): string {
+  const safeKey = crypto.createHash('sha1').update(key).digest('hex')
+  return path.join(getTmdbTitleLogoCacheDir(), `${safeKey}.json`)
+}
+
+function isRemoteImagePath(value: string): boolean {
+  return value.startsWith('http://') || value.startsWith('https://')
+}
+
+function isUsableTitleLogoCache(entry: { logoPath: string | null, timestamp: number }): boolean {
+  const age = Date.now() - entry.timestamp
+
+  if (!entry.logoPath) {
+    return age < TMDB_TITLE_LOGO_NEGATIVE_CACHE_TTL
+  }
+
+  if (isRemoteImagePath(entry.logoPath)) {
+    return age < TMDB_TITLE_LOGO_CACHE_TTL
+  }
+
+  return fs.existsSync(entry.logoPath)
+}
+
+function readTmdbTitleLogoCache(key: string): string | null | undefined {
+  const memoryHit = tmdbTitleLogoCache.get(key)
+  if (memoryHit && isUsableTitleLogoCache(memoryHit)) {
+    return memoryHit.logoPath
+  }
+
+  const recordPath = getTmdbTitleLogoRecordPath(key)
+  if (!fs.existsSync(recordPath)) return undefined
+
+  try {
+    const cached = JSON.parse(fs.readFileSync(recordPath, 'utf8')) as Partial<TmdbTitleLogoDiskCache>
+    if (typeof cached.timestamp !== 'number') return undefined
+    const logoPath = typeof cached.logoPath === 'string' ? cached.logoPath : null
+    const entry = { logoPath, timestamp: cached.timestamp }
+
+    if (!isUsableTitleLogoCache(entry)) return undefined
+
+    tmdbTitleLogoCache.set(key, entry)
+    return entry.logoPath
+  } catch (err: any) {
+    console.warn(`[TMDB] Failed to read title logo cache: ${err.message}`)
+    return undefined
+  }
+}
+
+function writeTmdbTitleLogoCache(key: string, logoPath: string | null, remoteUrl?: string | null): void {
+  const entry: TmdbTitleLogoDiskCache = {
+    logoPath,
+    remoteUrl: remoteUrl || logoPath,
+    timestamp: Date.now()
+  }
+
+  tmdbTitleLogoCache.set(key, { logoPath, timestamp: entry.timestamp })
+
+  try {
+    fs.writeFileSync(getTmdbTitleLogoRecordPath(key), JSON.stringify(entry))
+  } catch (err: any) {
+    console.warn(`[TMDB] Failed to write title logo cache: ${err.message}`)
+  }
+}
+
+function getImageExtensionFromUrl(imageUrl: string, contentType?: string | null): string {
+  try {
+    const ext = path.extname(new URL(imageUrl).pathname).toLowerCase()
+    if (['.jpg', '.jpeg', '.png', '.webp', '.svg'].includes(ext)) {
+      return ext === '.jpeg' ? '.jpg' : ext
+    }
+  } catch {
+    // Fall through to content-type based detection.
+  }
+
+  if (contentType?.includes('svg')) return '.svg'
+  if (contentType?.includes('webp')) return '.webp'
+  if (contentType?.includes('png')) return '.png'
+  if (contentType?.includes('jpeg') || contentType?.includes('jpg')) return '.jpg'
+  return '.png'
+}
+
+async function cacheTmdbTitleLogoAsset(key: string, remoteUrl: string): Promise<string | null> {
+  try {
+    const response = await fetch(remoteUrl, {
+      dispatcher: tmdbDispatcher,
+      signal: AbortSignal.timeout(TMDB_FETCH_TIMEOUT_MS),
+      headers: {
+        'User-Agent': 'MyCinema/1.25.0',
+        'Accept': 'image/avif,image/webp,image/png,image/svg+xml,image/*,*/*;q=0.8'
+      }
+    })
+
+    if (!response.ok) throw new Error(`HTTP ${response.status}`)
+
+    const ext = getImageExtensionFromUrl(remoteUrl, response.headers.get('content-type'))
+    const safeKey = crypto.createHash('sha1').update(key).digest('hex')
+    const logoPath = path.join(getTmdbTitleLogoCacheDir(), `${safeKey}${ext}`)
+
+    const arrayBuffer = await response.arrayBuffer()
+    fs.writeFileSync(logoPath, Buffer.from(arrayBuffer))
+    return logoPath
+  } catch (err: any) {
+    console.warn(`[TMDB] Failed to cache title logo asset: ${err.message}`)
+    return null
+  }
 }
 
 function readTmdbListCache(key: string, label: string, allowExpired = false): any[] | null {
@@ -310,17 +430,25 @@ export async function fetchTmdbTitleLogo(type: 'movie' | 'series', tmdbId: numbe
 
   const endpoint = type === 'series' ? 'tv' : 'movie'
   const cacheKey = `${endpoint}:${normalizedTmdbId}`
-  const cached = tmdbTitleLogoCache.get(cacheKey)
-
-  if (cached && (Date.now() - cached.timestamp) < TMDB_TITLE_LOGO_CACHE_TTL) {
-    return cached.logoPath
-  }
+  const cached = readTmdbTitleLogoCache(cacheKey)
+  if (cached !== undefined) return cached
 
   const apiKey = getTmdbApiKey()
   if (!apiKey) return null
 
-  const logoPath = await fetchTitleLogo(endpoint, normalizedTmdbId, apiKey)
-  tmdbTitleLogoCache.set(cacheKey, { logoPath, timestamp: Date.now() })
+  if (!cachedTmdbIp) {
+    await resolveDnsDoH('api.themoviedb.org')
+  }
+
+  const remoteLogoPath = await fetchTitleLogo(endpoint, normalizedTmdbId, apiKey)
+  if (!remoteLogoPath) {
+    writeTmdbTitleLogoCache(cacheKey, null, null)
+    return null
+  }
+
+  const cachedLogoPath = await cacheTmdbTitleLogoAsset(cacheKey, remoteLogoPath)
+  const logoPath = cachedLogoPath || remoteLogoPath
+  writeTmdbTitleLogoCache(cacheKey, logoPath, remoteLogoPath)
   return logoPath
 }
 
@@ -365,7 +493,7 @@ export async function fetchTrending(type: 'movie' | 'series'): Promise<any[]> {
       overview: item.overview,
       poster_path: item.poster_path ? `${TMDB_IMG}${item.poster_path}` : null,
       backdrop_path: item.backdrop_path ? `${TMDB_BACKDROP}${item.backdrop_path}` : null,
-      logo_path: item.id ? await fetchTitleLogo(endpoint, item.id, apiKey) : null,
+      logo_path: item.id ? await fetchTmdbTitleLogo(type, item.id) : null,
       vote_average: item.vote_average,
       release_year: (item.release_date || item.first_air_date || '').substring(0, 4),
       type: type,
@@ -484,7 +612,7 @@ export async function fetchTrendingInIndia(type: 'movie' | 'series' = 'movie'): 
       overview: item.overview,
       poster_path: item.poster_path ? `${TMDB_IMG}${item.poster_path}` : null,
       backdrop_path: item.backdrop_path ? `${TMDB_BACKDROP}${item.backdrop_path}` : null,
-      logo_path: item.id ? await fetchTitleLogo(mediaType, item.id, apiKey) : null,
+      logo_path: item.id ? await fetchTmdbTitleLogo(mediaType === 'tv' ? 'series' : 'movie', item.id) : null,
       vote_average: item.vote_average,
       release_year: getTmdbReleaseDate(item, mediaType).substring(0, 4),
       type: mediaType === 'tv' ? 'series' : 'movie',

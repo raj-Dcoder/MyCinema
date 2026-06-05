@@ -1,3 +1,23 @@
+# MyCinema v1.25.2
+
+Patch release focused on making title artwork fast, cached, and consistent across Home and detail pages.
+
+### Title Artwork
+- **Persistent Title Logos**: TMDB title logos are now saved locally, so reopening MyCinema no longer repeats the same slow artwork lookup.
+- **Detail Screen Logos**: Movie and series detail pages now fetch and show the same official TMDB title art used by the hero carousel.
+- **Readable While Loading**: Detail pages keep the written title visible while missing logo artwork resolves in the background.
+
+### Reliability
+- **Shared Logo Cache**: Hero, detail, and trending title artwork now reuse the same cache path instead of creating separate lookup behavior.
+- **Correct Local Image Types**: Cached SVG and GIF logo assets are served as images, not as fallback video content.
+- **Fewer Repeat Requests**: Titles without TMDB logo art are cached briefly, avoiding repeated slow network checks for the same title.
+
+### Security & Privacy
+- **Scoped Artwork Serving**: Cached artwork stays under the existing app user-data path and is served through the same safe local media protocol.
+- **Validated Logo Lookups**: Logo requests still accept only a movie or series type plus a TMDB ID through the main-process boundary.
+
+***
+
 # MyCinema v1.25.1
 
 Patch release focused on calmer fullscreen controls and more cinematic hero titles.

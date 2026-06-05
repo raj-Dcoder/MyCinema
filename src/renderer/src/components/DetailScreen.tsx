@@ -165,6 +165,8 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
   const [showShareModal, setShowShareModal] = useState(false)
   const [shareFeedback, setShareFeedback] = useState<string | null>(null)
   const [showShareHint, setShowShareHint] = useState(() => localStorage.getItem(SHARE_HINT_STORAGE_KEY) !== 'true')
+  const [resolvedLogoPath, setResolvedLogoPath] = useState<string | null>(null)
+  const [logoLoadFailed, setLogoLoadFailed] = useState(false)
 
   // Torrent Search State
   const [sources, setSources] = useState<any[]>([])
@@ -417,6 +419,32 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
       cleanup()
     }
   }, [])
+
+  useEffect(() => {
+    let cancelled = false
+
+    setResolvedLogoPath(null)
+    setLogoLoadFailed(false)
+
+    if (!isTmdbBacked || !video.tmdb_id || video.logo_path) {
+      return () => {
+        cancelled = true
+      }
+    }
+
+    window.api.getTmdbTitleLogo(video.type === 'series' ? 'series' : 'movie', video.tmdb_id)
+      .then(logoPath => {
+        if (!cancelled) setResolvedLogoPath(logoPath || null)
+      })
+      .catch(err => {
+        console.error('[DetailScreen] Failed to fetch title logo:', err)
+        if (!cancelled) setResolvedLogoPath(null)
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [isTmdbBacked, video.tmdb_id, video.logo_path, video.type])
 
   const handleDownloadSource = async (source: any) => {
     setStartingSourceMagnet(source.magnet)
@@ -810,7 +838,8 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
   }
 
   const posterUrl = getArtworkUrl(video.poster_path, 'w780')
-  const logoUrl = getArtworkUrl(video.logo_path, 'original')
+  const logoPath = video.logo_path || resolvedLogoPath
+  const logoUrl = !logoLoadFailed ? getArtworkUrl(logoPath || undefined, 'original') : null
 
   const formatDuration = (seconds?: number) => {
     if (!seconds) return null
@@ -880,6 +909,7 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
                   loading="eager"
                   decoding="async"
                   className="max-h-20 md:max-h-24 w-auto max-w-[min(100%,420px)] object-contain object-left drop-shadow-[0_10px_28px_rgba(0,0,0,0.75)]"
+                  onError={() => setLogoLoadFailed(true)}
                 />
               ) : (
                 <h2 className="text-4xl md:text-6xl font-black tracking-tighter text-white uppercase italic leading-[0.9] drop-shadow-lg">

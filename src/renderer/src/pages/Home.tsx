@@ -894,7 +894,7 @@ const Home: React.FC<HomeProps> = ({ onPlay, onShowDetail, onNavigate, refreshKe
         <section className="-mt-6 mb-9">
           <div className="relative overflow-hidden">
             <div className="absolute left-0 right-0 top-0 z-30">
-              <div className="mx-auto flex max-w-[1600px] items-start justify-between gap-6 px-8 pt-6">
+              <div className="mx-auto flex max-w-[1600px] items-start px-8 pt-8 md:px-16">
                 <div>
                   <p className="text-[10px] font-black uppercase tracking-[0.22em] text-primary drop-shadow-[0_2px_12px_rgba(0,0,0,0.9)]">
                     {getTimeGreeting()}, {userName}
@@ -903,8 +903,10 @@ const Home: React.FC<HomeProps> = ({ onPlay, onShowDetail, onNavigate, refreshKe
                     {showHero ? heroTitle : 'Ready to Watch'}
                   </h2>
                 </div>
+              </div>
 
-                <div className="relative flex items-center gap-4" ref={searchBoxRef}>
+              <div className="pointer-events-none mx-auto mt-6 flex max-w-[1600px] justify-end px-8 md:px-16">
+                <div className="pointer-events-auto relative flex items-center gap-4" ref={searchBoxRef}>
                   <div
                     className={`relative transition-all duration-300 ease-out ${
                       isSearchOpen ? 'w-[min(420px,calc(100vw-4rem))]' : 'w-12'
@@ -953,7 +955,7 @@ const Home: React.FC<HomeProps> = ({ onPlay, onShowDetail, onNavigate, refreshKe
                     </div>
 
                     {isSearchOpen && searchQuery.trim().length > 0 && (
-                      <div className="absolute right-0 top-14 z-40 w-[420px] overflow-hidden rounded-3xl border border-white/10 bg-[#070a0f]/95 shadow-[0_28px_90px_rgba(0,0,0,0.72)] backdrop-blur-2xl animate-in fade-in slide-in-from-top-2 duration-200">
+                      <div className="absolute right-0 top-14 z-40 w-[min(420px,calc(100vw-4rem))] overflow-hidden rounded-3xl border border-white/10 bg-[#070a0f]/95 shadow-[0_28px_90px_rgba(0,0,0,0.72)] backdrop-blur-2xl animate-in fade-in slide-in-from-top-2 duration-200">
                         <div className="border-b border-white/6 px-4 py-3">
                           <div className="flex items-center justify-between gap-3">
                             <p className="text-[10px] font-black uppercase tracking-[0.22em] text-white/35">Search</p>

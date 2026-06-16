@@ -1,3 +1,12 @@
+# MyCinema v1.25.3
+
+Patch release focused on making putting in fullscreen and exit from fullscreen seamless.
+
+### Visibility
+- **Persistent controls**: Persistent close, minimise, maximise and fullscreen buttons.
+
+***
+
 # MyCinema v1.25.2
 
 Patch release focused on making title artwork fast, cached, and consistent across Home and detail pages.

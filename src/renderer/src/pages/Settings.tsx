@@ -170,7 +170,7 @@ const Settings: React.FC = () => {
               <div className="min-w-0">
                 <h4 className="text-xs font-black text-white uppercase tracking-tight">Open in Fullscreen</h4>
                 <p className="mt-0.5 text-[11px] font-medium leading-4 text-white/35">
-                  Launch MyCinema in the immersive F11-style fullscreen mode and show the top-edge fullscreen control.
+                  Launch MyCinema in the immersive F11-style fullscreen mode and show lightweight fullscreen controls.
                 </p>
               </div>
             </div>

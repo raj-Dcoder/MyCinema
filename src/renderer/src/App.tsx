@@ -1,6 +1,5 @@
 import React, { useState, useEffect, useLayoutEffect, useRef } from 'react'
-import { AnimatePresence } from 'framer-motion'
-import { Home as HomeIcon, Film, Tv, Settings as SettingsIcon, Video as VideoIcon, Download as DownloadIcon, Menu, Bookmark, Clock, Heart, Settings, RefreshCw, Maximize2, Minimize2, Loader2, PauseCircle, AlertCircle, X } from 'lucide-react'
+import { Home as HomeIcon, Film, Tv, Settings as SettingsIcon, Video as VideoIcon, Download as DownloadIcon, Menu, Bookmark, Clock, Heart, Settings, RefreshCw, Maximize2, Minimize2, Loader2, PauseCircle, AlertCircle, X, Minus, ArrowUpRight } from 'lucide-react'
 import { Video } from './types'
 import Home from './pages/Home'
 import Videos from './pages/Videos'
@@ -12,11 +11,12 @@ import History from './pages/History'
 import SettingsPage from './pages/Settings'
 import VideoPlayer from './components/VideoPlayer'
 import DetailScreen from './components/DetailScreen'
-import WhatsNewOnboarding, { LATEST_RELEASE } from './components/WhatsNewOnboarding'
+import { LATEST_RELEASE } from './components/WhatsNewOnboarding'
 import Download from './pages/Download'
 import appLogo from './assets/mycinema-logo.png'
 
 const getWhatsNewStorageKey = (version: string) => `mycinema_whats_new_seen_${version}`
+const getFeatureSpotlightStorageKey = (version: string) => `mycinema_fullscreen_controls_spotlight_seen_${version}`
 const SIDEBAR_EXPANDED_STORAGE_KEY = 'mycinema_sidebar_expanded'
 type AppTab = 'home' | 'videos' | 'movies' | 'series' | 'download' | 'settings' | 'watchlist' | 'history' | 'favorites'
 
@@ -57,8 +57,9 @@ const App: React.FC = () => {
     return localStorage.getItem(SIDEBAR_EXPANDED_STORAGE_KEY) !== 'false'
   })
 
-  const [showWhatsNew, setShowWhatsNew] = useState(() => localStorage.getItem(getWhatsNewStorageKey(LATEST_RELEASE.version)) !== 'true')
-  const [whatsNewStep, setWhatsNewStep] = useState(0)
+  const [showFeatureSpotlight, setShowFeatureSpotlight] = useState(() => {
+    return localStorage.getItem(getFeatureSpotlightStorageKey(LATEST_RELEASE.version)) !== 'true'
+  })
 
   const [playingVideo, setPlayingVideo] = useState<Video | null>(null)
   const [selectedVideo, setSelectedVideo] = useState<Video | null>(null)
@@ -76,10 +77,6 @@ const App: React.FC = () => {
   const activeTabRef = useRef<AppTab>('home')
   const tabScrollPositionsRef = useRef<Partial<Record<AppTab, number>>>({})
   const windowControlsHideTimerRef = useRef<number | null>(null)
-  const windowControlsRevealTimerRef = useRef<number | null>(null)
-  const windowControlsTopEdgeHoveredRef = useRef(false)
-  const windowControlsPanelHoveredRef = useRef(false)
-  const windowControlsRevealConsumedRef = useRef(false)
 
   const getScrollElement = (tab: AppTab) => {
     return tab === 'home' ? homeScrollRef.current : activePageScrollRef.current
@@ -118,6 +115,11 @@ const App: React.FC = () => {
   useEffect(() => {
     localStorage.setItem(SIDEBAR_EXPANDED_STORAGE_KEY, String(isSidebarExpanded))
   }, [isSidebarExpanded])
+
+  useEffect(() => {
+    // The large full-screen What's New reveal is intentionally suppressed.
+    localStorage.setItem(getWhatsNewStorageKey(LATEST_RELEASE.version), 'true')
+  }, [])
 
   useEffect(() => {
     window.api.isFullscreen().then(setIsFullscreen).catch(() => {})
@@ -172,7 +174,6 @@ const App: React.FC = () => {
   useEffect(() => {
     return () => {
       clearWindowControlsHideTimer()
-      clearWindowControlsRevealTimer()
     }
   }, [])
 
@@ -184,7 +185,6 @@ const App: React.FC = () => {
         const video = await window.api.getSharedMediaByTmdbId(target.type, target.tmdbId)
         if (cancelled || !video) return
 
-        setShowWhatsNew(false)
         setPlayingVideo(null)
         setSharedSource(target.source || null)
         setSelectedVideo(video)
@@ -279,29 +279,6 @@ const App: React.FC = () => {
     }
   }
 
-  const closeWhatsNew = () => {
-    localStorage.setItem(getWhatsNewStorageKey(LATEST_RELEASE.version), 'true')
-    setShowWhatsNew(false)
-    setWhatsNewStep(0)
-  }
-
-  const handleWhatsNewNext = () => {
-    if (whatsNewStep < LATEST_RELEASE.slides.length - 1) {
-      setWhatsNewStep(step => step + 1)
-      return
-    }
-
-    closeWhatsNew()
-  }
-
-  const handleWhatsNewPrevious = () => {
-    setWhatsNewStep(step => Math.max(0, step - 1))
-  }
-
-  const handleWhatsNewStepChange = (step: number) => {
-    setWhatsNewStep(Math.min(Math.max(step, 0), LATEST_RELEASE.slides.length - 1))
-  }
-
   const clearWindowControlsHideTimer = () => {
     if (windowControlsHideTimerRef.current) {
       window.clearTimeout(windowControlsHideTimerRef.current)
@@ -309,117 +286,157 @@ const App: React.FC = () => {
     }
   }
 
-  const clearWindowControlsRevealTimer = () => {
-    if (windowControlsRevealTimerRef.current) {
-      window.clearTimeout(windowControlsRevealTimerRef.current)
-      windowControlsRevealTimerRef.current = null
-    }
-  }
-
-  const hideWindowControlsNow = () => {
-    clearWindowControlsRevealTimer()
-    clearWindowControlsHideTimer()
-    setShowWindowControls(false)
-  }
-
   const revealWindowControls = () => {
-    clearWindowControlsRevealTimer()
     clearWindowControlsHideTimer()
     setShowWindowControls(true)
   }
 
-  const revealWindowControlsAfterDwell = () => {
-    windowControlsTopEdgeHoveredRef.current = true
-    clearWindowControlsHideTimer()
-    if (windowControlsRevealConsumedRef.current || showWindowControls) return
-
-    windowControlsRevealConsumedRef.current = true
-    clearWindowControlsRevealTimer()
-    windowControlsRevealTimerRef.current = window.setTimeout(() => {
-      windowControlsRevealTimerRef.current = null
-      if (!windowControlsTopEdgeHoveredRef.current) return
-      revealWindowControls()
-    }, 260)
-  }
-
   const hideWindowControlsSoon = () => {
-    clearWindowControlsRevealTimer()
     clearWindowControlsHideTimer()
     windowControlsHideTimerRef.current = window.setTimeout(() => {
-      if (windowControlsTopEdgeHoveredRef.current || windowControlsPanelHoveredRef.current) {
-        windowControlsHideTimerRef.current = null
-        return
-      }
-
       setShowWindowControls(false)
-      windowControlsRevealConsumedRef.current = false
       windowControlsHideTimerRef.current = null
-    }, 500)
+    }, 700)
   }
 
-  const handleWindowControlsTopEdgeLeave = () => {
-    windowControlsTopEdgeHoveredRef.current = false
-    clearWindowControlsRevealTimer()
-    hideWindowControlsSoon()
+  const handleToggleFullscreen = async () => {
+    const nextState = await window.api.toggleFullscreen()
+    setIsFullscreen(nextState)
+    if (!nextState) {
+      setShowWindowControls(false)
+    }
   }
 
-  const handleWindowControlsPanelEnter = () => {
-    windowControlsPanelHoveredRef.current = true
-    windowControlsRevealConsumedRef.current = true
-    revealWindowControls()
+  const dismissFeatureSpotlight = () => {
+    localStorage.setItem(getFeatureSpotlightStorageKey(LATEST_RELEASE.version), 'true')
+    setShowFeatureSpotlight(false)
   }
 
-  const handleWindowControlsPanelLeave = () => {
-    windowControlsPanelHoveredRef.current = false
-    hideWindowControlsSoon()
-  }
+  const WindowControls = () => {
+    if (!launchFullscreen) return null
 
-  const WindowControls = () => (
-    <>
-      {launchFullscreen && (
-        <>
-          <style>{`
-            @keyframes fullscreenControlPop {
-              0% { opacity: 0; transform: translate(-50%, -34px) scale(0.96); }
-              68% { opacity: 1; transform: translate(-50%, 3px) scale(1.02); }
-              100% { opacity: 1; transform: translate(-50%, 0) scale(1); }
-            }
-          `}</style>
+    const controlsVisible = showWindowControls || showFeatureSpotlight
+    const controlButtonClass = 'flex h-6 w-7 items-center justify-center text-white/60 transition-[color,opacity,transform] duration-150 hover:text-white/95 active:scale-90 focus:outline-none focus:text-white focus:ring-1 focus:ring-white/35'
+
+    if (isFullscreen) {
+      return (
+        <div
+          className="fixed right-2 top-0 z-[260] flex h-6 w-24 items-center justify-end"
+          onMouseEnter={revealWindowControls}
+          onMouseLeave={hideWindowControlsSoon}
+          onFocus={revealWindowControls}
+          onBlur={hideWindowControlsSoon}
+        >
           <div
-            className="fixed left-1/2 top-0 z-[259] h-2 w-[min(28rem,100vw)] -translate-x-1/2"
-            onMouseEnter={revealWindowControlsAfterDwell}
-            onMouseLeave={handleWindowControlsTopEdgeLeave}
-          />
-          <div
-            className={`fixed left-1/2 top-2 z-[260] -translate-x-1/2 rounded-lg border border-white/10 bg-black/70 p-1.5 shadow-[0_16px_42px_rgba(0,0,0,0.46)] backdrop-blur-xl transition-[opacity,transform] duration-300 ease-out ${
-              showWindowControls ? 'translate-y-0 scale-100 opacity-100 animate-[fullscreenControlPop_220ms_ease-out_both]' : '-translate-y-10 scale-95 opacity-0 pointer-events-none'
+            className={`flex items-center gap-1 transition-opacity duration-200 ${
+              controlsVisible ? 'opacity-100' : 'opacity-55'
             }`}
-            onMouseEnter={handleWindowControlsPanelEnter}
-            onMouseLeave={handleWindowControlsPanelLeave}
-            onFocus={revealWindowControls}
-            onBlur={hideWindowControlsSoon}
           >
             <button
               type="button"
-              title={isFullscreen ? 'Exit fullscreen' : 'Enter fullscreen'}
-              aria-label={isFullscreen ? 'Exit fullscreen' : 'Enter fullscreen'}
-              onClick={async (event) => {
-                windowControlsRevealConsumedRef.current = true
-                hideWindowControlsNow()
-                event.currentTarget.blur()
-                const nextState = await window.api.toggleFullscreen()
-                setIsFullscreen(nextState)
-              }}
-              className="flex h-9 items-center gap-2 rounded-md px-3 text-sm font-semibold text-white/75 transition-all duration-150 hover:scale-[1.02] hover:bg-white/10 hover:text-white active:scale-95 focus:outline-none focus:ring-2 focus:ring-primary/60"
+              title="Minimize"
+              aria-label="Minimize"
+              onClick={() => window.api.minimizeWindow()}
+              className={controlButtonClass}
             >
-              {isFullscreen ? <Minimize2 size={16} /> : <Maximize2 size={16} />}
-              <span>{isFullscreen ? 'Exit fullscreen' : 'Enter fullscreen'}</span>
+              <Minus size={17} strokeWidth={2.5} />
+            </button>
+            <button
+              type="button"
+              title="Exit fullscreen"
+              aria-label="Exit fullscreen"
+              onClick={handleToggleFullscreen}
+              className={controlButtonClass}
+            >
+              <Minimize2 size={15} strokeWidth={2.2} />
+            </button>
+            <button
+              type="button"
+              title="Close"
+              aria-label="Close"
+              onClick={() => window.api.closeWindow()}
+              className={`${controlButtonClass} hover:text-red-300 focus:ring-red-300/50 focus:text-red-200`}
+            >
+              <X size={17} strokeWidth={2.3} />
             </button>
           </div>
-        </>
-      )}
-    </>
-  )
+        </div>
+      )
+    }
+
+    return (
+      <div
+        className="fixed right-3 top-0 z-[260] flex h-6 w-28 items-center justify-end gap-1"
+        onMouseEnter={revealWindowControls}
+        onMouseLeave={hideWindowControlsSoon}
+        onFocus={revealWindowControls}
+        onBlur={hideWindowControlsSoon}
+      >
+        <span
+          className={`pointer-events-none text-[9px] font-bold uppercase tracking-[0.14em] text-white/50 transition-opacity duration-150 ${
+            controlsVisible ? 'opacity-100' : 'opacity-0'
+          }`}
+        >
+          Fullscreen
+        </span>
+        <button
+          type="button"
+          title="Enter fullscreen"
+          aria-label="Enter fullscreen"
+          onClick={handleToggleFullscreen}
+          className={`flex h-6 w-7 items-center justify-center text-white/60 transition-[color,opacity,transform] duration-150 hover:text-white/95 active:scale-90 focus:outline-none focus:text-white focus:ring-1 focus:ring-white/35 ${
+            controlsVisible ? 'opacity-100' : 'opacity-55'
+          }`}
+        >
+          <Maximize2 size={15} strokeWidth={2.2} />
+        </button>
+      </div>
+    )
+  }
+
+  const FeatureSpotlight = () => {
+    if (!showFeatureSpotlight || !launchFullscreen || playingVideo) return null
+
+    return (
+      <div
+        className="fixed inset-0 z-[255] bg-black/45 backdrop-blur-[1.5px]"
+        style={{
+          background: 'radial-gradient(circle at calc(100% - 58px) 16px, transparent 0 42px, rgba(0,0,0,0.34) 70px, rgba(0,0,0,0.58) 100%)'
+        }}
+      >
+        <button
+          type="button"
+          aria-label="Dismiss fullscreen controls tip"
+          className="absolute inset-0 cursor-default"
+          onClick={dismissFeatureSpotlight}
+        />
+
+        <div className="absolute right-8 top-12 w-[min(310px,calc(100vw-2rem))] rounded-lg border border-white/12 bg-[#080c12]/92 p-4 text-left shadow-[0_20px_70px_rgba(0,0,0,0.5)] backdrop-blur-2xl">
+          <ArrowUpRight
+            size={30}
+            strokeWidth={1.8}
+            className="absolute -right-1 -top-8 rotate-[-24deg] text-white/75 drop-shadow-[0_0_16px_rgba(255,255,255,0.25)]"
+          />
+          <div className="mb-2 inline-flex rounded-md border border-white/10 bg-white/6 px-2 py-1 text-[9px] font-black uppercase tracking-[0.16em] text-white/55">
+            New control
+          </div>
+          <h3 className="text-sm font-black uppercase tracking-tight text-white">
+            Fullscreen controls moved here
+          </h3>
+          <p className="mt-2 text-xs font-semibold leading-5 text-white/55">
+            Hover the top-right edge for quick minimize, fullscreen, and close controls.
+          </p>
+          <button
+            type="button"
+            onClick={dismissFeatureSpotlight}
+            className="mt-4 rounded-md border border-white/10 px-3 py-2 text-[10px] font-black uppercase tracking-[0.14em] text-white/70 transition-colors hover:border-white/20 hover:text-white"
+          >
+            Got it
+          </button>
+        </div>
+      </div>
+    )
+  }
 
   const visibleDownloads = sortDownloadsForTray(activeDownloads.filter(download => (
     download.status === 'downloading' ||
@@ -747,18 +764,8 @@ const App: React.FC = () => {
         />
       )}
 
-      {/* What's New Onboarding */}
-      <AnimatePresence>
-        {showWhatsNew && (
-          <WhatsNewOnboarding
-            currentStep={whatsNewStep}
-            onNext={handleWhatsNewNext}
-            onPrevious={handleWhatsNewPrevious}
-            onStepChange={handleWhatsNewStepChange}
-            onClose={closeWhatsNew}
-          />
-        )}
-      </AnimatePresence>
+      {/* Full-screen What's New onboarding is intentionally disabled for this release. */}
+      <FeatureSpotlight />
     </div>
   )
 }

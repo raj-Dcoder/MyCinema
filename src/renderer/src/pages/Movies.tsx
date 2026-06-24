@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState, useRef } from 'react'
 import { Video } from '../types'
 import VideoCard from '../components/VideoCard'
 import { ArrowUpDown, Check, Film, Search, X } from 'lucide-react'
+import { groupMovieCards } from '../utils/mediaVersions'
 
 interface MoviesProps {
   onPlay: (video: Video) => void
@@ -28,7 +29,7 @@ const Movies: React.FC<MoviesProps> = ({ onPlay, onShowDetail }) => {
       const isMovie = (v: Video) => 
         v.type === 'movie'
 
-      setMovies(allVideos.filter(isMovie))
+      setMovies(groupMovieCards(allVideos.filter(isMovie)))
     } finally {
       setLoading(false)
       isInitialLoad.current = false

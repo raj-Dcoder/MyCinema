@@ -4,6 +4,7 @@ import VideoCard from '../components/VideoCard'
 import HeroCarousel from '../components/HeroCarousel'
 import HorizontalScrollRow, { type HorizontalScrollRowHandle } from '../components/HorizontalScrollRow'
 import { groupSeriesCards } from '../utils/seriesCards'
+import { groupMovieCards } from '../utils/mediaVersions'
 import { Search as SearchIcon, Bookmark, ChevronLeft, ChevronRight, Play, X, Loader2, Star, Film, Tv, HardDrive, Cloud, CheckCircle2 } from 'lucide-react'
 
 interface HomeProps {
@@ -483,7 +484,7 @@ const Home: React.FC<HomeProps> = ({ onPlay, onShowDetail, onNavigate, refreshKe
       setContinueWatching(groupContinueWatching(cw))
 
       const moviesOnly = allVideos.filter(v => v.type === 'movie')
-      setRecentMovies(moviesOnly.slice(0, 10))
+      setRecentMovies(groupMovieCards(moviesOnly).slice(0, 10))
 
       setRecentSeries(groupSeriesCards(allVideos).slice(0, 10))
     } catch (err) {
@@ -681,13 +682,24 @@ const Home: React.FC<HomeProps> = ({ onPlay, onShowDetail, onNavigate, refreshKe
 
     const timer = window.setTimeout(async () => {
       try {
-        const localMatches: SearchResultVideo[] = allLibraryVideos
+        const groupedSeries = groupSeriesCards(allLibraryVideos)
+        const groupedMovies = groupMovieCards(allLibraryVideos)
+        const localSearchInventory = [
+          ...groupedMovies,
+          ...groupedSeries,
+          ...allLibraryVideos.filter(video => video.type === 'video')
+        ]
+        const localMatches: SearchResultVideo[] = localSearchInventory
           .filter(video => videoMatchesQuery(video, query))
           .slice(0, 5)
           .map(video => ({
             ...video,
             searchAvailability: 'local',
-            searchLabel: video.is_watchlist ? 'Library + Watchlist' : 'In Library'
+            searchLabel: video.type === 'series'
+              ? `${video.episode_count || 1} ${(video.episode_count || 1) === 1 ? 'episode' : 'episodes'} in library`
+              : (video.version_count || 1) > 1
+                ? `${video.version_count} versions in library`
+                : video.is_watchlist ? 'Library + Watchlist' : 'In Library'
           }))
 
         const watchlistMatches: SearchResultVideo[] = watchlistItems
@@ -708,12 +720,16 @@ const Home: React.FC<HomeProps> = ({ onPlay, onShowDetail, onNavigate, refreshKe
           .map(mapTmdbSearchResult)
           .filter((video: Video) => Boolean(video.title && video.tmdb_id))
           .map((video: Video) => {
-            const localMatch = allLibraryVideos.find(candidate => sameTmdbTitle(candidate, video))
+            const localMatch = localSearchInventory.find(candidate => sameTmdbTitle(candidate, video))
             if (localMatch) {
               return {
                 ...localMatch,
                 searchAvailability: 'local',
-                searchLabel: localMatch.is_watchlist ? 'Library + Watchlist' : 'In Library'
+                searchLabel: localMatch.type === 'series'
+                  ? `${localMatch.episode_count || 1} ${(localMatch.episode_count || 1) === 1 ? 'episode' : 'episodes'} in library`
+                  : (localMatch.version_count || 1) > 1
+                    ? `${localMatch.version_count} versions in library`
+                    : localMatch.is_watchlist ? 'Library + Watchlist' : 'In Library'
               } as SearchResultVideo
             }
 

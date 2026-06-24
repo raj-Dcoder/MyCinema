@@ -548,7 +548,17 @@ const Download: React.FC<DownloadProps> = ({ onShowDetail }) => {
   const handleStartDownload = async (source: TorrentSource) => {
     const title = selectedItem?.title || selectedItem?.name || 'Unknown'
     try {
-      await window.api.startTorrentDownload(source.magnet, `${title} (${source.quality})`, selectedItem?.id, source.title)
+      await window.api.startTorrentDownload(
+        source.magnet,
+        `${title} (${source.quality})`,
+        selectedItem?.id,
+        source.title,
+        {
+          mediaType: selectedItem?.media_type === 'tv' ? 'series' : 'movie',
+          season: source.parsedSeason,
+          episode: source.parsedEpisode
+        }
+      )
       refreshDownloadsStorage()
     } catch (err) {
       console.error('[Download] Start download error:', err)

@@ -12,6 +12,7 @@ const api = {
   getContinueWatching: () => ipcRenderer.invoke('get-continue-watching'),
   playVideo: (videoId: number) => ipcRenderer.invoke('play-video', videoId),
   getSeriesInfo: (seriesName: string) => ipcRenderer.invoke('get-series-info', seriesName),
+  setPreferredVideoVersion: (videoId: number) => ipcRenderer.invoke('set-preferred-video-version', videoId),
   getSubtitlePath: (filePath: string) => ipcRenderer.invoke('get-subtitles', filePath),
   getEmbeddedSubtitles: (filePath: string) => ipcRenderer.invoke('get-embedded-subtitles', filePath),
   getEmbeddedAudio: (filePath: string) => ipcRenderer.invoke('get-embedded-audio', filePath),
@@ -38,6 +39,7 @@ const api = {
   getTmdbTitleLogo: (type: 'movie' | 'series', tmdbId: number) => ipcRenderer.invoke('get-tmdb-title-logo', type, tmdbId),
   getTmdbTrailer: (params: { tmdbId?: number | null; title: string; type: 'movie' | 'series'; year?: number | null; seasonNumber?: number | null; preferLatestSeason?: boolean }) =>
     ipcRenderer.invoke('get-tmdb-trailer', params),
+  getTmdbSeriesCatalog: (tmdbId: number) => ipcRenderer.invoke('get-tmdb-series-catalog', tmdbId),
   getIntroDbSegments: (params: { imdbId?: string | null; tmdbId?: number | null; season?: number | null; episode?: number | null; filePath?: string | null; duration?: number | null }) =>
     ipcRenderer.invoke('get-introdb-segments', params),
   getPendingSharedMediaTarget: () => ipcRenderer.invoke('get-pending-shared-media-target'),
@@ -71,8 +73,8 @@ const api = {
     ipcRenderer.on('torrent-sources-progress', handler)
     return () => ipcRenderer.removeListener('torrent-sources-progress', handler)
   },
-  startTorrentDownload: (magnetUrl: string, title: string, tmdbId?: number, name?: string) =>
-    ipcRenderer.invoke('start-torrent-download', magnetUrl, title, tmdbId, name),
+  startTorrentDownload: (magnetUrl: string, title: string, tmdbId?: number, name?: string, media?: { mediaType?: 'movie' | 'series'; season?: number; episode?: number }) =>
+    ipcRenderer.invoke('start-torrent-download', magnetUrl, title, tmdbId, name, media),
   cancelTorrentDownload: (id: string) => 
     ipcRenderer.invoke('cancel-torrent-download', id),
   removeDownload: (id: string, deleteFile?: boolean) => 

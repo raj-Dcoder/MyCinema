@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from 'react'
 import { X, Play, Info, Calendar, Clock, Star, FolderOpen, Film, Music, Subtitles, HardDrive, ChevronDown, ChevronUp, Heart, Bookmark, Share2, Search, Zap, Users, Download, AlertTriangle, Clapperboard, Loader2, ExternalLink, Languages, CheckCircle2, Copy, MessageCircle, Send } from 'lucide-react'
 import { Video } from '../types'
 import { getTorrentSourceHealthScore, getTorrentSourceSpeedLabel } from '../utils/torrentSources'
+import { getMediaUnitIdentity, getVersionLabel, groupMediaVersions, pickPreferredVersion } from '../utils/mediaVersions'
 
 interface DetailScreenProps {
   video: Video
@@ -35,6 +36,26 @@ const InfoRow: React.FC<{ label: string; value: string | null | undefined }> = (
 
 type TrailerSeasonSelection = 'latest' | 'series' | number
 
+type SeriesCatalogEpisode = {
+  seasonNumber: number
+  episodeNumber: number
+  name: string
+  overview: string | null
+  airDate: string | null
+  stillPath: string | null
+  released: boolean
+}
+
+type EpisodeDisplayRow = {
+  season: number
+  episode: number
+  title: string
+  localVideo?: Video
+  versionCount: number
+  released: boolean
+  airDate: string | null
+}
+
 type ActiveDownload = {
   id: string
   title?: string
@@ -44,6 +65,10 @@ type ActiveDownload = {
   downloadSpeed?: string
   timeRemaining?: string
   tmdbId?: number
+  magnet?: string
+  mediaType?: 'movie' | 'series'
+  season?: number
+  episode?: number
 }
 
 const getTorrentStreamErrorMessage = (error?: string | null) => {
@@ -141,6 +166,9 @@ const SHARE_HINT_STORAGE_KEY = 'mycinema_detail_share_hint_seen_v1'
 
 const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource, onClose, onPlay, onWatchlistChange }) => {
   const [episodes, setEpisodes] = useState<Video[]>([])
+  const [localVersions, setLocalVersions] = useState<Video[]>([])
+  const [seriesCatalog, setSeriesCatalog] = useState<SeriesCatalogEpisode[]>([])
+  const [catalogLoading, setCatalogLoading] = useState(false)
   const [loading, setLoading] = useState(false)
   const [showInfoModal, setShowInfoModal] = useState(false)
   const [showTrailerModal, setShowTrailerModal] = useState(false)
@@ -167,6 +195,10 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
   const [showShareHint, setShowShareHint] = useState(() => localStorage.getItem(SHARE_HINT_STORAGE_KEY) !== 'true')
   const [resolvedLogoPath, setResolvedLogoPath] = useState<string | null>(null)
   const [logoLoadFailed, setLogoLoadFailed] = useState(false)
+  const [isOverflowing, setIsOverflowing] = useState(false)
+  const overviewRef = useRef<HTMLParagraphElement>(null)
+  const [expandedOverview, setExpandedOverview] = useState(false)
+
 
   // Torrent Search State
   const [sources, setSources] = useState<any[]>([])
@@ -179,7 +211,6 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
   const [showDownloadOptions, setShowDownloadOptions] = useState(false)
   const [startingSourceMagnet, setStartingSourceMagnet] = useState<string | null>(null)
   const [startedSourceMagnet, setStartedSourceMagnet] = useState<string | null>(null)
-  const [startingBestDownload, setStartingBestDownload] = useState(false)
   const [startingTorrentStream, setStartingTorrentStream] = useState(false)
   const [torrentStreamError, setTorrentStreamError] = useState<string | null>(null)
   const [activeDownloads, setActiveDownloads] = useState<ActiveDownload[]>([])
@@ -201,7 +232,11 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
   const displayTitle = video.type === 'series' && video.series_name ? video.series_name : video.title
   const normalizedDisplayTitle = normalizeMatchText(displayTitle)
   const matchingDownload = activeDownloads.find(download => {
-    if (video.tmdb_id && download.tmdbId === video.tmdb_id) return true
+    if (video.tmdb_id && download.tmdbId === video.tmdb_id) {
+      if (video.type !== 'series' || download.mediaType !== 'series') return true
+      if (download.season == null || download.episode == null) return true
+      return Number(download.season) === Number(video.season || 1) && Number(download.episode) === Number(video.episode || 0)
+    }
     const downloadTitle = normalizeMatchText([download.title, download.name].filter(Boolean).join(' '))
     return Boolean(normalizedDisplayTitle && downloadTitle && (
       downloadTitle.includes(normalizedDisplayTitle) || normalizedDisplayTitle.includes(downloadTitle)
@@ -314,7 +349,7 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
     sourceSearchRequestRef.current = requestId
     try {
       const results = await window.api.searchTorrentSources(
-        video.title, 
+        displayTitle,
         video.release_year?.toString() || '', 
         video.type === 'series' ? 'tv' : 'movie', 
         video.tmdb_id!,
@@ -354,6 +389,17 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
   const handleOpenDownloadOptions = async () => {
     setShowDownloadOptions(true)
     await handleSearchSources(false)
+  }
+
+  const handleOpenEpisodeSources = async (season: number, episode: number) => {
+    setSourceSeasonFilter(String(season))
+    setSourcePackSeasonFilter('all')
+    setSourceEpisodeFilter(String(episode))
+    setShowDownloadOptions(true)
+    await handleSearchSources(false)
+    setSourceSeasonFilter(String(season))
+    setSourcePackSeasonFilter('all')
+    setSourceEpisodeFilter(String(episode))
   }
 
   const handleCloseDownloadOptions = () => {
@@ -446,10 +492,28 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
     }
   }, [isTmdbBacked, video.tmdb_id, video.logo_path, video.type])
 
+  useEffect(() => {
+    const el = overviewRef.current
+
+    if (!el) return
+
+    setIsOverflowing(el.scrollHeight > el.clientHeight)
+  }, [video.overview])
+
   const handleDownloadSource = async (source: any) => {
     setStartingSourceMagnet(source.magnet)
     try {
-      const torrentId = await window.api.startTorrentDownload(source.magnet, video.title, video.tmdb_id, source.title)
+      const torrentId = await window.api.startTorrentDownload(
+        source.magnet,
+        displayTitle,
+        video.tmdb_id,
+        source.title,
+        {
+          mediaType: video.type === 'series' ? 'series' : 'movie',
+          season: source.parsedSeason ?? video.season,
+          episode: source.parsedEpisode ?? video.episode
+        }
+      )
       if (torrentId) {
         setStartedSourceMagnet(source.magnet)
         window.api.getActiveDownloads()
@@ -460,26 +524,6 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
       console.error('Failed to start download:', err)
     } finally {
       setStartingSourceMagnet(null)
-    }
-  }
-
-  const handleDownloadBest = async () => {
-    if (!isTmdbBacked || !video.tmdb_id || isDownloadActive || startingBestDownload) return
-
-    setStartingBestDownload(true)
-    try {
-      const results = await handleSearchSources(true)
-      const bestSource = [...results]
-        .filter(source => source?.magnet)
-        .sort((a, b) => getTorrentSourceHealthScore(b) - getTorrentSourceHealthScore(a))[0]
-
-      if (bestSource) {
-        await handleDownloadSource(bestSource)
-      } else {
-        setShowDownloadOptions(true)
-      }
-    } finally {
-      setStartingBestDownload(false)
     }
   }
 
@@ -528,6 +572,15 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
 
   const handleOpenFolder = () => {
     window.api.openFolder(video.file_path)
+  }
+
+  const handleSetPreferredVersion = async (version: Video) => {
+    const changed = await window.api.setPreferredVideoVersion(version.id)
+    if (!changed) return
+    setLocalVersions(current => current.map(item => ({
+      ...item,
+      is_preferred: item.id === version.id
+    })))
   }
 
   const handleOpenMoctale = () => {
@@ -631,6 +684,11 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
     setTrailerLoading(true)
   }
 
+  const handleOpenTrailer = () => {
+    setShouldLoadTrailer(true)
+    setShowTrailerModal(true)
+  }
+
   useEffect(() => {
     let cancelled = false
 
@@ -650,7 +708,6 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
     setShowDownloadOptions(false)
     setStartingSourceMagnet(null)
     setStartedSourceMagnet(null)
-    setStartingBestDownload(false)
     setStartingTorrentStream(false)
     setTorrentStreamError(null)
 
@@ -687,6 +744,31 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
       setEpisodes([])
       setSelectedSeason(null)
       setLoading(false)
+    }
+
+    if (isLocalMedia && (video.type === 'movie' || video.type === 'series')) {
+      window.api.getVideos().then((allVideos: Video[]) => {
+        if (cancelled) return
+        const identity = getMediaUnitIdentity(video)
+        setLocalVersions(allVideos.filter(candidate => getMediaUnitIdentity(candidate) === identity))
+      }).catch(err => console.error('[DetailScreen] Failed to load local versions:', err))
+    } else {
+      setLocalVersions([])
+    }
+
+    if (video.type === 'series' && video.tmdb_id) {
+      setCatalogLoading(true)
+      window.api.getTmdbSeriesCatalog(video.tmdb_id).then(catalog => {
+        if (!cancelled) setSeriesCatalog(catalog || [])
+      }).catch(err => {
+        console.error('[DetailScreen] Failed to load episode catalog:', err)
+        if (!cancelled) setSeriesCatalog([])
+      }).finally(() => {
+        if (!cancelled) setCatalogLoading(false)
+      })
+    } else {
+      setSeriesCatalog([])
+      setCatalogLoading(false)
     }
 
     return () => {
@@ -744,17 +826,60 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
     }
   }, [video, trailerSeasonSelection, shouldLoadTrailer, isTmdbBacked])
 
-  // Group episodes by season
-  const episodesBySeason = episodes.reduce((acc, ep) => {
-    const s = ep.season || 1
-    if (!acc[s]) acc[s] = []
-    acc[s].push(ep)
+  // A physical file is a version, not another episode. Collapse alternate
+  // encodes before rendering counts and playback order.
+  const episodeGroups = groupMediaVersions(episodes)
+  const localEpisodeGroups = new Map(episodeGroups.map(group => {
+    const representative = group.representative
+    return [`${Number(representative.season || 1)}:${Number(representative.episode || 0)}`, group] as const
+  }))
+  const catalogEpisodeKeys = new Set(seriesCatalog.map(episode => `${episode.seasonNumber}:${episode.episodeNumber}`))
+  const episodeRows: EpisodeDisplayRow[] = seriesCatalog.map(catalogEpisode => {
+    const localGroup = localEpisodeGroups.get(`${catalogEpisode.seasonNumber}:${catalogEpisode.episodeNumber}`)
+    return {
+      season: catalogEpisode.seasonNumber,
+      episode: catalogEpisode.episodeNumber,
+      title: catalogEpisode.name,
+      localVideo: localGroup?.representative,
+      versionCount: localGroup?.versions.length || 0,
+      released: catalogEpisode.released,
+      airDate: catalogEpisode.airDate
+    }
+  })
+  for (const group of episodeGroups) {
+    const representative = group.representative
+    const season = Number(representative.season || 1)
+    const episode = Number(representative.episode || 0)
+    if (catalogEpisodeKeys.has(`${season}:${episode}`)) continue
+    episodeRows.push({
+      season,
+      episode,
+      title: representative.title,
+      localVideo: representative,
+      versionCount: group.versions.length,
+      released: true,
+      airDate: null
+    })
+  }
+  episodeRows.sort((a, b) => a.season - b.season || a.episode - b.episode)
+
+  const episodesBySeason = episodeRows.reduce((acc, episode) => {
+    if (!acc[episode.season]) acc[episode.season] = []
+    acc[episode.season].push(episode)
     return acc
-  }, {} as Record<number, Video[]>)
+  }, {} as Record<number, EpisodeDisplayRow[]>)
 
   const seasons = Object.keys(episodesBySeason)
     .map(Number)
     .sort((a, b) => a - b)
+  const seasonKey = seasons.join(',')
+
+  useEffect(() => {
+    if (video.type !== 'series' || seasons.length === 0) return
+    setSelectedSeason(current => (
+      current && seasons.includes(current) ? current : (video.season && seasons.includes(video.season) ? video.season : seasons[0])
+    ))
+  }, [video.id, video.season, video.type, seasonKey])
 
   const sourceSeasons = React.useMemo(() => {
     const values = new Set<number>()
@@ -858,31 +983,34 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
       : isDownloadConnecting
         ? `Connecting ${roundedDownloadProgress}%`
         : 'Play While Downloading'
-    : startingBestDownload
-      ? 'Finding Best...'
-      : 'Download Best'
-  const canUseDownloadPrimary = Boolean(video.tmdb_id) && !isDownloadComplete && (!isDownloadActive || isDownloadPaused || !isDownloadConnecting)
+    : null
+  const canUseDownloadPrimary = isDownloadActive && !isDownloadComplete && (isDownloadPaused || !isDownloadConnecting)
+  const sourceActionLabel = video.type === 'series'
+    ? 'Episodes & Sources'
+    : isLocalMedia
+      ? 'Versions & Sources'
+      : 'Choose Source'
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 md:p-8 bg-black/90 backdrop-blur-md animate-in fade-in duration-300">
-      <div className="relative w-full max-w-6xl h-[90vh] bg-surface rounded-3xl overflow-hidden shadow-[0_0_50px_rgba(0,0,0,0.5)] border border-white/10 flex flex-col md:flex-row">
+      <div className="relative w-full max-w-[1530px] h-[92vh] bg-[#080d16] rounded-[28px] overflow-hidden shadow-[0_32px_100px_rgba(0,0,0,0.72)] border border-white/[0.11] flex flex-col md:flex-row">
         {/* Close Button */}
         <button 
           onClick={onClose}
-          className="absolute top-6 right-6 z-30 p-2 bg-black/40 hover:bg-red-600 rounded-full text-white transition-all border border-white/10 glass-effect"
+          className="absolute top-5 right-5 z-30 flex h-11 w-11 items-center justify-center rounded-full border border-white/15 bg-black/30 text-white/80 backdrop-blur-xl transition-all hover:border-red-500 hover:bg-red-600 hover:text-white"
         >
           <X size={24} />
         </button>
 
         {/* Poster Section (Left on Desktop, Top on Mobile) */}
-        <div className="w-full md:w-[40%] h-[300px] md:h-full relative overflow-hidden shrink-0">
+        <div className="w-full md:w-[42%] h-[300px] md:h-full relative overflow-hidden shrink-0 bg-[#101827]">
           {posterUrl ? (
             <img 
               src={posterUrl} 
               alt={video.title} 
               loading="eager"
               decoding="async"
-              className="h-full w-full object-cover"
+              className="h-full w-full object-cover object-center"
             />
           ) : (
             <div className="h-full w-full bg-secondary flex items-center justify-center text-muted italic">
@@ -890,43 +1018,46 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
             </div>
           )}
           {/* Gradients to blend poster with content */}
-          <div className="absolute inset-0 bg-gradient-to-t from-surface via-transparent to-transparent md:hidden" />
-          <div className="absolute inset-0 bg-gradient-to-r from-transparent via-transparent to-surface hidden md:block" />
+          <div className="absolute inset-0 bg-gradient-to-t from-[#080d16] via-transparent to-transparent md:hidden" />
+          <div className="absolute inset-0 bg-gradient-to-r from-transparent via-[#080d16]/20 to-[#080d16] hidden md:block" />
           
           {/* Subtle overlay on poster for depth */}
-          <div className="absolute inset-0 bg-black/20" />
+          <div className="absolute inset-0 bg-[#020611]/10" />
+          <div className="absolute bottom-0 left-0 right-0 hidden p-8 md:block">
+            <div className="h-px w-24 bg-red-500/80" />
+          </div>
         </div>
 
         {/* Content Section */}
-        <div className="flex-1 p-6 md:p-10 lg:p-12 overflow-y-auto scrollbar-hide flex flex-col relative bg-surface/95">
-          <div className="space-y-6">
+        <div className="flex-1 overflow-y-auto scrollbar-thin flex flex-col relative bg-[radial-gradient(circle_at_88%_0%,rgba(34,65,112,0.26),transparent_34%),#080d16]">
+          <div className="mx-auto w-full max-w-4xl space-y-7 p-6 pt-20 md:p-10 md:pt-14 lg:px-14">
             {/* Title & Tagline */}
-            <div className="space-y-3">
+            <div className="space-y-3 pr-10">
               {logoUrl ? (
                 <img
                   src={logoUrl}
                   alt={displayTitle}
                   loading="eager"
                   decoding="async"
-                  className="max-h-20 md:max-h-24 w-auto max-w-[min(100%,420px)] object-contain object-left drop-shadow-[0_10px_28px_rgba(0,0,0,0.75)]"
+                  className="max-h-20 md:max-h-24 w-auto max-w-[min(100%,440px)] object-contain object-left drop-shadow-[0_10px_28px_rgba(0,0,0,0.75)]"
                   onError={() => setLogoLoadFailed(true)}
                 />
               ) : (
-                <h2 className="text-4xl md:text-6xl font-black tracking-tighter text-white uppercase italic leading-[0.9] drop-shadow-lg">
+                <h2 className="text-4xl md:text-5xl font-black tracking-[-0.05em] text-white leading-[0.94] drop-shadow-lg">
                   {displayTitle}
                 </h2>
               )}
               {video.tagline && (
-                <p className="text-primary font-black italic tracking-[0.2em] text-xs md:text-sm uppercase opacity-90 pl-1">
+                <p className="text-primary font-black italic tracking-[0.18em] text-[10px] md:text-xs uppercase opacity-95 pl-0.5">
                   {video.tagline}
                 </p>
               )}
             </div>
 
             {/* Meta Info Row */}
-            <div className="flex flex-wrap items-center gap-2.5 text-[10px] font-black text-white/70 uppercase tracking-[0.13em]">
+            <div className="flex flex-wrap items-center gap-2 text-[10px] font-black text-white/70 uppercase tracking-[0.13em]">
               {video.vote_average ? (
-                <div className="flex items-center gap-1.5 bg-white/[0.06] px-3 py-1.5 rounded-full border border-white/10 text-white">
+                <div className="flex items-center gap-1.5 bg-white/[0.07] px-3 py-1.5 rounded-full border border-white/10 text-white">
                   <Star size={12} className="text-yellow-500 fill-yellow-500" />
                   <span className="text-white/45">IMDb</span>
                   <span>{video.vote_average.toFixed(1)}</span>
@@ -961,69 +1092,79 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
             )}
 
             {/* Overview */}
-            <div className="max-w-2xl rounded-2xl border border-white/[0.08] bg-white/[0.035] px-4 py-3.5">
-              <p className="text-white/[0.72] text-sm md:text-[15px] leading-7 font-semibold italic">
+            <div className="relative max-w-3xl">
+              <p
+                ref={overviewRef}
+                className={`text-white/[0.72] text-sm md:text-[15px] leading-7 font-medium transition-all duration-300 ${
+                  expandedOverview ? '' : 'line-clamp-3'
+                }`}
+              >
                 {video.overview || 'No overview available for this title.'}
               </p>
+
+              {!expandedOverview && isOverflowing && (
+                <div className="pointer-events-none absolute bottom-6 left-0 right-0 h-10 bg-gradient-to-t from-[#080d16] to-transparent" />
+              )}
+
+              {video.overview && video.overview.length > 250 && (
+                <button
+                  onClick={() => setExpandedOverview(!expandedOverview)}
+                  className="mt-2 text-xs font-black uppercase tracking-widest text-red-400 hover:text-red-300"
+                >
+                  {expandedOverview ? 'Read Less' : 'Read More'}
+                </button>
+              )}
             </div>
 
             {/* Actions */}
-            <div className="flex flex-wrap items-center gap-3 pt-1">
-              {isLocalMedia ? (
+            <div className="flex flex-wrap items-stretch gap-3 pt-2">
+              {isLocalMedia && (
                 <button 
-                  onClick={() => onPlay(video)}
-                  className="flex min-h-14 items-center gap-3 bg-red-600 hover:bg-red-700 text-white px-8 rounded-2xl font-black text-sm tracking-widest transition-all shadow-[0_10px_30px_rgba(220,38,38,0.4)] hover:scale-105 active:scale-95 group uppercase italic"
+                  onClick={() => onPlay(pickPreferredVersion(localVersions, video) || video)}
+                  className="flex min-h-16 items-center justify-center gap-3 bg-red-600 hover:bg-red-500 text-white px-8 rounded-xl font-black text-xs tracking-[0.12em] transition-all shadow-[0_12px_30px_rgba(220,38,38,0.35)] hover:-translate-y-0.5 active:scale-95 group uppercase"
                 >
                   <Play fill="white" size={20} className="group-hover:scale-110 transition-transform" />
-                  Play Now
+                  {video.type === 'series' && (video.last_watched_time || 0) > 0 ? 'Continue' : 'Play Now'}
                 </button>
-              ) : (
-                <>
-                  <button
-                    onClick={isDownloadPaused ? handleResumeDownload : isDownloadActive ? handlePlayTorrentStream : handleDownloadBest}
-                    disabled={!canUseDownloadPrimary || startingBestDownload || startingTorrentStream || (searching && !isDownloadPaused)}
-                    className={`flex min-h-14 items-center gap-3 px-8 rounded-2xl font-black text-sm tracking-widest transition-all shadow-[0_10px_30px_rgba(229,9,20,0.34)] hover:scale-105 active:scale-95 group uppercase italic disabled:cursor-not-allowed ${
-                      isDownloadActive && !isDownloadPaused
-                        ? 'bg-emerald-500/15 text-emerald-200 border border-emerald-300/20 hover:bg-emerald-500/22 disabled:opacity-60'
-                        : 'bg-primary hover:bg-primary/80 text-white disabled:opacity-55'
-                    }`}
-                  >
-                    {startingBestDownload || startingTorrentStream ? (
-                      <Loader2 size={20} className="animate-spin" />
-                    ) : isDownloadActive ? (
-                      isDownloadPaused || isDownloadConnecting ? (
-                        <Download size={20} className={isDownloadPaused ? 'group-hover:scale-110 transition-transform' : ''} />
-                      ) : (
-                        <Play fill="currentColor" size={20} className="group-hover:scale-110 transition-transform" />
-                      )
-                    ) : (
-                      <Zap size={20} className="group-hover:scale-110 transition-transform" />
-                    )}
-                    {downloadPrimaryLabel}
-                  </button>
+              )}
 
-                  <button
-                    onClick={handleOpenDownloadOptions}
-                    disabled={searching && sources.length === 0}
-                    className="flex min-h-14 items-center gap-3 rounded-2xl border border-white/10 bg-white/[0.055] px-6 text-sm font-black uppercase italic tracking-widest text-white/70 transition-all hover:scale-105 hover:bg-white/[0.09] hover:text-white active:scale-95 disabled:cursor-wait disabled:opacity-55"
-                  >
-                    {searching && sources.length === 0 ? <Loader2 size={19} className="animate-spin" /> : <Download size={19} />}
-                    Choose Source
-                  </button>
+              {isDownloadActive && (
+                <button
+                  onClick={isDownloadPaused ? handleResumeDownload : handlePlayTorrentStream}
+                  disabled={!canUseDownloadPrimary || startingTorrentStream}
+                  className="flex min-h-16 items-center justify-center gap-3 rounded-xl border border-emerald-300/20 bg-emerald-500/15 px-7 text-xs font-black uppercase tracking-[0.12em] text-emerald-200 transition-all hover:-translate-y-0.5 hover:bg-emerald-500/22 active:scale-95 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {startingTorrentStream ? <Loader2 size={20} className="animate-spin" /> : isDownloadPaused ? <Download size={20} /> : <Play fill="currentColor" size={20} />}
+                  {downloadPrimaryLabel}
+                </button>
+              )}
 
-                  {isDownloadActive && (
-                    <div className="basis-full text-[11px] font-bold text-white/42">
-                      {torrentStreamError || `${roundedDownloadProgress}% downloaded${matchingDownload?.downloadSpeed ? ` / ${matchingDownload.downloadSpeed}` : ''}`}
-                    </div>
-                  )}
-                </>
+              {isTmdbBacked && video.tmdb_id && (
+                <button
+                  onClick={handleOpenDownloadOptions}
+                  disabled={searching && sources.length === 0}
+                  className={`flex min-h-16 items-center justify-center gap-3 rounded-xl px-7 text-xs font-black uppercase tracking-[0.12em] transition-all hover:-translate-y-0.5 active:scale-95 disabled:cursor-wait disabled:opacity-55 ${
+                    isLocalMedia || isDownloadActive
+                      ? 'border border-white/10 bg-white/[0.055] text-white/70 hover:bg-white/[0.09] hover:text-white'
+                      : 'bg-primary text-white shadow-[0_10px_30px_rgba(229,9,20,0.34)] hover:bg-primary/80'
+                  }`}
+                >
+                  {searching && sources.length === 0 ? <Loader2 size={19} className="animate-spin" /> : <Download size={19} />}
+                  {sourceActionLabel}
+                </button>
+              )}
+
+              {isDownloadActive && (
+                <div className="basis-full text-[11px] font-bold text-white/42">
+                  {torrentStreamError || `${roundedDownloadProgress}% downloaded${matchingDownload?.downloadSpeed ? ` / ${matchingDownload.downloadSpeed}` : ''}`}
+                </div>
               )}
               
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center gap-2 basis-full pt-1">
                 <button
                   onClick={handleToggleWatchlist}
                   disabled={watchlistBusy}
-                  className={`p-4 rounded-2xl border transition-all hover:scale-105 active:scale-95 glass-effect ${
+                  className={`p-3.5 rounded-xl border transition-all hover:-translate-y-0.5 active:scale-95 glass-effect ${
                     isWatchlist ? 'bg-primary/20 border-primary text-primary' : 'bg-white/5 border-white/10 text-white/40 hover:text-white'
                   } disabled:opacity-50 disabled:cursor-wait`}
                   title={isWatchlist ? 'Remove from Watchlist' : 'Add to Watchlist'}
@@ -1032,7 +1173,7 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
                 </button>
                 <button
                   onClick={handleToggleFavorite}
-                  className={`p-4 rounded-2xl border transition-all hover:scale-105 active:scale-95 glass-effect ${
+                  className={`p-3.5 rounded-xl border transition-all hover:-translate-y-0.5 active:scale-95 glass-effect ${
                     isFavorite ? 'bg-red-500/20 border-red-500 text-red-500' : 'bg-white/5 border-white/10 text-white/40 hover:text-white'
                   }`}
                   title="Mark as Favorite"
@@ -1042,7 +1183,7 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
                 {isLocalMedia && (
                   <button
                     onClick={handleShowInfo}
-                    className="p-4 bg-white/5 border border-white/10 rounded-2xl text-white/40 hover:text-white transition-all hover:scale-105 active:scale-95 glass-effect"
+                    className="flex h-12 w-12 items-center justify-center bg-white/5 border border-white/10 rounded-xl text-white/40 hover:text-white transition-all hover:-translate-y-0.5 active:scale-95 glass-effect"
                     title="View Media Info"
                   >
                     <Info size={20} />
@@ -1052,7 +1193,7 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
                   <div className="relative">
                     <button
                       onClick={handleShare}
-                      className={`flex items-center gap-2 px-4 py-4 border rounded-2xl transition-all hover:scale-105 active:scale-95 glass-effect ${
+                    className={`flex h-12 items-center gap-2 px-4 border rounded-xl transition-all hover:-translate-y-0.5 active:scale-95 glass-effect ${
                         shareCopied
                           ? 'bg-emerald-500/15 border-emerald-400/35 text-emerald-300'
                           : 'bg-white/5 border-white/10 text-white/45 hover:text-white hover:border-cyan-400/30 hover:bg-cyan-400/10'
@@ -1060,7 +1201,7 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
                       title={shareCopied ? 'Copied share link' : 'Share MyCinema link'}
                     >
                       {shareCopied ? <CheckCircle2 size={18} /> : <Share2 size={18} />}
-                      <span className="text-[10px] font-black uppercase tracking-widest">{shareCopied ? 'Copied' : 'Share'}</span>
+                      {/* <span className="text-[10px] font-black uppercase tracking-widest">{shareCopied ? 'Copied' : 'Share'}</span> */}
                     </button>
                     {showShareHint && (
                       <div className="absolute left-1/2 top-full z-40 mt-3 w-[245px] -translate-x-1/2 rounded-xl border border-cyan-300/20 bg-[#07111c] p-3 text-left shadow-2xl shadow-black/45 ring-1 ring-white/5 animate-in fade-in slide-in-from-top-1 duration-200">
@@ -1094,7 +1235,7 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
                 {isTmdbBacked && (
                   <button
                     onClick={handleOpenMoctale}
-                    className="flex items-center gap-2 px-4 py-4 bg-white/5 border border-white/10 rounded-2xl text-white/45 hover:text-white hover:border-red-500/30 hover:bg-red-600/10 transition-all hover:scale-105 active:scale-95 glass-effect"
+                    className="flex h-12 items-center gap-2 px-4 bg-white/5 border border-white/10 rounded-xl text-white/45 hover:text-white hover:border-red-500/30 hover:bg-red-600/10 transition-all hover:-translate-y-0.5 active:scale-95 glass-effect"
                     title="Open reviews on Moctale"
                   >
                     <ExternalLink size={18} />
@@ -1104,87 +1245,25 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
                 {!video.isExternal && (
                   <button
                     onClick={handleOpenFolder}
-                    className="p-4 bg-white/5 border border-white/10 rounded-2xl text-white/40 hover:text-white transition-all hover:scale-105 active:scale-95 glass-effect"
+                    className="flex h-12 w-12 items-center justify-center bg-white/5 border border-white/10 rounded-xl text-white/40 hover:text-white transition-all hover:-translate-y-0.5 active:scale-95 glass-effect"
                     title="Open Folder"
                   >
                     <FolderOpen size={20} />
                   </button>
                 )}
+                {isTmdbBacked && (
+                  <button
+                    onClick={handleOpenTrailer}
+                    className="flex h-12 items-center justify-center gap-2 px-4 bg-white/5 border border-white/10 rounded-xl text-white/45 hover:text-white hover:border-red-500/30 hover:bg-red-600/10 transition-all hover:-translate-y-0.5 active:scale-95 glass-effect"
+                    title={trailerLoading ? 'Loading trailer' : trailer ? 'Watch trailer' : 'Find trailer'}
+                  >
+                    {trailerLoading ? <Loader2 size={19} className="animate-spin" /> : <Clapperboard size={19} />}
+                    <span className="text-[10px] font-black uppercase tracking-widest">Trailer</span>
+
+                  </button>
+                )}
               </div>
             </div>
-
-            {isTmdbBacked && (
-            <div className="max-w-2xl">
-              {trailerLoading || !shouldLoadTrailer ? (
-                <div className="h-28 rounded-2xl border border-white/8 bg-white/[0.03] overflow-hidden flex items-center gap-4 px-4">
-                  <div className="h-20 w-32 rounded-xl bg-white/5 animate-pulse" />
-                  <div className="min-w-0 flex-1 space-y-2">
-                    <div className="h-3 w-28 rounded-full bg-white/8 animate-pulse" />
-                    <div className="h-4 w-56 max-w-full rounded-full bg-white/8 animate-pulse" />
-                    <div className="h-3 w-36 rounded-full bg-white/5 animate-pulse" />
-                  </div>
-                  <Loader2 size={20} className="text-primary animate-spin" />
-                </div>
-              ) : trailer ? (
-                <button
-                  onClick={() => setShowTrailerModal(true)}
-                  className="group/trailer relative w-full overflow-hidden rounded-2xl border border-white/10 bg-white/[0.04] text-left transition-all duration-300 hover:border-red-500/35 hover:bg-white/[0.07] hover:-translate-y-0.5 hover:shadow-[0_18px_45px_rgba(0,0,0,0.35)]"
-                >
-                  <div className="flex items-stretch">
-                    <div className="relative h-28 w-40 shrink-0 overflow-hidden bg-black">
-                      <img
-                        src={trailer.thumbnailUrl}
-                        alt=""
-                        className="h-full w-full object-cover opacity-80 transition-transform duration-500 group-hover/trailer:scale-105"
-                      />
-                      <div className="absolute inset-0 bg-gradient-to-r from-black/10 to-black/55" />
-                      <div className="absolute inset-0 flex items-center justify-center">
-                        <div className="flex h-11 w-11 items-center justify-center rounded-full bg-red-600 text-white shadow-[0_10px_30px_rgba(220,38,38,0.45)] transition-transform duration-300 group-hover/trailer:scale-110">
-                          <Play size={18} fill="currentColor" />
-                        </div>
-                      </div>
-                    </div>
-
-                    <div className="min-w-0 flex-1 p-4 flex items-center justify-between gap-4">
-                      <div className="min-w-0">
-                        <div className="mb-1.5 flex items-center gap-2 text-[9px] font-black uppercase tracking-[0.18em] text-red-400">
-                          <Clapperboard size={14} />
-                          <span>{trailer.label || `${trailer.official ? 'Official' : 'YouTube'} ${trailer.type || 'Trailer'}`}</span>
-                        </div>
-                        <h3 className="truncate text-sm md:text-base font-black text-white tracking-tight">
-                          {trailer.name || 'Watch Trailer'}
-                        </h3>
-                        <p className="mt-1 line-clamp-1 text-[11px] font-semibold text-white/35">
-                          {video.type === 'series' && trailer.seasonNumber ? `${video.series_name || video.title} • Season ${trailer.seasonNumber}` : video.type === 'series' && video.series_name ? video.series_name : video.title}
-                        </p>
-                      </div>
-                      <div className="hidden sm:flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-white/10 bg-black/25 text-white/45 transition-all group-hover/trailer:text-white group-hover/trailer:border-red-500/30 group-hover/trailer:bg-red-600/15">
-                        <Play size={16} fill="currentColor" />
-                      </div>
-                    </div>
-                  </div>
-                </button>
-              ) : (
-                <div className="h-28 rounded-2xl border border-white/8 bg-white/[0.03] overflow-hidden flex items-center gap-4 px-4">
-                  <div className="flex h-20 w-32 shrink-0 items-center justify-center rounded-xl bg-black/25 border border-white/8 text-white/25">
-                    <Clapperboard size={24} />
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    <div className="mb-1.5 flex items-center gap-2 text-[9px] font-black uppercase tracking-[0.18em] text-white/35">
-                      <Clapperboard size={14} />
-                      <span>Trailer</span>
-                    </div>
-                    <h3 className="truncate text-sm md:text-base font-black text-white/70 tracking-tight">
-                      Trailer unavailable
-                    </h3>
-                    <p className="mt-1 line-clamp-1 text-[11px] font-semibold text-white/30">
-                      No playable trailer was found right now.
-                    </p>
-                  </div>
-                </div>
-              )}
-            </div>
-            )}
 
             {/* Share Modal */}
             {showShareModal && sharePayload && (
@@ -1480,75 +1559,85 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
               </div>
             )}
 
-            {/* Episodes Section (for downloaded series) */}
-            {isLocalMedia && video.type === 'series' && (loading || episodes.length > 0) && (
-              <div className="pt-10 space-y-6">
-                <div className="flex flex-col md:flex-row md:items-center justify-between border-b border-white/5 pb-4 gap-4">
-                  <h3 className="text-2xl font-black text-white italic uppercase tracking-tighter">
-                    Episodes
-                  </h3>
-                  
-                  {/* Season Selector */}
-                  {seasons.length > 1 && (
-                    <div className="flex flex-wrap gap-2">
-                      {seasons.map(s => (
-                        <button
-                          key={s}
-                          onClick={() => setSelectedSeason(s)}
-                          className={`px-4 py-1.5 rounded-full text-[10px] font-black uppercase tracking-widest transition-all border ${
-                            selectedSeason === s 
-                              ? 'bg-red-600 border-red-600 text-white shadow-[0_0_15px_rgba(220,38,38,0.4)]' 
-                              : 'bg-white/5 border-white/10 text-muted hover:bg-white/10 hover:text-white'
-                          }`}
+            {/* Released, local, and upcoming series episodes */}
+            {video.type === 'series' && (loading || catalogLoading || episodeRows.length > 0) && (
+              <div className="border-t border-white/[0.08] pt-8 space-y-4">
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+                  <div>
+                    <p className="mb-1 text-[10px] font-black uppercase tracking-[0.2em] text-red-400">Browse the show</p>
+                    <h3 className="text-2xl font-black tracking-tight text-white">Episodes</h3>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    {seasons.length > 1 && (
+                      <label className="relative">
+                        <span className="sr-only">Select season</span>
+                        <select
+                          value={selectedSeason || seasons[0] || 1}
+                          onChange={(event) => setSelectedSeason(Number(event.target.value))}
+                          className="h-10 appearance-none rounded-xl border border-white/10 bg-white/[0.055] pl-3 pr-9 text-[10px] font-black uppercase tracking-[0.13em] text-white outline-none transition-colors hover:border-white/20 focus:border-red-500"
                         >
-                          Season {s}
-                        </button>
-                      ))}
-                    </div>
-                  )}
-
-                  <div className="flex items-center gap-4">
-                    <span className="text-[10px] text-muted font-black uppercase tracking-widest bg-white/5 px-3 py-1.5 rounded-full border border-white/5">
-                      {episodesBySeason[selectedSeason || 1]?.length || 0} Episodes
+                          {seasons.map(s => <option key={s} value={s} className="bg-[#111826]">Season {s}</option>)}
+                        </select>
+                        <ChevronDown size={14} className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-white/55" />
+                      </label>
+                    )}
+                    <span className="h-10 rounded-xl border border-white/[0.08] bg-white/[0.035] px-3 flex items-center text-[10px] font-black uppercase tracking-widest text-white/45">
+                      {episodesBySeason[selectedSeason || seasons[0] || 1]?.length || 0} episodes
                     </span>
                   </div>
                 </div>
                 
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 max-h-[400px] overflow-y-auto pr-2 scrollbar-thin">
-                  {loading ? (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5 max-h-[400px] overflow-y-auto pr-2 scrollbar-thin">
+                  {loading || catalogLoading ? (
                     <div className="col-span-full py-16 text-center">
                       <div className="inline-block w-8 h-8 border-4 border-primary/30 border-t-primary rounded-full animate-spin mb-4" />
                       <div className="text-muted font-black uppercase tracking-widest text-[10px]">Fetching episodes...</div>
                     </div>
                   ) : (
-                    (episodesBySeason[selectedSeason || 1] || []).map((ep, idx) => (
+                    (episodesBySeason[selectedSeason || 1] || []).map((ep, idx) => {
+                      const isCurrentEpisode = Boolean(ep.localVideo && getMediaUnitIdentity(ep.localVideo) === getMediaUnitIdentity(video))
+                      const isUpcoming = !ep.released && !ep.localVideo
+                      const isMissing = ep.released && !ep.localVideo
+                      return (
                       <button
-                        key={ep.id}
-                        onClick={() => onPlay(ep)}
-                        className={`flex items-center p-4 rounded-2xl transition-all border group text-left relative overflow-hidden ${
-                          ep.id === video.id 
-                            ? 'bg-red-600/10 border-red-600/40 translate-x-2' 
-                            : 'bg-white/5 border-white/5 hover:bg-white/10 hover:border-white/10 hover:-translate-y-1'
+                        key={`${ep.season}:${ep.episode}`}
+                        onClick={() => {
+                          if (ep.localVideo) onPlay(ep.localVideo)
+                          else if (isMissing) void handleOpenEpisodeSources(ep.season, ep.episode)
+                        }}
+                        disabled={isUpcoming}
+                        className={`flex min-h-[76px] items-center p-3 rounded-xl transition-all border group text-left relative overflow-hidden ${
+                          isCurrentEpisode
+                            ? 'bg-red-600/[0.12] border-red-500/45 shadow-[0_8px_28px_rgba(220,38,38,0.12)]'
+                          : isUpcoming
+                            ? 'cursor-default bg-white/[0.025] border-white/5 opacity-65'
+                            : 'bg-white/[0.045] border-white/[0.07] hover:bg-white/[0.08] hover:border-white/15'
                         }`}
                       >
-                        <div className={`w-12 h-12 rounded-xl flex items-center justify-center mr-5 transition-all text-sm font-black italic ${
-                          ep.id === video.id ? 'bg-red-600 text-white' : 'bg-black/40 text-muted group-hover:bg-red-600 group-hover:text-white'
+                        <div className={`w-10 h-10 rounded-lg flex items-center justify-center mr-3.5 transition-all text-sm font-black italic ${
+                          isCurrentEpisode ? 'bg-red-600 text-white' : isMissing ? 'bg-primary/15 text-primary' : 'bg-black/40 text-muted group-hover:bg-red-600 group-hover:text-white'
                         }`}>
                           {(idx + 1).toString().padStart(2, '0')}
                         </div>
                         <div className="flex-1 truncate">
                           <div className="text-sm font-bold text-white truncate mb-0.5">
-                            S{ep.season?.toString().padStart(2, '0')} E{ep.episode?.toString().padStart(2, '0')}
+                            S{ep.season.toString().padStart(2, '0')} E{ep.episode.toString().padStart(2, '0')}
                           </div>
                           <div className="text-[9px] text-muted font-black uppercase tracking-[0.1em] truncate opacity-60">
-                            {ep.title}
+                            {ep.title}{ep.versionCount > 1 ? ` • ${ep.versionCount} versions` : ''}
+                          </div>
+                          <div className={`mt-1 text-[8px] font-black uppercase tracking-widest ${
+                            ep.localVideo ? 'text-emerald-300/70' : isMissing ? 'text-primary/80' : 'text-white/30'
+                          }`}>
+                            {ep.localVideo ? 'In library' : isMissing ? 'Released • choose source' : ep.airDate ? `Upcoming • ${ep.airDate}` : 'Upcoming'}
                           </div>
                         </div>
-                        <div className="ml-4 opacity-0 group-hover:opacity-100 transition-opacity">
-                          <Play size={16} className="text-red-600" fill="currentColor" />
+                        <div className={`ml-4 transition-opacity ${isUpcoming ? 'opacity-40' : 'opacity-0 group-hover:opacity-100'}`}>
+                          {ep.localVideo ? <Play size={16} className="text-red-600" fill="currentColor" /> : isMissing ? <Download size={16} className="text-primary" /> : <Calendar size={16} className="text-white/40" />}
                         </div>
                       </button>
-                    ))
+                      )
+                    })
                   )}
                 </div>
               </div>
@@ -1569,11 +1658,12 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
                 <div className="min-w-0">
                   <div className="mb-2 flex items-center gap-2 text-[10px] font-black uppercase tracking-[0.18em] text-primary">
                     <Download size={14} />
-                    Download Sources
+                    {sourceActionLabel}
                   </div>
                   <h3 className="truncate text-lg font-black text-white">
                     {video.type === 'series' && video.series_name ? video.series_name : video.title}
                   </h3>
+                  <p className="mt-1 text-[10px] font-semibold text-white/35">Select a specific source to start a download.</p>
                   <div className="mt-3 flex flex-wrap items-center gap-2">
                     <span className="rounded-md border border-white/10 bg-white/[0.04] px-2.5 py-1 text-[10px] font-bold text-white/65">
                       {filteredSources.length} shown
@@ -1581,11 +1671,6 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
                     <span className="rounded-md border border-white/10 bg-white/[0.04] px-2.5 py-1 text-[10px] font-bold text-white/65">
                       {sources.length} total
                     </span>
-                    {filteredSources[0] && (
-                      <span className="rounded-md border border-emerald-400/20 bg-emerald-400/10 px-2.5 py-1 text-[10px] font-bold text-emerald-300">
-                        Best: {getTorrentSourceSpeedLabel(filteredSources[0])}
-                      </span>
-                    )}
                     {searching && sourceSearchStatus.total > 0 && (
                       <span className="rounded-md border border-primary/20 bg-primary/10 px-2.5 py-1 text-[10px] font-bold text-primary">
                         Checking {sourceSearchStatus.completed}/{sourceSearchStatus.total}
@@ -1695,6 +1780,51 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
             </div>
 
             <div className="flex-1 overflow-y-auto bg-[#080B10] px-4 py-4 scrollbar-thin">
+              {localVersions.length > 0 && (
+                <div className="mb-4 rounded-2xl border border-emerald-400/15 bg-emerald-400/[0.06] p-3.5">
+                  <div className="mb-3 flex items-center justify-between gap-3">
+                    <div>
+                      <p className="text-[9px] font-black uppercase tracking-[0.18em] text-emerald-300">In your library</p>
+                      <p className="mt-1 text-xs font-semibold text-white/60">
+                        {localVersions.length} {localVersions.length === 1 ? 'version' : 'versions'} • new downloads are kept separately
+                      </p>
+                    </div>
+                    <HardDrive size={18} className="text-emerald-300/70" />
+                  </div>
+                  <div className="space-y-2">
+                    {localVersions.map(version => (
+                      <div key={version.id} className="flex items-center gap-3 rounded-xl border border-white/8 bg-black/20 px-3 py-2.5">
+                        <button
+                          onClick={() => onPlay(version)}
+                          className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-red-600 text-white transition-transform hover:scale-105"
+                          title="Play this version"
+                        >
+                          <Play size={13} fill="currentColor" />
+                        </button>
+                        <div className="min-w-0 flex-1">
+                          <p className="text-xs font-bold text-white">{getVersionLabel(version)}</p>
+                          <p className="truncate text-[9px] font-semibold text-white/35" title={version.file_path}>
+                            {version.file_path.split(/[\\/]/).pop()}
+                          </p>
+                        </div>
+                        {version.is_preferred || (localVersions.length === 1 && version.id === localVersions[0].id) ? (
+                          <span className="rounded-md border border-emerald-300/20 bg-emerald-300/10 px-2 py-1 text-[8px] font-black uppercase tracking-widest text-emerald-200">
+                            Preferred
+                          </span>
+                        ) : (
+                          <button
+                            onClick={() => handleSetPreferredVersion(version)}
+                            className="rounded-md border border-white/10 px-2 py-1 text-[8px] font-black uppercase tracking-widest text-white/45 transition-colors hover:border-emerald-300/25 hover:text-emerald-200"
+                          >
+                            Make preferred
+                          </button>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
               {(searching || !sourceSearchStatus.done) && filteredSources.length === 0 ? (
                 <div className="flex h-full min-h-[340px] flex-col items-center justify-center gap-4 text-center">
                   <div className="h-12 w-12 rounded-full border-4 border-primary/20 border-t-primary animate-spin" />
@@ -1714,7 +1844,7 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
                   {filteredSources.map((src, idx) => {
                     const speedLabel = getTorrentSourceSpeedLabel(src)
                     const isStarting = startingSourceMagnet === src.magnet
-                    const isStarted = startedSourceMagnet === src.magnet
+                    const isStarted = startedSourceMagnet === src.magnet || activeDownloads.some(download => download.magnet === src.magnet && download.status !== 'error')
                     const isSharedSource = initialSharedSource?.magnet && src.magnet === initialSharedSource.magnet
                     const sharedSourceHasLiveStats = isSharedSource && ((Number(src.seeds) || 0) > 0 || (Number(src.peers) || 0) > 0)
 
@@ -1769,7 +1899,7 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
 
                           <button
                             onClick={() => handleDownloadSource(src)}
-                            disabled={isStarting}
+                            disabled={isStarting || isStarted}
                             className={`shrink-0 rounded-lg p-2 transition-all ${
                               isStarted
                                 ? 'bg-green-500/15 text-green-300'

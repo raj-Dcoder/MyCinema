@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react'
 import { Play, Pause, Rewind, FastForward, X, Maximize, Minimize, Volume2, VolumeX, Subtitles, Music, SkipForward as SkipNext, ArrowLeft, MessageSquareText, AlertTriangle, Check, Monitor, RectangleHorizontal, Crop, FolderOpen, Info, Film, HardDrive, ChevronDown, ChevronUp, ListVideo, Users, Search, Globe, Loader2, Download, RotateCcw, Zap, Sparkles, Wand2, PictureInPicture2, Mic, MicOff } from 'lucide-react'
 import { Video } from '../types'
+import { getMediaUnitIdentity, groupMediaVersions } from '../utils/mediaVersions'
 import { useWatchTogether } from '../hooks/useWatchTogether'
 import { WatchTogetherModal } from './WatchTogetherModal'
 import AIEnhancementRenderer from './AIEnhancementRenderer'
@@ -68,6 +69,7 @@ const INTRODB_AUTO_SKIP_NEXT_TRANSITION_MS = 240
 const INTRODB_AUTO_SKIP_CONFIRMATION_MS = 700
 const INTRODB_RECAP_PROMPT_VISIBLE_SECONDS = 8
 const SERIES_SUBTITLE_AUTO_LOAD_VALUE = 'external'
+const DOUBLE_TAP_WINDOW_MS = 300
 
 const AUDIO_BOOST_PROFILES: Record<AudioBoostProfile, {
   label: string
@@ -411,6 +413,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
   const [seekPopup, setSeekPopup] = useState<{ show: boolean, text: string, id: number }>({ show: false, text: '', id: 0 })
   const [volumePopup, setVolumePopup] = useState<{ show: boolean, volume: number, isMuted: boolean, id: number }>({ show: false, volume: 1, isMuted: false, id: 0 })
   const [speedPopup, setSpeedPopup] = useState<{ show: boolean, rate: number, id: number }>({ show: false, rate: 1, id: 0 })
+  const [fullscreenPopup, setFullscreenPopup] = useState<{ show: boolean, isFullscreen: boolean, id: number }>({ show: false, isFullscreen: false, id: 0 })
   const [performanceNotice, setPerformanceNotice] = useState<{ show: boolean, text: string, id: number }>({ show: false, text: '', id: 0 })
   const [highSpeedPerformanceMode, setHighSpeedPerformanceMode] = useState(false)
   const ASPECT_MODES: ('contain' | 'cover' | 'fill')[] = ['contain', 'cover', 'fill'];
@@ -426,6 +429,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
   const lastSeekTimeRef = useRef(0)
   const [hasNextEpisode, setHasNextEpisode] = useState(false)
   const clickTimeoutRef = useRef<NodeJS.Timeout | null>(null)
+  const fullscreenToggleInFlightRef = useRef(false)
   const timeRef = useRef(0)
   const durationRef = useRef(1)
   const holdTimeoutRef = useRef<NodeJS.Timeout | null>(null)
@@ -1188,9 +1192,11 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
 
   const checkNextEpisode = async (video: Video) => {
     if (video.type === 'series' && video.series_name) {
-      const episodes: Video[] = await window.api.getSeriesInfo(video.series_name)
+      const episodeVersions: Video[] = await window.api.getSeriesInfo(video.series_name)
+      const episodes = groupMediaVersions(episodeVersions).map(group => group.representative)
       setSeriesEpisodes(episodes)
-      const currentIndex = episodes.findIndex(e => e.id === video.id)
+      const currentIdentity = getMediaUnitIdentity(video)
+      const currentIndex = episodes.findIndex(episode => getMediaUnitIdentity(episode) === currentIdentity)
       setHasNextEpisode(currentIndex !== -1 && currentIndex < episodes.length - 1)
     } else {
       setSeriesEpisodes([])
@@ -1546,6 +1552,14 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
       return () => clearTimeout(timer)
     }
   }, [seekPopup.id, seekPopup.show])
+
+  useEffect(() => {
+    if (!fullscreenPopup.show) return
+    const timer = setTimeout(() => {
+      setFullscreenPopup(previous => ({ ...previous, show: false }))
+    }, 1100)
+    return () => clearTimeout(timer)
+  }, [fullscreenPopup.id, fullscreenPopup.show])
 
   useEffect(() => {
     let isCancelled = false
@@ -2455,8 +2469,10 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
 
   const playNextEpisode = async () => {
     if (currentVideo.type === 'series' && currentVideo.series_name) {
-      const episodes: Video[] = seriesEpisodes.length > 0 ? seriesEpisodes : await window.api.getSeriesInfo(currentVideo.series_name)
-      const currentIndex = episodes.findIndex(e => e.id === currentVideo.id)
+      const episodeVersions: Video[] = seriesEpisodes.length > 0 ? seriesEpisodes : await window.api.getSeriesInfo(currentVideo.series_name)
+      const episodes = groupMediaVersions(episodeVersions).map(group => group.representative)
+      const currentIdentity = getMediaUnitIdentity(currentVideo)
+      const currentIndex = episodes.findIndex(episode => getMediaUnitIdentity(episode) === currentIdentity)
       if (currentIndex !== -1 && currentIndex < episodes.length - 1) {
         forceRestartRef.current = true
         setForceRestart(true)
@@ -2527,16 +2543,17 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
     }
 
     if (clickTimeoutRef.current) {
-      // It's a double click!
+      // A double click/tap on the viewing surface toggles fullscreen. Keeping this
+      // separate from native dblclick makes it work the same for mouse, touch, and pen.
       clearTimeout(clickTimeoutRef.current)
       clickTimeoutRef.current = null
-      toggleFullscreen()
+      void toggleFullscreen()
     } else {
-      // First click!
+      // Wait briefly so a potential second tap can take precedence over play/pause.
       clickTimeoutRef.current = setTimeout(() => {
         togglePlay()
         clickTimeoutRef.current = null
-      }, 300)
+      }, DOUBLE_TAP_WINDOW_MS)
     }
   }
 
@@ -3302,6 +3319,9 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
   }
 
   const toggleFullscreen = async () => {
+    if (fullscreenToggleInFlightRef.current) return
+    fullscreenToggleInFlightRef.current = true
+
     try {
       const hasDocumentFullscreen = !!document.fullscreenElement
       const hasWindowFullscreen = await window.api.isFullscreen().catch(() => isWindowFullscreen)
@@ -3322,12 +3342,16 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
         setShowControls(true)
         clearTimeout(window.controlsTimeout)
         window.controlsTimeout = setTimeout(() => setShowControls(false), 3000)
+        setFullscreenPopup(previous => ({ show: true, isFullscreen: false, id: previous.id + 1 }))
         return
       }
 
       await playerShellRef.current?.requestFullscreen()
+      setFullscreenPopup(previous => ({ show: true, isFullscreen: true, id: previous.id + 1 }))
     } catch (err) {
       console.error('Fullscreen toggle failed:', err)
+    } finally {
+      fullscreenToggleInFlightRef.current = false
     }
   }
 
@@ -3432,6 +3456,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
   return (
     <div 
       ref={playerShellRef}
+      data-fullscreen-gesture-scope="player"
       className={`fixed inset-0 z-50 bg-black flex flex-col items-center justify-center group overflow-hidden ${!showControls ? 'cursor-none' : ''}`}
       onMouseMove={(e) => {
         setShowControls(true)
@@ -3653,6 +3678,21 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
           <div className="bg-black/60 text-white font-bold w-24 h-24 rounded-full backdrop-blur-md flex flex-col justify-center items-center animate-seek shadow-2xl border border-white/10 space-y-1">
             <FastForward size={32} />
             <span className="text-lg tracking-wider">{speedPopup.rate}x</span>
+          </div>
+        </div>
+      )}
+
+      {/* Gives the double-tap gesture an immediate, unambiguous confirmation. */}
+      {fullscreenPopup.show && (
+        <div
+          key={`fullscreen-${fullscreenPopup.id}`}
+          className="absolute inset-0 z-[60] flex items-center justify-center pointer-events-none"
+          role="status"
+          aria-live="polite"
+        >
+          <div className="flex h-24 w-24 flex-col items-center justify-center space-y-1 rounded-full border border-white/10 bg-black/60 font-bold text-white shadow-2xl backdrop-blur-md animate-seek">
+            {fullscreenPopup.isFullscreen ? <Maximize size={30} /> : <Minimize size={30} />}
+            <span className="text-xs tracking-wide">{fullscreenPopup.isFullscreen ? 'Fullscreen' : 'Windowed'}</span>
           </div>
         </div>
       )}

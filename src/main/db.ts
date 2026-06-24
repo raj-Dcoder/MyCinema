@@ -121,6 +121,9 @@ export function initDb() {
   if (!columnNames.includes('watchlist_category')) {
     db.exec("ALTER TABLE videos ADD COLUMN watchlist_category TEXT DEFAULT 'Watchlist'")
   }
+  if (!columnNames.includes('is_preferred')) {
+    db.exec("ALTER TABLE videos ADD COLUMN is_preferred BOOLEAN DEFAULT 0")
+  }
 
   const watchlistColumns = db.prepare("PRAGMA table_info(watchlist)").all()
   const watchlistColumnNames = watchlistColumns.map((c: any) => c.name)
@@ -155,6 +158,10 @@ export function initDb() {
       size TEXT DEFAULT '—',
       downloaded TEXT DEFAULT '0 B',
       tmdb_id INTEGER,
+      media_type TEXT,
+      season INTEGER,
+      episode INTEGER,
+      download_path TEXT,
       error_message TEXT,
       added_at DATETIME DEFAULT CURRENT_TIMESTAMP
     );
@@ -168,6 +175,18 @@ export function initDb() {
   }
   if (!dlColumnNames.includes('tmdb_id')) {
     db.exec("ALTER TABLE downloads ADD COLUMN tmdb_id INTEGER")
+  }
+  if (!dlColumnNames.includes('media_type')) {
+    db.exec("ALTER TABLE downloads ADD COLUMN media_type TEXT")
+  }
+  if (!dlColumnNames.includes('season')) {
+    db.exec("ALTER TABLE downloads ADD COLUMN season INTEGER")
+  }
+  if (!dlColumnNames.includes('episode')) {
+    db.exec("ALTER TABLE downloads ADD COLUMN episode INTEGER")
+  }
+  if (!dlColumnNames.includes('download_path')) {
+    db.exec("ALTER TABLE downloads ADD COLUMN download_path TEXT")
   }
 }
 
@@ -221,6 +240,46 @@ export function deleteVideo(id: number) {
   return stmt.run(id)
 }
 
+export function setPreferredVideoVersion(videoId: number) {
+  const video = db.prepare('SELECT * FROM videos WHERE id = ?').get(videoId) as any
+  if (!video) return false
+
+  const tx = db.transaction(() => {
+    if (video.type === 'series') {
+      if (video.tmdb_id) {
+        db.prepare(`
+          UPDATE videos SET is_preferred = 0
+          WHERE type = 'series' AND tmdb_id = ?
+            AND COALESCE(season, 1) = COALESCE(?, 1)
+            AND COALESCE(episode, 0) = COALESCE(?, 0)
+        `).run(video.tmdb_id, video.season, video.episode)
+      } else {
+        db.prepare(`
+          UPDATE videos SET is_preferred = 0
+          WHERE type = 'series' AND LOWER(TRIM(series_name)) = LOWER(TRIM(?))
+            AND COALESCE(season, 1) = COALESCE(?, 1)
+            AND COALESCE(episode, 0) = COALESCE(?, 0)
+        `).run(video.series_name, video.season, video.episode)
+      }
+    } else if (video.type === 'movie') {
+      if (video.tmdb_id) {
+        db.prepare("UPDATE videos SET is_preferred = 0 WHERE type = 'movie' AND tmdb_id = ?").run(video.tmdb_id)
+      } else {
+        db.prepare(`
+          UPDATE videos SET is_preferred = 0
+          WHERE type = 'movie' AND LOWER(TRIM(title)) = LOWER(TRIM(?))
+            AND COALESCE(release_year, 0) = COALESCE(?, 0)
+        `).run(video.title, video.release_year)
+      }
+    }
+
+    db.prepare('UPDATE videos SET is_preferred = 1 WHERE id = ?').run(videoId)
+  })
+
+  tx()
+  return true
+}
+
 /**
  * When an episode is completed, find the very next episode in the series
  * and insert a fresh 0:00, completed=0 progress row for it.
@@ -231,13 +290,25 @@ function queueNextEpisode(videoId: number) {
     const currentVideo = db.prepare('SELECT * FROM videos WHERE id = ?').get(videoId) as any
     if (!currentVideo || currentVideo.type !== 'series' || !currentVideo.series_name) return
 
-    const episodes = db.prepare(`
+    const episodeVersions = db.prepare(`
       SELECT * FROM videos 
       WHERE series_name = ? 
-      ORDER BY season ASC, episode ASC
+      ORDER BY season ASC, episode ASC, is_preferred DESC, added_at DESC
     `).all(currentVideo.series_name) as any[]
 
-    const currentIndex = episodes.findIndex((e: any) => e.id === videoId)
+    const episodes: any[] = []
+    const seenEpisodes = new Set<string>()
+    for (const episode of episodeVersions) {
+      const key = `${Number(episode.season || 1)}:${Number(episode.episode || 0)}`
+      if (seenEpisodes.has(key)) continue
+      seenEpisodes.add(key)
+      episodes.push(episode)
+    }
+
+    const currentKey = `${Number(currentVideo.season || 1)}:${Number(currentVideo.episode || 0)}`
+    const currentIndex = episodes.findIndex((episode: any) => (
+      `${Number(episode.season || 1)}:${Number(episode.episode || 0)}` === currentKey
+    ))
     if (currentIndex === -1) return
 
     // If this is the final episode in the series, mark ALL previous episodes as completed
@@ -319,7 +390,7 @@ export function getSeriesInfo(seriesName: string) {
   return db.prepare(`
     SELECT * FROM videos 
     WHERE series_name = ? 
-    ORDER BY season ASC, episode ASC
+    ORDER BY season ASC, episode ASC, is_preferred DESC, added_at DESC
   `).all(seriesName)
 }
 
@@ -584,8 +655,8 @@ export function removeFolder(folderPath: string) {
 
 export function addDownload(dl: any) {
   const stmt = db.prepare(`
-    INSERT INTO downloads (id, title, name, magnet, progress, download_speed, time_remaining, status, size, downloaded, tmdb_id, error_message)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO downloads (id, title, name, magnet, progress, download_speed, time_remaining, status, size, downloaded, tmdb_id, media_type, season, episode, download_path, error_message)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(id) DO UPDATE SET
       title = excluded.title,
       name = excluded.name,
@@ -596,10 +667,14 @@ export function addDownload(dl: any) {
       size = excluded.size,
       downloaded = excluded.downloaded,
       tmdb_id = excluded.tmdb_id,
+      media_type = excluded.media_type,
+      season = excluded.season,
+      episode = excluded.episode,
+      download_path = excluded.download_path,
       error_message = excluded.error_message
   `)
   return stmt.run(
-    dl.id, dl.title, dl.name || null, dl.magnet, dl.progress || 0, dl.downloadSpeed || '0 B/s', dl.timeRemaining || '—', dl.status || 'pending', dl.size || '—', dl.downloaded || '0 B', dl.tmdbId || null, dl.errorMessage || null
+    dl.id, dl.title, dl.name || null, dl.magnet, dl.progress || 0, dl.downloadSpeed || '0 B/s', dl.timeRemaining || '—', dl.status || 'pending', dl.size || '—', dl.downloaded || '0 B', dl.tmdbId || null, dl.mediaType || null, dl.season || null, dl.episode || null, dl.downloadPath || null, dl.errorMessage || null
   )
 }
 
@@ -627,6 +702,10 @@ export function getDownloads() {
     size: row.size,
     downloaded: row.downloaded,
     tmdbId: row.tmdb_id,
+    mediaType: row.media_type,
+    season: row.season,
+    episode: row.episode,
+    downloadPath: row.download_path,
     errorMessage: row.error_message,
     addedAt: row.added_at
   }))
@@ -679,6 +758,10 @@ export function removeVideosByTmdbId(tmdbId: number) {
 
 export function getDownloadByTorrentName(name: string) {
   return db.prepare('SELECT * FROM downloads WHERE name = ?').get(name) as any
+}
+
+export function getDownloadById(id: string) {
+  return db.prepare('SELECT * FROM downloads WHERE id = ?').get(id) as any
 }
 
 export function findVideoByTmdbId(tmdbId: number) {

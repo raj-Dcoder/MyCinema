@@ -98,6 +98,16 @@ export interface TmdbTrailer {
   availableSeasons: number[]
 }
 
+export interface TmdbSeriesEpisode {
+  seasonNumber: number
+  episodeNumber: number
+  name: string
+  overview: string | null
+  airDate: string | null
+  stillPath: string | null
+  released: boolean
+}
+
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 function getCacheDir(): string {
@@ -119,6 +129,8 @@ const TMDB_FETCH_TIMEOUT_MS = 12000
 const youtubePlayableCache = new Map<string, { playable: boolean, timestamp: number }>()
 const YOUTUBE_PLAYABLE_CACHE_TTL = 1000 * 60 * 60 * 12
 const tmdbTrailerCache = new Map<string, { trailer: TmdbTrailer | null, timestamp: number }>()
+const tmdbSeriesCatalogCache = new Map<number, { episodes: TmdbSeriesEpisode[], timestamp: number }>()
+const TMDB_SERIES_CATALOG_CACHE_TTL = 1000 * 60 * 60 * 6
 const TMDB_TRAILER_CACHE_TTL = 1000 * 60 * 30
 const tmdbTitleLogoCache = new Map<string, { logoPath: string | null, timestamp: number }>()
 const TMDB_TITLE_LOGO_CACHE_TTL = 1000 * 60 * 60 * 24 * 30
@@ -831,6 +843,70 @@ export async function fetchTmdbMetadata(
   } catch (err: any) {
     console.error(`[TMDB] Error for "${title}" ${year ? `(${year})` : ''}:`, err.message)
     return empty
+  }
+}
+
+export async function fetchTmdbSeriesCatalog(tmdbId: number): Promise<TmdbSeriesEpisode[]> {
+  const normalizedId = Number(tmdbId)
+  if (!Number.isFinite(normalizedId) || normalizedId <= 0) return []
+
+  const cached = tmdbSeriesCatalogCache.get(normalizedId)
+  if (cached && Date.now() - cached.timestamp < TMDB_SERIES_CATALOG_CACHE_TTL) {
+    return cached.episodes
+  }
+
+  const apiKey = getTmdbApiKey()
+  if (!apiKey) return []
+
+  try {
+    if (!cachedTmdbIp) await resolveDnsDoH('api.themoviedb.org')
+
+    const request = async (url: string) => {
+      const response = await fetch(url, {
+        dispatcher: tmdbDispatcher,
+        headers: { 'User-Agent': 'MyCinema/1.25.3', 'Accept': 'application/json' },
+        signal: AbortSignal.timeout(TMDB_FETCH_TIMEOUT_MS)
+      })
+      if (!response.ok) throw new Error(`HTTP ${response.status}`)
+      return await response.json() as any
+    }
+
+    const details = await request(`${TMDB_BASE}/tv/${normalizedId}?api_key=${apiKey}&language=en-US`)
+    const seasonNumbers: number[] = (Array.isArray(details.seasons) ? details.seasons : [])
+      .map((season: any) => Number(season?.season_number))
+      .filter((seasonNumber: number) => Number.isFinite(seasonNumber) && seasonNumber > 0)
+
+    const seasonResults = await Promise.allSettled(seasonNumbers.map(seasonNumber => (
+      request(`${TMDB_BASE}/tv/${normalizedId}/season/${seasonNumber}?api_key=${apiKey}&language=en-US`)
+    )))
+    const today = new Date().toISOString().slice(0, 10)
+    const episodes: TmdbSeriesEpisode[] = []
+
+    for (const result of seasonResults) {
+      if (result.status !== 'fulfilled') continue
+      for (const episode of Array.isArray(result.value.episodes) ? result.value.episodes : []) {
+        const seasonNumber = Number(episode?.season_number)
+        const episodeNumber = Number(episode?.episode_number)
+        if (!Number.isFinite(seasonNumber) || !Number.isFinite(episodeNumber)) continue
+        const airDate = typeof episode.air_date === 'string' && episode.air_date ? episode.air_date : null
+        episodes.push({
+          seasonNumber,
+          episodeNumber,
+          name: String(episode.name || `Episode ${episodeNumber}`),
+          overview: episode.overview || null,
+          airDate,
+          stillPath: episode.still_path ? `${TMDB_IMG}${episode.still_path}` : null,
+          released: Boolean(airDate && airDate <= today)
+        })
+      }
+    }
+
+    episodes.sort((a, b) => a.seasonNumber - b.seasonNumber || a.episodeNumber - b.episodeNumber)
+    tmdbSeriesCatalogCache.set(normalizedId, { episodes, timestamp: Date.now() })
+    return episodes
+  } catch (err: any) {
+    console.warn(`[TMDB] Episode catalog fetch failed for ${normalizedId}: ${err.message}`)
+    return cached?.episodes || []
   }
 }
 

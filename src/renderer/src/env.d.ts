@@ -19,6 +19,7 @@ interface Api {
   getContinueWatching: () => Promise<any[]>
   playVideo: (videoId: number) => Promise<void>
   getSeriesInfo: (seriesName: string) => Promise<any[]>
+  setPreferredVideoVersion: (videoId: number) => Promise<boolean>
   getSubtitlePath: (filePath: string) => Promise<string | null>
   getEmbeddedSubtitles: (filePath: string) => Promise<any[]>
   getEmbeddedAudio: (filePath: string) => Promise<any[]>
@@ -56,6 +57,7 @@ interface Api {
   fetchTrendingIndia: (type?: 'movie' | 'series') => Promise<any[]>
   getTmdbTitleLogo: (type: 'movie' | 'series', tmdbId: number) => Promise<string | null>
   getTmdbTrailer: (params: { tmdbId?: number | null; title: string; type: 'movie' | 'series'; year?: number | null; seasonNumber?: number | null; preferLatestSeason?: boolean }) => Promise<any | null>
+  getTmdbSeriesCatalog: (tmdbId: number) => Promise<Array<{ seasonNumber: number; episodeNumber: number; name: string; overview: string | null; airDate: string | null; stillPath: string | null; released: boolean }>>
   getIntroDbSegments: (params: { imdbId?: string | null; tmdbId?: number | null; season?: number | null; episode?: number | null; filePath?: string | null; duration?: number | null }) => Promise<{
     imdbId: string | null
     season: number | null
@@ -92,7 +94,7 @@ interface Api {
   searchTorrentSources: (title: string, year: string, mediaType: string, tmdbId: number, requestId?: string) => Promise<any[]>
   cancelTorrentSourceSearch: (requestId: string) => Promise<boolean>
   onTorrentSourcesProgress: (callback: (data: any) => void) => () => void
-  startTorrentDownload: (magnetUrl: string, title: string, tmdbId?: number, name?: string) => Promise<string | boolean>
+  startTorrentDownload: (magnetUrl: string, title: string, tmdbId?: number, name?: string, media?: { mediaType?: 'movie' | 'series'; season?: number; episode?: number }) => Promise<string | boolean>
   cancelTorrentDownload: (id: string) => Promise<boolean>
   removeDownload: (id: string, deleteFile?: boolean) => Promise<boolean>
   pauseResumeTorrent: (id: string) => Promise<boolean>

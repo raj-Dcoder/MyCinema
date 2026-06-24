@@ -1326,6 +1326,14 @@ ipcMain.handle('get-series-info', (_, seriesName) => {
   return db.getSeriesInfo(seriesName)
 })
 
+ipcMain.handle('set-preferred-video-version', (_, videoId: number) => {
+  const changed = db.setPreferredVideoVersion(videoId)
+  if (changed) {
+    BrowserWindow.getAllWindows().forEach(w => w.webContents.send('library-updated'))
+  }
+  return changed
+})
+
 ipcMain.handle('get-folders', () => {
   return db.getFolders()
 })
@@ -2252,6 +2260,10 @@ ipcMain.handle('get-tmdb-title-logo', async (_, type: 'movie' | 'series', tmdbId
 
 ipcMain.handle('get-tmdb-trailer', async (_, params: { tmdbId?: number | null; title: string; type: 'movie' | 'series'; year?: number | null; seasonNumber?: number | null; preferLatestSeason?: boolean }) => {
   return await tmdb.fetchTmdbTrailer(params)
+})
+
+ipcMain.handle('get-tmdb-series-catalog', async (_, tmdbId: number) => {
+  return await tmdb.fetchTmdbSeriesCatalog(tmdbId)
 })
 
 ipcMain.handle('get-introdb-segments', async (_, params: { imdbId?: string | null; tmdbId?: number | null; season?: number | null; episode?: number | null; filePath?: string | null; duration?: number | null }) => {
@@ -4054,9 +4066,10 @@ async function startWebTorrent(torrentId: string, magnetUrl: string, title: stri
   pausedTorrentIds.delete(torrentId)
   clearTorrentProgressInterval(torrentId)
   const client = await getWebTorrentClient()
-  const downloadPath = getDownloadPath()
   const enrichedMagnetUrl = enrichMagnetWithTrackers(magnetUrl)
   const existingDownload = db.getDownloads().find((d: any) => d.id === torrentId)
+  const downloadPath = existingDownload?.downloadPath || getDownloadPath()
+  fs.mkdirSync(downloadPath, { recursive: true })
   const displayName = initialName || existingDownload?.name || getMagnetDisplayName(enrichedMagnetUrl) || title
 
   console.log(`[Torrent] Starting download: "${title}" -> ${downloadPath}`)
@@ -4137,11 +4150,21 @@ async function autoResumeDownloads() {
   }
 }
 
-ipcMain.handle('start-torrent-download', async (_, magnetUrl: string, title: string, tmdbId?: number, name?: string) => {
+ipcMain.handle('start-torrent-download', async (_, magnetUrl: string, title: string, tmdbId?: number, name?: string, media?: {
+  mediaType?: 'movie' | 'series'
+  season?: number
+  episode?: number
+}) => {
   try {
-    const torrentId = crypto.randomUUID()
     const enrichedMagnetUrl = enrichMagnetWithTrackers(magnetUrl)
+    const existingDownload = db.getDownloads().find((download: any) => (
+      download.magnet === enrichedMagnetUrl && download.status !== 'error'
+    ))
+    if (existingDownload) return existingDownload.id
+
+    const torrentId = crypto.randomUUID()
     const displayName = name || getMagnetDisplayName(enrichedMagnetUrl) || title
+    const downloadPath = path.join(getDownloadPath(), torrentId)
     
     db.addDownload({
       id: torrentId,
@@ -4149,7 +4172,11 @@ ipcMain.handle('start-torrent-download', async (_, magnetUrl: string, title: str
       name: displayName,
       magnet: enrichedMagnetUrl,
       status: 'downloading',
-      tmdbId
+      tmdbId,
+      mediaType: media?.mediaType,
+      season: media?.season,
+      episode: media?.episode,
+      downloadPath
     })
 
     await startWebTorrent(torrentId, enrichedMagnetUrl, title, 0, displayName)
@@ -4515,7 +4542,6 @@ function collectDownloadDeleteTargets(id: string, torrent: any, download: any): 
   const targets = new Set<string>()
   const tvMeta = inferDownloadTvMetadata(torrent, download)
   const isSingleEpisodeDownload = typeof tvMeta.parsedEpisode === 'number' && tvMeta.isSeasonPack === false
-  const isSeasonPackDownload = Boolean(tvMeta.isSeasonPack) && !isSingleEpisodeDownload
 
   const addTarget = (candidate?: string | null) => {
     if (!candidate) return
@@ -4531,6 +4557,14 @@ function collectDownloadDeleteTargets(id: string, torrent: any, download: any): 
     if (isPathInsideRoot(resolved, downloadRoot) && resolved !== path.resolve(downloadRoot)) {
       targets.add(resolved)
     }
+  }
+
+  // New downloads live in an ID-scoped directory. This is the authoritative
+  // boundary for deleting one download and prevents another version of the
+  // same title from being collected through a broad TMDB match.
+  if (download?.downloadPath) {
+    addAbsoluteTarget(download.downloadPath)
+    if (targets.size > 0) return Array.from(targets)
   }
 
   const matchingVideos = getMatchingDownloadedVideos(downloadRoot, download, tvMeta)
@@ -4553,16 +4587,6 @@ function collectDownloadDeleteTargets(id: string, torrent: any, download: any): 
       addTarget(relativeFilePath)
       if (!isSingleEpisodeDownload) {
         addAbsoluteTarget(getTopLevelDownloadTarget(downloadRoot, relativeFilePath))
-      }
-    }
-  }
-
-  if (download?.tmdbId && !isSingleEpisodeDownload && !isSeasonPackDownload) {
-    const videos = db.getVideos() as any[]
-    for (const video of videos) {
-      if (video.tmdb_id === download.tmdbId && video.type !== 'series' && isPathInsideRoot(video.file_path, downloadRoot)) {
-        addAbsoluteTarget(video.file_path)
-        addAbsoluteTarget(getTopLevelDownloadTarget(downloadRoot, path.relative(downloadRoot, video.file_path)))
       }
     }
   }

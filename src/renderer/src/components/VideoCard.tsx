@@ -1,5 +1,5 @@
 import React from 'react'
-import { Play, Star } from 'lucide-react'
+import { Layers3, Play, Star } from 'lucide-react'
 import { Video } from '../types'
 import { groupSeriesCards } from '../utils/seriesCards'
 
@@ -152,7 +152,12 @@ const VideoCard: React.FC<VideoCardProps> = ({ video, onPlay, onShowDetail, isCo
 
         <div className="absolute inset-0 flex flex-col justify-end bg-gradient-to-t from-black via-black/75 to-black/10 p-3 opacity-0 transition-opacity duration-300 group-hover:opacity-100 group-focus-visible:opacity-100">
           <div className="mb-auto flex items-start justify-between gap-2">
-            {video.isExternal && !video.is_watchlist ? (
+            {(video.version_count || 1) > 1 ? (
+              <span className="inline-flex items-center gap-1 rounded-md border border-emerald-400/25 bg-emerald-400/15 px-2 py-1 text-[8px] font-black uppercase tracking-widest text-emerald-200 backdrop-blur-md">
+                <Layers3 size={10} />
+                {video.version_count} versions
+              </span>
+            ) : video.isExternal && !video.is_watchlist ? (
               <span className="rounded-md border border-red-500/30 bg-red-600/25 px-2 py-1 text-[8px] font-black uppercase tracking-widest text-white backdrop-blur-md">
                 Trending
               </span>

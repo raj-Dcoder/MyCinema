@@ -1,4 +1,5 @@
 import { Video } from '../types'
+import { getEpisodeIdentity, pickPreferredVersion } from './mediaVersions'
 
 const getSeriesKey = (video: Video) => video.series_name?.trim().toLowerCase()
 
@@ -14,15 +15,26 @@ const isInProgressEpisode = (video: Video) => {
 
 export function groupSeriesCards(videos: Video[]) {
   const seriesEpisodes = videos.filter(video => video.type === 'series' && video.series_name)
-  const counts = new Map<string, number>()
+  const episodeIds = new Map<string, Set<string>>()
   const fallbackBySeries = new Map<string, Video>()
   const resumeBySeries = new Map<string, Video>()
+  const versionsByEpisode = new Map<string, Video[]>()
 
   for (const episode of seriesEpisodes) {
+    const episodeKey = getEpisodeIdentity(episode)
+    const versions = versionsByEpisode.get(episodeKey) || []
+    versions.push(episode)
+    versionsByEpisode.set(episodeKey, versions)
+  }
+
+  for (const versions of versionsByEpisode.values()) {
+    const episode = pickPreferredVersion(versions)!
     const key = getSeriesKey(episode)
     if (!key) continue
 
-    counts.set(key, (counts.get(key) || 0) + 1)
+    const ids = episodeIds.get(key) || new Set<string>()
+    ids.add(getEpisodeIdentity(episode))
+    episodeIds.set(key, ids)
     if (!fallbackBySeries.has(key)) fallbackBySeries.set(key, episode)
 
     if (isInProgressEpisode(episode)) {
@@ -35,6 +47,6 @@ export function groupSeriesCards(videos: Video[]) {
 
   return Array.from(fallbackBySeries.entries()).map(([key, fallback]) => ({
     ...(resumeBySeries.get(key) || fallback),
-    episode_count: counts.get(key) || 1
+    episode_count: episodeIds.get(key)?.size || 1
   }))
 }

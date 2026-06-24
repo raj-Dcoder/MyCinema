@@ -18,6 +18,7 @@ import appLogo from './assets/mycinema-logo.png'
 const getWhatsNewStorageKey = (version: string) => `mycinema_whats_new_seen_${version}`
 const getFeatureSpotlightStorageKey = (version: string) => `mycinema_fullscreen_controls_spotlight_seen_${version}`
 const SIDEBAR_EXPANDED_STORAGE_KEY = 'mycinema_sidebar_expanded'
+const DOUBLE_TAP_WINDOW_MS = 300
 type AppTab = 'home' | 'videos' | 'movies' | 'series' | 'download' | 'settings' | 'watchlist' | 'history' | 'favorites'
 
 type ActiveDownload = {
@@ -77,6 +78,8 @@ const App: React.FC = () => {
   const activeTabRef = useRef<AppTab>('home')
   const tabScrollPositionsRef = useRef<Partial<Record<AppTab, number>>>({})
   const windowControlsHideTimerRef = useRef<number | null>(null)
+  const appFullscreenTapTimerRef = useRef<number | null>(null)
+  const appFullscreenToggleInFlightRef = useRef(false)
 
   const getScrollElement = (tab: AppTab) => {
     return tab === 'home' ? homeScrollRef.current : activePageScrollRef.current
@@ -174,6 +177,9 @@ const App: React.FC = () => {
   useEffect(() => {
     return () => {
       clearWindowControlsHideTimer()
+      if (appFullscreenTapTimerRef.current) {
+        window.clearTimeout(appFullscreenTapTimerRef.current)
+      }
     }
   }, [])
 
@@ -300,11 +306,38 @@ const App: React.FC = () => {
   }
 
   const handleToggleFullscreen = async () => {
-    const nextState = await window.api.toggleFullscreen()
-    setIsFullscreen(nextState)
-    if (!nextState) {
-      setShowWindowControls(false)
+    if (appFullscreenToggleInFlightRef.current) return
+    appFullscreenToggleInFlightRef.current = true
+    try {
+      const nextState = await window.api.toggleFullscreen()
+      setIsFullscreen(nextState)
+      if (!nextState) {
+        setShowWindowControls(false)
+      }
+    } finally {
+      appFullscreenToggleInFlightRef.current = false
     }
+  }
+
+  const handleAppSurfaceClick = (event: React.MouseEvent<HTMLDivElement>) => {
+    if (playingVideo) return
+
+    const target = event.target as HTMLElement
+    // Controls, fields, dialogs, and the player always retain their own interaction model.
+    if (target.closest('button, a, input, textarea, select, option, [contenteditable="true"], [role="button"], [role="dialog"], [data-fullscreen-gesture-ignore], [data-fullscreen-gesture-scope]')) {
+      return
+    }
+
+    if (appFullscreenTapTimerRef.current) {
+      window.clearTimeout(appFullscreenTapTimerRef.current)
+      appFullscreenTapTimerRef.current = null
+      void handleToggleFullscreen()
+      return
+    }
+
+    appFullscreenTapTimerRef.current = window.setTimeout(() => {
+      appFullscreenTapTimerRef.current = null
+    }, DOUBLE_TAP_WINDOW_MS)
   }
 
   const dismissFeatureSpotlight = () => {
@@ -451,7 +484,11 @@ const App: React.FC = () => {
   const shouldShowDownloadTray = Boolean(trayDownload && activeTab !== 'download' && !playingVideo)
 
   return (
-    <div className="flex h-screen bg-[#05080d] text-text font-sans overflow-hidden">
+    <div
+      className="flex h-screen bg-[#05080d] text-text font-sans overflow-hidden"
+      onClick={handleAppSurfaceClick}
+      title="Double-click or double-tap open space to toggle fullscreen"
+    >
       <WindowControls />
 
       {/* Sidebar */}

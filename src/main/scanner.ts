@@ -1,6 +1,6 @@
 import fs from 'fs'
 import path from 'path'
-import { addVideo, getVideos, updateVideoMetadata, deleteVideo, getDownloadByTorrentName } from './db'
+import { addVideo, getVideos, updateVideoMetadata, deleteVideo, getDownloadById, getDownloadByTorrentName } from './db'
 import { fetchTmdbMetadata } from './tmdb'
 import ffmpeg from 'fluent-ffmpeg'
 import ffmpegStatic from 'ffmpeg-static'
@@ -273,7 +273,7 @@ export async function scanFolder(rootPath: string) {
       if (normFilePath.toLowerCase().startsWith(dlPath.toLowerCase())) {
         const relative = path.relative(dlPath, normFilePath)
         const torrentName = relative.split(path.sep)[0]
-        const download = getDownloadByTorrentName(torrentName)
+        const download = getDownloadById(torrentName) || getDownloadByTorrentName(torrentName)
         if (download && download.tmdb_id) {
           tmdbIdFromDownload = download.tmdb_id
           console.log(`[Scanner] Linked file to download: "${torrentName}" -> TMDB ID: ${tmdbIdFromDownload}`)

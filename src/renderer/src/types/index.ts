@@ -17,6 +17,8 @@ export interface Video {
   completed?: boolean
   updated_at?: string
   episode_count?: number
+  version_count?: number
+  is_preferred?: boolean
   vote_average?: number
   release_year?: number
   tmdb_id?: number

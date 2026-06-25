@@ -45,86 +45,84 @@ type WhatsNewSlide = {
 }
 
 export const LATEST_RELEASE = {
-  version: '1.25.2',
-  eyebrow: 'What\'s New',
+  version: '1.26.0',
+  eyebrow: "What's New",
   slides: [
     {
-      id: 'cached-title-logos',
+      id: 'fullscreen-toggle',
       layout: 'reveal',
       icon: Zap,
-      kicker: 'Speed',
-      headline: 'Logos load like locals.',
-      highlight: 'like locals',
-      support: 'Title artwork is cached after the first successful TMDB lookup.',
+      kicker: 'UX',
+      headline: 'Double-click for fullscreen.',
+      highlight: 'fullscreen',
+      support: 'Quickly enter or exit fullscreen.',
       bullets: [
-        'Reopening MyCinema no longer repeats the same slow title-logo request.',
-        'Hero, detail, and trending artwork share one cached result.',
-        'Titles without logo art are remembered briefly to avoid repeated waits.'
+        'Double-click on empty space to toggle fullscreen.'
       ],
-      signal: 'Cached',
-      cta: 'Fast now',
+      signal: 'New',
+      cta: 'Got it',
       mood: {
-        name: 'cached-title-logos',
-        gradient: 'from-rose-300 via-red-300 to-orange-300',
-        text: 'text-rose-200',
-        border: 'border-rose-300/30',
-        shadow: 'shadow-[0_0_72px_rgba(248,113,113,0.3)]',
-        backdrop: 'linear-gradient(135deg, rgba(225,29,72,0.24), transparent 34%), linear-gradient(235deg, rgba(251,146,60,0.18), transparent 48%), linear-gradient(180deg, rgba(127,29,29,0.24), transparent 66%)',
-        cursor: 'rgba(248,113,113,0.22)'
+        name: 'fullscreen-toggle',
+        gradient: 'from-amber-300 via-orange-300 to-red-300',
+        text: 'text-amber-200',
+        border: 'border-amber-300/30',
+        shadow: 'shadow-[0_0_72px_rgba(251,191,36,0.3)]',
+        backdrop:
+          'linear-gradient(135deg, rgba(251,191,36,0.2), transparent 35%), linear-gradient(235deg, rgba(249,115,22,0.18), transparent 50%)',
+        cursor: 'rgba(251,191,36,0.22)'
       }
     },
     {
-      id: 'detail-title-art',
+      id: 'compact-overview',
       layout: 'discovery',
       icon: Film,
       kicker: 'Details',
-      headline: 'Title art follows you.',
-      highlight: 'Title art',
-      support: 'Detail pages now match the cinematic logo treatment from Home.',
+      headline: 'Cleaner content overview.',
+      highlight: 'Cleaner',
+      support: 'Descriptions stay compact.',
       bullets: [
-        'Movie and series detail screens fetch missing TMDB logos automatically.',
-        'The written title stays visible while artwork resolves in the background.',
-        'Broken logo images fall back cleanly to readable text.'
+        'Read More appears when extra text is available.'
       ],
-      signal: 'Matched',
-      cta: 'Looks good',
+      signal: 'Improved',
+      cta: 'Nice',
       mood: {
-        name: 'detail-title-art',
-        gradient: 'from-cyan-300 via-sky-300 to-emerald-300',
+        name: 'compact-overview',
+        gradient: 'from-cyan-300 via-sky-300 to-blue-300',
         text: 'text-cyan-200',
         border: 'border-cyan-300/30',
         shadow: 'shadow-[0_0_72px_rgba(34,211,238,0.3)]',
-        backdrop: 'linear-gradient(135deg, rgba(14,165,233,0.22), transparent 34%), linear-gradient(235deg, rgba(16,185,129,0.18), transparent 48%), linear-gradient(180deg, rgba(8,47,73,0.24), transparent 66%)',
+        backdrop:
+          'linear-gradient(135deg, rgba(14,165,233,0.2), transparent 35%), linear-gradient(235deg, rgba(59,130,246,0.18), transparent 50%)',
         cursor: 'rgba(34,211,238,0.22)'
       }
     },
     {
-      id: 'scoped-artwork-cache',
+      id: 'details-redesign',
       layout: 'security',
       icon: ShieldCheck,
-      kicker: 'Privacy',
-      headline: 'Artwork stays scoped.',
-      highlight: 'stays scoped',
-      support: 'Cached logos live under app data and safe media serving.',
+      kicker: 'Redesign',
+      headline: 'Improved details page.',
+      highlight: 'Improved',
+      support: 'Cleaner layout and easier navigation.',
       bullets: [
-        'Logo files are stored under MyCinema user data, not random folders.',
-        'Local cached SVG and GIF artwork is served with correct image types.',
-        'Lookups still require a validated media type and TMDB title ID.'
+        'Better season picker.',
+        'Episode download and action buttons redesigned.'
       ],
-      signal: 'Safe cache',
-      cta: 'Let\'s go',
+      signal: 'Updated',
+      cta: 'Explore',
       mood: {
-        name: 'scoped-artwork-cache',
-        gradient: 'from-lime-200 via-emerald-300 to-teal-300',
+        name: 'details-redesign',
+        gradient: 'from-lime-300 via-emerald-300 to-teal-300',
         text: 'text-emerald-200',
         border: 'border-emerald-300/30',
-        shadow: 'shadow-[0_0_72px_rgba(52,211,153,0.28)]',
-        backdrop: 'linear-gradient(130deg, rgba(16,185,129,0.22), transparent 36%), linear-gradient(260deg, rgba(20,184,166,0.18), transparent 48%), linear-gradient(180deg, rgba(6,78,59,0.24), transparent 64%)',
+        shadow: 'shadow-[0_0_72px_rgba(52,211,153,0.3)]',
+        backdrop:
+          'linear-gradient(135deg, rgba(16,185,129,0.2), transparent 35%), linear-gradient(235deg, rgba(20,184,166,0.18), transparent 50%)',
         cursor: 'rgba(52,211,153,0.22)'
       }
     }
   ] satisfies WhatsNewSlide[]
-}
+};
 
 type WhatsNewOnboardingProps = {
   currentStep: number

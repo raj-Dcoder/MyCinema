@@ -1,3 +1,14 @@
+# MyCinema v1.26.0
+
+Minor release focused on basic ux improvemnt. 
+
+- **Double click to toggle fullscreen**: double click on non-content are to enter/exit full screen.
+- **Compact Content Overview**: compact content overview in detailscreen page, with implementation of 'read more' button to see more.
+- **Redesigned Detailscreen Page**: redesigned the detailscreen page, improved how season selection ui, download the each episode, and primary and secondary action button.
+
+
+***
+
 # MyCinema v1.25.3
 
 Patch release focused on making putting in fullscreen and exit from fullscreen seamless.

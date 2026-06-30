@@ -20,15 +20,27 @@ const History: React.FC<HistoryProps> = ({ onPlay, onShowDetail }) => {
 
     try {
       const data: Video[] = await window.api.getVideos()
-      setItems(
-        data
-          .filter(video => Boolean(video.completed) || (video.last_watched_time || 0) > 0)
-          .sort((a, b) => {
-            const aTime = a.updated_at ? new Date(a.updated_at).getTime() : 0
-            const bTime = b.updated_at ? new Date(b.updated_at).getTime() : 0
-            return (Number.isFinite(bTime) ? bTime : 0) - (Number.isFinite(aTime) ? aTime : 0)
-          })
-      )
+      const sortedHistory = data
+        .filter(video => Boolean(video.completed) || (video.last_watched_time || 0) > 0)
+        .sort((a, b) => {
+          const aTime = a.updated_at ? new Date(a.updated_at).getTime() : 0
+          const bTime = b.updated_at ? new Date(b.updated_at).getTime() : 0
+          return (Number.isFinite(bTime) ? bTime : 0) - (Number.isFinite(aTime) ? aTime : 0)
+        })
+
+      const seenSeries = new Set<string>()
+      const deduplicated = sortedHistory.filter(video => {
+        if (video.type === 'series') {
+          const seriesKey = video.tmdb_id ? `tmdb:${video.tmdb_id}` : `name:${video.series_name || video.title}`
+          if (seenSeries.has(seriesKey)) {
+            return false
+          }
+          seenSeries.add(seriesKey)
+        }
+        return true
+      })
+
+      setItems(deduplicated)
     } finally {
       setLoading(false)
       isInitialLoad.current = false

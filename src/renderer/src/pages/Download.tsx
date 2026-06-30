@@ -833,99 +833,64 @@ const Download: React.FC<DownloadProps> = ({ onShowDetail }) => {
 
       {/* Main Content Area */}
       <div className={`transition-all duration-300 ${panelOpen ? 'mr-[500px]' : ''}`}>
-        {/* Header */}
-        <div className="mb-6 flex flex-wrap items-start justify-between gap-4">
-          <div>
-            <h1 className="mb-1 text-2xl font-bold">Downloads</h1>
-            <p className="text-sm text-muted">Manage download progress, completed files, and storage.</p>
+        {/* Unified Header */}
+        <div className="mb-8 flex flex-col md:flex-row md:items-center justify-between gap-6">
+          <div className="flex flex-1 items-center gap-6">
+            <div>
+              <h1 className="text-2xl font-bold tracking-tight">Downloads</h1>
+            </div>
+            
+            <div className="relative flex-1 max-w-md flex items-center bg-white/[0.035] border border-white/10 rounded-2xl overflow-hidden focus-within:border-white/20 focus-within:bg-white/[0.055] transition-all shadow-sm">
+              <div className="pl-4 text-muted">
+                {searching ? <Loader2 size={16} className="animate-spin text-white" /> : <Search size={16} />}
+              </div>
+              <input
+                ref={searchInputRef}
+                type="text"
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                placeholder="Search movies & TV shows..."
+                className="w-full bg-transparent border-none px-3 py-2.5 text-sm text-white placeholder:text-muted/50 focus:outline-none focus:ring-0"
+              />
+              {query && (
+                <button onClick={() => setQuery('')} className="pr-4 text-muted hover:text-white transition-colors shrink-0">
+                  <X size={14} />
+                </button>
+              )}
+            </div>
           </div>
 
-          <div className="mt-2 flex flex-wrap items-center justify-end gap-3">
+          <div className="flex items-center gap-3">
             <button
               onClick={refreshDownloadsStorage}
-              className="group flex min-w-[210px] items-center gap-3 rounded-xl border border-white/10 bg-white/5 px-4 py-2 text-left transition-colors hover:bg-white/10"
-              title={downloadsStorage?.path ? `Downloads storage: ${downloadsStorage.path}` : 'Refresh downloads storage'}
+              className="flex items-center gap-3 rounded-xl border border-white/10 bg-white/5 px-4 py-2.5 hover:bg-white/10 transition-colors"
+              title={downloadsStorage?.path || 'Refresh storage'}
             >
-              <HardDrive size={16} className="shrink-0 text-primary" />
-              <div className="min-w-0 flex-1">
-                {downloadsStorage?.error ? (
-                  <>
-                    <p className="text-xs font-semibold text-red-300">Storage unavailable</p>
-                    <p className="truncate text-[10px] text-muted/70">Click to retry</p>
-                  </>
-                ) : downloadsStorage ? (
-                  <>
-                    <div className="flex items-center justify-between gap-3">
-                      <p className="text-xs font-semibold text-text">{formatBytes(downloadsStorage.free)} free</p>
-                      <p className="text-[10px] text-muted">{formatBytes(downloadsStorage.total)} total</p>
-                    </div>
-                    <div className="mt-1 h-1 overflow-hidden rounded-full bg-white/10">
-                      <div
-                        className={`h-full rounded-full transition-[width] duration-500 ${
-                          storageUsedPercent >= 90 ? 'bg-red-400' :
-                          storageUsedPercent >= 75 ? 'bg-amber-400' :
-                          'bg-primary'
-                        }`}
-                        style={{ width: `${storageUsedPercent}%` }}
-                      />
-                    </div>
-                  </>
-                ) : (
-                  <>
-                    <p className="text-xs font-semibold text-text">Checking storage</p>
-                    <p className="text-[10px] text-muted/70">Downloads folder</p>
-                  </>
-                )}
+              <HardDrive size={15} className="text-primary" />
+              <div className="flex flex-col min-w-[100px]">
+                <div className="flex items-center justify-between gap-3 text-[10px] font-bold uppercase tracking-widest mb-1">
+                  <span className="text-white">{downloadsStorage ? formatBytes(downloadsStorage.free) : '--'} free</span>
+                </div>
+                <div className="h-1 w-full overflow-hidden rounded-full bg-white/10">
+                  <div
+                    className={`h-full rounded-full transition-all duration-500 ${
+                      storageUsedPercent >= 90 ? 'bg-red-400' :
+                      storageUsedPercent >= 75 ? 'bg-amber-400' :
+                      'bg-primary'
+                    }`}
+                    style={{ width: `${storageUsedPercent}%` }}
+                  />
+                </div>
               </div>
             </button>
 
-            {/* Open Downloads Folder */}
             <button
               onClick={() => window.api.openDownloadsFolder()}
-              className="flex items-center gap-2 px-4 py-2 rounded-xl bg-white/5 border border-white/10 text-muted hover:text-text hover:bg-white/10 transition-colors"
+              className="p-2.5 rounded-xl bg-white/5 border border-white/10 text-muted hover:text-white hover:bg-white/10 transition-colors"
               title="Open downloads folder"
             >
               <FolderOpen size={16} />
-              <span className="text-sm font-medium">Open Folder</span>
             </button>
-
-            <div className="flex items-center gap-2 rounded-xl border border-primary/25 bg-primary/10 px-4 py-2 text-primary">
-              <DownloadIcon size={16} />
-              <span className="text-sm font-medium">{queueStatusText}</span>
-            </div>
-          </div>
-        </div>
-
-        <div className="mb-6">
-          <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
-            <div className="rounded-2xl border border-white/10 bg-white/[0.035] p-4">
-              <div className="mb-3 flex h-9 w-9 items-center justify-center rounded-xl bg-primary/10 text-primary">
-                <DownloadIcon size={17} />
-              </div>
-              <p className="text-2xl font-black text-white">{activeCount}</p>
-              <p className="mt-1 text-[10px] font-black uppercase tracking-widest text-white/35">Active</p>
-            </div>
-            <div className="rounded-2xl border border-white/10 bg-white/[0.035] p-4">
-              <div className="mb-3 flex h-9 w-9 items-center justify-center rounded-xl bg-emerald-400/10 text-emerald-300">
-                <CheckCircle2 size={17} />
-              </div>
-              <p className="text-2xl font-black text-white">{completedCount}</p>
-              <p className="mt-1 text-[10px] font-black uppercase tracking-widest text-white/35">Complete</p>
-            </div>
-            <div className="rounded-2xl border border-white/10 bg-white/[0.035] p-4">
-              <div className="mb-3 flex h-9 w-9 items-center justify-center rounded-xl bg-amber-400/10 text-amber-300">
-                <Pause size={17} />
-              </div>
-              <p className="text-2xl font-black text-white">{pausedCount}</p>
-              <p className="mt-1 text-[10px] font-black uppercase tracking-widest text-white/35">Paused</p>
-            </div>
-            <div className="rounded-2xl border border-white/10 bg-white/[0.035] p-4">
-              <div className="mb-3 flex h-9 w-9 items-center justify-center rounded-xl bg-red-400/10 text-red-300">
-                <AlertCircle size={17} />
-              </div>
-              <p className="text-2xl font-black text-white">{failedCount}</p>
-              <p className="mt-1 text-[10px] font-black uppercase tracking-widest text-white/35">Failed</p>
-            </div>
           </div>
         </div>
 
@@ -940,9 +905,11 @@ const Download: React.FC<DownloadProps> = ({ onShowDetail }) => {
                 </div>
                 <p className="mt-1 text-[11px] text-muted">{queueStatusText}</p>
               </div>
-              <div className="flex items-center gap-2 text-[10px] font-black uppercase tracking-widest text-white/42">
-                {completedCount > 0 && <span>{completedCount} complete</span>}
-                {failedCount > 0 && <span className="text-red-300">{failedCount} failed</span>}
+              <div className="flex flex-wrap items-center gap-3 text-[10px] font-black uppercase tracking-widest text-white/40">
+                {activeCount > 0 && <span className="text-primary">{activeCount} active</span>}
+                {completedCount > 0 && <span className="text-emerald-400">{completedCount} complete</span>}
+                {pausedCount > 0 && <span className="text-amber-400">{pausedCount} paused</span>}
+                {failedCount > 0 && <span className="text-red-400">{failedCount} failed</span>}
               </div>
             </div>
           <div className="divide-y divide-secondary/50">
@@ -1188,56 +1155,14 @@ const Download: React.FC<DownloadProps> = ({ onShowDetail }) => {
 
         {/* Empty Queue */}
         {!searching && results.length === 0 && !selectedItem && downloads.length === 0 && (
-          <div className="grid gap-4 lg:grid-cols-[minmax(0,1.15fr)_minmax(300px,0.85fr)]">
-            <div className="relative min-h-[260px] overflow-hidden rounded-2xl border border-white/10 bg-[linear-gradient(135deg,rgba(255,255,255,0.055),rgba(255,255,255,0.018))] p-7">
-              <div className="absolute right-8 top-8 h-28 w-28 rounded-full border border-white/10 bg-white/[0.025]" />
-              <div className="relative max-w-xl">
-                <div className="mb-6 flex h-14 w-14 items-center justify-center rounded-2xl border border-primary/25 bg-primary/10 text-primary">
-                  <DownloadIcon size={24} />
-                </div>
-                <p className="text-[10px] font-black uppercase tracking-[0.22em] text-primary">No downloads yet</p>
-                <h2 className="mt-2 text-3xl font-black italic tracking-tight text-white">Queue is empty</h2>
-                <p className="mt-3 max-w-lg text-sm font-medium leading-7 text-white/48">
-                  Active, paused, failed, and completed downloads will appear here as soon as you start one from a title detail page.
-                </p>
-              </div>
+          <div className="flex flex-col items-center justify-center min-h-[400px] rounded-3xl border border-white/5 bg-white/[0.015] p-10 text-center animate-in fade-in zoom-in-95 duration-500">
+            <div className="mb-6 flex h-16 w-16 items-center justify-center rounded-2xl border border-white/10 bg-white/5 text-muted">
+              <DownloadIcon size={28} />
             </div>
-
-            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-1">
-              <button
-                type="button"
-                onClick={() => window.api.openDownloadsFolder()}
-                className="flex min-h-[122px] items-start gap-4 rounded-2xl border border-white/10 bg-white/[0.035] p-5 text-left transition-all hover:border-white/20 hover:bg-white/[0.055]"
-              >
-                <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-white/5 text-white/70">
-                  <FolderOpen size={20} />
-                </div>
-                <div>
-                  <p className="text-sm font-black text-white">Downloads folder</p>
-                  <p className="mt-2 text-xs font-medium leading-5 text-white/38">Open the folder where completed files are saved.</p>
-                </div>
-              </button>
-
-              <button
-                type="button"
-                onClick={refreshDownloadsStorage}
-                className="flex min-h-[122px] items-start gap-4 rounded-2xl border border-white/10 bg-white/[0.035] p-5 text-left transition-all hover:border-white/20 hover:bg-white/[0.055]"
-              >
-                <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-white/5 text-white/70">
-                  <HardDrive size={20} />
-                </div>
-                <div className="min-w-0">
-                  <p className="text-sm font-black text-white">Storage</p>
-                  <p className="mt-2 text-xs font-medium leading-5 text-white/38">
-                    {downloadsStorage?.error
-                      ? 'Storage unavailable. Click to retry.'
-                      : downloadsStorage
-                        ? `${formatBytes(downloadsStorage.free)} free in downloads.`
-                        : 'Checking downloads storage.'}
-                  </p>
-                </div>
-              </button>
-            </div>
+            <h2 className="text-2xl font-black italic tracking-tight text-white">No downloads yet</h2>
+            <p className="mt-2 max-w-md text-sm font-medium leading-relaxed text-muted">
+              Search for a movie or TV show above, or browse the catalog to start building your offline library.
+            </p>
           </div>
         )}
       </div>

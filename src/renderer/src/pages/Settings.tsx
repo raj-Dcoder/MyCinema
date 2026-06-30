@@ -1,10 +1,13 @@
 import React, { useEffect, useState } from 'react'
-import { FolderOpen, Trash2, Plus, HardDrive, AlertTriangle, Check, X as CloseIcon, Maximize2, Download, Upload } from 'lucide-react'
+import { FolderOpen, Trash2, Plus, HardDrive, AlertTriangle, Check, X as CloseIcon, Maximize2, Download, Upload, Image as ImageIcon } from 'lucide-react'
+import ProfilePictureModal from '../components/ProfilePictureModal'
 
 const Settings: React.FC = () => {
   const [folders, setFolders] = useState<any[]>([])
   const [scanning, setScanning] = useState<string | null>(null)
   const [userName, setUserName] = useState(() => localStorage.getItem('mycinema_user_name') || 'User')
+  const [profileImage, setProfileImage] = useState<string | null>(() => localStorage.getItem('mycinema_profile_image'))
+  const [isProfileModalOpen, setIsProfileModalOpen] = useState(false)
   const [isEditingName, setIsEditingName] = useState(false)
   const [tempName, setTempName] = useState(userName)
   const [launchFullscreen, setLaunchFullscreen] = useState(true)
@@ -24,6 +27,24 @@ const Settings: React.FC = () => {
     // Dispatch custom event to notify other components (like Sidebar/Home)
     window.dispatchEvent(new Event('mycinema_name_updated'))
   }
+
+  const handleProfileImageChange = (newImage: string | null) => {
+    setProfileImage(newImage)
+    if (newImage) {
+      localStorage.setItem('mycinema_profile_image', newImage)
+    } else {
+      localStorage.removeItem('mycinema_profile_image')
+    }
+    window.dispatchEvent(new Event('mycinema_profile_updated'))
+  }
+
+  useEffect(() => {
+    const handleProfileUpdate = () => {
+      setProfileImage(localStorage.getItem('mycinema_profile_image'))
+    }
+    window.addEventListener('mycinema_profile_updated', handleProfileUpdate)
+    return () => window.removeEventListener('mycinema_profile_updated', handleProfileUpdate)
+  }, [])
 
   useEffect(() => {
     fetchFolders()
@@ -101,29 +122,45 @@ const Settings: React.FC = () => {
     await window.api.clearAllData()
   }
 
-  const sectionTitleClass = "text-sm font-black text-white/85 uppercase tracking-tight"
-  const panelClass = "bg-[#0a0f18] border border-white/5 rounded-2xl"
-  const iconBoxClass = "flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-xl bg-white/5 text-white/40"
-  const compactButtonClass = "inline-flex items-center justify-center gap-2 rounded-xl px-4 py-2 text-[10px] font-black uppercase tracking-widest transition-all active:scale-95 disabled:cursor-not-allowed disabled:opacity-50"
+  const sectionTitleClass = "text-[10px] font-black text-primary/80 uppercase tracking-[0.2em] ml-1 mb-3 block"
+  const panelClass = "bg-white/[0.02] border border-white/10 rounded-3xl shadow-xl backdrop-blur-md transition-all duration-300 hover:bg-white/[0.04] hover:border-white/20 hover:shadow-2xl"
+  const iconBoxClass = "flex h-12 w-12 flex-shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-white/10 to-white/5 text-white/70 shadow-[inset_0_1px_1px_rgba(255,255,255,0.1)] ring-1 ring-white/5"
+  const compactButtonClass = "inline-flex items-center justify-center gap-2 rounded-xl px-5 py-2.5 text-[11px] font-black uppercase tracking-widest transition-all duration-300 active:scale-95 disabled:cursor-not-allowed disabled:opacity-50 hover:-translate-y-0.5"
 
   return (
-    <div className="max-w-5xl space-y-6">
-      <div className="flex items-center gap-3">
-        <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-white/5 text-white/40">
-          <HardDrive size={24} />
-        </div>
-        <div>
-          <h2 className="text-3xl font-black text-white tracking-tighter uppercase">Settings</h2>
-          <p className="text-xs font-bold tracking-wide text-white/30">Manage library, backups, and application data</p>
+    <div className="max-w-5xl space-y-8 pb-12">
+      <div className="relative mb-10 overflow-hidden rounded-[2rem] bg-gradient-to-r from-red-600/10 via-[#0a0f18]/50 to-transparent p-8 border border-white/5 shadow-2xl">
+        <div className="absolute top-0 right-0 -mr-20 -mt-20 h-64 w-64 rounded-full bg-red-600/10 blur-3xl pointer-events-none" />
+        <div className="absolute bottom-0 left-0 -ml-20 -mb-20 h-64 w-64 rounded-full bg-blue-600/5 blur-3xl pointer-events-none" />
+        
+        <div className="relative z-10 flex items-center gap-6">
+          <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-gradient-to-br from-red-500 to-red-700 text-white shadow-xl shadow-red-900/50 ring-1 ring-white/20">
+            <HardDrive size={28} />
+          </div>
+          <div>
+            <h2 className="text-4xl font-black italic tracking-tighter text-white uppercase drop-shadow-lg">Settings</h2>
+            <p className="mt-1.5 text-sm font-bold uppercase tracking-widest text-white/40">Manage library, backups, and application data</p>
+          </div>
         </div>
       </div>
 
-      <div className="space-y-5">
-        <section className="space-y-3">
+      <div className="space-y-10">
+        <section>
           <h3 className={sectionTitleClass}>User Profile</h3>
-          <div className={`${panelClass} flex items-center gap-5 p-5 group`}>
-            <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-red-600 text-2xl font-black text-white shadow-xl shadow-red-950/20 transition-transform duration-300 group-hover:scale-105">
-              {userName.charAt(0).toUpperCase()}
+          <div className={`${panelClass} flex items-center gap-6 p-6 group`}>
+            <div 
+              className={`relative flex h-16 w-16 cursor-pointer items-center justify-center overflow-hidden rounded-2xl ${profileImage ? 'bg-transparent' : 'bg-red-600'} text-2xl font-black text-white shadow-xl shadow-red-950/20 transition-transform duration-300 group-hover:scale-105`}
+              onClick={() => setIsProfileModalOpen(true)}
+              title="Change Profile Picture"
+            >
+              {profileImage ? (
+                <img src={profileImage} alt={userName} className="h-full w-full object-cover" />
+              ) : (
+                userName.charAt(0).toUpperCase()
+              )}
+              <div className="absolute inset-0 flex items-center justify-center bg-black/50 opacity-0 transition-opacity group-hover:opacity-100">
+                <ImageIcon size={20} className="text-white" />
+              </div>
             </div>
             
             <div className="min-w-0 flex-1 space-y-1">
@@ -160,9 +197,9 @@ const Settings: React.FC = () => {
           </div>
         </section>
 
-        <section className="space-y-3">
+        <section>
           <h3 className={sectionTitleClass}>Application</h3>
-          <div className={`${panelClass} flex items-center justify-between gap-4 p-4`}>
+          <div className={`${panelClass} flex items-center justify-between gap-6 p-6`}>
             <div className="flex items-center gap-4 min-w-0">
               <div className={iconBoxClass}>
                 <Maximize2 size={17} />
@@ -194,8 +231,8 @@ const Settings: React.FC = () => {
           </div>
         </section>
 
-        <section className="space-y-3">
-          <div className="flex items-center justify-between">
+        <section>
+          <div className="flex items-center justify-between mb-3">
             <h3 className={sectionTitleClass}>Watched Folders</h3>
             <button
               onClick={handleAddFolder}
@@ -245,9 +282,9 @@ const Settings: React.FC = () => {
           </div>
         </section>
 
-                <section className="space-y-3">
+        <section>
           <h3 className={sectionTitleClass}>Backup & Restore</h3>
-          <div className={`${panelClass} flex flex-col justify-between gap-4 p-4 md:flex-row md:items-center`}>
+          <div className={`${panelClass} flex flex-col justify-between gap-6 p-6 md:flex-row md:items-center`}>
             <div className="flex items-center gap-4 min-w-0">
               <div className={iconBoxClass}>
                 <HardDrive size={17} />
@@ -285,13 +322,13 @@ const Settings: React.FC = () => {
         </section>
 
         {/* Danger Zone */}
-        <section className="border-t border-white/5 pt-5">
-          <div className="mb-3 flex items-center gap-2">
-            <AlertTriangle size={17} className="text-amber-500" />
-            <h3 className={sectionTitleClass}>Danger Zone</h3>
+        <section className="border-t border-white/10 pt-8 mt-8">
+          <div className="mb-4 flex items-center gap-3 ml-1">
+            <AlertTriangle size={20} className="text-red-500 animate-pulse" />
+            <h3 className="text-[12px] font-black text-red-500 uppercase tracking-[0.25em]">Danger Zone</h3>
           </div>
           
-          <div className="flex flex-col justify-between gap-4 rounded-2xl border border-red-500/10 bg-red-500/5 p-4 md:flex-row md:items-center">
+          <div className="flex flex-col justify-between gap-6 rounded-3xl border border-red-500/20 bg-gradient-to-r from-red-500/10 to-transparent p-6 md:flex-row md:items-center">
             <div className="space-y-1">
               <h4 className="text-sm font-black uppercase text-white">Clear All Application Data</h4>
               <p className="max-w-2xl text-xs font-medium leading-5 text-white/30">
@@ -307,6 +344,13 @@ const Settings: React.FC = () => {
           </div>
         </section>
       </div>
+      
+      <ProfilePictureModal
+        isOpen={isProfileModalOpen}
+        onClose={() => setIsProfileModalOpen(false)}
+        currentImage={profileImage}
+        onSelectImage={handleProfileImageChange}
+      />
     </div>
   )
 }

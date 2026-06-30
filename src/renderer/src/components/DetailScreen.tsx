@@ -54,6 +54,7 @@ type EpisodeDisplayRow = {
   versionCount: number
   released: boolean
   airDate: string | null
+  stillPath?: string | null
 }
 
 type ActiveDownload = {
@@ -587,6 +588,12 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
     window.open(getMoctaleUrl(video), '_blank')
   }
 
+  const handleOpenGoogleSearch = () => {
+    const searchTitle = video.type === 'series' && video.series_name ? video.series_name : video.title
+    const query = encodeURIComponent(`${searchTitle} ${video.release_year || ''}`.trim())
+    window.open(`https://www.google.com/search?q=${query}`, '_blank')
+  }
+
   const getSharePayload = () => {
     if (!video.tmdb_id || (video.type !== 'movie' && video.type !== 'series')) return null
 
@@ -843,7 +850,8 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
       localVideo: localGroup?.representative,
       versionCount: localGroup?.versions.length || 0,
       released: catalogEpisode.released,
-      airDate: catalogEpisode.airDate
+      airDate: catalogEpisode.airDate,
+      stillPath: catalogEpisode.stillPath
     }
   })
   for (const group of episodeGroups) {
@@ -858,7 +866,8 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
       localVideo: representative,
       versionCount: group.versions.length,
       released: true,
-      airDate: null
+      airDate: null,
+      stillPath: null
     })
   }
   episodeRows.sort((a, b) => a.season - b.season || a.episode - b.episode)
@@ -953,7 +962,7 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
   }, [onClose])
 
 
-  const getArtworkUrl = (artworkPath?: string, remoteSize: 'w780' | 'original' = 'w780') => {
+  const getArtworkUrl = (artworkPath?: string, remoteSize: 'w342' | 'w780' | 'w1280' | 'original' = 'w780') => {
     if (!artworkPath) return null
     if (artworkPath.startsWith('http')) {
       return artworkPath
@@ -963,6 +972,7 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
   }
 
   const posterUrl = getArtworkUrl(video.poster_path, 'w780')
+  const backdropUrl = getArtworkUrl(video.backdrop_path, 'w1280')
   const logoPath = video.logo_path || resolvedLogoPath
   const logoUrl = !logoLoadFailed ? getArtworkUrl(logoPath || undefined, 'original') : null
 
@@ -990,47 +1000,60 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
     : isLocalMedia
       ? 'Versions & Sources'
       : 'Choose Source'
-
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 md:p-8 bg-black/90 backdrop-blur-md animate-in fade-in duration-300">
-      <div className="relative w-full max-w-[1530px] h-[92vh] bg-[#080d16] rounded-[28px] overflow-hidden shadow-[0_32px_100px_rgba(0,0,0,0.72)] border border-white/[0.11] flex flex-col md:flex-row">
+    <div className="fixed inset-0 z-50 animate-in fade-in duration-300">
+      <div className="relative w-full h-full bg-[#080d16] overflow-hidden flex flex-col">
         {/* Close Button */}
         <button 
           onClick={onClose}
-          className="absolute top-5 right-5 z-30 flex h-11 w-11 items-center justify-center rounded-full border border-white/15 bg-black/30 text-white/80 backdrop-blur-xl transition-all hover:border-red-500 hover:bg-red-600 hover:text-white"
+          className="absolute top-6 right-6 md:top-8 md:right-8 z-30 flex h-12 w-12 items-center justify-center rounded-full border border-white/15 bg-black/30 text-white/80 backdrop-blur-xl transition-all hover:border-red-500 hover:bg-red-600 hover:text-white"
         >
           <X size={24} />
         </button>
 
-        {/* Poster Section (Left on Desktop, Top on Mobile) */}
-        <div className="w-full md:w-[42%] h-[300px] md:h-full relative overflow-hidden shrink-0 bg-[#101827]">
-          {posterUrl ? (
+        {/* Full Screen Background */}
+        <div className="absolute inset-0 z-0 bg-[#080d16] pointer-events-none">
+          {backdropUrl ? (
+            <img 
+              src={backdropUrl} 
+              alt={video.title} 
+              loading="eager"
+              decoding="async"
+              className="h-full w-full object-cover object-center opacity-70 md:opacity-[0.85] scale-[1.05] translate-x-[2%] md:translate-x-[5%]"
+            />
+          ) : posterUrl ? (
             <img 
               src={posterUrl} 
               alt={video.title} 
               loading="eager"
               decoding="async"
-              className="h-full w-full object-cover object-center"
+              className="h-full w-full object-cover object-top opacity-30 blur-3xl scale-110"
             />
-          ) : (
-            <div className="h-full w-full bg-secondary flex items-center justify-center text-muted italic">
-              No Poster Available
-            </div>
-          )}
-          {/* Gradients to blend poster with content */}
-          <div className="absolute inset-0 bg-gradient-to-t from-[#080d16] via-transparent to-transparent md:hidden" />
-          <div className="absolute inset-0 bg-gradient-to-r from-transparent via-[#080d16]/20 to-[#080d16] hidden md:block" />
+          ) : null}
           
-          {/* Subtle overlay on poster for depth */}
-          <div className="absolute inset-0 bg-[#020611]/10" />
-          <div className="absolute bottom-0 left-0 right-0 hidden p-8 md:block">
-            <div className="h-px w-24 bg-red-500/80" />
-          </div>
+          {/* Cinematic Overlays */}
+          {/* 1. Subtle top vignette for edge readability (15%) */}
+          <div className="absolute inset-x-0 top-0 h-[20vh] bg-gradient-to-b from-[#080d16]/20 to-transparent pointer-events-none" />
+          
+          {/* 2. Strong left linear gradient for content readability */}
+          <div className="absolute inset-y-0 left-0 w-full md:w-[75%] bg-gradient-to-r from-[#080d16] via-[#080d16]/80 to-transparent pointer-events-none" />
+          
+          {/* 3. Spotlight radial gradient centered behind text area for readability without paneling */}
+          <div className="absolute inset-0 bg-[radial-gradient(circle_at_15%_55%,rgba(8,13,22,0.8)_0%,rgba(8,13,22,0.3)_35%,transparent_60%)] pointer-events-none" />
+
+          {/* 4. Bottom vignette to gently ground the image and improve readability of lower content */}
+          <div className="absolute inset-x-0 bottom-0 h-[35vh] bg-gradient-to-t from-[#080d16] via-[#080d16]/50 to-transparent pointer-events-none" />
         </div>
 
         {/* Content Section */}
-        <div className="flex-1 overflow-y-auto scrollbar-thin flex flex-col relative bg-[radial-gradient(circle_at_88%_0%,rgba(34,65,112,0.26),transparent_34%),#080d16]">
-          <div className="mx-auto w-full max-w-4xl space-y-7 p-6 pt-20 md:p-10 md:pt-14 lg:px-14">
+        <div className="flex-1 overflow-y-auto scrollbar-thin relative z-10 w-full">
+          <div className="min-h-full flex flex-col">
+            {/* Spacer to push content down (reduced to move content higher) */}
+            <div className="h-[13vh] shrink-0 pointer-events-none" />
+            
+            {/* Content wrapper */}
+            <div className="relative flex-1 w-full">
+              <div className="relative z-10 w-full max-w-4xl space-y-7 p-6 pb-24 md:p-14 lg:pl-16">
             {/* Title & Tagline */}
             <div className="space-y-3 pr-10">
               {logoUrl ? (
@@ -1039,16 +1062,16 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
                   alt={displayTitle}
                   loading="eager"
                   decoding="async"
-                  className="max-h-20 md:max-h-24 w-auto max-w-[min(100%,440px)] object-contain object-left drop-shadow-[0_10px_28px_rgba(0,0,0,0.75)]"
+                  className="max-h-24 md:max-h-32 w-auto max-w-[min(100%,440px)] object-contain object-left drop-shadow-[0_10px_28px_rgba(0,0,0,0.75)]"
                   onError={() => setLogoLoadFailed(true)}
                 />
               ) : (
-                <h2 className="text-4xl md:text-5xl font-black tracking-[-0.05em] text-white leading-[0.94] drop-shadow-lg">
+                <h2 className="text-4xl md:text-6xl font-black tracking-[-0.05em] text-white leading-[0.94] drop-shadow-lg">
                   {displayTitle}
                 </h2>
               )}
               {video.tagline && (
-                <p className="text-primary font-black italic tracking-[0.18em] text-[10px] md:text-xs uppercase opacity-95 pl-0.5">
+                <p className="text-primary font-black italic tracking-[0.18em] text-xs md:text-sm uppercase opacity-95 pl-0.5">
                   {video.tagline}
                 </p>
               )}
@@ -1242,6 +1265,18 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
                     <span className="text-[10px] font-black uppercase tracking-widest">Moctale</span>
                   </button>
                 )}
+                <button
+                  onClick={handleOpenGoogleSearch}
+                  className="flex h-12 w-12 items-center justify-center bg-white/5 border border-white/10 rounded-xl text-white/45 hover:text-white hover:border-blue-500/30 hover:bg-blue-600/10 transition-all hover:-translate-y-0.5 active:scale-95 glass-effect group"
+                  title="Search on Google"
+                >
+                  <svg viewBox="0 0 24 24" width="18" height="18" xmlns="http://www.w3.org/2000/svg" className="opacity-80 group-hover:opacity-100 transition-opacity">
+                    <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#4285F4"/>
+                    <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853"/>
+                    <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" fill="#FBBC05"/>
+                    <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335"/>
+                  </svg>
+                </button>
                 {!video.isExternal && (
                   <button
                     onClick={handleOpenFolder}
@@ -1255,9 +1290,9 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
                   <button
                     onClick={handleOpenTrailer}
                     className="flex h-12 items-center justify-center gap-2 px-4 bg-white/5 border border-white/10 rounded-xl text-white/45 hover:text-white hover:border-red-500/30 hover:bg-red-600/10 transition-all hover:-translate-y-0.5 active:scale-95 glass-effect"
-                    title={trailerLoading ? 'Loading trailer' : trailer ? 'Watch trailer' : 'Find trailer'}
+                    title={trailer ? 'Watch trailer' : 'Find trailer'}
                   >
-                    {trailerLoading ? <Loader2 size={19} className="animate-spin" /> : <Clapperboard size={19} />}
+                    <Clapperboard size={19} />
                     <span className="text-[10px] font-black uppercase tracking-widest">Trailer</span>
 
                   </button>
@@ -1614,10 +1649,16 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
                             : 'bg-white/[0.045] border-white/[0.07] hover:bg-white/[0.08] hover:border-white/15'
                         }`}
                       >
-                        <div className={`w-10 h-10 rounded-lg flex items-center justify-center mr-3.5 transition-all text-sm font-black italic ${
+                        <div className={`w-32 h-[72px] shrink-0 rounded-lg flex items-center justify-center mr-4 transition-all text-sm font-black italic relative overflow-hidden shadow-md ${
                           isCurrentEpisode ? 'bg-red-600 text-white' : isMissing ? 'bg-primary/15 text-primary' : 'bg-black/40 text-muted group-hover:bg-red-600 group-hover:text-white'
                         }`}>
-                          {(idx + 1).toString().padStart(2, '0')}
+                          {ep.stillPath ? (
+                            <img src={getArtworkUrl(ep.stillPath, 'w342') || undefined} alt="" className="absolute inset-0 w-full h-full object-cover opacity-80 group-hover:opacity-100 transition-opacity" />
+                          ) : (
+                            <span className="relative z-10 opacity-50">
+                              {(idx + 1).toString().padStart(2, '0')}
+                            </span>
+                          )}
                         </div>
                         <div className="flex-1 truncate">
                           <div className="text-sm font-bold text-white truncate mb-0.5">
@@ -1644,6 +1685,8 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
             )}
           </div>
         </div>
+      </div>
+      </div>
       </div>
 
       {showDownloadOptions && (

@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useLayoutEffect, useRef } from 'react'
-import { Home as HomeIcon, Film, Tv, Settings as SettingsIcon, Video as VideoIcon, Download as DownloadIcon, Menu, Bookmark, Clock, Heart, Settings, RefreshCw, Maximize2, Minimize2, Loader2, PauseCircle, AlertCircle, X, Minus, ArrowUpRight } from 'lucide-react'
+import { Home as HomeIcon, Film, Tv, Settings as SettingsIcon, Video as VideoIcon, Download as DownloadIcon, Menu, Bookmark, Clock, Heart, Settings, RefreshCw, Maximize2, Minimize2, Loader2, PauseCircle, AlertCircle, X, Minus, ArrowUpRight, Image as ImageIcon, ChevronLeft, ChevronRight } from 'lucide-react'
 import { Video } from './types'
 import Home from './pages/Home'
 import Videos from './pages/Videos'
@@ -68,6 +68,7 @@ const App: React.FC = () => {
   const [homeRefreshKey, setHomeRefreshKey] = useState(0)
   const [watchlistRefreshKey, setWatchlistRefreshKey] = useState(0)
   const [userName, setUserName] = useState(() => localStorage.getItem('mycinema_user_name') || 'User')
+  const [profileImage, setProfileImage] = useState<string | null>(() => localStorage.getItem('mycinema_profile_image'))
   const [isFullscreen, setIsFullscreen] = useState(true)
   const [launchFullscreen, setLaunchFullscreen] = useState(true)
   const [showWindowControls, setShowWindowControls] = useState(false)
@@ -111,8 +112,15 @@ const App: React.FC = () => {
     const handleNameUpdate = () => {
       setUserName(localStorage.getItem('mycinema_user_name') || 'User')
     }
+    const handleProfileUpdate = () => {
+      setProfileImage(localStorage.getItem('mycinema_profile_image'))
+    }
     window.addEventListener('mycinema_name_updated', handleNameUpdate)
-    return () => window.removeEventListener('mycinema_name_updated', handleNameUpdate)
+    window.addEventListener('mycinema_profile_updated', handleProfileUpdate)
+    return () => {
+      window.removeEventListener('mycinema_name_updated', handleNameUpdate)
+      window.removeEventListener('mycinema_profile_updated', handleProfileUpdate)
+    }
   }, [])
 
   useEffect(() => {
@@ -491,18 +499,28 @@ const App: React.FC = () => {
       <WindowControls />
 
       {/* Sidebar */}
-      <div className={`bg-[#0a0f18] flex flex-col border-r border-white/5 transition-all duration-300 ease-in-out ${isSidebarExpanded ? 'w-64' : 'w-20'}`}>
-        <div className="flex items-center justify-between gap-3 px-4 py-6">
-          <div className={`flex min-w-0 flex-1 items-center gap-3 overflow-hidden transition-all duration-300 ${isSidebarExpanded ? 'max-w-[190px] opacity-100' : 'max-w-0 opacity-0'}`}>
-            <img src={appLogo} alt="MyCinema" className="h-11 w-11 flex-shrink-0 rounded-full object-cover shadow-lg shadow-blue-500/10" />
-            <span className="min-w-0 whitespace-nowrap text-xl font-black tracking-tight text-white">MyCinema</span>
+      <div className={`group/sidebar relative bg-[#0a0f18] flex flex-col border-r border-white/5 transition-[width] duration-300 ease-in-out ${isSidebarExpanded ? 'w-64' : 'w-20'}`}>
+        
+        {/* Toggle Button */}
+        <button
+          onClick={() => setIsSidebarExpanded(!isSidebarExpanded)}
+          className="absolute -right-3.5 top-9 z-50 flex h-7 w-7 items-center justify-center rounded-full bg-[#1a2230] border border-white/10 text-white/70 shadow-xl opacity-0 -translate-x-2 pointer-events-none group-hover/sidebar:opacity-100 group-hover/sidebar:translate-x-0 group-hover/sidebar:pointer-events-auto hover:text-white hover:bg-[#253040] hover:scale-110 transition-all duration-300"
+          title={isSidebarExpanded ? "Collapse Sidebar" : "Expand Sidebar"}
+        >
+          {isSidebarExpanded ? <ChevronLeft size={16} strokeWidth={2.5} /> : <ChevronRight size={16} strokeWidth={2.5} />}
+        </button>
+
+        <div className="relative flex h-24 items-center px-4 w-full overflow-hidden">
+          <div className="w-12 h-full flex items-center justify-center flex-shrink-0">
+            <img 
+              src={appLogo} 
+              alt="MyCinema" 
+              className="h-11 w-11 rounded-full object-cover shadow-lg shadow-blue-500/10"
+            />
           </div>
-          <button 
-            onClick={() => setIsSidebarExpanded(!isSidebarExpanded)}
-            className="p-2 rounded-lg hover:bg-white/5 text-white/40 hover:text-white transition-colors flex-shrink-0"
-          >
-            <Menu size={20} />
-          </button>
+          <div className={`absolute left-16 whitespace-nowrap transition-all duration-300 ${isSidebarExpanded ? 'opacity-100 translate-x-0' : 'opacity-0 -translate-x-2 pointer-events-none'}`}>
+            <span className="text-xl font-black tracking-tight text-white">MyCinema</span>
+          </div>
         </div>
         
         <div className="flex-1 overflow-y-auto scrollbar-hide px-4 space-y-8">
@@ -512,12 +530,14 @@ const App: React.FC = () => {
               <button
                 key={item.id}
                 onClick={() => navigateToTab(item.id)}
-                className={`w-full flex items-center py-3 px-4 rounded-xl transition-all duration-200 group ${
+                className={`relative w-full flex items-center h-12 rounded-xl transition-colors duration-200 group ${
                   activeTab === item.id ? 'bg-primary/10 text-primary' : 'text-white/40 hover:bg-white/5 hover:text-white'
                 }`}
               >
-                <div className="flex-shrink-0">{item.icon}</div>
-                <div className={`ml-4 overflow-hidden transition-all duration-300 whitespace-nowrap text-sm font-bold ${isSidebarExpanded ? 'max-w-[150px] opacity-100' : 'max-w-0 opacity-0'}`}>
+                <div className="w-12 h-full flex items-center justify-center flex-shrink-0 text-current">
+                  {item.icon}
+                </div>
+                <div className={`absolute left-12 whitespace-nowrap text-sm font-bold transition-all duration-300 ${isSidebarExpanded ? 'opacity-100 translate-x-0' : 'opacity-0 -translate-x-2 pointer-events-none'}`}>
                   {item.label}
                 </div>
               </button>
@@ -525,21 +545,25 @@ const App: React.FC = () => {
           </nav>
 
           {/* Library Section */}
-          <div className="space-y-3">
-            <h3 className={`px-4 text-[10px] font-black uppercase tracking-[0.2em] text-white/20 transition-opacity duration-300 ${isSidebarExpanded ? 'opacity-100' : 'opacity-0'}`}>
-              Library
-            </h3>
+          <div className="space-y-1">
+            <div className="h-6 relative overflow-hidden">
+              <h3 className={`absolute left-3 top-2 text-[10px] font-black uppercase tracking-[0.2em] text-white/20 whitespace-nowrap transition-all duration-300 ${isSidebarExpanded ? 'opacity-100 translate-x-0' : 'opacity-0 -translate-x-2 pointer-events-none'}`}>
+                Library
+              </h3>
+            </div>
             <nav className="space-y-1">
               {libraryItems.map(item => (
                 <button
                   key={item.id}
                   onClick={() => navigateToTab(item.id)}
-                  className={`w-full flex items-center py-3 px-4 rounded-xl transition-all duration-200 group ${
+                  className={`relative w-full flex items-center h-12 rounded-xl transition-colors duration-200 group ${
                     activeTab === item.id ? 'bg-primary/10 text-primary' : 'text-white/40 hover:bg-white/5 hover:text-white'
                   }`}
                 >
-                  <div className="flex-shrink-0">{item.icon}</div>
-                  <div className={`ml-4 overflow-hidden transition-all duration-300 whitespace-nowrap text-sm font-bold ${isSidebarExpanded ? 'max-w-[150px] opacity-100' : 'max-w-0 opacity-0'}`}>
+                  <div className="w-12 h-full flex items-center justify-center flex-shrink-0 text-current">
+                    {item.icon}
+                  </div>
+                  <div className={`absolute left-12 whitespace-nowrap text-sm font-bold transition-all duration-300 ${isSidebarExpanded ? 'opacity-100 translate-x-0' : 'opacity-0 -translate-x-2 pointer-events-none'}`}>
                     {item.label}
                   </div>
                 </button>
@@ -640,28 +664,37 @@ const App: React.FC = () => {
 
         {/* User Profile */}
         <div className="p-4 mt-auto">
-          <div className={`flex items-center gap-4 p-3 bg-white/5 rounded-2xl border border-white/5 transition-all duration-300 ${isSidebarExpanded ? 'w-full' : 'w-12 justify-center'}`}>
-            <div 
-              className={`w-10 h-10 rounded-xl bg-red-600 flex items-center justify-center text-white font-black text-lg shadow-lg italic flex-shrink-0 cursor-pointer hover:scale-105 transition-transform`}
-              onClick={() => !isSidebarExpanded && navigateToTab('settings')}
-              title={!isSidebarExpanded ? `Settings (${userName})` : undefined}
-            >
-              {userName.charAt(0).toUpperCase()}
-            </div>
+          <div className="relative flex items-center bg-white/5 rounded-2xl border border-white/5 h-[52px] w-full overflow-hidden transition-all duration-300">
             
-            {isSidebarExpanded && (
-              <>
-                <div className="flex-1 min-w-0">
-                  <h4 className="text-sm font-bold text-white truncate italic">{userName}</h4>
-                </div>
-                <button 
-                  onClick={() => navigateToTab('settings')}
-                  className="p-2 text-white/40 hover:text-white transition-colors"
-                >
-                  <SettingsIcon size={18} />
-                </button>
-              </>
-            )}
+            {/* Avatar (Fixed Left) */}
+            <div className="absolute left-1 w-10 h-10 flex-shrink-0 flex items-center justify-center">
+              <div 
+                className={`relative w-full h-full rounded-xl ${profileImage ? 'bg-transparent' : 'bg-red-600'} flex items-center justify-center text-white font-black text-lg shadow-lg italic cursor-pointer hover:scale-105 transition-transform overflow-hidden`}
+                onClick={() => navigateToTab('settings')}
+                title="Settings & Profile"
+              >
+                {profileImage ? (
+                  <img src={profileImage} alt={userName} className="w-full h-full object-cover" />
+                ) : (
+                  userName.charAt(0).toUpperCase()
+                )}
+              </div>
+            </div>
+
+            {/* Expanded Content */}
+            <div className={`absolute left-14 right-2 flex items-center justify-between transition-all duration-300 ${isSidebarExpanded ? 'opacity-100 translate-x-0' : 'opacity-0 -translate-x-2 pointer-events-none'}`}>
+              <div className="flex-1 min-w-0 cursor-pointer" onClick={() => navigateToTab('settings')}>
+                <h4 className="text-sm font-bold text-white truncate italic">{userName}</h4>
+              </div>
+              <button 
+                onClick={() => navigateToTab('settings')}
+                className="p-1.5 rounded-lg text-white/40 hover:text-white hover:bg-white/10 transition-colors flex-shrink-0"
+                title="Settings"
+              >
+                <SettingsIcon size={18} />
+              </button>
+            </div>
+
           </div>
         </div>
       </div>

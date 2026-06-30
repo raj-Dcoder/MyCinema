@@ -49,81 +49,78 @@ export const LATEST_RELEASE: {
   eyebrow: string
   slides: WhatsNewSlide[]
 } = {
-  version: '1.26.1',
+  version: '1.27.0',
   eyebrow: "What's New",
   slides: [
     {
-      id: 'audio-speed',
-      layout: 'reveal',
-      icon: Zap,
-      kicker: 'Speed',
-      headline: 'Stable playback speed always.',
-      highlight: 'playback speed',
-      support: 'External audio tracks now perfectly preserve your preferred playback speed when reloading or seeking.',
+      id: 'user-avatars',
+      layout: 'celebrate',
+      icon: Sparkles,
+      kicker: 'Identity',
+      headline: 'Your profile, your vibe.',
+      highlight: 'your vibe',
+      support: 'Set a custom profile picture to make MyCinema feel truly yours.',
       bullets: [
-        'Maintains chosen speed across seeking.',
-        'Persistent rate settings on audio load.'
+        'Upload custom avatars.',
+        'Visible everywhere.'
       ],
-      signal: 'Fixed',
-      cta: "Let's go",
+      signal: 'Personalized',
+      cta: 'Love it',
       mood: {
-        name: 'audio-speed',
-        gradient: 'from-amber-300 via-orange-300 to-red-300',
-        text: 'text-amber-200',
-        border: 'border-amber-300/30',
-        shadow: 'shadow-[0_0_72px_rgba(251,191,36,0.3)]',
-        backdrop:
-          'linear-gradient(135deg, rgba(251,191,36,0.2), transparent 35%), linear-gradient(235deg, rgba(249,115,22,0.18), transparent 50%)',
-        cursor: 'rgba(251,191,36,0.22)'
+        name: 'user-avatars',
+        gradient: 'from-fuchsia-400 via-purple-400 to-indigo-400',
+        text: 'text-purple-200',
+        border: 'border-purple-400/30',
+        shadow: 'shadow-[0_0_72px_rgba(192,132,252,0.32)]',
+        backdrop: 'linear-gradient(135deg, rgba(216,180,254,0.2), transparent 35%), linear-gradient(235deg, rgba(167,139,250,0.18), transparent 50%)',
+        cursor: 'rgba(192,132,252,0.24)'
       }
     },
     {
-      id: 'audio-codec',
-      layout: 'discovery',
-      icon: Tv,
-      kicker: 'Codec',
-      headline: 'Seamless audio track selection.',
-      highlight: 'Seamless',
-      support: 'Enjoy better support and cleaner track options for videos with unsupported audio codecs.',
+      id: 'premium-ui',
+      layout: 'reveal',
+      icon: Zap,
+      kicker: 'Aesthetics',
+      headline: 'Premium interfaces everywhere.',
+      highlight: 'Premium interfaces',
+      support: 'Enjoy sleek glassmorphism, dynamic gradients, and refined layouts across Settings, History, and Downloads.',
       bullets: [
-        'Cleaned up duplicate audio tracks list.',
-        'Handles fallback audio track states seamlessly.'
+        'Modern cinematic layouts.',
+        'Responsive dynamic effects.'
       ],
-      signal: 'Solved',
+      signal: 'Refined',
       cta: 'Nice',
       mood: {
-        name: 'audio-codec',
+        name: 'premium-ui',
         gradient: 'from-cyan-300 via-sky-300 to-blue-300',
         text: 'text-cyan-200',
         border: 'border-cyan-300/30',
         shadow: 'shadow-[0_0_72px_rgba(34,211,238,0.3)]',
-        backdrop:
-          'linear-gradient(135deg, rgba(14,165,233,0.2), transparent 35%), linear-gradient(235deg, rgba(59,130,246,0.18), transparent 50%)',
+        backdrop: 'linear-gradient(135deg, rgba(14,165,233,0.2), transparent 35%), linear-gradient(235deg, rgba(59,130,246,0.18), transparent 50%)',
         cursor: 'rgba(34,211,238,0.22)'
       }
     },
     {
-      id: 'tooltip-fix',
-      layout: 'celebrate',
-      icon: Sparkles,
-      kicker: 'Interface',
-      headline: 'Clean workspace, zero clutter.',
-      highlight: 'zero clutter',
-      support: 'The persistent fullscreen helper tooltip has been completely removed to keep your view distraction-free.',
+      id: 'hi-res-art',
+      layout: 'discovery',
+      icon: Film,
+      kicker: 'Immersion',
+      headline: 'Ultra-crisp cinematic backdrops.',
+      highlight: 'Ultra-crisp',
+      support: 'Title detail screens now use massive, high-resolution artwork for a more immersive feel.',
       bullets: [
-        'No more annoying background popups.',
-        'Clean hover states everywhere.'
+        '1280px native backdrops.',
+        'Sharper on large screens.'
       ],
-      signal: 'Polished',
-      cta: 'Awesome',
+      signal: 'Upgraded',
+      cta: "Let's go",
       mood: {
-        name: 'tooltip-fix',
+        name: 'hi-res-art',
         gradient: 'from-lime-300 via-emerald-300 to-teal-300',
         text: 'text-emerald-200',
         border: 'border-emerald-300/30',
         shadow: 'shadow-[0_0_72px_rgba(52,211,153,0.3)]',
-        backdrop:
-          'linear-gradient(135deg, rgba(16,185,129,0.2), transparent 35%), linear-gradient(235deg, rgba(20,184,166,0.18), transparent 50%)',
+        backdrop: 'linear-gradient(135deg, rgba(16,185,129,0.2), transparent 35%), linear-gradient(235deg, rgba(20,184,166,0.18), transparent 50%)',
         cursor: 'rgba(52,211,153,0.22)'
       }
     }

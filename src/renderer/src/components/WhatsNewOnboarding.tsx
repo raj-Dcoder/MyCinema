@@ -44,7 +44,11 @@ type WhatsNewSlide = {
   cta: string
 }
 
-export const LATEST_RELEASE = {
+export const LATEST_RELEASE: {
+  version: string
+  eyebrow: string
+  slides: WhatsNewSlide[]
+} = {
   version: '1.26.1',
   eyebrow: "What's New",
   slides: [
@@ -123,7 +127,7 @@ export const LATEST_RELEASE = {
         cursor: 'rgba(52,211,153,0.22)'
       }
     }
-  ] satisfies WhatsNewSlide[]
+  ]
 };
 
 type WhatsNewOnboardingProps = {

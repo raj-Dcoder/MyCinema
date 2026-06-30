@@ -487,7 +487,6 @@ const App: React.FC = () => {
     <div
       className="flex h-screen bg-[#05080d] text-text font-sans overflow-hidden"
       onClick={handleAppSurfaceClick}
-      title="Double-click or double-tap open space to toggle fullscreen"
     >
       <WindowControls />
 

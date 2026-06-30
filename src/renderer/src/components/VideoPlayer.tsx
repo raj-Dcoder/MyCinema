@@ -1320,6 +1320,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
     setLastSeekTime(safeTime)
     audioEl.pause()
     audioEl.volume = volume
+    audioEl.defaultPlaybackRate = playbackRate
     audioEl.playbackRate = playbackRate
     audioEl.src = `audio://file/${encodeURIComponent(currentVideo.file_path)}?track=${trackIndex}&time=${safeTime}`
 
@@ -1331,6 +1332,8 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
         audioEl.removeEventListener('canplay', handleReady)
         audioEl.removeEventListener('loadeddata', handleReady)
         audioEl.removeEventListener('error', handleError)
+        audioEl.defaultPlaybackRate = playbackRate
+        audioEl.playbackRate = playbackRate
         resolve(ready && isCurrentRequest())
       }
       const handleReady = () => finish(true)
@@ -1370,6 +1373,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
 
     try {
       await Promise.allSettled([audioEl.play(), videoEl.play()])
+      audioEl.playbackRate = playbackRate
       if (audioCtxRef.current?.state === 'suspended') {
         await audioCtxRef.current.resume()
       }
@@ -1389,12 +1393,15 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
     setLastSeekTime(safeTime)
     audioEl.pause()
     audioEl.volume = volume
+    audioEl.defaultPlaybackRate = playbackRate
     audioEl.playbackRate = playbackRate
     audioEl.src = `audio://file/${encodeURIComponent(currentVideo.file_path)}?track=${trackIndex}&time=${safeTime}`
     audioEl.load()
 
     if (shouldPlay) {
-      audioEl.play().catch(e => console.log('Audio play failed:', e))
+      audioEl.play()
+        .then(() => { audioEl.playbackRate = playbackRate })
+        .catch(e => console.log('Audio play failed:', e))
     }
   }
 
@@ -1443,8 +1450,10 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
     try {
       if (keepVideoPlaying) {
         await audioEl.play()
+        audioEl.playbackRate = playbackRate
       } else {
         await Promise.allSettled([audioEl.play(), videoEl.play()])
+        audioEl.playbackRate = playbackRate
       }
     } finally {
       externalAudioSeekBarrierRef.current = false

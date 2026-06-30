@@ -1242,16 +1242,17 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
     if (!hasVideoMetadata) return []
 
     const arr: any[] = []
-    if (audioTracks.length > 0) {
+    if (audioTracks.length > 0 && audioTracks.length === embeddedAudio.length) {
       audioTracks.forEach((t, i) => {
         arr.push({ id: `nat-${i}`, index: i, native: true, label: formatTrackLabel(embeddedAudio[i] || t, i + 1) })
-      })
-      embeddedAudio.slice(audioTracks.length).forEach((t, i) => {
-        arr.push({ id: `ext-${t.index}`, index: t.index, native: false, label: formatTrackLabel(t, audioTracks.length + i + 1) })
       })
     } else if (embeddedAudio.length > 0) {
       embeddedAudio.forEach((t, i) => {
         arr.push({ id: `ext-${t.index}`, index: t.index, native: false, label: formatTrackLabel(t, i + 1) })
+      })
+    } else if (audioTracks.length > 0) {
+      audioTracks.forEach((t, i) => {
+        arr.push({ id: `nat-${i}`, index: i, native: true, label: formatTrackLabel(t, i + 1) })
       })
     }
     return arr
@@ -1609,6 +1610,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
         forceTorrentNativeAudio()
         return
       }
+      setSelectedAudioId('')
       const srt = await window.api.getSubtitlePath(currentVideo.file_path)
       if (isCancelled || isPlayerClosingRef.current || sessionToken !== playerSessionTokenRef.current) return
       if (srt) setSubtitlePath(srt)

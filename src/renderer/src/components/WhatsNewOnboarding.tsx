@@ -45,24 +45,25 @@ type WhatsNewSlide = {
 }
 
 export const LATEST_RELEASE = {
-  version: '1.26.0',
+  version: '1.26.1',
   eyebrow: "What's New",
   slides: [
     {
-      id: 'fullscreen-toggle',
+      id: 'audio-speed',
       layout: 'reveal',
       icon: Zap,
-      kicker: 'UX',
-      headline: 'Double-click for fullscreen.',
-      highlight: 'fullscreen',
-      support: 'Quickly enter or exit fullscreen.',
+      kicker: 'Speed',
+      headline: 'Stable playback speed always.',
+      highlight: 'playback speed',
+      support: 'External audio tracks now perfectly preserve your preferred playback speed when reloading or seeking.',
       bullets: [
-        'Double-click on empty space to toggle fullscreen.'
+        'Maintains chosen speed across seeking.',
+        'Persistent rate settings on audio load.'
       ],
-      signal: 'New',
-      cta: 'Got it',
+      signal: 'Fixed',
+      cta: "Let's go",
       mood: {
-        name: 'fullscreen-toggle',
+        name: 'audio-speed',
         gradient: 'from-amber-300 via-orange-300 to-red-300',
         text: 'text-amber-200',
         border: 'border-amber-300/30',
@@ -73,20 +74,21 @@ export const LATEST_RELEASE = {
       }
     },
     {
-      id: 'compact-overview',
+      id: 'audio-codec',
       layout: 'discovery',
-      icon: Film,
-      kicker: 'Details',
-      headline: 'Cleaner content overview.',
-      highlight: 'Cleaner',
-      support: 'Descriptions stay compact.',
+      icon: Tv,
+      kicker: 'Codec',
+      headline: 'Seamless audio track selection.',
+      highlight: 'Seamless',
+      support: 'Enjoy better support and cleaner track options for videos with unsupported audio codecs.',
       bullets: [
-        'Read More appears when extra text is available.'
+        'Cleaned up duplicate audio tracks list.',
+        'Handles fallback audio track states seamlessly.'
       ],
-      signal: 'Improved',
+      signal: 'Solved',
       cta: 'Nice',
       mood: {
-        name: 'compact-overview',
+        name: 'audio-codec',
         gradient: 'from-cyan-300 via-sky-300 to-blue-300',
         text: 'text-cyan-200',
         border: 'border-cyan-300/30',
@@ -97,21 +99,21 @@ export const LATEST_RELEASE = {
       }
     },
     {
-      id: 'details-redesign',
-      layout: 'security',
-      icon: ShieldCheck,
-      kicker: 'Redesign',
-      headline: 'Improved details page.',
-      highlight: 'Improved',
-      support: 'Cleaner layout and easier navigation.',
+      id: 'tooltip-fix',
+      layout: 'celebrate',
+      icon: Sparkles,
+      kicker: 'Interface',
+      headline: 'Clean workspace, zero clutter.',
+      highlight: 'zero clutter',
+      support: 'The persistent fullscreen helper tooltip has been completely removed to keep your view distraction-free.',
       bullets: [
-        'Better season picker.',
-        'Episode download and action buttons redesigned.'
+        'No more annoying background popups.',
+        'Clean hover states everywhere.'
       ],
-      signal: 'Updated',
-      cta: 'Explore',
+      signal: 'Polished',
+      cta: 'Awesome',
       mood: {
-        name: 'details-redesign',
+        name: 'tooltip-fix',
         gradient: 'from-lime-300 via-emerald-300 to-teal-300',
         text: 'text-emerald-200',
         border: 'border-emerald-300/30',

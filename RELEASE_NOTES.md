@@ -1,3 +1,16 @@
+# MyCinema v1.26.1
+
+Patch release focused on fixing external audio playback rate issues, unsupported codec audio track selection, and removing the intrusive fullscreen helper tooltip.
+
+### Video Player Experience
+- **Preserved Playback Speed**: Fixed an issue where the audio playback rate would reset to normal (1.0x) speed whenever external audio tracks reloaded or seeked.
+- **Better Codec Handling**: Fixed audio track selection state issues that occurred when attempting to play tracks with unsupported codecs.
+
+### UI & UX Polish
+- **Removed Intrusive Tooltip**: Removed the fullscreen helper tooltip that popped up persistently across empty spaces of the application window.
+
+***
+
 # MyCinema v1.26.0
 
 Minor release focused on basic ux improvemnt. 

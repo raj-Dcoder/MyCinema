@@ -235,7 +235,7 @@ async function nodeHttpRequest(
 }
 
 // ─── File-system Watcher Registry ────────────────────────────────────────────
-const VIDEO_EXTS = new Set(['.mp4', '.mkv', '.avi', '.mov', '.webm'])
+const VIDEO_EXTS = new Set(['.mp4', '.mkv', '.avi', '.mov', '.webm', '.flv', '.wmv', '.mpg', '.mpeg', '.mpe', '.mpv', '.m2v', '.m4v', '.ts', '.m2ts', '.mts', '.vob', '.rm', '.rmvb', '.asf', '.ogv', '.3gp', '.3g2', '.amv', '.nsv', '.roq', '.svi', '.divx', '.xvid', '.dat', '.f4v', '.f4p', '.fdmdownload', '.crdownload', '.part', '.!ut', '.bc!'])
 const folderWatchers = new Map<string, fs.FSWatcher>()
 
 /**
@@ -631,6 +631,17 @@ function getContentTypeForPath(filePath: string): string {
   if (ext === '.avi') return 'video/x-msvideo'
   if (ext === '.mov') return 'video/quicktime'
   if (ext === '.m4v') return 'video/mp4'
+  if (ext === '.flv' || ext === '.f4v' || ext === '.f4p') return 'video/x-flv'
+  if (ext === '.wmv') return 'video/x-ms-wmv'
+  if (ext === '.mpg' || ext === '.mpeg' || ext === '.m2v' || ext === '.mpe' || ext === '.mpv') return 'video/mpeg'
+  if (ext === '.ts' || ext === '.m2ts' || ext === '.mts') return 'video/mp2t'
+  if (ext === '.vob') return 'video/dvd'
+  if (ext === '.rm' || ext === '.rmvb') return 'application/vnd.rn-realmedia'
+  if (ext === '.asf') return 'video/x-ms-asf'
+  if (ext === '.ogv') return 'video/ogg'
+  if (ext === '.3gp') return 'video/3gpp'
+  if (ext === '.3g2') return 'video/3gpp2'
+  if (ext === '.divx' || ext === '.xvid') return 'video/x-msvideo'
   return 'video/mp4'
 }
 
@@ -2251,6 +2262,10 @@ ipcMain.handle('fetch-trending', async (_, type: 'movie' | 'series') => {
 
 ipcMain.handle('fetch-trending-india', async (_, type: 'movie' | 'series' = 'movie') => {
   return await tmdb.fetchTrendingInIndia(type)
+})
+
+ipcMain.handle('get-tmdb-release-info', async (_, id: number, type: 'movie' | 'series') => {
+  return await tmdb.fetchTmdbReleaseInfo(id, type)
 })
 
 ipcMain.handle('get-tmdb-title-logo', async (_, type: 'movie' | 'series', tmdbId: number) => {

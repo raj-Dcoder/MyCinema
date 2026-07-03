@@ -21,7 +21,7 @@ const ffprobePath = isDev
 ffmpeg.setFfprobePath(ffprobePath)
 ffmpeg.setFfmpegPath(ffmpegPath)
 
-const VIDEO_EXTENSIONS = ['.mp4', '.mkv', '.avi', '.mov', '.webm']
+const VIDEO_EXTENSIONS = ['.mp4', '.mkv', '.avi', '.mov', '.webm', '.flv', '.wmv', '.mpg', '.mpeg', '.mpe', '.mpv', '.m2v', '.m4v', '.ts', '.m2ts', '.mts', '.vob', '.rm', '.rmvb', '.asf', '.ogv', '.3gp', '.3g2', '.amv', '.nsv', '.roq', '.svi', '.divx', '.xvid', '.dat', '.f4v', '.f4p', '.fdmdownload', '.crdownload', '.part', '.!ut', '.bc!']
 const LIBRARY_UPDATE_DEBOUNCE_MS = 1200
 
 function normalizeVideoPath(filePath: string) {

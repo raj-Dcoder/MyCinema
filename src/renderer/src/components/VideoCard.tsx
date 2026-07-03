@@ -152,16 +152,43 @@ const VideoCard: React.FC<VideoCardProps> = ({ video, onPlay, onShowDetail, isCo
 
         <div className="absolute inset-0 flex flex-col justify-end bg-gradient-to-t from-black via-black/75 to-black/10 p-3 opacity-0 transition-opacity duration-300 group-hover:opacity-100 group-focus-visible:opacity-100">
           <div className="mb-auto flex items-start justify-between gap-2">
-            {(video.version_count || 1) > 1 ? (
-              <span className="inline-flex items-center gap-1 rounded-md border border-emerald-400/25 bg-emerald-400/15 px-2 py-1 text-[8px] font-black uppercase tracking-widest text-emerald-200 backdrop-blur-md">
-                <Layers3 size={10} />
-                {video.version_count} versions
-              </span>
-            ) : video.isExternal && !video.is_watchlist ? (
-              <span className="rounded-md border border-red-500/30 bg-red-600/25 px-2 py-1 text-[8px] font-black uppercase tracking-widest text-white backdrop-blur-md">
-                Trending
-              </span>
-            ) : <span />}
+            {(() => {
+              if ((video.version_count || 1) > 1) {
+                return (
+                  <span className="inline-flex items-center gap-1 rounded-md border border-emerald-400/25 bg-emerald-400/15 px-2 py-1 text-[8px] font-black uppercase tracking-widest text-emerald-200 backdrop-blur-md">
+                    <Layers3 size={10} />
+                    {video.version_count} versions
+                  </span>
+                )
+              }
+              if (video.isExternal && !video.is_watchlist) {
+                if (!video.release_date) {
+                  return (
+                    <span className="rounded-md border border-red-500/30 bg-red-600/25 px-2 py-1 text-[8px] font-black uppercase tracking-widest text-white backdrop-blur-md">
+                      Trending
+                    </span>
+                  )
+                }
+                
+                const releaseDate = new Date(video.release_date)
+                const isReleased = releaseDate <= new Date()
+                
+                if (isReleased) {
+                  return (
+                    <span className="rounded-md border border-emerald-500/30 bg-emerald-600/25 px-2 py-1 text-[8px] font-black uppercase tracking-widest text-emerald-200 backdrop-blur-md">
+                      Released
+                    </span>
+                  )
+                } else {
+                  return (
+                    <span className="rounded-md border border-amber-500/30 bg-amber-600/25 px-2 py-1 text-[8px] font-black uppercase tracking-widest text-amber-200 backdrop-blur-md">
+                      Coming Soon
+                    </span>
+                  )
+                }
+              }
+              return <span />
+            })()}
             {video.vote_average && video.vote_average > 0 && (
               <span className="inline-flex items-center gap-1 rounded-md border border-white/10 bg-black/55 px-2 py-1 text-[10px] font-black text-white backdrop-blur-md">
                 <Star size={11} fill="#facc15" className="text-yellow-400" />

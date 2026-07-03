@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react'
 import { X, Play, Info, Calendar, Clock, Star, FolderOpen, Film, Music, Subtitles, HardDrive, ChevronDown, ChevronUp, Heart, Bookmark, Share2, Search, Zap, Users, Download, AlertTriangle, Clapperboard, Loader2, ExternalLink, Languages, CheckCircle2, Copy, MessageCircle, Send } from 'lucide-react'
 import { Video } from '../types'
+import { ShareHintGuide } from './FeatureGuides'
 import { getTorrentSourceHealthScore, getTorrentSourceSpeedLabel } from '../utils/torrentSources'
 import { getMediaUnitIdentity, getVersionLabel, groupMediaVersions, pickPreferredVersion } from '../utils/mediaVersions'
 
@@ -163,7 +164,6 @@ const MYCINEMA_SHARE_BASE_URL = (
   import.meta.env.VITE_MYCINEMA_SHARE_BASE_URL ||
   'https://mycinema-share.rajveersinghranaofficial.workers.dev'
 ).replace(/\/+$/, '')
-const SHARE_HINT_STORAGE_KEY = 'mycinema_detail_share_hint_seen_v1'
 
 const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource, onClose, onPlay, onWatchlistChange }) => {
   const [episodes, setEpisodes] = useState<Video[]>([])
@@ -193,10 +193,10 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
   const [shareCopied, setShareCopied] = useState(false)
   const [showShareModal, setShowShareModal] = useState(false)
   const [shareFeedback, setShareFeedback] = useState<string | null>(null)
-  const [showShareHint, setShowShareHint] = useState(() => localStorage.getItem(SHARE_HINT_STORAGE_KEY) !== 'true')
   const [resolvedLogoPath, setResolvedLogoPath] = useState<string | null>(null)
   const [logoLoadFailed, setLogoLoadFailed] = useState(false)
   const [isOverflowing, setIsOverflowing] = useState(false)
+  const [releaseInfo, setReleaseInfo] = useState<import('../types').TmdbReleaseInfo | null>(null)
   const overviewRef = useRef<HTMLParagraphElement>(null)
   const [expandedOverview, setExpandedOverview] = useState(false)
 
@@ -488,6 +488,15 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
         if (!cancelled) setResolvedLogoPath(null)
       })
 
+    window.api.getTmdbReleaseInfo(video.tmdb_id, video.type === 'series' ? 'series' : 'movie')
+      .then(info => {
+        if (!cancelled) setReleaseInfo(info)
+      })
+      .catch(err => {
+        console.error('[DetailScreen] Failed to fetch release info:', err)
+        if (!cancelled) setReleaseInfo(null)
+      })
+
     return () => {
       cancelled = true
     }
@@ -628,8 +637,6 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
 
   const handleShare = () => {
     if (!getSharePayload()) return
-    localStorage.setItem(SHARE_HINT_STORAGE_KEY, 'true')
-    setShowShareHint(false)
     setShowShareModal(true)
   }
 
@@ -1092,6 +1099,56 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
                   <span>{video.release_year}</span>
                 </div>
               ) : null}
+              {releaseInfo ? (() => {
+                let isFuture = false
+                let formattedDate = ''
+                
+                if (releaseInfo.releaseDate) {
+                  const rDate = new Date(releaseInfo.releaseDate)
+                  if (!isNaN(rDate.getTime())) {
+                    isFuture = rDate > new Date()
+                    formattedDate = rDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+                  }
+                }
+                
+                if (isFuture && formattedDate) {
+                  return (
+                    <div className="flex items-center gap-1.5 bg-amber-500/15 px-3 py-1.5 rounded-full border border-amber-500/30 text-amber-200">
+                      <Calendar size={12} className="text-amber-200/50" />
+                      <span>Releases {formattedDate}</span>
+                    </div>
+                  )
+                }
+                
+                if (releaseInfo.providers && releaseInfo.providers.length > 0) {
+                  return (
+                    <div className="flex items-center gap-2 bg-emerald-500/15 px-3 py-1.5 rounded-full border border-emerald-500/30 text-emerald-100">
+                      <span>Streaming on</span>
+                      <div className="flex items-center gap-1">
+                        {releaseInfo.providers.slice(0, 3).map(p => (
+                          <img key={p.provider_name} src={p.logo_path} alt={p.provider_name} className="w-4 h-4 rounded-full object-cover" title={p.provider_name} />
+                        ))}
+                      </div>
+                    </div>
+                  )
+                } else if (releaseInfo.type === 'theatrical' && releaseInfo.releaseDate) {
+                  const rDate = new Date(releaseInfo.releaseDate)
+                  const now = new Date()
+                  const daysSinceRelease = (now.getTime() - rDate.getTime()) / (1000 * 3600 * 24)
+                  
+                  // Only show "In Theaters" if it was released within the last 90 days
+                  if (daysSinceRelease >= 0 && daysSinceRelease <= 90) {
+                    return (
+                      <div className="flex items-center gap-1.5 bg-blue-500/15 px-3 py-1.5 rounded-full border border-blue-500/30 text-blue-200">
+                        <Film size={12} className="text-blue-200/50" />
+                        <span>In Theaters</span>
+                      </div>
+                    )
+                  }
+                }
+
+                return null
+              })() : null}
               {video.duration && (
                 <div className="flex items-center gap-1.5 bg-white/[0.06] px-3 py-1.5 rounded-full border border-white/10">
                   <Clock size={12} className="text-white/45" />
@@ -1216,43 +1273,13 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
                   <div className="relative">
                     <button
                       onClick={handleShare}
-                    className={`flex h-12 items-center gap-2 px-4 border rounded-xl transition-all hover:-translate-y-0.5 active:scale-95 glass-effect ${
-                        shareCopied
-                          ? 'bg-emerald-500/15 border-emerald-400/35 text-emerald-300'
-                          : 'bg-white/5 border-white/10 text-white/45 hover:text-white hover:border-cyan-400/30 hover:bg-cyan-400/10'
-                      }`}
-                      title={shareCopied ? 'Copied share link' : 'Share MyCinema link'}
+                      className="flex h-12 items-center gap-2 px-4 bg-white/5 border border-white/10 rounded-xl text-white/45 hover:text-white hover:border-cyan-400/30 hover:bg-cyan-400/10 transition-all hover:-translate-y-0.5 active:scale-95 glass-effect group"
+                      title="Share this title"
                     >
                       {shareCopied ? <CheckCircle2 size={18} /> : <Share2 size={18} />}
                       {/* <span className="text-[10px] font-black uppercase tracking-widest">{shareCopied ? 'Copied' : 'Share'}</span> */}
                     </button>
-                    {showShareHint && (
-                      <div className="absolute left-1/2 top-full z-40 mt-3 w-[245px] -translate-x-1/2 rounded-xl border border-cyan-300/20 bg-[#07111c] p-3 text-left shadow-2xl shadow-black/45 ring-1 ring-white/5 animate-in fade-in slide-in-from-top-1 duration-200">
-                        <div className="absolute left-1/2 top-0 h-3 w-3 -translate-x-1/2 -translate-y-1/2 rotate-45 border-l border-t border-cyan-300/20 bg-[#07111c]" />
-                        <div className="flex items-start gap-3">
-                          <div className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-cyan-300/12 text-cyan-200">
-                            <Share2 size={14} />
-                          </div>
-                          <div className="min-w-0 flex-1">
-                            <p className="text-[10px] font-black uppercase tracking-[0.18em] text-cyan-100">New sharing</p>
-                            <p className="mt-1 text-[11px] font-semibold leading-relaxed text-white/58">
-                              Send this title to friends through WhatsApp, Telegram, or a copy link.
-                            </p>
-                          </div>
-                          <button
-                            type="button"
-                            onClick={() => {
-                              localStorage.setItem(SHARE_HINT_STORAGE_KEY, 'true')
-                              setShowShareHint(false)
-                            }}
-                            className="rounded-md p-1 text-white/35 transition-colors hover:bg-white/10 hover:text-white"
-                            title="Dismiss hint"
-                          >
-                            <X size={13} />
-                          </button>
-                        </div>
-                      </div>
-                    )}
+                    <ShareHintGuide />
                   </div>
                 )}
                 {isTmdbBacked && (
@@ -1405,8 +1432,8 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
                   {/* Modal Header */}
                   <div className="flex items-center justify-between px-6 py-4 border-b border-white/5 bg-white/[0.02]">
                     <div className="flex items-center gap-3">
-                      <div className="w-10 h-10 rounded-lg bg-red-500/10 flex items-center justify-center">
-                        <Info size={18} className="text-red-500" />
+                      <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-red-500/10 text-red-500">
+                        <Info size={18} />
                       </div>
                       <div>
                         <h3 className="text-[13px] font-black text-white uppercase tracking-widest leading-none">Media Information</h3>
@@ -1491,23 +1518,23 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
 
             {showTrailerModal && (
               <div
-                className="fixed inset-0 z-[65] flex items-center justify-center p-4 md:p-8 bg-black/80 backdrop-blur-md animate-in fade-in duration-200"
+                className="fixed inset-0 z-[60] flex items-center justify-center p-4 md:p-8 bg-black/70 backdrop-blur-sm animate-in fade-in duration-200"
                 onClick={() => setShowTrailerModal(false)}
               >
                 <div
-                  className="relative w-full max-w-5xl overflow-hidden rounded-3xl border border-white/10 bg-[#080808] shadow-[0_30px_90px_rgba(0,0,0,0.75)] animate-in zoom-in-95 slide-in-from-bottom-4 duration-300"
+                  className="relative w-full max-w-5xl overflow-hidden rounded-2xl border border-white/10 bg-[#0f0f0f] shadow-2xl animate-in zoom-in-95 slide-in-from-bottom-4 duration-300"
                   onClick={e => e.stopPropagation()}
                 >
-                  <div className="flex items-center justify-between gap-4 border-b border-white/8 bg-white/[0.03] px-5 py-4">
+                  <div className="flex items-center justify-between gap-4 border-b border-white/5 bg-white/[0.02] px-6 py-4">
                     <div className="min-w-0 flex items-center gap-3">
-                      <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-red-600/15 text-red-500 ring-1 ring-red-500/20">
-                        <Clapperboard size={20} />
+                      <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-red-500/10 text-red-500">
+                        <Clapperboard size={18} />
                       </div>
                       <div className="min-w-0">
-                        <h3 className="truncate text-sm font-black uppercase tracking-[0.16em] text-white">
+                        <h3 className="truncate text-[13px] font-black uppercase tracking-widest text-white leading-none">
                           {trailer?.label || (activeTrailerSeason ? `Season ${activeTrailerSeason} Trailer` : 'Trailer')} {trailerLoading ? 'Loading' : 'Playing'}
                         </h3>
-                        <p className="truncate text-[12px] font-semibold text-white/35">{trailer?.name || 'Finding the best playable trailer...'}</p>
+                        <p className="truncate text-[11px] font-medium text-white/35 mt-1">{trailer?.name || 'Finding the best playable trailer...'}</p>
                       </div>
                     </div>
 
@@ -1520,7 +1547,7 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
                               onClick={() => handleTrailerSeasonSelect(seasonNumber)}
                               className={`h-7 shrink-0 rounded-lg px-3 text-[9px] font-black uppercase tracking-widest transition-all ${
                                 activeTrailerSeason === seasonNumber
-                                  ? 'bg-red-600 text-white'
+                                  ? 'bg-red-500 text-white'
                                   : 'text-white/45 hover:bg-white/8 hover:text-white'
                               }`}
                             >
@@ -1532,16 +1559,13 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
                       <button
                         onClick={() => trailer?.watchUrl && window.open(trailer.watchUrl, '_blank')}
                         disabled={!trailer?.watchUrl}
-                        className="hidden sm:flex h-9 items-center gap-2 rounded-xl border border-white/10 bg-white/[0.04] px-3 text-[10px] font-black uppercase tracking-widest text-white/45 transition-all hover:text-white hover:bg-white/[0.08]"
+                        className="hidden sm:flex h-8 items-center gap-2 rounded-lg border border-white/10 bg-white/[0.04] px-3 text-[10px] font-black uppercase tracking-widest text-white/45 transition-all hover:text-white hover:bg-white/[0.08]"
                       >
                         <ExternalLink size={13} />
                         YouTube
                       </button>
-                      <button
-                        onClick={() => setShowTrailerModal(false)}
-                        className="flex h-9 w-9 items-center justify-center rounded-xl border border-white/10 bg-white/[0.04] text-white/50 transition-all hover:bg-red-600 hover:text-white hover:border-red-600"
-                      >
-                        <X size={17} />
+                      <button onClick={() => setShowTrailerModal(false)} className="p-1.5 rounded-lg hover:bg-white/10 text-white/50 hover:text-white transition-all ml-1">
+                        <X size={18} />
                       </button>
                     </div>
                   </div>

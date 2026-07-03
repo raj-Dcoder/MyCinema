@@ -1,4 +1,19 @@
-﻿# MyCinema v1.27.0
+# MyCinema v1.28.0
+
+Minor release focused on player stability, audio enhancements, and simpler onboarding.
+
+### Player Experience
+- **Overhauled Video Player**: Completely refactored the video player component for better performance, smoother playback, and cleaner code architecture.
+- **Intro Skip**: Added support for automatically skipping TV show intros with a single click.
+- **Audio Boost**: Integrated a new audio boost feature allowing users to increase volume for quiet videos natively.
+
+### UI & UX Polish
+- **Feature Guides**: Added interactive UI guides (`FeatureGuides.tsx`) to help users discover new features naturally.
+- **Simplified What's New**: Replaced the cinematic onboarding slides with a clean, simple, and direct WhatsApp-style "What's New" modal dialog.
+
+***
+
+# MyCinema v1.27.0
 
 Minor release focused on user personalization and premium visual upgrades across the app.
 

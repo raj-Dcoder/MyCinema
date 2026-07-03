@@ -465,7 +465,7 @@ export async function fetchTmdbTitleLogo(type: 'movie' | 'series', tmdbId: numbe
 }
 
 export async function fetchTrending(type: 'movie' | 'series'): Promise<any[]> {
-  const cacheKey = `trending:${type}:week`
+  const cacheKey = `trending:v4:${type}:week`
   const cached = readTmdbListCache(cacheKey, `trending ${type}`)
   if (cached && cached.length > 0) return cached
 
@@ -508,6 +508,7 @@ export async function fetchTrending(type: 'movie' | 'series'): Promise<any[]> {
       logo_path: item.id ? await fetchTmdbTitleLogo(type, item.id) : null,
       vote_average: item.vote_average,
       release_year: (item.release_date || item.first_air_date || '').substring(0, 4),
+      release_date: item.release_date || item.first_air_date,
       type: type,
       isExternal: true
     })))
@@ -523,8 +524,8 @@ export async function fetchTrending(type: 'movie' | 'series'): Promise<any[]> {
 }
 
 export async function fetchTrendingInIndia(type: 'movie' | 'series' = 'movie'): Promise<any[]> {
-  const cacheKey = `trending:IN:watchable-now:v8:${type}`
-  const legacyCacheKey = `trending:IN:watchable-now:v7:${type}`
+  const cacheKey = `trending:IN:watchable-now:v9:${type}`
+  const legacyCacheKey = `trending:IN:watchable-now:v8:${type}`
   const cached = readTmdbListCache(cacheKey, `India watchable trending ${type}`)
   if (cached && cached.length > 0) return cached
   const legacyCached = readTmdbListCache(legacyCacheKey, `legacy India OTT trending ${type}`, true)
@@ -627,6 +628,7 @@ export async function fetchTrendingInIndia(type: 'movie' | 'series' = 'movie'): 
       logo_path: item.id ? await fetchTmdbTitleLogo(mediaType === 'tv' ? 'series' : 'movie', item.id) : null,
       vote_average: item.vote_average,
       release_year: getTmdbReleaseDate(item, mediaType).substring(0, 4),
+      release_date: getTmdbReleaseDate(item, mediaType),
       type: mediaType === 'tv' ? 'series' : 'movie',
       isExternal: true
     })))
@@ -1251,3 +1253,72 @@ export async function fetchTmdbTrailer(params: {
     return null
   }
 }
+
+export async function fetchTmdbReleaseInfo(id: number, type: 'movie' | 'series'): Promise<any> {
+  const apiKey = getTmdbApiKey()
+  if (!apiKey) return null
+
+  try {
+    const endpoint = type === 'series' ? 'tv' : 'movie'
+    const url = `${TMDB_BASE}/${endpoint}/${id}?api_key=${apiKey}&append_to_response=watch/providers,release_dates`
+    
+    if (!cachedTmdbIp) {
+      await resolveDnsDoH('api.themoviedb.org')
+    }
+
+    const response = await fetch(url, {
+      dispatcher: tmdbDispatcher,
+      signal: AbortSignal.timeout(10000),
+      headers: {
+        'User-Agent': 'MyCinema/1.3.0',
+        'Accept': 'application/json'
+      }
+    })
+
+    if (!response.ok) return null
+    const data = await response.json() as any
+
+    let releaseDate = null
+    let releaseType: 'theatrical' | 'digital' | 'tv' | null = null
+    const providers: Array<{ provider_name: string, logo_path: string }> = []
+
+    if (type === 'movie') {
+      releaseDate = data.release_date || null
+      const rdResults = data.release_dates?.results || []
+      const regionRelease = rdResults.find((r: any) => r.iso_3166_1 === 'IN') || rdResults.find((r: any) => r.iso_3166_1 === 'US') || rdResults[0]
+      if (regionRelease && regionRelease.release_dates) {
+        const digital = regionRelease.release_dates.find((d: any) => d.type === 4)
+        const theatrical = regionRelease.release_dates.find((d: any) => d.type === 3)
+        if (digital) {
+          releaseType = 'digital'
+        } else if (theatrical) {
+          releaseType = 'theatrical'
+        }
+      }
+    } else {
+      releaseDate = data.first_air_date || null
+      releaseType = 'tv'
+    }
+
+    const watchProviders = data['watch/providers']?.results || {}
+    const regionalProviders = watchProviders['IN'] || watchProviders['US'] || Object.values(watchProviders)[0] || {}
+    const flatrate = regionalProviders.flatrate || []
+    
+    for (const p of flatrate) {
+      providers.push({
+        provider_name: p.provider_name,
+        logo_path: p.logo_path ? `${TMDB_IMG}${p.logo_path}` : ''
+      })
+    }
+
+    return {
+      releaseDate,
+      type: releaseType,
+      providers
+    }
+  } catch (err) {
+    console.warn(`[TMDB] fetchTmdbReleaseInfo failed for ${id}:`, err)
+    return null
+  }
+}
+

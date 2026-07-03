@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react'
-import { Search, Download as DownloadIcon, Film, Tv, X, Loader2, HardDrive, CheckCircle2, AlertCircle, Pause, Play, FolderOpen, Bookmark, BookmarkCheck, ArrowLeft, Languages, RotateCcw, Share2, Copy, MessageCircle, Send } from 'lucide-react'
+import { Search, Download as DownloadIcon, Film, Tv, X, Loader2, HardDrive, CheckCircle2, AlertCircle, Pause, Play, FolderOpen, Bookmark, BookmarkCheck, ArrowLeft, Languages, RotateCcw, Share2, Copy, MessageCircle, Send, MoreVertical, Trash, ListMinus } from 'lucide-react'
 
 import { Video } from '../types'
+import { DownloadOptionsGuide } from '../components/FeatureGuides'
 import { getTorrentSourceHealthScore, getTorrentSourceSpeedLabel } from '../utils/torrentSources'
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -64,7 +65,6 @@ const MYCINEMA_SHARE_BASE_URL = (
   import.meta.env.VITE_MYCINEMA_SHARE_BASE_URL ||
   'https://mycinema-share.rajveersinghranaofficial.workers.dev'
 ).replace(/\/+$/, '')
-const DOWNLOAD_SHARE_HINT_STORAGE_KEY = 'mycinema_download_share_hint_seen_v1'
 
 const encodeShareSource = (source: any) => {
   const json = JSON.stringify(source)
@@ -139,7 +139,6 @@ const Download: React.FC<DownloadProps> = ({ onShowDetail }) => {
   const [downloadToRemove, setDownloadToRemove] = useState<string | null>(null)
   const [downloadToShare, setDownloadToShare] = useState<ActiveDownload | null>(null)
   const [shareFeedback, setShareFeedback] = useState<string | null>(null)
-  const [showDownloadShareHint, setShowDownloadShareHint] = useState(() => localStorage.getItem(DOWNLOAD_SHARE_HINT_STORAGE_KEY) !== 'true')
   const [loadingDetailId, setLoadingDetailId] = useState<string | null>(null)
   const [downloadsStorage, setDownloadsStorage] = useState<DownloadsStorage | null>(null)
   const removedIdsRef = useRef<Set<string>>(new Set())
@@ -265,11 +264,6 @@ const Download: React.FC<DownloadProps> = ({ onShowDetail }) => {
   }
 
   const openShareUrl = (url: string) => window.open(url, '_blank')
-
-  const dismissDownloadShareHint = () => {
-    localStorage.setItem(DOWNLOAD_SHARE_HINT_STORAGE_KEY, 'true')
-    setShowDownloadShareHint(false)
-  }
 
   const toggleWatchlist = (item: TMDBResult, e?: React.MouseEvent) => {
     e?.stopPropagation()
@@ -724,53 +718,88 @@ const Download: React.FC<DownloadProps> = ({ onShowDetail }) => {
   return (
     <div className="relative">
       {/* Compact Removal Tooltip/Menu */}
-      {downloadToRemove && (
-        <div 
-          className="fixed inset-0 z-[100]" 
-          onClick={() => setDownloadToRemove(null)}
-        >
+      {downloadToRemove && (() => {
+        const dlItem = downloads.find(d => d.id === downloadToRemove);
+        const matchingVideo = (() => {
+          if (!dlItem) return null;
+          if (dlItem.tmdbId && videoMap.has(`tmdb-${dlItem.tmdbId}`)) {
+            return videoMap.get(`tmdb-${dlItem.tmdbId}`);
+          }
+          const cleanDlTitle = dlItem.title.replace(/\s*\([^)]*\)\s*$/, '').toLowerCase();
+          return videoMap.get(`title-${cleanDlTitle}`) || videoMap.get(`series-${cleanDlTitle}`);
+        })();
+        const isShareEligible = Boolean((dlItem?.tmdbId || matchingVideo?.tmdb_id) && dlItem?.magnet);
+
+        return (
           <div 
-            className="absolute bg-surface/95 backdrop-blur-2xl border border-white/10 rounded-xl shadow-2xl overflow-hidden min-w-[180px] animate-in fade-in zoom-in duration-200"
-            style={{ 
-              top: window.innerHeight - 200 > (document.getElementById(`dl-btn-${downloadToRemove}`)?.getBoundingClientRect().bottom || 0) 
-                ? (document.getElementById(`dl-btn-${downloadToRemove}`)?.getBoundingClientRect().bottom || 0) + 8 
-                : (document.getElementById(`dl-btn-${downloadToRemove}`)?.getBoundingClientRect().top || 0) - 100,
-              left: Math.max(20, (document.getElementById(`dl-btn-${downloadToRemove}`)?.getBoundingClientRect().right || 0) - 180)
-            }}
-            onClick={(e) => e.stopPropagation()}
+            className="fixed inset-0 z-[100]" 
+            onClick={() => setDownloadToRemove(null)}
           >
-            <div className="p-1.5 flex flex-col gap-1">
-              <button
-                onClick={() => handleRemoveDownload(downloadToRemove, false)}
-                className="flex items-center gap-3 px-3 py-2.5 rounded-lg hover:bg-white/5 text-left transition-colors group"
-              >
-                <div className="w-8 h-8 rounded-lg bg-white/5 flex items-center justify-center text-muted group-hover:text-primary transition-colors">
-                  <X size={16} />
-                </div>
-                <div className="flex flex-col">
-                  <span className="text-xs font-bold text-text">Remove History</span>
-                  <span className="text-[10px] text-muted">Keep files on disk</span>
-                </div>
-              </button>
-              
-              <div className="h-px bg-white/5 mx-2" />
-              
-              <button
-                onClick={() => handleRemoveDownload(downloadToRemove, true)}
-                className="flex items-center gap-3 px-3 py-2.5 rounded-lg hover:bg-red-500/10 text-left transition-colors group"
-              >
-                <div className="w-8 h-8 rounded-lg bg-red-500/10 flex items-center justify-center text-red-400">
-                  <AlertCircle size={16} />
-                </div>
-                <div className="flex flex-col">
-                  <span className="text-xs font-bold text-red-400">Delete Permanently</span>
-                  <span className="text-[10px] text-red-400/60">Delete from disk</span>
-                </div>
-              </button>
+            <div 
+              className="absolute bg-surface/95 backdrop-blur-2xl border border-white/10 rounded-xl shadow-2xl overflow-hidden min-w-[180px] animate-in fade-in zoom-in duration-200"
+              style={{ 
+                top: window.innerHeight - 200 > (document.getElementById(`dl-btn-${downloadToRemove}`)?.getBoundingClientRect().bottom || 0) 
+                  ? (document.getElementById(`dl-btn-${downloadToRemove}`)?.getBoundingClientRect().bottom || 0) + 8 
+                  : (document.getElementById(`dl-btn-${downloadToRemove}`)?.getBoundingClientRect().top || 0) - 100,
+                left: Math.max(20, (document.getElementById(`dl-btn-${downloadToRemove}`)?.getBoundingClientRect().right || 0) - 180)
+              }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="p-1.5 flex flex-col gap-1">
+                {isShareEligible && dlItem && (
+                  <>
+                    <button
+                      onClick={() => {
+                        setDownloadToShare({ ...dlItem, tmdbId: dlItem.tmdbId || matchingVideo?.tmdb_id })
+                        setShareFeedback(null)
+                        setDownloadToRemove(null)
+                      }}
+                      className="flex items-center gap-3 px-3 py-2.5 rounded-lg hover:bg-cyan-500/10 text-left transition-colors group"
+                    >
+                      <div className="w-8 h-8 rounded-lg bg-cyan-500/10 flex items-center justify-center text-cyan-500 group-hover:scale-110 transition-transform">
+                        <Share2 size={16} />
+                      </div>
+                      <div className="flex flex-col">
+                        <span className="text-xs font-bold text-cyan-400">Share source</span>
+                        <span className="text-[10px] text-cyan-400/60">Share download link</span>
+                      </div>
+                    </button>
+                    <div className="h-px bg-white/5 mx-2" />
+                  </>
+                )}
+                
+                <button
+                  onClick={() => handleRemoveDownload(downloadToRemove, false)}
+                  className="flex items-center gap-3 px-3 py-2.5 rounded-lg hover:bg-white/5 text-left transition-colors group"
+                >
+                  <div className="w-8 h-8 rounded-lg bg-white/5 flex items-center justify-center text-muted group-hover:text-primary transition-colors">
+                    <ListMinus size={16} />
+                  </div>
+                  <div className="flex flex-col">
+                    <span className="text-xs font-bold text-text">Remove from list</span>
+                    <span className="text-[10px] text-muted">Keep files on disk</span>
+                  </div>
+                </button>
+                
+                <div className="h-px bg-white/5 mx-2" />
+                
+                <button
+                  onClick={() => handleRemoveDownload(downloadToRemove, true)}
+                  className="flex items-center gap-3 px-3 py-2.5 rounded-lg hover:bg-red-500/10 text-left transition-colors group"
+                >
+                  <div className="w-8 h-8 rounded-lg bg-red-500/10 flex items-center justify-center text-red-400">
+                    <Trash size={16} />
+                  </div>
+                  <div className="flex flex-col">
+                    <span className="text-xs font-bold text-red-400">Delete from disk</span>
+                    <span className="text-[10px] text-red-400/60">Delete permanently</span>
+                  </div>
+                </button>
+              </div>
             </div>
           </div>
-        </div>
-      )}
+        )
+      })()}
 
       {downloadToShare && (() => {
         const payload = getDownloadSharePayload(downloadToShare)
@@ -923,12 +952,6 @@ const Download: React.FC<DownloadProps> = ({ onShowDetail }) => {
                   return videoMap.get(`title-${cleanDlTitle}`) || videoMap.get(`series-${cleanDlTitle}`)
                 })()
                 const isShareEligible = Boolean((dl.tmdbId || matchingVideo?.tmdb_id) && dl.magnet)
-                const showHintForThisDownload = showDownloadShareHint && idx === sortedDownloads.findIndex(item => {
-                  if (!item.magnet) return false
-                  if (item.tmdbId) return true
-                  const cleanTitle = item.title.replace(/\s*\([^)]*\)\s*$/, '').toLowerCase()
-                  return Boolean(videoMap.get(`title-${cleanTitle}`) || videoMap.get(`series-${cleanTitle}`))
-                })
 
                 const handleShowDetailWithDelay = (video: Video) => {
                   setLoadingDetailId(dl.id)
@@ -997,45 +1020,6 @@ const Download: React.FC<DownloadProps> = ({ onShowDetail }) => {
                           <AlertCircle size={14} /> Failed
                         </span>
                       )}
-                      {isShareEligible && (
-                        <div className="relative">
-                          <button
-                            onClick={() => {
-                              dismissDownloadShareHint()
-                              setDownloadToShare({ ...dl, tmdbId: dl.tmdbId || matchingVideo?.tmdb_id })
-                              setShareFeedback(null)
-                            }}
-                            className="p-1.5 rounded-lg text-muted hover:text-cyan-300 hover:bg-cyan-400/10 transition-colors"
-                            title="Share exact source"
-                          >
-                            <Share2 size={14} />
-                          </button>
-                          {showHintForThisDownload && (
-                            <div className="absolute right-0 top-full z-40 mt-3 w-[245px] rounded-xl border border-cyan-300/20 bg-[#07111c] p-3 text-left shadow-2xl shadow-black/45 ring-1 ring-white/5 animate-in fade-in slide-in-from-top-1 duration-200">
-                              <div className="absolute right-3 top-0 h-3 w-3 -translate-y-1/2 rotate-45 border-l border-t border-cyan-300/20 bg-[#07111c]" />
-                              <div className="flex items-start gap-3">
-                                <div className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-cyan-300/12 text-cyan-200">
-                                  <Share2 size={14} />
-                                </div>
-                                <div className="min-w-0 flex-1">
-                                  <p className="text-[10px] font-black uppercase tracking-[0.18em] text-cyan-100">Share mirrors</p>
-                                  <p className="mt-1 text-[11px] font-semibold leading-relaxed text-white/58">
-                                    Send this exact source so friends can download the same mirror.
-                                  </p>
-                                </div>
-                                <button
-                                  type="button"
-                                  onClick={dismissDownloadShareHint}
-                                  className="rounded-md p-1 text-white/35 transition-colors hover:bg-white/10 hover:text-white"
-                                  title="Dismiss hint"
-                                >
-                                  <X size={13} />
-                                </button>
-                              </div>
-                            </div>
-                          )}
-                        </div>
-                      )}
                     </div>
                   </div>
                   <div className="flex items-center gap-3">
@@ -1076,10 +1060,11 @@ const Download: React.FC<DownloadProps> = ({ onShowDetail }) => {
                     <button
                       id={`dl-btn-${dl.id}`}
                       onClick={() => setDownloadToRemove(dl.id)}
-                      className="p-1 rounded-lg text-muted hover:text-red-400 hover:bg-red-400/10 transition-colors"
-                      title={(dl.status === 'downloading' || dl.status === 'connecting') ? 'Cancel & Remove' : 'Remove from List'}
+                      className="p-1 rounded-lg text-muted hover:text-red-400 hover:bg-red-400/10 transition-colors relative"
+                      title="More Options"
                     >
-                      <X size={14} />
+                      <MoreVertical size={14} />
+                      {idx === 0 && <DownloadOptionsGuide />}
                     </button>
                   </div>
                   {dl.status !== 'done' && dl.downloaded && dl.size && (

@@ -56,6 +56,7 @@ interface Api {
   fetchTrending: (type: 'movie' | 'series') => Promise<any[]>
   fetchTrendingIndia: (type?: 'movie' | 'series') => Promise<any[]>
   getTmdbTitleLogo: (type: 'movie' | 'series', tmdbId: number) => Promise<string | null>
+  getTmdbReleaseInfo: (id: number, type: 'movie' | 'series') => Promise<import('./types').TmdbReleaseInfo | null>
   getTmdbTrailer: (params: { tmdbId?: number | null; title: string; type: 'movie' | 'series'; year?: number | null; seasonNumber?: number | null; preferLatestSeason?: boolean }) => Promise<any | null>
   getTmdbSeriesCatalog: (tmdbId: number) => Promise<Array<{ seasonNumber: number; episodeNumber: number; name: string; overview: string | null; airDate: string | null; stillPath: string | null; released: boolean }>>
   getIntroDbSegments: (params: { imdbId?: string | null; tmdbId?: number | null; season?: number | null; episode?: number | null; filePath?: string | null; duration?: number | null }) => Promise<{
@@ -127,6 +128,7 @@ interface Api {
   getAppSettings: () => Promise<{ launchFullscreen: boolean }>
   setLaunchFullscreen: (launchFullscreen: boolean) => Promise<{ launchFullscreen: boolean }>
   onAppSettingsChanged: (callback: (settings: { launchFullscreen: boolean }) => void) => () => void
+  getTmdbReleaseInfo: (id: number, type: 'movie' | 'series') => Promise<import('./types').TmdbReleaseInfo | null>
 }
 
 declare global {

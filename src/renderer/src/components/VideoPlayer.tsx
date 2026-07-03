@@ -5,6 +5,10 @@ import { getMediaUnitIdentity, groupMediaVersions } from '../utils/mediaVersions
 import { useWatchTogether } from '../hooks/useWatchTogether'
 import { WatchTogetherModal } from './WatchTogetherModal'
 import AIEnhancementRenderer from './AIEnhancementRenderer'
+import { PlayerControls } from './player/PlayerControls'
+import { SubtitleOverlay } from './player/SubtitleOverlay'
+import { useAudioBoost, AudioBoostProfile, AudioBoostIntensity, AUDIO_BOOST_PROFILES, AUDIO_BOOST_INTENSITIES } from '../hooks/useAudioBoost'
+import { useIntroSkip, IntroDbSegment, getIntroDbSegmentKey, getIntroDbSegmentLabel, getIntroDbSegmentAccentClass, INTRODB_SKIP_END_PADDING_SECONDS, INTRODB_AUTO_SKIP_CONFIRMATION_MS } from '../hooks/useIntroSkip'
 import {
   SUBTITLE_SYNC_COARSE_STEP_MS,
   SUBTITLE_SYNC_FINE_STEP_MS,
@@ -22,26 +26,6 @@ const isTorrentStreamPath = (filePath?: string | null) => Boolean(filePath?.star
 const getVideoSourceUrl = (filePath: string) => (
   isTorrentStreamPath(filePath) ? filePath : `media://file/${encodeURIComponent(filePath)}`
 )
-
-type AudioBoostProfile = 'auto' | 'dialogue' | 'night' | 'laptop' | 'cinema'
-type AudioBoostIntensity = 'low' | 'medium' | 'high'
-type IntroDbSegmentType = 'intro' | 'recap' | 'outro'
-
-interface IntroDbSegment {
-  type: IntroDbSegmentType
-  startSec: number
-  endSec: number
-  confidence: number | null
-  submissionCount: number | null
-  updatedAt: string | null
-  source: 'theintrodb' | 'introdb' | 'chapters'
-}
-
-interface AutoSkipTransitionState {
-  show: boolean
-  label: string
-  id: number
-}
 
 interface SeriesSubtitleStatus {
   label: string
@@ -61,123 +45,10 @@ const HIGH_SPEED_MIN_FRAME_SAMPLE = 24
 const HIGH_SPEED_DROPPED_FRAME_LIMIT = 8
 const HIGH_SPEED_DROPPED_FRAME_RATIO = 0.18
 const BUFFERING_INDICATOR_DELAY_MS = 450
-const INTRODB_SKIP_PROMPT_LEAD_SECONDS = 3
-const INTRODB_SKIP_END_PADDING_SECONDS = 0.15
-const INTRODB_AUTO_SKIP_STORAGE_KEY = 'mycinema_introdb_auto_skip'
-const INTRODB_AUTO_SKIP_SEEK_TRANSITION_MS = 180
-const INTRODB_AUTO_SKIP_NEXT_TRANSITION_MS = 240
-const INTRODB_AUTO_SKIP_CONFIRMATION_MS = 700
-const INTRODB_RECAP_PROMPT_VISIBLE_SECONDS = 8
 const SERIES_SUBTITLE_AUTO_LOAD_VALUE = 'external'
 const DOUBLE_TAP_WINDOW_MS = 300
 
-const AUDIO_BOOST_PROFILES: Record<AudioBoostProfile, {
-  label: string
-  detail: string
-  bassGain: number
-  lowMidGain: number
-  dialogGain: number
-  presenceGain: number
-  airGain: number
-  compressorThreshold: number
-  compressorKnee: number
-  compressorRatio: number
-  compressorAttack: number
-  compressorRelease: number
-  limiterThreshold: number
-  outputGain: number
-}> = {
-  auto: {
-    label: 'Auto',
-    detail: 'Voices + leveler',
-    bassGain: 2.8,
-    lowMidGain: -2.8,
-    dialogGain: 4.6,
-    presenceGain: 2.2,
-    airGain: 1.5,
-    compressorThreshold: -30,
-    compressorKnee: 22,
-    compressorRatio: 5.2,
-    compressorAttack: 0.006,
-    compressorRelease: 0.22,
-    limiterThreshold: -3.5,
-    outputGain: 1.22
-  },
-  dialogue: {
-    label: 'Dialogue',
-    detail: 'Lift voices',
-    bassGain: 0.8,
-    lowMidGain: -4.2,
-    dialogGain: 6.4,
-    presenceGain: 3.4,
-    airGain: 1.0,
-    compressorThreshold: -31,
-    compressorKnee: 20,
-    compressorRatio: 4.8,
-    compressorAttack: 0.005,
-    compressorRelease: 0.18,
-    limiterThreshold: -3.5,
-    outputGain: 1.18
-  },
-  night: {
-    label: 'Night',
-    detail: 'Tame loud scenes',
-    bassGain: -1.4,
-    lowMidGain: -2.4,
-    dialogGain: 5.4,
-    presenceGain: 1.8,
-    airGain: 0.8,
-    compressorThreshold: -34,
-    compressorKnee: 30,
-    compressorRatio: 8.0,
-    compressorAttack: 0.004,
-    compressorRelease: 0.28,
-    limiterThreshold: -6,
-    outputGain: 1.14
-  },
-  laptop: {
-    label: 'Laptop',
-    detail: 'Small speakers',
-    bassGain: 1.8,
-    lowMidGain: -5.0,
-    dialogGain: 5.4,
-    presenceGain: 4.0,
-    airGain: 2.0,
-    compressorThreshold: -32,
-    compressorKnee: 20,
-    compressorRatio: 5.8,
-    compressorAttack: 0.004,
-    compressorRelease: 0.2,
-    limiterThreshold: -3.8,
-    outputGain: 1.26
-  },
-  cinema: {
-    label: 'Cinema',
-    detail: 'Bigger impact',
-    bassGain: 5.4,
-    lowMidGain: -1.8,
-    dialogGain: 3.2,
-    presenceGain: 1.6,
-    airGain: 2.8,
-    compressorThreshold: -26,
-    compressorKnee: 22,
-    compressorRatio: 4.0,
-    compressorAttack: 0.008,
-    compressorRelease: 0.2,
-    limiterThreshold: -3,
-    outputGain: 1.2
-  }
-}
 
-const AUDIO_BOOST_INTENSITIES: Record<AudioBoostIntensity, {
-  label: string
-  amount: number
-  outputScale: number
-}> = {
-  low: { label: 'Low', amount: 0.72, outputScale: 0.82 },
-  medium: { label: 'Med', amount: 1, outputScale: 1 },
-  high: { label: 'High', amount: 1.28, outputScale: 1.12 }
-}
 
 // ── VTT Parser (runs once per track selection, no React state) ──────────────
 function parseVTTTime(s: string): number {
@@ -225,22 +96,6 @@ function parseVTT(content: string): SubCue[] {
     if (text) cues.push({ start, end, text })
   }
   return cues
-}
-
-function getIntroDbSegmentKey(segment: IntroDbSegment): string {
-  return `${segment.type}:${segment.startSec}:${segment.endSec}`
-}
-
-function getIntroDbSegmentLabel(type: IntroDbSegmentType): string {
-  if (type === 'recap') return 'Recap'
-  if (type === 'outro') return 'Outro'
-  return 'Intro'
-}
-
-function getIntroDbSegmentAccentClass(type: IntroDbSegmentType): string {
-  if (type === 'recap') return 'bg-sky-300/70'
-  if (type === 'outro') return 'bg-emerald-300/70'
-  return 'bg-amber-300/70'
 }
 
 function getPreferenceSeriesKey(video: Video) {
@@ -448,15 +303,12 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
   const highSpeedQualityRef = useRef<{ dropped: number; total: number } | null>(null)
   const bufferingIndicatorTimerRef = useRef<NodeJS.Timeout | null>(null)
   const lastTimeUpdateRef = useRef(0)
-  const subtitleRafRef = useRef<number | null>(null)
-  // Custom subtitle renderer refs — never triggers React re-renders
-  const subtitleDivRef = useRef<HTMLDivElement | null>(null)
+  const subtitleContainerRef = useRef<HTMLDivElement | null>(null)
+
   const subtitleCuesRef = useRef<SubCue[]>([])
   const activeSubKeyRef = useRef<string | null>(null)
-  const activeSubtitleCueIndexRef = useRef(-1)
   const subtitleOffsetStorageKeyRef = useRef<string | null>(null)
   const subtitleOffsetRef = useRef(0)
-
   const getSpeakerLabel = (speakerId: string | null) => {
     if (!speakerId) return 'Someone'
     if (speakerId === localPeerId) return 'You'
@@ -507,23 +359,51 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
     const storedVibrance = localStorage.getItem('mycinema_ai_vibrance')
     return storedVibrance === 'true'
   })
-  const [audioBoostEnabled, setAudioBoostEnabled] = useState(() => {
-    return localStorage.getItem('mycinema_audio_boost') === 'true'
+  const {
+    audioBoostEnabled,
+    setAudioBoostEnabled,
+    audioBoostProfile,
+    setAudioBoostProfile,
+    audioBoostIntensity,
+    setAudioBoostIntensity,
+    audioCtxRef
+  } = useAudioBoost({
+    videoRef,
+    audioRef,
+    isPlaying,
+    selectedAudioId,
+    embeddedAudio
   })
-  const [audioBoostProfile, setAudioBoostProfile] = useState<AudioBoostProfile>(() => {
-    const stored = localStorage.getItem('mycinema_audio_boost_profile')
-    if (stored === 'balanced') return 'auto'
-    if (stored === 'rich') return 'cinema'
-    if (stored === 'dialogue' || stored === 'night' || stored === 'laptop' || stored === 'cinema' || stored === 'auto') return stored
-    return 'auto'
+  const canControlPlayback = isHost || roomId === null
+  const performIntroDbSkipRef = useRef<(segment: IntroDbSegment) => void>(() => {})
+  const playNextEpisodeRef = useRef<() => void>(() => {})
+  const seekToTimeRef = useRef<(t: number) => void>(() => {})
+
+  const {
+    introDbSegments,
+    autoSkipIntroOutroEnabled,
+    setAutoSkipIntroOutroEnabled,
+    autoSkipTransition,
+    activeIntroDbSegment,
+    activeIntroDbSegmentCanAutoSkip,
+    activeIntroDbAutoSkipCountdown,
+    activeIntroDbWatchLabel,
+    activeIntroDbActionLabel,
+    activeIntroDbAutoSkipProgress,
+    dismissIntroDbSegment,
+    skipIntroDbSegment,
+    clearIntroDbRuntimeWork
+  } = useIntroSkip({
+    currentVideo,
+    duration,
+    currentTime,
+    canControlPlayback,
+    hasNextEpisode,
+    onSkipSegment: (segment: IntroDbSegment) => performIntroDbSkipRef.current(segment),
+    isPlaying,
+    isSeeking
   })
-  const [audioBoostIntensity, setAudioBoostIntensity] = useState<AudioBoostIntensity>(() => {
-    const stored = localStorage.getItem('mycinema_audio_boost_intensity')
-    return stored === 'low' || stored === 'high' ? stored : 'medium'
-  })
-  const [autoSkipIntroOutroEnabled, setAutoSkipIntroOutroEnabled] = useState(() => {
-    return localStorage.getItem(INTRODB_AUTO_SKIP_STORAGE_KEY) !== 'false'
-  })
+
   const [showInfoPanel, setShowInfoPanel] = useState(false)
   const [showEpisodesPanel, setShowEpisodesPanel] = useState(false)
   const [seriesEpisodes, setSeriesEpisodes] = useState<Video[]>([])
@@ -531,9 +411,6 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
   const [infoLoading, setInfoLoading] = useState(false)
   const [showAllAudioInfo, setShowAllAudioInfo] = useState(false)
   const [showSubtitleSyncPanel, setShowSubtitleSyncPanel] = useState(false)
-  const [introDbSegments, setIntroDbSegments] = useState<IntroDbSegment[]>([])
-  const [dismissedIntroDbSegmentKeys, setDismissedIntroDbSegmentKeys] = useState<Set<string>>(new Set())
-  const [autoSkipTransition, setAutoSkipTransition] = useState<AutoSkipTransitionState | null>(null)
   
   // Online subtitle search state
   const [onlineSubResults, setOnlineSubResults] = useState<any[]>([])
@@ -572,48 +449,12 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
   const subtitleLoadTokenRef = useRef(0)
   const isPlayerClosingRef = useRef(false)
   const seriesSubtitleStatusTimerRef = useRef<NodeJS.Timeout | null>(null)
-  const autoSkipInFlightKeyRef = useRef<string | null>(null)
-  const autoSkipTransitionTimerRef = useRef<NodeJS.Timeout | null>(null)
   const highSpeedPlaybackActive = playbackRate >= HIGH_SPEED_PERFORMANCE_RATE || isHolding2x
   const highSpeedDisplayRate = isHolding2x ? 2 : playbackRate
   const highSpeedMotionPaused = fpsBoostEnabled && highSpeedPlaybackActive && highSpeedPerformanceMode
   const effectiveFpsBoostEnabled = fpsBoostEnabled && !highSpeedMotionPaused
   const effectiveSharpnessEnabled = qualitySharpnessEnabled
   const effectiveVibranceEnabled = qualityVibranceEnabled
-  const canControlPlayback = isHost || roomId === null
-  const activeIntroDbSegment = canControlPlayback
-    ? introDbSegments.find(segment => {
-        const key = getIntroDbSegmentKey(segment)
-        const segmentEnd = duration > 0 ? Math.min(segment.endSec, duration) : segment.endSec
-        const promptStart = Math.max(0, segment.startSec - INTRODB_SKIP_PROMPT_LEAD_SECONDS)
-        const promptEnd = segment.type === 'recap'
-          ? Math.min(segmentEnd - 0.25, segment.startSec + INTRODB_RECAP_PROMPT_VISIBLE_SECONDS)
-          : segmentEnd - 0.25
-        return !dismissedIntroDbSegmentKeys.has(key) &&
-          currentTime >= promptStart &&
-          currentTime < promptEnd
-      }) || null
-    : null
-  const activeIntroDbSegmentCanAutoSkip = activeIntroDbSegment?.type === 'intro' || activeIntroDbSegment?.type === 'outro'
-  const activeIntroDbAutoSkipCountdown = activeIntroDbSegment && activeIntroDbSegmentCanAutoSkip
-    ? Math.max(0, Math.ceil(activeIntroDbSegment.startSec - currentTime))
-    : 0
-  const activeIntroDbSegmentIsOutroAdvance = activeIntroDbSegment?.type === 'outro' && hasNextEpisode
-  const activeIntroDbWatchLabel = activeIntroDbSegment
-    ? activeIntroDbSegment.type === 'outro'
-      ? 'Watch Credits'
-      : `Watch ${getIntroDbSegmentLabel(activeIntroDbSegment.type)}`
-    : ''
-  const activeIntroDbActionLabel = activeIntroDbSegment
-    ? activeIntroDbSegmentIsOutroAdvance
-      ? 'Next Episode'
-      : activeIntroDbSegment.type === 'outro'
-        ? 'Skip Credits'
-        : `Skip ${getIntroDbSegmentLabel(activeIntroDbSegment.type)}`
-    : ''
-  const activeIntroDbAutoSkipProgress = activeIntroDbSegment && activeIntroDbSegmentCanAutoSkip && autoSkipIntroOutroEnabled
-    ? Math.max(0, Math.min(1, 1 - ((activeIntroDbSegment.startSec - currentTime) / INTRODB_SKIP_PROMPT_LEAD_SECONDS)))
-    : 0
 
   const activateHighSpeedPerformanceMode = useCallback((message?: string) => {
     if (!fpsBoostEnabled) return
@@ -701,10 +542,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
       clearTimeout(seekPreviewThumbTimerRef.current)
       seekPreviewThumbTimerRef.current = null
     }
-    if (autoSkipTransitionTimerRef.current) {
-      clearTimeout(autoSkipTransitionTimerRef.current)
-      autoSkipTransitionTimerRef.current = null
-    }
+    clearIntroDbRuntimeWork()
     if (seriesSubtitleStatusTimerRef.current) {
       clearTimeout(seriesSubtitleStatusTimerRef.current)
       seriesSubtitleStatusTimerRef.current = null
@@ -716,10 +554,6 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
       cancelAnimationFrame(reverseRafRef.current)
       reverseRafRef.current = null
     }
-    if (subtitleRafRef.current !== null) {
-      cancelAnimationFrame(subtitleRafRef.current)
-      subtitleRafRef.current = null
-    }
     if (speedToastRef.current) {
       speedToastRef.current.remove()
       speedToastRef.current = null
@@ -727,18 +561,14 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
     if (subtitleContainerRef.current) {
       subtitleContainerRef.current.remove()
       subtitleContainerRef.current = null
-      subtitleDivRef.current = null
     }
     hideBufferingIndicator()
 
     subtitleCuesRef.current = []
     activeSubKeyRef.current = null
-    activeSubtitleCueIndexRef.current = -1
-    lastSeekPreviewBucketRef.current = null
+
     isPushToTalkActiveRef.current = false
     activeSpeakerIdRef.current = null
-    autoSkipInFlightKeyRef.current = null
-    setAutoSkipTransition(null)
     setSeriesSubtitleStatus(null)
 
     if (releaseMedia) {
@@ -764,19 +594,6 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
       isPlayerClosingRef.current = true
       clearPlayerRuntimeWork(true)
       leaveRoom()
-      if (audioCtxRef.current) {
-        audioCtxRef.current.close().catch(() => {})
-        audioCtxRef.current = null
-        videoSourceNodeRef.current = null
-        audioSourceNodeRef.current = null
-        bassFilterRef.current = null
-        clarityFilterRef.current = null
-        airFilterRef.current = null
-        compressorRef.current = null
-        limiterRef.current = null
-        boostGainRef.current = null
-        audioBoostChainConnectedRef.current = false
-      }
     }
   }, [])
 
@@ -798,63 +615,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
     }
   }, [currentVideo.file_path])
 
-  useEffect(() => {
-    let isCancelled = false
-    setIntroDbSegments([])
-    setDismissedIntroDbSegmentKeys(new Set())
-    setAutoSkipTransition(null)
-    autoSkipInFlightKeyRef.current = null
-    if (autoSkipTransitionTimerRef.current) {
-      clearTimeout(autoSkipTransitionTimerRef.current)
-      autoSkipTransitionTimerRef.current = null
-    }
 
-    if (
-      isTorrentStreamPath(currentVideo.file_path) ||
-      currentVideo.type !== 'series' ||
-      currentVideo.season == null ||
-      currentVideo.episode == null ||
-      (!currentVideo.imdb_id && !currentVideo.tmdb_id && !currentVideo.file_path)
-    ) {
-      return () => {
-        isCancelled = true
-      }
-    }
-
-    window.api.getIntroDbSegments({
-      imdbId: currentVideo.imdb_id || null,
-      tmdbId: currentVideo.tmdb_id || null,
-      season: currentVideo.season,
-      episode: currentVideo.episode,
-      filePath: currentVideo.file_path || null,
-      duration: currentVideo.duration || duration || null
-    })
-      .then(result => {
-        if (isCancelled) return
-        setIntroDbSegments((result?.segments || []).filter(segment =>
-          Number.isFinite(segment.startSec) &&
-          Number.isFinite(segment.endSec) &&
-          segment.endSec > segment.startSec
-        ))
-      })
-      .catch(err => {
-        if (!isCancelled) setIntroDbSegments([])
-        console.warn('[VideoPlayer] IntroDB lookup failed:', err)
-      })
-
-    return () => {
-      isCancelled = true
-    }
-  }, [
-    currentVideo.episode,
-    currentVideo.id,
-    currentVideo.imdb_id,
-    currentVideo.file_path,
-    currentVideo.season,
-    currentVideo.tmdb_id,
-    currentVideo.type,
-    duration
-  ])
 
   useEffect(() => {
     localStorage.setItem('mycinema_ai_sharpness', qualitySharpnessEnabled.toString())
@@ -864,21 +625,9 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
     localStorage.setItem('mycinema_ai_vibrance', qualityVibranceEnabled.toString())
   }, [qualityVibranceEnabled])
 
-  useEffect(() => {
-    localStorage.setItem('mycinema_audio_boost', audioBoostEnabled.toString())
-  }, [audioBoostEnabled])
 
-  useEffect(() => {
-    localStorage.setItem('mycinema_audio_boost_profile', audioBoostProfile)
-  }, [audioBoostProfile])
 
-  useEffect(() => {
-    localStorage.setItem('mycinema_audio_boost_intensity', audioBoostIntensity)
-  }, [audioBoostIntensity])
 
-  useEffect(() => {
-    localStorage.setItem(INTRODB_AUTO_SKIP_STORAGE_KEY, autoSkipIntroOutroEnabled.toString())
-  }, [autoSkipIntroOutroEnabled])
 
   useEffect(() => {
     if (!performanceNotice.show) return
@@ -939,18 +688,6 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
   ])
 
   // ─── Audio Boost Logic (Web Audio API) ──────────────────────────────────────
-  const audioCtxRef = useRef<AudioContext | null>(null)
-  const videoSourceNodeRef = useRef<MediaElementAudioSourceNode | null>(null)
-  const audioSourceNodeRef = useRef<MediaElementAudioSourceNode | null>(null)
-  const bassFilterRef = useRef<BiquadFilterNode | null>(null)
-  const lowMidFilterRef = useRef<BiquadFilterNode | null>(null)
-  const clarityFilterRef = useRef<BiquadFilterNode | null>(null)
-  const presenceFilterRef = useRef<BiquadFilterNode | null>(null)
-  const airFilterRef = useRef<BiquadFilterNode | null>(null)
-  const compressorRef = useRef<DynamicsCompressorNode | null>(null)
-  const limiterRef = useRef<DynamicsCompressorNode | null>(null)
-  const boostGainRef = useRef<GainNode | null>(null)
-  const audioBoostChainConnectedRef = useRef(false)
 
   const forceTorrentNativeAudio = () => {
     if (!isTorrentStreamPath(currentVideoRef.current.file_path)) return
@@ -980,192 +717,6 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
       audioCtxRef.current.resume().catch(() => {})
     }
   }
-
-  const getActiveAudioChannelCount = () => {
-    const fallback = embeddedAudio[0]?.channels || 2
-    if (!selectedAudioId) return fallback
-
-    const nativeMatch = selectedAudioId.match(/^nat-(\d+)$/)
-    if (nativeMatch) {
-      const nativeIndex = Number(nativeMatch[1])
-      return embeddedAudio[nativeIndex]?.channels || fallback
-    }
-
-    const externalMatch = selectedAudioId.match(/^ext-(\d+)$/)
-    if (externalMatch) {
-      const streamIndex = Number(externalMatch[1])
-      return embeddedAudio.find(track => track.index === streamIndex)?.channels || fallback
-    }
-
-    return fallback
-  }
-
-  useEffect(() => {
-    const setParam = (param: AudioParam, value: number, time: number, ramp = 0.08) => {
-      param.setTargetAtTime(value, time, ramp)
-    }
-
-    const initAudio = () => {
-      try {
-        if (!audioCtxRef.current) {
-          audioCtxRef.current = new (window.AudioContext || (window as any).webkitAudioContext)()
-        }
-        const ctx = audioCtxRef.current
-
-        // Create nodes if they don't exist
-        if (!bassFilterRef.current) {
-          bassFilterRef.current = ctx.createBiquadFilter()
-          bassFilterRef.current.type = 'lowshelf'
-          bassFilterRef.current.frequency.value = 115
-        }
-
-        if (!lowMidFilterRef.current) {
-          lowMidFilterRef.current = ctx.createBiquadFilter()
-          lowMidFilterRef.current.type = 'peaking'
-          lowMidFilterRef.current.frequency.value = 360
-          lowMidFilterRef.current.Q.value = 1.05
-        }
-        
-        if (!clarityFilterRef.current) {
-          clarityFilterRef.current = ctx.createBiquadFilter()
-          clarityFilterRef.current.type = 'peaking'
-          clarityFilterRef.current.frequency.value = 1750
-          clarityFilterRef.current.Q.value = 1.0
-        }
-
-        if (!presenceFilterRef.current) {
-          presenceFilterRef.current = ctx.createBiquadFilter()
-          presenceFilterRef.current.type = 'peaking'
-          presenceFilterRef.current.frequency.value = 3400
-          presenceFilterRef.current.Q.value = 1.2
-        }
-
-        if (!airFilterRef.current) {
-          airFilterRef.current = ctx.createBiquadFilter()
-          airFilterRef.current.type = 'highshelf'
-          airFilterRef.current.frequency.value = 8500
-        }
-
-        if (!compressorRef.current) {
-          compressorRef.current = ctx.createDynamicsCompressor()
-          compressorRef.current.attack.value = 0.008
-          compressorRef.current.release.value = 0.18
-        }
-
-        if (!limiterRef.current) {
-          limiterRef.current = ctx.createDynamicsCompressor()
-          limiterRef.current.threshold.value = -3
-          limiterRef.current.knee.value = 0
-          limiterRef.current.ratio.value = 14
-          limiterRef.current.attack.value = 0.002
-          limiterRef.current.release.value = 0.08
-        }
-
-        if (!boostGainRef.current) {
-          boostGainRef.current = ctx.createGain()
-        }
-
-        // Connect videoRef
-        if (videoRef.current && !videoSourceNodeRef.current) {
-          videoSourceNodeRef.current = ctx.createMediaElementSource(videoRef.current)
-          videoSourceNodeRef.current.connect(bassFilterRef.current)
-        }
-
-        // Connect audioRef (for external tracks)
-        if (audioRef.current && !audioSourceNodeRef.current) {
-          audioSourceNodeRef.current = ctx.createMediaElementSource(audioRef.current)
-          audioSourceNodeRef.current.connect(bassFilterRef.current)
-        }
-
-        if (!audioBoostChainConnectedRef.current) {
-          // Chain: bass warmth -> mud cut -> dialogue lift -> presence -> air -> leveler -> limiter.
-          bassFilterRef.current.connect(lowMidFilterRef.current)
-          lowMidFilterRef.current.connect(clarityFilterRef.current)
-          clarityFilterRef.current.connect(presenceFilterRef.current)
-          presenceFilterRef.current.connect(airFilterRef.current)
-          airFilterRef.current.connect(compressorRef.current)
-          compressorRef.current.connect(limiterRef.current)
-          limiterRef.current.connect(boostGainRef.current)
-          boostGainRef.current.connect(ctx.destination)
-          audioBoostChainConnectedRef.current = true
-        }
-
-        if (ctx.state === 'suspended') {
-          ctx.resume()
-        }
-      } catch (e) {
-        console.error('Audio Boost initialization failed:', e)
-      }
-    }
-
-    if (isPlaying && audioBoostEnabled) {
-      initAudio()
-    }
-
-    if (audioCtxRef.current) {
-      const now = audioCtxRef.current.currentTime
-      const profile = AUDIO_BOOST_PROFILES[audioBoostProfile]
-      const intensity = AUDIO_BOOST_INTENSITIES[audioBoostIntensity]
-      const active = audioBoostEnabled
-      const intensityAmount = active ? intensity.amount : 0
-      const channelCount = getActiveAudioChannelCount()
-      const surroundDialogLift = active && channelCount >= 6 ? 1.18 : 1
-      const scaledGain = (value: number) => value * intensityAmount
-      const scaledOutputGain = active
-        ? 1 + ((profile.outputGain - 1) * intensity.outputScale) + (channelCount >= 6 ? 0.04 : 0)
-        : 1.0
-      const scaledThreshold = active
-        ? profile.compressorThreshold + ((1 - intensity.amount) * 8)
-        : 0
-
-      if (bassFilterRef.current) {
-        setParam(bassFilterRef.current.gain, scaledGain(profile.bassGain), now)
-      }
-      if (lowMidFilterRef.current) {
-        setParam(lowMidFilterRef.current.gain, scaledGain(profile.lowMidGain), now)
-      }
-      if (clarityFilterRef.current) {
-        setParam(clarityFilterRef.current.gain, scaledGain(profile.dialogGain * surroundDialogLift), now)
-      }
-      if (presenceFilterRef.current) {
-        setParam(presenceFilterRef.current.gain, scaledGain(profile.presenceGain * surroundDialogLift), now)
-      }
-      if (airFilterRef.current) {
-        setParam(airFilterRef.current.gain, scaledGain(profile.airGain), now)
-      }
-      if (compressorRef.current) {
-        setParam(compressorRef.current.threshold, scaledThreshold, now)
-        setParam(compressorRef.current.knee, active ? profile.compressorKnee : 0, now)
-        setParam(compressorRef.current.ratio, active ? 1 + ((profile.compressorRatio - 1) * intensity.amount) : 1, now)
-        setParam(compressorRef.current.attack, active ? profile.compressorAttack : 0.003, now)
-        setParam(compressorRef.current.release, active ? profile.compressorRelease : 0.25, now)
-      }
-      if (limiterRef.current) {
-        setParam(limiterRef.current.threshold, active ? profile.limiterThreshold : 0, now)
-        setParam(limiterRef.current.ratio, active ? 14 : 1, now)
-      }
-      if (boostGainRef.current) {
-        setParam(boostGainRef.current.gain, scaledOutputGain, now)
-      }
-    }
-
-    return () => {
-      // We don't necessarily want to close the context on every effect run,
-      // but we should ensure it's suspended if we're not playing.
-      if (audioCtxRef.current && !isPlaying) {
-        audioCtxRef.current.suspend()
-      }
-    }
-  }, [audioBoostEnabled, audioBoostProfile, audioBoostIntensity, isPlaying, selectedAudioId, embeddedAudio])
-
-  useEffect(() => {
-    return () => {
-      if (audioCtxRef.current) {
-        audioCtxRef.current.close()
-        audioCtxRef.current = null
-      }
-    }
-  }, [])
 
   // Sync internal state when the video prop changes (e.g. user opens a new file while player is already open)
   // This ensures that switching from one external file to another (both with ID -1) triggers a re-load.
@@ -1784,125 +1335,6 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
     }
   }, [currentVideo.id, currentVideo.file_path])
 
-  // ─────────────────────────────────────────────────────────────────────────────
-  // ── Imperative subtitle overlay (matches the working 2x Speed Toast pattern) ──
-  // ─────────────────────────────────────────────────────────────────────────────
-  const subtitleContainerRef = useRef<HTMLDivElement | null>(null)
-  const subtitleBottom = showControls ? '136px' : '48px'
-
-  useEffect(() => {
-    // Clean up existing container if it exists
-    if (subtitleContainerRef.current) {
-      subtitleContainerRef.current.remove()
-      subtitleContainerRef.current = null
-      subtitleDivRef.current = null
-    }
-
-    if (activeSubKey !== null && videoRef.current?.parentElement) {
-      const parent = videoRef.current.parentElement
-
-      // Keep subtitles above the video while leaving the controls/seek preview layer on top.
-      const container = document.createElement('div')
-      container.style.cssText = [
-        'position:fixed',
-        `bottom:${subtitleBottom}`,
-        'left:0',
-        'right:0',
-        'display:flex',
-        'justify-content:center',
-        'pointer-events:none',
-        `z-index:${SUBTITLE_OVERLAY_Z_INDEX}`,
-        'will-change:transform',
-        'transition:bottom 0.3s ease',
-        `bottom:${subtitleBottom}`,
-      ].join(';')
-
-      if (subtitleLoading) {
-        const loadingSpan = document.createElement('span')
-        loadingSpan.style.cssText = [
-          "font-family:'Poppins','Segoe UI Variable','Segoe UI',system-ui,sans-serif",
-          'font-size:14px',
-          'color:rgba(255,255,255,0.5)',
-          'background:rgba(0,0,0,0.5)',
-          'padding:4px 12px',
-          'border-radius:999px',
-        ].join(';')
-        loadingSpan.textContent = '⏳ Loading subtitles…'
-        container.appendChild(loadingSpan)
-      } else {
-        const textDiv = document.createElement('div')
-        textDiv.style.cssText = [
-          "font-family:'Poppins','Segoe UI Variable','Segoe UI',system-ui,sans-serif",
-          'font-size:26px',
-          'font-weight:600',
-          'color:white',
-          'background-color:rgba(0, 0, 0, 0.65)',
-          'padding:6px 22px',
-          'border-radius:12px',
-          'backdrop-filter:blur(8px)',
-          'border:1px solid rgba(255, 255, 255, 0.1)',
-          'text-shadow:0px 2px 4px rgba(0,0,0,0.5)',
-          'text-align:center',
-          'max-width:85%',
-          'line-height:1.4',
-          'white-space:pre-line',
-          'display:none',
-        ].join(';')
-        container.appendChild(textDiv)
-        subtitleDivRef.current = textDiv
-      }
-
-      parent.appendChild(container)
-      subtitleContainerRef.current = container
-
-      return () => {
-        container.remove()
-        if (subtitleContainerRef.current === container) {
-          subtitleContainerRef.current = null
-          subtitleDivRef.current = null
-        }
-      }
-    }
-  }, [activeSubKey, subtitleLoading]) // Re-run when track changes or loading status changes
-
-  // Update subtitle position when controls show/hide
-  useEffect(() => {
-    if (subtitleContainerRef.current) {
-      subtitleContainerRef.current.style.bottom = subtitleBottom
-    }
-  }, [subtitleBottom])
-
-  useEffect(() => {
-    if (activeSubKey !== null && videoRef.current) {
-      renderSubtitleAtTime(videoRef.current.currentTime)
-    }
-  }, [activeSubKey, subtitleOffsetMs, subtitleLoading])
-
-  useEffect(() => {
-    if (activeSubKey === null || subtitleLoading || !isPlaying) {
-      if (subtitleRafRef.current !== null) {
-        cancelAnimationFrame(subtitleRafRef.current)
-        subtitleRafRef.current = null
-      }
-      return
-    }
-
-    const renderLoop = () => {
-      if (videoRef.current) {
-        renderSubtitleAtTime(videoRef.current.currentTime)
-      }
-      subtitleRafRef.current = requestAnimationFrame(renderLoop)
-    }
-
-    subtitleRafRef.current = requestAnimationFrame(renderLoop)
-
-    return () => {
-      if (subtitleRafRef.current !== null) {
-        cancelAnimationFrame(subtitleRafRef.current)
-        subtitleRafRef.current = null
-      }
-    }
-  }, [activeSubKey, subtitleLoading, isPlaying])
 
   useEffect(() => {
     if (!showMediaMenu || showOnlineSearch) {
@@ -1955,11 +1387,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
   }
 
   const clearRenderedSubtitle = () => {
-    activeSubtitleCueIndexRef.current = -1
-    if (subtitleDivRef.current) {
-      subtitleDivRef.current.textContent = ''
-      subtitleDivRef.current.style.display = 'none'
-    }
+
   }
 
   const getSubtitleSourceId = (key: string | null, externalPathOverride?: string | null) => {
@@ -1983,7 +1411,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
     const clamped = clampSubtitleOffsetMs(nextOffsetMs)
     subtitleOffsetRef.current = clamped
     setSubtitleOffsetMs(clamped)
-    activeSubtitleCueIndexRef.current = -1
+
 
     if (options.persist !== false && subtitleOffsetStorageKeyRef.current) {
       localStorage.setItem(subtitleOffsetStorageKeyRef.current, String(clamped))
@@ -2035,24 +1463,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
     applySubtitleOffset(0, { showToast: true })
   }
 
-  const renderSubtitleAtTime = (playbackTime: number) => {
-    if (!subtitleDivRef.current || activeSubKeyRef.current === null) return
 
-    const { cue, index } = resolveSubtitleCue(
-      subtitleCuesRef.current,
-      playbackTime,
-      subtitleOffsetRef.current,
-      activeSubtitleCueIndexRef.current
-    )
-
-    activeSubtitleCueIndexRef.current = index
-
-    const nextText = cue ? cue.text : ''
-    if (subtitleDivRef.current.textContent !== nextText) {
-      subtitleDivRef.current.textContent = nextText
-      subtitleDivRef.current.style.display = nextText ? 'block' : 'none'
-    }
-  }
 
   const cycleAspectRatio = () => {
     if (playerShellRef.current && !document.fullscreenElement) {
@@ -2748,10 +2159,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
       }
 
       subtitleCuesRef.current = parsedCues
-      activeSubtitleCueIndexRef.current = -1
-      if (videoRef.current) {
-        renderSubtitleAtTime(videoRef.current.currentTime)
-      }
+  
       console.log('[Subtitle] Loaded', subtitleCuesRef.current.length, 'cues for', key)
     } catch (err) {
       console.error('[Subtitle] Failed to load cues:', err)
@@ -3117,14 +2525,6 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
     }
   }
 
-  const dismissIntroDbSegment = (segment: IntroDbSegment) => {
-    setDismissedIntroDbSegmentKeys(prev => {
-      const next = new Set(prev)
-      next.add(getIntroDbSegmentKey(segment))
-      return next
-    })
-  }
-
   const performIntroDbSkip = (segment: IntroDbSegment) => {
     const targetTime = segment.endSec + INTRODB_SKIP_END_PADDING_SECONDS
     const isOutroAdvance = segment.type === 'outro' && hasNextEpisode
@@ -3142,46 +2542,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
 
     seekToTime(targetTime)
   }
-
-  const skipIntroDbSegment = (segment: IntroDbSegment, options: { automatic?: boolean } = {}) => {
-    const isOutroAdvance = segment.type === 'outro' && hasNextEpisode
-
-    if (options.automatic) {
-      const id = Date.now()
-      const transitionMs = isOutroAdvance ? INTRODB_AUTO_SKIP_NEXT_TRANSITION_MS : INTRODB_AUTO_SKIP_SEEK_TRANSITION_MS
-
-      if (autoSkipTransitionTimerRef.current) {
-        clearTimeout(autoSkipTransitionTimerRef.current)
-        autoSkipTransitionTimerRef.current = null
-      }
-      setAutoSkipTransition(null)
-
-      autoSkipTransitionTimerRef.current = setTimeout(() => {
-        dismissIntroDbSegment(segment)
-        performIntroDbSkip(segment)
-        if (isOutroAdvance) {
-          autoSkipTransitionTimerRef.current = null
-          return
-        }
-
-        setAutoSkipTransition({
-          show: true,
-          label: segment.type === 'outro'
-            ? 'Credits skipped'
-            : `${getIntroDbSegmentLabel(segment.type)} skipped`,
-          id
-        })
-        autoSkipTransitionTimerRef.current = setTimeout(() => {
-          autoSkipTransitionTimerRef.current = null
-          setAutoSkipTransition(prev => prev?.id === id ? null : prev)
-        }, INTRODB_AUTO_SKIP_CONFIRMATION_MS)
-      }, transitionMs)
-      return
-    }
-
-    dismissIntroDbSegment(segment)
-    performIntroDbSkip(segment)
-  }
+  performIntroDbSkipRef.current = performIntroDbSkip
 
   const toggleAutoSkipIntroOutro = (e?: React.MouseEvent) => {
     e?.stopPropagation()
@@ -3189,34 +2550,6 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
     setAutoSkipIntroOutroEnabled(next)
     showTrackToast('skip', next ? 'Auto Skip On' : 'Auto Skip Off')
   }
-
-  useEffect(() => {
-    if (
-      !autoSkipIntroOutroEnabled ||
-      !activeIntroDbSegment ||
-      !activeIntroDbSegmentCanAutoSkip ||
-      !canControlPlayback ||
-      !isPlaying ||
-      isSeeking ||
-      currentTime < activeIntroDbSegment.startSec ||
-      currentTime >= activeIntroDbSegment.endSec - 0.25
-    ) {
-      return
-    }
-
-    const segmentKey = getIntroDbSegmentKey(activeIntroDbSegment)
-    if (autoSkipInFlightKeyRef.current === segmentKey) return
-    autoSkipInFlightKeyRef.current = segmentKey
-    skipIntroDbSegment(activeIntroDbSegment, { automatic: true })
-  }, [
-    activeIntroDbSegment,
-    activeIntroDbSegmentCanAutoSkip,
-    autoSkipIntroOutroEnabled,
-    canControlPlayback,
-    currentTime,
-    isPlaying,
-    isSeeking
-  ])
 
   const handleSeekChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const time = parseFloat(e.target.value)
@@ -3464,6 +2797,9 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
 
   const videoObjectFit: React.CSSProperties['objectFit'] = aspectMode === 'cover' ? 'cover' : 'fill'
 
+  playNextEpisodeRef.current = playNextEpisode
+  seekToTimeRef.current = seekToTime
+
   return (
     <div 
       ref={playerShellRef}
@@ -3489,6 +2825,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
       <div className="relative overflow-hidden bg-black" style={videoSurfaceStyle}>
         <video
           ref={videoRef}
+          crossOrigin="anonymous"
           src={getVideoSourceUrl(currentVideo.file_path)}
           className={`h-full w-full outline-none ${showControls ? 'subs-up' : 'subs-down'} opacity-100`}
           style={{ 
@@ -3504,8 +2841,6 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
               lastTimeUpdateRef.current = now
             }
             timeRef.current = videoRef.current.currentTime
-
-            renderSubtitleAtTime(videoRef.current.currentTime)
           }
         }}
         onSeeked={() => {
@@ -3524,8 +2859,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
           } else {
             void syncSelectedExternalAudio(time, !videoRef.current.paused)
           }
-          activeSubtitleCueIndexRef.current = -1
-          renderSubtitleAtTime(time)
+      
         }}
         onDurationChange={() => {
           if (videoRef.current) {
@@ -4169,425 +3503,82 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
         </div>
       </div>
 
-      {/* Controls */}
-      <div className={`absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/90 to-transparent px-10 pb-10 pt-20 transition-opacity duration-300 video-controls z-40 ${showControls ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}>
-        {/* Progress Bar Wrapper */}
-        <div 
-          className="group/progress relative h-6 mb-4 flex items-center cursor-pointer"
-          onMouseMove={handleProgressMouseMove}
-          onMouseLeave={handleProgressMouseLeave}
-        >
-          {/* Hover Preview Tooltip */}
-          <div 
-            className={`absolute bottom-full mb-4 -translate-x-1/2 flex flex-col items-center pointer-events-none transition-opacity duration-200 z-30 ${hoverTime !== null ? 'opacity-100' : 'opacity-0'}`}
-            style={{ left: `${hoverPosition}%` }}
-          >
-            <div className="w-48 aspect-video bg-black/80 rounded-lg overflow-hidden border border-white/20 shadow-2xl flex items-center justify-center relative">
-              {seekPreviewImageSrc ? (
-                <img
-                  src={seekPreviewImageSrc}
-                  className="w-full h-full object-cover"
-                  alt=""
-                  draggable={false}
-                />
-              ) : (
-                <div className="flex h-full w-full items-center justify-center bg-black/70 text-white/45">
-                  {seekPreviewLoading && <Loader2 size={18} className="animate-spin" />}
-                </div>
-              )}
-              <div className="absolute bottom-1 bg-black/60 px-2 py-0.5 rounded text-[10px] font-bold text-white drop-shadow-md">
-                {hoverTime !== null ? formatTime(hoverTime) : '0:00'}
-              </div>
-            </div>
-          </div>
+      <SubtitleOverlay
+        videoRef={videoRef}
+        activeSubKey={activeSubKey}
+        subtitleCuesRef={subtitleCuesRef}
+        subtitleOffsetMs={subtitleOffsetMs}
+        subtitleBottom={showControls ? '136px' : '48px'}
+        subtitleLoading={subtitleLoading}
+      />
 
-          <input 
-            type="range"
-            min="0"
-            max={duration}
-            step="0.1"
-            value={currentTime}
-            onChange={handleSeekChange}
-            onMouseDown={handleSeekMouseDown}
-            onMouseUp={(e) => { handleSeekMouseUp(e); (e.target as HTMLElement).blur(); }}
-            onTouchStart={handleSeekMouseDown}
-            onTouchEnd={(e) => { handleSeekMouseUp(e); (e.target as HTMLElement).blur(); }}
-            disabled={!isHost && roomId !== null}
-            className={`absolute inset-0 w-full h-full opacity-0 z-20 ${!isHost && roomId !== null ? 'cursor-not-allowed' : 'cursor-pointer'}`}
-          />
-          
-          <div className="absolute left-0 right-0 top-1/2 -translate-y-1/2 h-1 bg-gray-600 rounded-full" />
-          <div 
-            className="absolute left-0 top-1/2 -translate-y-1/2 h-1 bg-primary rounded-full transition-[height] group-hover/progress:h-1.5 duration-100" 
-            style={{ width: `${((seekPreview ?? currentTime) / duration) * 100}%` }}
-          />
-          {duration > 0 && introDbSegments.map(segment => {
-            const startPercent = Math.max(0, Math.min(100, (segment.startSec / duration) * 100))
-            const endPercent = Math.max(startPercent, Math.min(100, (segment.endSec / duration) * 100))
-            return (
-              <div
-                key={getIntroDbSegmentKey(segment)}
-                className={`absolute top-1/2 -translate-y-1/2 rounded-full h-1.5 pointer-events-none ${getIntroDbSegmentAccentClass(segment.type)}`}
-                style={{
-                  left: `${startPercent}%`,
-                  width: `${Math.max(0.35, endPercent - startPercent)}%`
-                }}
-                title={`${getIntroDbSegmentLabel(segment.type)} ${formatTime(segment.startSec)} - ${formatTime(segment.endSec)}`}
-              />
-            )
-          })}
-          {/* Seek Preview Ghost Indicator */}
-          {seekPreview !== null && duration > 0 && (
-            <>
-              <div 
-                className="absolute top-1/2 -translate-y-1/2 h-1 bg-white/30 rounded-full"
-                style={{ left: `${(currentTime / duration) * 100}%`, width: `${Math.abs((seekPreview - currentTime) / duration) * 100}%`, ...(seekPreview < currentTime ? { left: `${(seekPreview / duration) * 100}%` } : {}) }}
-              />
-              <div 
-                className="absolute w-4 h-4 bg-white rounded-full shadow-xl border-2 border-primary top-1/2 -translate-y-1/2 z-20 pointer-events-none"
-                style={{ left: `calc(${(seekPreview / duration) * 100}% - 8px)` }}
-              />
-              <div
-                className="absolute bottom-full mb-3 -translate-x-1/2 bg-black/80 text-white text-xs font-bold px-2 py-1 rounded-md pointer-events-none"
-                style={{ left: `${(seekPreview / duration) * 100}%` }}
-              >
-                {formatTime(seekPreview)}
-              </div>
-            </>
-          )}
-          <div 
-            className="absolute w-3 h-3 bg-primary rounded-full shadow-lg opacity-0 group-hover/progress:opacity-100 transition-opacity top-1/2 -translate-y-1/2 z-10 group-hover/progress:scale-125"
-            style={{ left: `calc(${(currentTime / duration) * 100}% - 6px)` }}
-          />
-        </div>
+      <PlayerControls
+        showControls={showControls}
+        hoverTime={hoverTime}
+        hoverPosition={hoverPosition}
+        seekPreviewImageSrc={seekPreviewImageSrc}
+        seekPreviewLoading={seekPreviewLoading}
+        duration={duration}
+        currentTime={currentTime}
+        seekPreview={seekPreview}
+        introDbSegments={introDbSegments}
+        isPlaying={isPlaying}
+        isHost={isHost}
+        roomId={roomId}
+        volume={volume}
+        currentVideo={currentVideo}
+        hasNextEpisode={hasNextEpisode}
+        canControlPlayback={canControlPlayback}
+        showEpisodesPanel={showEpisodesPanel}
+        showInfoPanel={showInfoPanel}
+        isTorrentStream={isTorrentStream}
+        aspectMode={aspectMode}
+        showAdvancedMenu={showAdvancedMenu}
+        showSpeedMenu={showSpeedMenu}
+        fpsBoostEnabled={fpsBoostEnabled}
+        highSpeedMotionPaused={highSpeedMotionPaused}
+        audioBoostEnabled={audioBoostEnabled}
+        audioBoostProfile={audioBoostProfile}
+        audioBoostIntensity={audioBoostIntensity}
+        qualitySharpnessEnabled={qualitySharpnessEnabled}
+        qualityVibranceEnabled={qualityVibranceEnabled}
+        autoSkipIntroOutroEnabled={autoSkipIntroOutroEnabled}
+        playbackRate={playbackRate}
+        isPiPActive={isPiPActive}
+        isPiPSupported={isPiPSupported}
+        isAnyFullscreen={isAnyFullscreen}
+        highSpeedPerformanceRate={HIGH_SPEED_PERFORMANCE_RATE}
 
-        <div className="flex items-center justify-between">
-          <div className="flex items-center space-x-6">
-            <button onClick={() => seek(-10)} className="text-white hover:text-primary hover:-translate-x-1 transition-all" title="Rewind 10s">
-              <Rewind size={28} fill="currentColor" />
-            </button>
-            <button onClick={togglePlay} className="text-white hover:scale-110 transition-transform">
-              {isPlaying ? <Pause size={36} fill="currentColor" /> : <Play size={36} fill="currentColor" />}
-            </button>
-            <button onClick={() => seek(10)} className="text-white hover:text-primary hover:translate-x-1 transition-all" title="Forward 10s">
-              <FastForward size={28} fill="currentColor" />
-            </button>
-            
-            {/* Volume: Speaker icon + always-visible horizontal slider */}
-            <div className="flex items-center space-x-2">
-              <button
-                onClick={(e) => { e.stopPropagation(); handleVolumeChange({ target: { value: volume === 0 ? '1' : '0' } } as any) }}
-                className="text-white hover:text-primary transition-colors flex-shrink-0"
-                title={volume === 0 ? 'Unmute' : 'Mute'}
-              >
-                <Volume2 size={22} className={volume === 0 ? 'opacity-40' : ''} />
-              </button>
-              <input
-                type="range"
-                min="0"
-                max="1"
-                step="0.01"
-                value={volume}
-                onChange={handleVolumeChange}
-                onClick={(e) => e.stopPropagation()}
-                className="w-20 h-1 accent-primary cursor-pointer flex-shrink-0"
-              />
-            </div>
-
-            <div className="text-sm font-medium text-gray-300">
-              {formatTime(currentTime)} / {formatTime(duration)}
-            </div>
-          </div>
-
-          <div className="flex items-center space-x-6">
-            {/* Episodes */}
-            {currentVideo.type === 'series' && currentVideo.series_name && (
-              <button
-                onClick={(e) => { e.stopPropagation(); setShowInfoPanel(false); setShowEpisodesPanel(!showEpisodesPanel); }}
-                className={`transition-colors flex items-center ${showEpisodesPanel ? 'text-primary' : 'text-white hover:text-primary'}`}
-                title="Episodes"
-              >
-                <ListVideo size={22} className="opacity-90 hover:opacity-100" />
-              </button>
-            )}
-
-            {/* Open Folder */}
-            {!isTorrentStream && (
-              <button
-                onClick={(e) => { e.stopPropagation(); handleOpenFolder(); }}
-                className="text-white hover:text-primary transition-colors"
-                title="Open in Explorer"
-              >
-                <FolderOpen size={22} className="opacity-90 hover:opacity-100" />
-              </button>
-            )}
-
-            {/* Watch Together */}
-            <button
-              onClick={(e) => { e.stopPropagation(); setShowWatchTogetherState(true); }}
-              className={`transition-colors ${roomId !== null ? 'text-indigo-400' : 'text-white hover:text-indigo-400'}`}
-              title="Watch Together"
-            >
-              <Users size={22} className="opacity-90 hover:opacity-100" />
-            </button>
-
-            {/* Media Info */}
-            {!isTorrentStream && (
-              <button
-                onClick={(e) => { e.stopPropagation(); handleToggleInfoPanel(); }}
-                className={`transition-colors ${showInfoPanel ? 'text-primary' : 'text-white hover:text-primary'}`}
-                title="Media Info (I)"
-              >
-                <Info size={22} className="opacity-90 hover:opacity-100" />
-              </button>
-            )}
-
-            <button 
-              onClick={(e) => { e.stopPropagation(); cycleAspectRatio(); }}
-              className="text-white hover:text-primary transition-colors flex items-center"
-              title="Aspect Ratio (R)"
-            >
-              {aspectMode === 'cover' ? <Crop size={22} className="opacity-90 hover:opacity-100" />
-               : aspectMode === 'fill' ? <RectangleHorizontal size={22} className="opacity-90 hover:opacity-100" />
-               : <Monitor size={22} className="opacity-90 hover:opacity-100" />}
-            </button>
-
-            <div className="relative flex items-center">
-              {showAdvancedMenu && (
-                <div 
-                  className="absolute bottom-full right-0 mb-6 bg-[#111111]/90 backdrop-blur-2xl rounded-2xl shadow-[0_20px_50px_rgba(0,0,0,0.6)] border border-white/10 overflow-hidden z-50 animate-in fade-in slide-in-from-bottom-2 duration-300 w-[280px]"
-                  onClick={(e) => e.stopPropagation()}
-                >
-                  <div className="px-4 py-3 border-b border-white/5 bg-white/[0.02]">
-                    <div className="flex items-center space-x-2">
-                      <Sparkles size={14} className="text-primary" />
-                      <h3 className="text-[10px] font-black text-white uppercase tracking-[0.2em]">Advanced Settings</h3>
-                    </div>
-                  </div>
-                  
-                  <div className="p-2 space-y-1">
-                    {highSpeedMotionPaused && (
-                      <div className="mx-1 mb-2 rounded-xl border border-emerald-400/15 bg-emerald-400/10 px-3 py-2">
-                        <p className="text-[10px] font-black uppercase tracking-widest text-emerald-200">Performance Mode</p>
-                        <p className="mt-0.5 text-[10px] font-medium leading-snug text-white/55">FPS Boost resumes below {HIGH_SPEED_PERFORMANCE_RATE}x. Sharpness and vibrance stay on.</p>
-                      </div>
-                    )}
-
-                    {currentVideo.type === 'series' && canControlPlayback && (
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation()
-                          toggleAutoSkipIntroOutro()
-                        }}
-                        aria-pressed={autoSkipIntroOutroEnabled}
-                        className={`w-full flex items-center justify-between px-3 py-3 rounded-xl transition-all duration-200 group ${autoSkipIntroOutroEnabled ? 'bg-primary/10 text-primary' : 'text-white/60 hover:bg-white/5 hover:text-white'}`}
-                        title={`Auto Skip Intro/Outro ${autoSkipIntroOutroEnabled ? 'On' : 'Off'}`}
-                      >
-                        <div className="flex items-center space-x-3">
-                          <SkipNext size={18} className={autoSkipIntroOutroEnabled ? "text-primary" : "text-white/30"} />
-                          <div className="text-left">
-                            <p className="text-[13px] font-bold tracking-tight">Auto Skip</p>
-                            <p className="text-[10px] opacity-50 font-medium">Intros & credits</p>
-                          </div>
-                        </div>
-                        <div className={`flex-shrink-0 w-10 h-5 rounded-full relative transition-colors duration-300 ${autoSkipIntroOutroEnabled ? 'bg-primary' : 'bg-white/10'}`}>
-                          <div className={`absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white transition-transform duration-300 ${autoSkipIntroOutroEnabled ? 'translate-x-5' : 'translate-x-0'}`} />
-                        </div>
-                      </button>
-                    )}
-
-                    {/* FPS Boost Toggle */}
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation()
-                        const nextEnabled = !fpsBoostEnabled
-                        setFpsBoostEnabled(nextEnabled)
-                      }}
-                      className={`w-full flex items-center justify-between px-3 py-3 rounded-xl transition-all duration-200 group ${fpsBoostEnabled ? 'bg-primary/10 text-primary' : 'text-white/60 hover:bg-white/5 hover:text-white'}`}
-                    >
-                      <div className="flex items-center space-x-3">
-                        <Zap size={18} className={fpsBoostEnabled ? "text-primary" : "text-white/30"} />
-                        <div className="text-left">
-                          <p className="text-[13px] font-bold tracking-tight">FPS Boost</p>
-                          <p className="text-[10px] opacity-50 font-medium">Smoother GPU motion</p>
-                        </div>
-                      </div>
-                      <div className={`flex-shrink-0 w-8 h-4.5 rounded-full relative transition-colors duration-300 ${fpsBoostEnabled ? 'bg-primary' : 'bg-white/10'}`}>
-                        <div className={`absolute top-0.75 left-0.75 w-3 h-3 rounded-full bg-white transition-transform duration-300 ${fpsBoostEnabled ? 'translate-x-3.5' : 'translate-x-0'}`} />
-                      </div>
-                    </button>
-
-                    {/* Audio Boost */}
-                    <button
-                      onClick={(e) => { e.stopPropagation(); setAudioBoostEnabled(!audioBoostEnabled); }}
-                      className={`w-full flex items-center justify-between px-3 py-3 rounded-xl transition-all duration-200 group ${audioBoostEnabled ? 'bg-primary/10 text-primary' : 'text-white/60 hover:bg-white/5 hover:text-white'}`}
-                    >
-                      <div className="flex items-center space-x-3">
-                        <Volume2 size={18} className={audioBoostEnabled ? "text-primary" : "text-white/30"} />
-                        <div className="text-left">
-                          <p className="text-[13px] font-bold tracking-tight">Audio Boost</p>
-                          <p className="text-[10px] opacity-50 font-medium">Dialogue & loudness</p>
-                        </div>
-                      </div>
-                      <div className={`flex-shrink-0 w-8 h-4.5 rounded-full relative transition-colors duration-300 ${audioBoostEnabled ? 'bg-primary' : 'bg-white/10'}`}>
-                        <div className={`absolute top-0.75 left-0.75 w-3 h-3 rounded-full bg-white transition-transform duration-300 ${audioBoostEnabled ? 'translate-x-3.5' : 'translate-x-0'}`} />
-                      </div>
-                    </button>
-
-                    {audioBoostEnabled && (
-                      <div className="space-y-2 px-1 pb-2">
-                        <div className="grid grid-cols-2 gap-1.5">
-                          {(Object.entries(AUDIO_BOOST_PROFILES) as [AudioBoostProfile, typeof AUDIO_BOOST_PROFILES[AudioBoostProfile]][]).map(([profileKey, profile]) => (
-                            <button
-                              key={profileKey}
-                              onClick={(e) => {
-                                e.stopPropagation()
-                                setAudioBoostProfile(profileKey)
-                              }}
-                              className={`min-w-0 rounded-lg px-2 py-2 text-left transition-all duration-200 ${
-                                audioBoostProfile === profileKey
-                                  ? 'bg-primary/15 text-primary ring-1 ring-primary/30'
-                                  : 'bg-white/5 text-white/55 hover:bg-white/10 hover:text-white'
-                              }`}
-                              title={profile.detail}
-                            >
-                              <p className="truncate text-[11px] font-black uppercase tracking-wide">{profile.label}</p>
-                              <p className="truncate text-[9px] font-semibold opacity-55">{profile.detail}</p>
-                            </button>
-                          ))}
-                        </div>
-                        <div className="grid grid-cols-3 gap-1.5">
-                          {(Object.entries(AUDIO_BOOST_INTENSITIES) as [AudioBoostIntensity, typeof AUDIO_BOOST_INTENSITIES[AudioBoostIntensity]][]).map(([intensityKey, intensity]) => (
-                            <button
-                              key={intensityKey}
-                              onClick={(e) => {
-                                e.stopPropagation()
-                                setAudioBoostIntensity(intensityKey)
-                              }}
-                              className={`rounded-lg px-2 py-1.5 text-center text-[10px] font-black uppercase tracking-wide transition-all duration-200 ${
-                                audioBoostIntensity === intensityKey
-                                  ? 'bg-white/15 text-white ring-1 ring-white/25'
-                                  : 'bg-white/5 text-white/45 hover:bg-white/10 hover:text-white/70'
-                              }`}
-                            >
-                              {intensity.label}
-                            </button>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-
-                    {/* AI Sharpness Toggle */}
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation()
-                        const nextEnabled = !qualitySharpnessEnabled
-                        setQualitySharpnessEnabled(nextEnabled)
-                      }}
-                      className={`w-full flex items-center justify-between px-3 py-3 rounded-xl transition-all duration-200 group ${qualitySharpnessEnabled ? 'bg-primary/10 text-primary' : 'text-white/60 hover:bg-white/5 hover:text-white'}`}
-                    >
-                      <div className="flex items-center space-x-3">
-                        <Wand2 size={18} className={qualitySharpnessEnabled ? "text-primary" : "text-white/30"} />
-                        <div className="text-left">
-                          <p className="text-[13px] font-bold tracking-tight">AI Sharpness</p>
-                          <p className="text-[10px] opacity-50 font-medium">Crisper edges and detail</p>
-                        </div>
-                      </div>
-                      <div className={`flex-shrink-0 w-8 h-4.5 rounded-full relative transition-colors duration-300 ${qualitySharpnessEnabled ? 'bg-primary' : 'bg-white/10'}`}>
-                        <div className={`absolute top-0.75 left-0.75 w-3 h-3 rounded-full bg-white transition-transform duration-300 ${qualitySharpnessEnabled ? 'translate-x-3.5' : 'translate-x-0'}`} />
-                      </div>
-                    </button>
-
-                    {/* AI Vibrance Toggle */}
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation()
-                        const nextEnabled = !qualityVibranceEnabled
-                        setQualityVibranceEnabled(nextEnabled)
-                      }}
-                      className={`w-full flex items-center justify-between px-3 py-3 rounded-xl transition-all duration-200 group ${qualityVibranceEnabled ? 'bg-primary/10 text-primary' : 'text-white/60 hover:bg-white/5 hover:text-white'}`}
-                    >
-                      <div className="flex items-center space-x-3">
-                        <Sparkles size={18} className={qualityVibranceEnabled ? "text-primary" : "text-white/30"} />
-                        <div className="text-left">
-                          <p className="text-[13px] font-bold tracking-tight">AI Vibrance</p>
-                          <p className="text-[10px] opacity-50 font-medium">Richer color and contrast</p>
-                        </div>
-                      </div>
-                      <div className={`flex-shrink-0 w-8 h-4.5 rounded-full relative transition-colors duration-300 ${qualityVibranceEnabled ? 'bg-primary' : 'bg-white/10'}`}>
-                        <div className={`absolute top-0.75 left-0.75 w-3 h-3 rounded-full bg-white transition-transform duration-300 ${qualityVibranceEnabled ? 'translate-x-3.5' : 'translate-x-0'}`} />
-                      </div>
-                    </button>
-                  </div>
-                  
-                  <div className="px-4 py-2 border-t border-white/5 bg-white/[0.01]">
-                    <span className="text-[9px] font-black text-primary/60 uppercase tracking-widest">Beta Features</span>
-                  </div>
-                </div>
-              )}
-              <button 
-                onClick={(e) => { 
-                  e.stopPropagation(); 
-                  setShowMediaMenu(false);
-                  setShowSpeedMenu(false);
-                  setShowAdvancedMenu(!showAdvancedMenu); 
-                }}
-                className={`transition-colors flex items-center ${showAdvancedMenu ? 'text-primary' : 'text-white hover:text-primary'}`}
-                title="Advanced Settings (Beta)"
-              >
-                <Sparkles size={22} className={showAdvancedMenu ? "opacity-100" : "opacity-90 hover:opacity-100"} />
-              </button>
-            </div>
-            <div className="relative flex items-center">
-              {showSpeedMenu && (
-                <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-6 bg-gray-900 rounded-lg shadow-xl border border-gray-700 overflow-hidden min-w-[120px] z-50">
-                  <div className="px-3 py-2 bg-gray-800 text-[10px] font-bold text-gray-400 uppercase tracking-wider border-b border-gray-700">Speed</div>
-                  <div className="max-h-56 overflow-y-auto custom-scrollbar flex flex-col">
-                    {[0.5, 0.75, 1, 1.25, 1.5, 1.75, 2, 2.25, 2.5, 3, 3.5, 4, 4.5, 5].map((rate) => (
-                      <button
-                        key={rate}
-                        onClick={(e) => { e.stopPropagation(); changeSpeed(rate); }}
-                        className={`w-full text-left px-4 py-2.5 text-sm transition-colors hover:bg-gray-800 border-b border-gray-800/50 last:border-0 ${playbackRate === rate ? 'text-primary font-medium bg-primary/10' : 'text-gray-300'}`}
-                      >
-                        {rate === 1 ? 'Normal' : `${rate}x`}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              )}
-              <button 
-                onClick={(e) => { 
-                  e.stopPropagation(); 
-                  setShowMediaMenu(false); 
-                  setShowAdvancedMenu(false);
-                  setShowSpeedMenu(!showSpeedMenu); 
-                }}
-                className={`text-white transition-colors text-sm font-bold w-12 flex justify-center ${showSpeedMenu ? 'text-primary' : 'hover:text-primary'}`}
-                title="Playback Speed"
-              >
-                {playbackRate}x
-              </button>
-            </div>
-
-            <button
-              onClick={(e) => { e.stopPropagation(); togglePictureInPicture(); }}
-              disabled={!isPiPSupported}
-              className={`transition-colors ${isPiPActive ? 'text-primary' : isPiPSupported ? 'text-white hover:text-primary' : 'text-white/30 cursor-not-allowed'}`}
-              title={isPiPSupported ? (isPiPActive ? 'Exit Picture-in-Picture (P)' : 'Picture-in-Picture (P)') : 'Picture-in-Picture is not available'}
-            >
-              <PictureInPicture2 size={24} />
-            </button>
-
-            <button onClick={(e) => { e.stopPropagation(); toggleFullscreen(); }} className="text-white hover:text-primary transition-colors" title={isAnyFullscreen ? "Exit Fullscreen" : "Fullscreen"}>
-              {isAnyFullscreen ? <Minimize size={24} /> : <Maximize size={24} />}
-            </button>
-
-
-          </div>
-        </div>
-      </div>
+        handleProgressMouseMove={handleProgressMouseMove}
+        handleProgressMouseLeave={handleProgressMouseLeave}
+        handleSeekChange={handleSeekChange}
+        handleSeekMouseDown={handleSeekMouseDown}
+        handleSeekMouseUp={handleSeekMouseUp}
+        seek={seek}
+        togglePlay={togglePlay}
+        playNextEpisode={playNextEpisode}
+        handleVolumeChange={handleVolumeChange}
+        setShowEpisodesPanel={setShowEpisodesPanel}
+        handleOpenFolder={handleOpenFolder}
+        setShowWatchTogetherState={setShowWatchTogetherState}
+        handleToggleInfoPanel={handleToggleInfoPanel}
+        cycleAspectRatio={cycleAspectRatio}
+        setShowAdvancedMenu={setShowAdvancedMenu}
+        setShowSpeedMenu={setShowSpeedMenu}
+        setShowMediaMenu={setShowMediaMenu}
+        setFpsBoostEnabled={setFpsBoostEnabled}
+        setAudioBoostEnabled={setAudioBoostEnabled}
+        setAudioBoostProfile={setAudioBoostProfile}
+        setAudioBoostIntensity={setAudioBoostIntensity}
+        setQualitySharpnessEnabled={setQualitySharpnessEnabled}
+        setQualityVibranceEnabled={setQualityVibranceEnabled}
+        toggleAutoSkipIntroOutro={toggleAutoSkipIntroOutro}
+        changeSpeed={changeSpeed}
+        togglePictureInPicture={togglePictureInPicture}
+        toggleFullscreen={toggleFullscreen}
+      />
       {/* Hidden Custom Audio Extraction Pipeliner */}
-      <audio ref={audioRef} style={{ display: 'none' }} />
+      <audio ref={audioRef} crossOrigin="anonymous" style={{ display: 'none' }} />
       {remoteAudioStreams.map(({ peerId, stream }) => (
         <audio
           key={peerId}

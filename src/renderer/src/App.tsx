@@ -12,11 +12,11 @@ import SettingsPage from './pages/Settings'
 import VideoPlayer from './components/VideoPlayer'
 import DetailScreen from './components/DetailScreen'
 import { LATEST_RELEASE } from './components/WhatsNewOnboarding'
+import { WindowControlsGuide } from './components/FeatureGuides'
 import Download from './pages/Download'
 import appLogo from './assets/mycinema-logo.png'
 
 const getWhatsNewStorageKey = (version: string) => `mycinema_whats_new_seen_${version}`
-const getFeatureSpotlightStorageKey = (version: string) => `mycinema_fullscreen_controls_spotlight_seen_${version}`
 const SIDEBAR_EXPANDED_STORAGE_KEY = 'mycinema_sidebar_expanded'
 const DOUBLE_TAP_WINDOW_MS = 300
 type AppTab = 'home' | 'videos' | 'movies' | 'series' | 'download' | 'settings' | 'watchlist' | 'history' | 'favorites'
@@ -56,10 +56,6 @@ const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState<AppTab>('home')
   const [isSidebarExpanded, setIsSidebarExpanded] = useState(() => {
     return localStorage.getItem(SIDEBAR_EXPANDED_STORAGE_KEY) !== 'false'
-  })
-
-  const [showFeatureSpotlight, setShowFeatureSpotlight] = useState(() => {
-    return localStorage.getItem(getFeatureSpotlightStorageKey(LATEST_RELEASE.version)) !== 'true'
   })
 
   const [playingVideo, setPlayingVideo] = useState<Video | null>(null)
@@ -280,7 +276,6 @@ const App: React.FC = () => {
 
   const handlePlayVideo = (video: Video) => {
     setPlayingVideo(video)
-    setSelectedVideo(null)
   }
 
   const handleStartUpdateDownload = async () => {
@@ -348,15 +343,10 @@ const App: React.FC = () => {
     }, DOUBLE_TAP_WINDOW_MS)
   }
 
-  const dismissFeatureSpotlight = () => {
-    localStorage.setItem(getFeatureSpotlightStorageKey(LATEST_RELEASE.version), 'true')
-    setShowFeatureSpotlight(false)
-  }
-
   const WindowControls = () => {
     if (!launchFullscreen) return null
 
-    const controlsVisible = showWindowControls || showFeatureSpotlight
+    const controlsVisible = showWindowControls
     const controlButtonClass = 'flex h-6 w-7 items-center justify-center text-white/60 transition-[color,opacity,transform] duration-150 hover:text-white/95 active:scale-90 focus:outline-none focus:text-white focus:ring-1 focus:ring-white/35'
 
     if (isFullscreen) {
@@ -431,50 +421,6 @@ const App: React.FC = () => {
         >
           <Maximize2 size={15} strokeWidth={2.2} />
         </button>
-      </div>
-    )
-  }
-
-  const FeatureSpotlight = () => {
-    if (!showFeatureSpotlight || !launchFullscreen || playingVideo) return null
-
-    return (
-      <div
-        className="fixed inset-0 z-[255] bg-black/45 backdrop-blur-[1.5px]"
-        style={{
-          background: 'radial-gradient(circle at calc(100% - 58px) 16px, transparent 0 42px, rgba(0,0,0,0.34) 70px, rgba(0,0,0,0.58) 100%)'
-        }}
-      >
-        <button
-          type="button"
-          aria-label="Dismiss fullscreen controls tip"
-          className="absolute inset-0 cursor-default"
-          onClick={dismissFeatureSpotlight}
-        />
-
-        <div className="absolute right-8 top-12 w-[min(310px,calc(100vw-2rem))] rounded-lg border border-white/12 bg-[#080c12]/92 p-4 text-left shadow-[0_20px_70px_rgba(0,0,0,0.5)] backdrop-blur-2xl">
-          <ArrowUpRight
-            size={30}
-            strokeWidth={1.8}
-            className="absolute -right-1 -top-8 rotate-[-24deg] text-white/75 drop-shadow-[0_0_16px_rgba(255,255,255,0.25)]"
-          />
-          <div className="mb-2 inline-flex rounded-md border border-white/10 bg-white/6 px-2 py-1 text-[9px] font-black uppercase tracking-[0.16em] text-white/55">
-            New control
-          </div>
-          <h3 className="text-sm font-black uppercase tracking-tight text-white">
-            Fullscreen controls moved here
-          </h3>
-          <p className="mt-2 text-xs font-semibold leading-5 text-white/55">
-            Hover the top-right edge for quick minimize, fullscreen, and close controls.
-          </p>
-          <button
-            type="button"
-            onClick={dismissFeatureSpotlight}
-            className="mt-4 rounded-md border border-white/10 px-3 py-2 text-[10px] font-black uppercase tracking-[0.14em] text-white/70 transition-colors hover:border-white/20 hover:text-white"
-          >
-            Got it
-          </button>
-        </div>
       </div>
     )
   }
@@ -834,7 +780,7 @@ const App: React.FC = () => {
       )}
 
       {/* Full-screen What's New onboarding is intentionally disabled for this release. */}
-      <FeatureSpotlight />
+      <WindowControlsGuide launchFullscreen={launchFullscreen} playingVideo={!!playingVideo} />
     </div>
   )
 }

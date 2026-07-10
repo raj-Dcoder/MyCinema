@@ -135,7 +135,7 @@ const VideoCard: React.FC<VideoCardProps> = ({ video, onPlay, onShowDetail, isCo
         }
       }}
     >
-      <div className="relative aspect-[2/3] w-full overflow-hidden rounded-2xl bg-secondary shadow-lg ring-1 ring-white/5 isolate transform-gpu transition-[transform,box-shadow] duration-300 will-change-transform [backface-visibility:hidden] [clip-path:inset(0_round_1rem)] group-hover:-translate-y-2 group-hover:scale-[1.03] group-hover:shadow-2xl group-hover:shadow-red-950/30 group-hover:ring-red-600/60 group-focus-visible:-translate-y-2 group-focus-visible:scale-[1.03] group-focus-visible:outline-none group-focus-visible:ring-2 group-focus-visible:ring-red-600/80">
+      <div className="relative aspect-[2/3] w-full overflow-hidden rounded-2xl bg-secondary shadow-lg ring-1 ring-white/5 isolate transform-gpu transition-[transform,box-shadow] duration-300 will-change-transform [backface-visibility:hidden] [clip-path:inset(0_round_1rem)] group-hover:-translate-y-2 group-hover:scale-[1.04] group-hover:shadow-2xl group-hover:shadow-red-950/40 group-hover:ring-red-600/70 group-focus-visible:-translate-y-2 group-focus-visible:scale-[1.04] group-focus-visible:outline-none group-focus-visible:ring-2 group-focus-visible:ring-red-600/80">
         {posterUrl ? (
           <img 
             src={posterUrl} 
@@ -197,7 +197,7 @@ const VideoCard: React.FC<VideoCardProps> = ({ video, onPlay, onShowDetail, isCo
             )}
           </div>
 
-          <div className="space-y-2">
+          <div className="space-y-2 translate-y-3 opacity-0 transition-all duration-300 ease-out group-hover:translate-y-0 group-hover:opacity-100 group-hover:delay-100 group-focus-visible:translate-y-0 group-focus-visible:opacity-100 group-focus-visible:delay-100">
             <div>
               <h3 className="line-clamp-2 text-sm font-black leading-tight text-white">
                 {title}
@@ -233,3 +233,22 @@ const VideoCard: React.FC<VideoCardProps> = ({ video, onPlay, onShowDetail, isCo
 }
 
 export default VideoCard
+
+export const VideoCardSkeleton: React.FC<{ isContinueWatching?: boolean }> = ({ isContinueWatching }) => {
+  if (isContinueWatching) {
+    return (
+      <div className="flex items-center gap-4 p-2 rounded-2xl">
+        <div className="relative w-24 aspect-video rounded-xl overflow-hidden skeleton" />
+        <div className="flex-1 min-w-0 space-y-2">
+          <div className="h-4 bg-white/5 rounded w-3/4 skeleton" />
+          <div className="h-3 bg-white/5 rounded w-1/2 skeleton" />
+        </div>
+        <div className="w-8 h-4 bg-white/5 rounded skeleton" />
+      </div>
+    )
+  }
+
+  return (
+    <div className="aspect-[2/3] w-full rounded-2xl skeleton shadow-lg ring-1 ring-white/5" />
+  )
+}

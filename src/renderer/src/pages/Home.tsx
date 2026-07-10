@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react'
 import { Video } from '../types'
-import VideoCard from '../components/VideoCard'
+import VideoCard, { VideoCardSkeleton } from '../components/VideoCard'
 import HeroCarousel from '../components/HeroCarousel'
 import HorizontalScrollRow, { type HorizontalScrollRowHandle } from '../components/HorizontalScrollRow'
 import { groupSeriesCards } from '../utils/seriesCards'
@@ -1002,11 +1002,11 @@ const Home: React.FC<HomeProps> = ({ onPlay, onShowDetail, onNavigate, refreshKe
                             <div className="space-y-2">
                               {[1, 2, 3].map(item => (
                                 <div key={item} className="flex items-center gap-3 rounded-2xl border border-white/5 bg-white/[0.03] p-2.5">
-                                  <div className="h-[92px] w-[62px] rounded-xl bg-white/5 animate-pulse" />
+                                  <div className="h-[92px] w-[62px] rounded-xl skeleton" />
                                   <div className="flex-1 space-y-3">
-                                    <div className="h-3 w-24 rounded-full bg-white/8 animate-pulse" />
-                                    <div className="h-4 w-44 rounded-full bg-white/8 animate-pulse" />
-                                    <div className="h-3 w-full rounded-full bg-white/5 animate-pulse" />
+                                    <div className="h-3 w-24 rounded-full skeleton" />
+                                    <div className="h-4 w-44 rounded-full skeleton" />
+                                    <div className="h-3 w-full rounded-full skeleton" />
                                   </div>
                                 </div>
                               ))}
@@ -1104,7 +1104,7 @@ const Home: React.FC<HomeProps> = ({ onPlay, onShowDetail, onNavigate, refreshKe
         ) : showRecentPlaceholders ? (
           <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-5">
             {[1,2,3,4,5,6].map(i => (
-              <div key={i} className="aspect-[2/3] bg-white/5 rounded-2xl animate-pulse" />
+              <VideoCardSkeleton key={i} />
             ))}
           </div>
         ) : (
@@ -1168,10 +1168,9 @@ const Home: React.FC<HomeProps> = ({ onPlay, onShowDetail, onNavigate, refreshKe
             </div>
           ))}
           {trendingMovies.length === 0 && Array.from({ length: TRENDING_RAIL_LIMIT }, (_, i) => i + 1).map(i => (
-            <div
-              key={i}
-              className={`${POSTER_RAIL_CARD_CLASS} aspect-[2/3] rounded-2xl bg-white/5 animate-pulse`}
-            />
+            <div key={i} className={POSTER_RAIL_CARD_CLASS}>
+              <VideoCardSkeleton />
+            </div>
           ))}
         </HorizontalScrollRow>
       </section>
@@ -1195,10 +1194,9 @@ const Home: React.FC<HomeProps> = ({ onPlay, onShowDetail, onNavigate, refreshKe
             </div>
           ))}
           {trendingSeries.length === 0 && Array.from({ length: TRENDING_RAIL_LIMIT }, (_, i) => i + 1).map(i => (
-            <div
-              key={i}
-              className={`${POSTER_RAIL_CARD_CLASS} aspect-[2/3] rounded-2xl bg-white/5 animate-pulse`}
-            />
+            <div key={i} className={POSTER_RAIL_CARD_CLASS}>
+              <VideoCardSkeleton />
+            </div>
           ))}
         </HorizontalScrollRow>
       </section>
@@ -1222,10 +1220,9 @@ const Home: React.FC<HomeProps> = ({ onPlay, onShowDetail, onNavigate, refreshKe
             </div>
           ))}
           {trendingIndiaMovies.length === 0 && Array.from({ length: TRENDING_RAIL_LIMIT }, (_, i) => i + 1).map(i => (
-            <div
-              key={i}
-              className={`${POSTER_RAIL_CARD_CLASS} aspect-[2/3] rounded-2xl bg-white/5 animate-pulse`}
-            />
+            <div key={i} className={POSTER_RAIL_CARD_CLASS}>
+              <VideoCardSkeleton />
+            </div>
           ))}
         </HorizontalScrollRow>
       </section>
@@ -1249,10 +1246,9 @@ const Home: React.FC<HomeProps> = ({ onPlay, onShowDetail, onNavigate, refreshKe
             </div>
           ))}
           {trendingIndiaSeries.length === 0 && Array.from({ length: TRENDING_RAIL_LIMIT }, (_, i) => i + 1).map(i => (
-            <div
-              key={i}
-              className={`${POSTER_RAIL_CARD_CLASS} aspect-[2/3] rounded-2xl bg-white/5 animate-pulse`}
-            />
+            <div key={i} className={POSTER_RAIL_CARD_CLASS}>
+              <VideoCardSkeleton />
+            </div>
           ))}
         </HorizontalScrollRow>
       </section>

@@ -7,6 +7,7 @@ import { WatchTogetherModal } from './WatchTogetherModal'
 import AIEnhancementRenderer from './AIEnhancementRenderer'
 import { PlayerControls } from './player/PlayerControls'
 import { SubtitleOverlay } from './player/SubtitleOverlay'
+import { VideoStatsOverlay } from './player/VideoStatsOverlay'
 import { useAudioBoost, AudioBoostProfile, AudioBoostIntensity, AUDIO_BOOST_PROFILES, AUDIO_BOOST_INTENSITIES } from '../hooks/useAudioBoost'
 import { useIntroSkip, IntroDbSegment, getIntroDbSegmentKey, getIntroDbSegmentLabel, getIntroDbSegmentAccentClass, INTRODB_SKIP_END_PADDING_SECONDS, INTRODB_AUTO_SKIP_CONFIRMATION_MS } from '../hooks/useIntroSkip'
 import {
@@ -109,15 +110,61 @@ function getSeriesSubtitleAutoLoadStorageKey(seriesKey: string) {
 interface VideoPlayerProps {
   video: Video
   onClose: () => void
+  onControlsVisibilityChange?: (visible: boolean) => void
 }
 
-const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
+const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVisibilityChange }) => {
   const videoRef = useRef<HTMLVideoElement>(null)
   
   const [isPlaying, setIsPlaying] = useState(false)
   const [currentTime, setCurrentTime] = useState(0)
   const [duration, setDuration] = useState(0)
   const [showControls, setShowControls] = useState(true)
+
+  const [sleepTimerEnd, setSleepTimerEnd] = useState<number | null>(null)
+  const [showStats, setShowStats] = useState(false)
+  const bookmarksStorageKey = `mycinema_bookmarks_${video.id}`
+  const [bookmarks, setBookmarks] = useState<{ time: number }[]>(() => {
+    try {
+      const stored = localStorage.getItem(bookmarksStorageKey)
+      return stored ? JSON.parse(stored) : []
+    } catch {
+      return []
+    }
+  })
+
+  useEffect(() => {
+    localStorage.setItem(bookmarksStorageKey, JSON.stringify(bookmarks))
+  }, [bookmarks, bookmarksStorageKey])
+
+  useEffect(() => {
+    if (sleepTimerEnd === null) return
+    const interval = setInterval(() => {
+      if (Date.now() >= sleepTimerEnd) {
+        if (videoRef.current && !videoRef.current.paused) {
+          videoRef.current.pause()
+        }
+        setSleepTimerEnd(null)
+      }
+    }, 5000)
+    return () => clearInterval(interval)
+  }, [sleepTimerEnd])
+
+  const toggleBookmark = useCallback(() => {
+    if (!videoRef.current) return
+    const time = videoRef.current.currentTime
+    setBookmarks(prev => {
+      const existing = prev.find(b => Math.abs(b.time - time) < 1)
+      if (existing) {
+        return prev.filter(b => b !== existing)
+      }
+      return [...prev, { time }].sort((a, b) => a.time - b.time)
+    })
+  }, [])
+
+  const removeBookmark = useCallback((time: number) => {
+    setBookmarks(prev => prev.filter(b => b.time !== time))
+  }, [])
 
   const { isHost, roomId, participants, localPeerId, isConnecting, error, voiceError, voiceEnabled, isMicActive, remoteAudioStreams, startHosting, joinRoom, leaveRoom, broadcastState, startVoiceSession, setPushToTalkActive, onReceiveSyncObj, debugLogs } = useWatchTogether()
   const [showWatchTogetherState, setShowWatchTogetherState] = useState(false)
@@ -265,6 +312,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
   const [showAdvancedMenu, setShowAdvancedMenu] = useState(false)
   const [playbackRate, setPlaybackRate] = useState<number>(1)
   const [showSpeedMenu, setShowSpeedMenu] = useState(false)
+  const [showSleepMenu, setShowSleepMenu] = useState(false)
   const [seekPopup, setSeekPopup] = useState<{ show: boolean, text: string, id: number }>({ show: false, text: '', id: 0 })
   const [volumePopup, setVolumePopup] = useState<{ show: boolean, volume: number, isMuted: boolean, id: number }>({ show: false, volume: 1, isMuted: false, id: 0 })
   const [speedPopup, setSpeedPopup] = useState<{ show: boolean, rate: number, id: number }>({ show: false, rate: 1, id: 0 })
@@ -1466,10 +1514,6 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
 
 
   const cycleAspectRatio = () => {
-    if (playerShellRef.current && !document.fullscreenElement) {
-      playerShellRef.current.requestFullscreen().catch((err) => console.log(err))
-    }
-    
     setAspectMode(prev => {
       const nextIdx = (ASPECT_MODES.indexOf(prev) + 1) % ASPECT_MODES.length;
       const mode = ASPECT_MODES[nextIdx];
@@ -1482,6 +1526,21 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
       return mode;
     });
   }
+
+  // Initial controls fade out
+  useEffect(() => {
+    setShowControls(true)
+    clearTimeout(window.controlsTimeout)
+    window.controlsTimeout = setTimeout(() => setShowControls(false), 4000)
+    
+    return () => clearTimeout(window.controlsTimeout)
+  }, [currentVideo.id])
+
+  useEffect(() => {
+    if (onControlsVisibilityChange) {
+      onControlsVisibilityChange(showControls)
+    }
+  }, [showControls, onControlsVisibilityChange])
 
   // Dedicated Keyboard Shortcuts Effect
   useEffect(() => {
@@ -1851,7 +1910,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
         
         window.api.updateVideoProgress(currentVideo.id, time, completed, false)
       }
-    }, 5000)
+    }, 60000)
 
     return () => {
       clearInterval(interval)
@@ -1943,6 +2002,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
       showOnlineSearch ||
       showSubtitleSyncPanel ||
       showSpeedMenu ||
+      showSleepMenu ||
       showAdvancedMenu ||
       showEpisodesPanel ||
       showInfoPanel ||
@@ -1957,6 +2017,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
       setShowOnlineSearch(false)
       setShowSubtitleSyncPanel(false)
       setShowSpeedMenu(false)
+      setShowSleepMenu(false)
       setShowAdvancedMenu(false)
       setShowEpisodesPanel(false)
       setShowInfoPanel(false)
@@ -3512,6 +3573,8 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
         subtitleLoading={subtitleLoading}
       />
 
+      {showStats && <VideoStatsOverlay videoRef={videoRef} />}
+
       <PlayerControls
         showControls={showControls}
         hoverTime={hoverTime}
@@ -3535,6 +3598,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
         aspectMode={aspectMode}
         showAdvancedMenu={showAdvancedMenu}
         showSpeedMenu={showSpeedMenu}
+        showSleepMenu={showSleepMenu}
         fpsBoostEnabled={fpsBoostEnabled}
         highSpeedMotionPaused={highSpeedMotionPaused}
         audioBoostEnabled={audioBoostEnabled}
@@ -3548,6 +3612,9 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
         isPiPSupported={isPiPSupported}
         isAnyFullscreen={isAnyFullscreen}
         highSpeedPerformanceRate={HIGH_SPEED_PERFORMANCE_RATE}
+        sleepTimerEnd={sleepTimerEnd}
+        showStats={showStats}
+        bookmarks={bookmarks}
 
         handleProgressMouseMove={handleProgressMouseMove}
         handleProgressMouseLeave={handleProgressMouseLeave}
@@ -3555,6 +3622,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
         handleSeekMouseDown={handleSeekMouseDown}
         handleSeekMouseUp={handleSeekMouseUp}
         seek={seek}
+        seekToTime={seekToTime}
         togglePlay={togglePlay}
         playNextEpisode={playNextEpisode}
         handleVolumeChange={handleVolumeChange}
@@ -3565,6 +3633,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
         cycleAspectRatio={cycleAspectRatio}
         setShowAdvancedMenu={setShowAdvancedMenu}
         setShowSpeedMenu={setShowSpeedMenu}
+        setShowSleepMenu={setShowSleepMenu}
         setShowMediaMenu={setShowMediaMenu}
         setFpsBoostEnabled={setFpsBoostEnabled}
         setAudioBoostEnabled={setAudioBoostEnabled}
@@ -3576,6 +3645,10 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose }) => {
         changeSpeed={changeSpeed}
         togglePictureInPicture={togglePictureInPicture}
         toggleFullscreen={toggleFullscreen}
+        setSleepTimerEnd={setSleepTimerEnd}
+        setShowStats={setShowStats}
+        toggleBookmark={toggleBookmark}
+        removeBookmark={removeBookmark}
       />
       {/* Hidden Custom Audio Extraction Pipeliner */}
       <audio ref={audioRef} crossOrigin="anonymous" style={{ display: 'none' }} />

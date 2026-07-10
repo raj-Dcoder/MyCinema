@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react'
-import { X, Play, Info, Calendar, Clock, Star, FolderOpen, Film, Music, Subtitles, HardDrive, ChevronDown, ChevronUp, Heart, Bookmark, Share2, Search, Zap, Users, Download, AlertTriangle, Clapperboard, Loader2, ExternalLink, Languages, CheckCircle2, Copy, MessageCircle, Send } from 'lucide-react'
+import { X, Play, Info, Calendar, Clock, Star, FolderOpen, Film, Music, Subtitles, HardDrive, ChevronDown, ChevronUp, Heart, Bookmark, Share2, Search, Zap, Users, Download, AlertTriangle, Clapperboard, Loader2, ExternalLink, Languages, CheckCircle2, Copy, MessageCircle, Send, Trash2 } from 'lucide-react'
 import { Video } from '../types'
-import { ShareHintGuide } from './FeatureGuides'
+import { ShareHintGuide, DeleteHintGuide } from './FeatureGuides'
 import { getTorrentSourceHealthScore, getTorrentSourceSpeedLabel } from '../utils/torrentSources'
 import { getMediaUnitIdentity, getVersionLabel, groupMediaVersions, pickPreferredVersion } from '../utils/mediaVersions'
 
@@ -134,6 +134,36 @@ const getVibeTags = (video: Video, genres: string[]) => {
   return Array.from(new Set([...scored, ...fallback])).slice(0, 5)
 }
 
+const getVibeColor = (vibe: string) => {
+  switch (vibe) {
+    case 'Space Survival': return 'from-indigo-600 to-purple-600 text-white border-indigo-400/30 shadow-indigo-900/50'
+    case 'Hard Sci-Fi': return 'from-cyan-600 to-blue-600 text-white border-cyan-400/30 shadow-cyan-900/50'
+    case 'High Drama': return 'from-rose-600 to-red-600 text-white border-rose-400/30 shadow-rose-900/50'
+    case 'Teen Chaos': return 'from-pink-500 to-rose-500 text-white border-pink-400/30 shadow-pink-900/50'
+    case 'Romance Heat': return 'from-red-500 to-pink-600 text-white border-red-400/30 shadow-red-900/50'
+    case 'Friend Group Energy': return 'from-amber-500 to-orange-500 text-white border-amber-400/30 shadow-amber-900/50'
+    case 'Dark & Messy': return 'from-stone-800 to-neutral-900 text-neutral-300 border-stone-600/50 shadow-stone-900/50'
+    case 'Mind Trip': return 'from-fuchsia-600 to-purple-700 text-white border-fuchsia-400/30 shadow-fuchsia-900/50'
+    case 'Mystery Pull': return 'from-violet-700 to-indigo-800 text-indigo-100 border-violet-500/30 shadow-violet-900/50'
+    case 'Crime Spiral': return 'from-slate-700 to-slate-900 text-slate-200 border-slate-500/50 shadow-slate-900/50'
+    case 'Bingeable': return 'from-emerald-500 to-teal-600 text-white border-emerald-400/30 shadow-emerald-900/50'
+    case 'Comfort Watch': return 'from-yellow-400 to-amber-500 text-amber-950 border-yellow-300/50 shadow-yellow-900/50'
+    case 'Action Rush': return 'from-orange-600 to-red-600 text-white border-orange-400/30 shadow-orange-900/50'
+    case 'Supernatural': return 'from-purple-800 to-slate-900 text-purple-200 border-purple-500/40 shadow-purple-900/50'
+    default:
+      const colors = [
+        'from-blue-500 to-indigo-600 text-white border-blue-400/30 shadow-blue-900/50',
+        'from-emerald-500 to-green-600 text-white border-emerald-400/30 shadow-emerald-900/50',
+        'from-rose-500 to-red-600 text-white border-rose-400/30 shadow-rose-900/50',
+        'from-violet-500 to-purple-600 text-white border-violet-400/30 shadow-violet-900/50',
+        'from-amber-500 to-orange-600 text-white border-amber-400/30 shadow-amber-900/50',
+        'from-cyan-500 to-blue-600 text-white border-cyan-400/30 shadow-cyan-900/50',
+      ]
+      const hash = vibe.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0)
+      return colors[hash % colors.length]
+  }
+}
+
 const hasSourceEpisodeMarker = (source: any) => (
   typeof source.parsedEpisode === 'number' ||
   /\bs\d{1,2}[\s._-]*e(?:p)?[\s._-]*\d{1,3}\b/i.test(source.title || '') ||
@@ -199,6 +229,7 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
   const [releaseInfo, setReleaseInfo] = useState<import('../types').TmdbReleaseInfo | null>(null)
   const overviewRef = useRef<HTMLParagraphElement>(null)
   const [expandedOverview, setExpandedOverview] = useState(false)
+  const [tmdbKeywords, setTmdbKeywords] = useState<string[]>([])
 
 
   // Torrent Search State
@@ -497,6 +528,15 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
         if (!cancelled) setReleaseInfo(null)
       })
 
+    window.api.getTmdbKeywords(video.tmdb_id, video.type === 'series' ? 'series' : 'movie')
+      .then(keywords => {
+        if (!cancelled) setTmdbKeywords(keywords || [])
+      })
+      .catch(err => {
+        console.error('[DetailScreen] Failed to fetch tmdb keywords:', err)
+        if (!cancelled) setTmdbKeywords([])
+      })
+
     return () => {
       cancelled = true
     }
@@ -582,6 +622,22 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
 
   const handleOpenFolder = () => {
     window.api.openFolder(video.file_path)
+  }
+
+  const handleDeleteFile = async () => {
+    if (window.confirm('Are you sure you want to completely delete this from disk? This cannot be undone.')) {
+      try {
+        const deleted = await window.api.deleteVideoFile(video)
+        if (deleted) {
+          onClose()
+        } else {
+          alert('Failed to delete some files. They might be in use or no longer exist.')
+        }
+      } catch (err) {
+        console.error('Delete error:', err)
+        alert('Failed to delete file.')
+      }
+    }
   }
 
   const handleSetPreferredVersion = async (version: Video) => {
@@ -992,7 +1048,12 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
   }
 
   const genres = splitGenres(video.genres)
-  const visibleVibes = getVibeTags(video, genres)
+  const fallbackVibes = getVibeTags(video, genres)
+  const visibleVibes = tmdbKeywords.length > 0
+    ? tmdbKeywords
+        .map(k => k.split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' '))
+        .slice(0, 5)
+    : fallbackVibes
   const sharePayload = getSharePayload()
   const downloadPrimaryLabel = isDownloadActive
     ? isDownloadPaused
@@ -1013,9 +1074,9 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
         {/* Close Button */}
         <button 
           onClick={onClose}
-          className="absolute top-6 right-6 md:top-8 md:right-8 z-30 flex h-12 w-12 items-center justify-center rounded-full border border-white/15 bg-black/30 text-white/80 backdrop-blur-xl transition-all hover:border-red-500 hover:bg-red-600 hover:text-white"
+          className="absolute top-6 left-6 md:top-8 md:left-8 z-30 flex h-10 w-10 items-center justify-center rounded-full bg-black/40 text-white/80 transition-all hover:scale-105 hover:bg-white hover:text-black backdrop-blur-md"
         >
-          <X size={24} />
+          <X size={22} strokeWidth={2.5} />
         </button>
 
         {/* Full Screen Background */}
@@ -1053,7 +1114,7 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
         </div>
 
         {/* Content Section */}
-        <div className="flex-1 overflow-y-auto scrollbar-thin relative z-10 w-full">
+        <div className="flex-1 overflow-y-auto scrollbar-thin relative z-10 w-full animate-in slide-in-from-bottom-[100px] fade-in duration-700 [animation-timing-function:cubic-bezier(0.16,1,0.3,1)]">
           <div className="min-h-full flex flex-col">
             {/* Spacer to push content down (reduced to move content higher) */}
             <div className="h-[13vh] shrink-0 pointer-events-none" />
@@ -1163,7 +1224,7 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
               {visibleVibes.map((vibe, idx) => (
                 <span 
                   key={idx} 
-                  className="px-4 py-1.5 bg-white/5 text-white/75 text-[9px] font-black uppercase tracking-widest rounded-full border border-white/10 hover:bg-primary/20 hover:text-primary hover:border-primary/30 transition-all cursor-default"
+                  className={`px-4 py-1.5 text-[9px] font-black uppercase tracking-widest rounded-full border shadow-lg transition-all hover:scale-105 hover:shadow-xl cursor-default bg-gradient-to-br ${getVibeColor(vibe)}`}
                 >
                   {vibe}
                 </span>
@@ -1305,13 +1366,25 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
                   </svg>
                 </button>
                 {!video.isExternal && (
-                  <button
-                    onClick={handleOpenFolder}
-                    className="flex h-12 w-12 items-center justify-center bg-white/5 border border-white/10 rounded-xl text-white/40 hover:text-white transition-all hover:-translate-y-0.5 active:scale-95 glass-effect"
-                    title="Open Folder"
-                  >
-                    <FolderOpen size={20} />
-                  </button>
+                  <>
+                    <button
+                      onClick={handleOpenFolder}
+                      className="flex h-12 w-12 items-center justify-center bg-white/5 border border-white/10 rounded-xl text-white/40 hover:text-white transition-all hover:-translate-y-0.5 active:scale-95 glass-effect"
+                      title="Open Folder"
+                    >
+                      <FolderOpen size={20} />
+                    </button>
+                    <div className="relative">
+                      <button
+                        onClick={handleDeleteFile}
+                        className="flex h-12 w-12 items-center justify-center bg-white/5 border border-white/10 rounded-xl text-white/40 hover:text-red-400 hover:border-red-500/30 hover:bg-red-500/10 transition-all hover:-translate-y-0.5 active:scale-95 glass-effect"
+                        title="Delete completely from disk"
+                      >
+                        <Trash2 size={20} />
+                      </button>
+                      <DeleteHintGuide />
+                    </div>
+                  </>
                 )}
                 {isTmdbBacked && (
                   <button
@@ -1331,7 +1404,7 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
             {showShareModal && sharePayload && (
               <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm animate-in fade-in duration-200" onClick={() => setShowShareModal(false)}>
                 <div
-                  className="relative w-full max-w-md overflow-hidden rounded-2xl border border-white/10 bg-[#0f141d] shadow-2xl animate-in slide-in-from-bottom-4 duration-300"
+                  className="relative w-full max-w-md overflow-hidden rounded-2xl border border-white/10 bg-[#0f141d]/70 backdrop-blur-2xl shadow-2xl animate-in slide-in-from-bottom-4 duration-300"
                   onClick={e => e.stopPropagation()}
                 >
                   <div className="flex items-center justify-between px-6 py-4 border-b border-white/5 bg-white/[0.02]">
@@ -1522,7 +1595,7 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
                 onClick={() => setShowTrailerModal(false)}
               >
                 <div
-                  className="relative w-full max-w-5xl overflow-hidden rounded-2xl border border-white/10 bg-[#0f0f0f] shadow-2xl animate-in zoom-in-95 slide-in-from-bottom-4 duration-300"
+                  className="relative w-full max-w-5xl overflow-hidden rounded-2xl border border-white/10 bg-[#0f0f0f]/70 backdrop-blur-3xl shadow-2xl animate-in zoom-in-95 slide-in-from-bottom-4 duration-300"
                   onClick={e => e.stopPropagation()}
                 >
                   <div className="flex items-center justify-between gap-4 border-b border-white/5 bg-white/[0.02] px-6 py-4">
@@ -1719,8 +1792,8 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
             className="fixed inset-0 z-[70] bg-black/25 animate-in fade-in duration-150"
             onClick={handleCloseDownloadOptions}
           />
-          <aside className="fixed inset-y-0 right-0 z-[80] flex w-full max-w-[560px] flex-col border-l border-white/10 bg-[#0B0F16] shadow-2xl animate-in slide-in-from-right duration-300">
-            <div className="border-b border-white/10 bg-[#0F141D]">
+          <aside className="fixed inset-y-0 right-0 z-[80] flex w-full max-w-[560px] flex-col border-l border-white/10 bg-[#0B0F16]/70 backdrop-blur-3xl shadow-2xl animate-in slide-in-from-right duration-300">
+            <div className="border-b border-white/10 bg-white/[0.02]">
               <div className="flex items-start justify-between gap-4 px-5 py-5">
                 <div className="min-w-0">
                   <div className="mb-2 flex items-center gap-2 text-[10px] font-black uppercase tracking-[0.18em] text-primary">

@@ -68,6 +68,7 @@ const App: React.FC = () => {
   const [isFullscreen, setIsFullscreen] = useState(true)
   const [launchFullscreen, setLaunchFullscreen] = useState(true)
   const [showWindowControls, setShowWindowControls] = useState(false)
+  const [videoControlsVisible, setVideoControlsVisible] = useState(false)
   const [activeDownloads, setActiveDownloads] = useState<ActiveDownload[]>([])
   const [dismissedDownloadTrayIds, setDismissedDownloadTrayIds] = useState<Set<string>>(() => new Set())
   const homeScrollRef = useRef<HTMLDivElement | null>(null)
@@ -346,7 +347,7 @@ const App: React.FC = () => {
   const WindowControls = () => {
     if (!launchFullscreen) return null
 
-    const controlsVisible = showWindowControls
+    const controlsVisible = showWindowControls || (!!playingVideo && videoControlsVisible)
     const controlButtonClass = 'flex h-6 w-7 items-center justify-center text-white/60 transition-[color,opacity,transform] duration-150 hover:text-white/95 active:scale-90 focus:outline-none focus:text-white focus:ring-1 focus:ring-white/35'
 
     if (isFullscreen) {
@@ -445,7 +446,7 @@ const App: React.FC = () => {
       <WindowControls />
 
       {/* Sidebar */}
-      <div className={`group/sidebar relative bg-[#0a0f18] flex flex-col border-r border-white/5 transition-[width] duration-300 ease-in-out ${isSidebarExpanded ? 'w-64' : 'w-20'}`}>
+      <div className={`group/sidebar relative bg-white/[0.02] backdrop-blur-2xl flex flex-col border-r border-white/5 transition-[width] duration-300 ease-in-out z-40 ${isSidebarExpanded ? 'w-64' : 'w-20'}`}>
         
         {/* Toggle Button */}
         <button
@@ -649,14 +650,14 @@ const App: React.FC = () => {
       <main className="relative flex-1 overflow-hidden">
         <div
           ref={homeScrollRef}
-          className={activeTab === 'home' ? 'absolute inset-0 overflow-y-auto scrollbar-hide pt-6 pb-14 opacity-100' : 'pointer-events-none absolute inset-0 overflow-y-auto scrollbar-hide pt-6 pb-14 opacity-0'}
+          className={activeTab === 'home' ? 'absolute inset-0 overflow-y-auto scrollbar-hide pt-6 pb-14 opacity-100 transition-opacity duration-300' : 'pointer-events-none absolute inset-0 overflow-y-auto scrollbar-hide pt-6 pb-14 opacity-0 transition-opacity duration-300'}
           aria-hidden={activeTab !== 'home'}
         >
           <Home onPlay={handlePlayVideo} onShowDetail={setSelectedVideo} onNavigate={navigateToTab} refreshKey={homeRefreshKey} />
         </div>
 
         {activeTab !== 'home' && (
-          <div ref={activePageScrollRef} className="absolute inset-0 overflow-y-auto scrollbar-hide">
+          <div ref={activePageScrollRef} className="absolute inset-0 overflow-y-auto scrollbar-hide animate-in fade-in duration-300">
             <div className="px-8 pt-6 pb-14 max-w-[1600px] mx-auto">
               {activeTab === 'videos'  && <Videos onPlay={handlePlayVideo} />}
               {activeTab === 'movies'  && <Movies onPlay={handlePlayVideo} onShowDetail={setSelectedVideo} />}
@@ -776,6 +777,7 @@ const App: React.FC = () => {
             setPlayingVideo(null)
             setHomeRefreshKey(k => k + 1)
           }} 
+          onControlsVisibilityChange={setVideoControlsVisible}
         />
       )}
 

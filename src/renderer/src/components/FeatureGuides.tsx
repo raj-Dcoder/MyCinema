@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react'
-import { ArrowUpRight, X } from 'lucide-react'
+import { ArrowUpRight, X, Trash2 } from 'lucide-react'
 import { LATEST_RELEASE } from './WhatsNewOnboarding'
 
 interface InlineFeatureGuideProps {
@@ -152,6 +152,45 @@ export const DownloadOptionsGuide: React.FC = () => {
               <X size={13} />
             </button>
           </div>
+        </div>
+      )}
+    />
+  )
+}
+
+export const DeleteHintGuide: React.FC = () => {
+  return (
+    <InlineFeatureGuide
+      featureId="detail-delete-button-v2"
+      targetVersion="1.28.0"
+      render={(dismiss) => (
+        <div className="absolute right-0 bottom-full z-40 mb-3.5 w-[260px] rounded-2xl border border-white/[0.08] bg-[#0c121b]/95 p-4 text-left shadow-[0_20px_40px_-15px_rgba(0,0,0,0.5)] backdrop-blur-xl animate-in fade-in slide-in-from-bottom-2 duration-300">
+          <div className="absolute right-4 bottom-0 h-3.5 w-3.5 translate-y-1/2 rotate-45 border-r border-b border-white/[0.08] bg-[#0c121b]" />
+          <div className="flex items-start justify-between gap-3">
+            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-red-500/10 text-red-400">
+              <Trash2 size={16} />
+            </div>
+            <button
+              type="button"
+              onClick={dismiss}
+              className="mt-0.5 rounded-full p-1.5 text-white/30 transition-colors hover:bg-white/10 hover:text-white"
+              title="Close"
+            >
+              <X size={14} />
+            </button>
+          </div>
+          <div className="mt-3">
+            <h3 className="text-[14px] font-bold text-white tracking-tight">Direct Deletion</h3>
+            <p className="mt-1.5 text-[12px] leading-relaxed text-white/50 font-medium">
+              You can now safely remove this file directly from your storage without leaving the app.
+            </p>
+          </div>
+          <button 
+            onClick={dismiss}
+            className="mt-4 w-full rounded-xl bg-white/10 py-2.5 text-[12px] font-bold text-white hover:bg-white/15 transition-colors shadow-sm active:scale-[0.98]"
+          >
+            Got it, thanks!
+          </button>
         </div>
       )}
     />

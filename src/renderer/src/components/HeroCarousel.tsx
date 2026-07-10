@@ -114,8 +114,30 @@ const HeroCarousel: React.FC<HeroCarouselProps> = ({ items, onPlay, onShowDetail
 
   if (items.length === 0) {
     return (
-      <div className="w-full min-h-[570px] h-[73vh] max-h-[800px] bg-white/5 animate-pulse flex items-center justify-center">
-        <div className="text-white/10 font-black text-4xl uppercase italic">Loading Featured Content...</div>
+      <div className="relative w-full min-h-[570px] h-[73vh] max-h-[800px] overflow-hidden skeleton">
+        <div className="absolute inset-0 bg-gradient-to-t from-background via-background/40 to-transparent">
+          <div className="absolute bottom-0 left-0 right-0 p-12 md:p-16 lg:p-24 max-w-4xl space-y-6">
+            {/* Title Placeholder */}
+            <div className="h-16 w-3/4 max-w-sm rounded-lg bg-white/10 skeleton" />
+            {/* Metadata Placeholder */}
+            <div className="flex gap-3">
+              <div className="h-5 w-20 rounded bg-white/10 skeleton" />
+              <div className="h-5 w-16 rounded bg-white/10 skeleton" />
+              <div className="h-5 w-24 rounded bg-white/10 skeleton" />
+            </div>
+            {/* Description Placeholder */}
+            <div className="space-y-3 pt-2">
+              <div className="h-4 w-full max-w-2xl rounded bg-white/10 skeleton" />
+              <div className="h-4 w-5/6 max-w-2xl rounded bg-white/10 skeleton" />
+              <div className="h-4 w-4/6 max-w-2xl rounded bg-white/10 skeleton" />
+            </div>
+            {/* Buttons Placeholder */}
+            <div className="flex items-center gap-4 pt-4">
+              <div className="h-12 w-32 rounded-xl bg-white/10 skeleton" />
+              <div className="h-12 w-32 rounded-xl bg-white/10 skeleton" />
+            </div>
+          </div>
+        </div>
       </div>
     )
   }
@@ -181,7 +203,7 @@ const HeroCarousel: React.FC<HeroCarouselProps> = ({ items, onPlay, onShowDetail
               <>
                 <img
                   src={imageUrl}
-                  className="absolute inset-0 h-full w-full scale-110 object-cover object-center blur-2xl opacity-70"
+                  className="absolute inset-0 h-full w-full scale-125 object-cover object-center blur-[80px] saturate-[2] opacity-85"
                   alt=""
                   loading={idx === currentIndex ? 'eager' : 'lazy'}
                   decoding="async"

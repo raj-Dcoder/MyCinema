@@ -60,7 +60,7 @@ const HorizontalScrollRow = forwardRef<HorizontalScrollRowHandle, HorizontalScro
 
   return (
     <div
-      className={`relative -mx-8 ${compact ? '-mt-2' : '-mt-4'}`}
+      className={`relative -mx-8 ${compact ? '-mt-6' : '-mt-8'}`}
       onMouseEnter={() => setIsHovered(true)}
       onMouseLeave={() => setIsHovered(false)}
     >
@@ -82,7 +82,7 @@ const HorizontalScrollRow = forwardRef<HorizontalScrollRowHandle, HorizontalScro
       {/* Scrollable row */}
       <div
         ref={scrollRef}
-        className={`flex overflow-x-auto px-8 scrollbar-hide scroll-smooth ${compact ? 'pt-4 pb-4' : 'pt-4 pb-6'} ${contentClassName}`}
+        className={`flex overflow-x-auto px-8 scrollbar-hide scroll-smooth ${compact ? 'pt-8 pb-6' : 'pt-8 pb-8'} ${contentClassName}`}
       >
         {children}
       </div>

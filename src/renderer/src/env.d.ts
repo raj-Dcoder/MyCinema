@@ -13,6 +13,7 @@ interface ImportMeta {
 interface Api {
   selectFolder: () => Promise<string | null>
   getVideos: () => Promise<any[]>
+  deleteVideoFile: (video: any) => Promise<boolean>
   getVideoProgress: (videoId: number) => Promise<any>
   updateVideoProgress: (videoId: number, time: number, completed: boolean, isClosing?: boolean) => void
   scanFolder: (path: string) => Promise<void>
@@ -57,6 +58,7 @@ interface Api {
   fetchTrendingIndia: (type?: 'movie' | 'series') => Promise<any[]>
   getTmdbTitleLogo: (type: 'movie' | 'series', tmdbId: number) => Promise<string | null>
   getTmdbReleaseInfo: (id: number, type: 'movie' | 'series') => Promise<import('./types').TmdbReleaseInfo | null>
+  getTmdbKeywords: (id: number, type: 'movie' | 'series') => Promise<string[]>
   getTmdbTrailer: (params: { tmdbId?: number | null; title: string; type: 'movie' | 'series'; year?: number | null; seasonNumber?: number | null; preferLatestSeason?: boolean }) => Promise<any | null>
   getTmdbSeriesCatalog: (tmdbId: number) => Promise<Array<{ seasonNumber: number; episodeNumber: number; name: string; overview: string | null; airDate: string | null; stillPath: string | null; released: boolean }>>
   getIntroDbSegments: (params: { imdbId?: string | null; tmdbId?: number | null; season?: number | null; episode?: number | null; filePath?: string | null; duration?: number | null }) => Promise<{

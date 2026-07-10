@@ -5,6 +5,7 @@ import { electronAPI } from '@electron-toolkit/preload'
 const api = {
   selectFolder: () => ipcRenderer.invoke('select-folder'),
   getVideos: () => ipcRenderer.invoke('get-videos'),
+  deleteVideoFile: (video: any) => ipcRenderer.invoke('delete-video-file', video),
   getVideoProgress: (videoId: number) => ipcRenderer.invoke('get-video-progress', videoId),
   updateVideoProgress: (videoId: number, time: number, completed: boolean, isClosing?: boolean) => 
     ipcRenderer.send('update-video-progress', videoId, time, completed, isClosing),
@@ -37,6 +38,7 @@ const api = {
   fetchTrending: (type: 'movie' | 'series') => ipcRenderer.invoke('fetch-trending', type),
   fetchTrendingIndia: (type: 'movie' | 'series' = 'movie') => ipcRenderer.invoke('fetch-trending-india', type),
   getTmdbTitleLogo: (type: 'movie' | 'series', tmdbId: number) => ipcRenderer.invoke('get-tmdb-title-logo', type, tmdbId),
+  getTmdbKeywords: (id: number, type: 'movie' | 'series') => ipcRenderer.invoke('get-tmdb-keywords', id, type),
   getTmdbReleaseInfo: (id: number, type: 'movie' | 'series') => ipcRenderer.invoke('get-tmdb-release-info', id, type),
   getTmdbTrailer: (params: { tmdbId?: number | null; title: string; type: 'movie' | 'series'; year?: number | null; seasonNumber?: number | null; preferLatestSeason?: boolean }) =>
     ipcRenderer.invoke('get-tmdb-trailer', params),

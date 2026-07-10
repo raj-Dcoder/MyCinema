@@ -1,11 +1,11 @@
-import React from 'react'
+import React, { useEffect, useState } from 'react'
 import { Video } from '../../types'
 import { IntroDbSegment, getIntroDbSegmentKey, getIntroDbSegmentLabel, getIntroDbSegmentAccentClass } from '../../hooks/useIntroSkip'
 import { AudioBoostProfile, AudioBoostIntensity, AUDIO_BOOST_PROFILES, AUDIO_BOOST_INTENSITIES } from '../../hooks/useAudioBoost'
 import {
   SkipForward as SkipNext, Loader2, Rewind, Pause, Play, FastForward, Volume2, ListVideo, FolderOpen,
   Users, Info, Crop, RectangleHorizontal, Monitor, Sparkles, Zap, Wand2, PictureInPicture2,
-  Minimize, Maximize
+  Minimize, Maximize, Bookmark, Clock, Activity
 } from 'lucide-react'
 
 export interface PlayerControlsProps {
@@ -45,12 +45,18 @@ export interface PlayerControlsProps {
   isAnyFullscreen: boolean
   highSpeedPerformanceRate: number
 
+  sleepTimerEnd: number | null
+  showSleepMenu: boolean
+  showStats: boolean
+  bookmarks: { time: number }[]
+
   handleProgressMouseMove: (e: React.MouseEvent<HTMLDivElement>) => void
   handleProgressMouseLeave: () => void
   handleSeekChange: (e: React.ChangeEvent<HTMLInputElement>) => void
   handleSeekMouseDown: () => void
   handleSeekMouseUp: (e: React.MouseEvent<HTMLInputElement> | React.TouchEvent<HTMLInputElement>) => void
   seek: (seconds: number) => void
+  seekToTime: (time: number) => void
   togglePlay: (e: React.MouseEvent) => void
   playNextEpisode: () => void
   handleVolumeChange: (e: React.ChangeEvent<HTMLInputElement>) => void
@@ -60,6 +66,7 @@ export interface PlayerControlsProps {
   handleToggleInfoPanel: () => void
   cycleAspectRatio: () => void
   setShowAdvancedMenu: (show: boolean) => void
+  setShowSleepMenu: (show: boolean) => void
   setShowSpeedMenu: (show: boolean) => void
   setShowMediaMenu: (show: boolean) => void
   setFpsBoostEnabled: (enabled: boolean) => void
@@ -72,6 +79,11 @@ export interface PlayerControlsProps {
   changeSpeed: (rate: number) => void
   togglePictureInPicture: () => void
   toggleFullscreen: () => void
+
+  setSleepTimerEnd: (time: number | null) => void
+  setShowStats: (show: boolean) => void
+  toggleBookmark: () => void
+  removeBookmark: (time: number) => void
 }
 
 const formatTime = (seconds: number) => {
@@ -121,6 +133,10 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
   isPiPSupported,
   isAnyFullscreen,
   highSpeedPerformanceRate,
+  sleepTimerEnd,
+  showSleepMenu,
+  showStats,
+  bookmarks,
 
   handleProgressMouseMove,
   handleProgressMouseLeave,
@@ -128,6 +144,7 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
   handleSeekMouseDown,
   handleSeekMouseUp,
   seek,
+  seekToTime,
   togglePlay,
   playNextEpisode,
   handleVolumeChange,
@@ -137,6 +154,7 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
   handleToggleInfoPanel,
   cycleAspectRatio,
   setShowAdvancedMenu,
+  setShowSleepMenu,
   setShowSpeedMenu,
   setShowMediaMenu,
   setFpsBoostEnabled,
@@ -148,8 +166,38 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
   toggleAutoSkipIntroOutro,
   changeSpeed,
   togglePictureInPicture,
-  toggleFullscreen
+  toggleFullscreen,
+  setSleepTimerEnd,
+  setShowStats,
+  toggleBookmark,
+  removeBookmark
 }) => {
+  const [, setTick] = useState(0)
+  
+  useEffect(() => {
+    if (!sleepTimerEnd) return
+    const interval = setInterval(() => setTick(t => t + 1), 1000)
+    return () => clearInterval(interval)
+  }, [sleepTimerEnd])
+
+  const [tourStep, setTourStep] = useState(0)
+
+  useEffect(() => {
+    const hasSeenTour = localStorage.getItem('hasSeenPlayerFeaturesTour_v1')
+    if (!hasSeenTour) {
+      setTourStep(1)
+    }
+  }, [])
+
+  const nextTourStep = () => {
+    if (tourStep === 3) {
+      localStorage.setItem('hasSeenPlayerFeaturesTour_v1', 'true')
+      setTourStep(0)
+    } else {
+      setTourStep(prev => prev + 1)
+    }
+  }
+
   return (
     <div className={`absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/90 to-transparent px-10 pb-10 pt-20 transition-opacity duration-300 video-controls z-40 ${showControls ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}>
       {/* Progress Bar Wrapper */}
@@ -236,6 +284,32 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
             </div>
           </>
         )}
+        
+        {/* Bookmarks */}
+        {duration > 0 && bookmarks.map((bookmark) => {
+          const leftPercent = (bookmark.time / duration) * 100
+          return (
+            <div
+              key={bookmark.time}
+              className="absolute top-1/2 -translate-y-1/2 w-2 h-2 rounded-full bg-amber-400 cursor-pointer shadow-lg z-30 transition-transform hover:scale-150"
+              style={{ left: `calc(${leftPercent}% - 4px)` }}
+              title={`Bookmark at ${formatTime(bookmark.time)} (Click to remove)`}
+              onClick={(e) => {
+                e.stopPropagation();
+                if (e.altKey || e.shiftKey) {
+                  removeBookmark(bookmark.time)
+                } else {
+                  seekToTime(bookmark.time)
+                }
+              }}
+              onContextMenu={(e) => {
+                e.preventDefault()
+                removeBookmark(bookmark.time)
+              }}
+            />
+          )
+        })}
+
         <div 
           className="absolute w-3 h-3 bg-primary rounded-full shadow-lg opacity-0 group-hover/progress:opacity-100 transition-opacity top-1/2 -translate-y-1/2 z-10 group-hover/progress:scale-125"
           style={{ left: `calc(${(currentTime / duration) * 100}% - 6px)` }}
@@ -243,7 +317,7 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
       </div>
 
       <div className="flex items-center justify-between">
-        <div className="flex items-center space-x-6">
+        <div className="flex items-center gap-5">
           <button onClick={() => seek(-10)} className="text-white hover:text-primary hover:-translate-x-1 transition-all" title="Rewind 10s">
             <Rewind size={28} fill="currentColor" />
           </button>
@@ -285,9 +359,33 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
           <div className="text-sm font-medium text-gray-300">
             {formatTime(currentTime)} / {formatTime(duration)}
           </div>
+          
+          {/* Toggle Bookmark */}
+          {(() => {
+            const hasBookmark = bookmarks.some(b => Math.abs(b.time - currentTime) < 1)
+            return (
+              <div className="relative flex items-center">
+                <button 
+                  onClick={(e) => { e.stopPropagation(); toggleBookmark(); }}
+                  className={`transition-colors ml-4 ${hasBookmark ? 'text-amber-400 hover:text-white' : 'text-white hover:text-amber-400'}`}
+                  title={hasBookmark ? "Remove Bookmark" : "Add Bookmark"}
+                >
+                  <Bookmark size={20} className="opacity-90 hover:opacity-100" fill={hasBookmark ? "currentColor" : "none"} />
+                </button>
+                {tourStep === 1 && (
+                  <div className="absolute bottom-full mb-4 left-1/2 -translate-x-1/2 w-64 bg-primary text-black p-4 rounded-xl shadow-2xl z-50 animate-in fade-in zoom-in-95">
+                    <h4 className="font-black text-[15px] mb-1 leading-tight tracking-tight">New: Bookmarks! 🔖</h4>
+                    <p className="text-[12px] font-medium mb-3 text-black/80">Click here to save any moment. Dots will appear on the timeline to let you jump back anytime.</p>
+                    <button onClick={(e) => { e.stopPropagation(); nextTourStep(); }} className="w-full bg-black text-white rounded-md py-2 text-[11px] uppercase tracking-wider font-bold hover:bg-black/80 transition-colors">Got it</button>
+                    <div className="absolute top-full left-1/2 -translate-x-1/2 border-8 border-transparent border-t-primary" />
+                  </div>
+                )}
+              </div>
+            )
+          })()}
         </div>
 
-        <div className="flex items-center space-x-6">
+        <div className="flex items-center gap-5">
           {/* Episodes */}
           {currentVideo.type === 'series' && currentVideo.series_name && (
             <button
@@ -341,6 +439,118 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
           </button>
 
           <div className="relative flex items-center">
+            <button
+              onClick={(e) => {
+                e.stopPropagation()
+                setShowSleepMenu(!showSleepMenu)
+              }}
+              className={`transition-colors flex items-center relative ${sleepTimerEnd || showSleepMenu ? 'text-amber-400' : 'text-white hover:text-amber-400'}`}
+              title="Sleep Timer"
+            >
+              <Clock size={22} className="opacity-90 hover:opacity-100" />
+              {sleepTimerEnd && (() => {
+                const msLeft = sleepTimerEnd - Date.now()
+                if (msLeft <= 0) return null
+                const minsLeft = Math.floor(msLeft / 60000)
+                const secsLeft = Math.floor(msLeft / 1000)
+                const text = minsLeft > 0 ? `${minsLeft}m` : `${secsLeft}s`
+                return (
+                  <span className="absolute -top-2 -right-2 bg-amber-400 text-black text-[9px] font-bold px-1 rounded-sm shadow-md">
+                    {text}
+                  </span>
+                )
+              })()}
+            </button>
+
+            {tourStep === 2 && (
+              <div className="absolute bottom-full mb-4 left-1/2 -translate-x-1/2 w-64 bg-primary text-black p-4 rounded-xl shadow-2xl z-50 animate-in fade-in zoom-in-95">
+                <h4 className="font-black text-[15px] mb-1 leading-tight tracking-tight">New: Sleep Timer ⏱️</h4>
+                <p className="text-[12px] font-medium mb-3 text-black/80">Set an automatic timer to pause the player so you don't lose your spot when falling asleep.</p>
+                <button onClick={(e) => { e.stopPropagation(); nextTourStep(); }} className="w-full bg-black text-white rounded-md py-2 text-[11px] uppercase tracking-wider font-bold hover:bg-black/80 transition-colors">Got it</button>
+                <div className="absolute top-full left-1/2 -translate-x-1/2 border-8 border-transparent border-t-primary" />
+              </div>
+            )}
+
+            {showSleepMenu && (
+              <div 
+                className="absolute bottom-full right-0 mb-6 bg-[#111111]/90 backdrop-blur-2xl rounded-2xl shadow-[0_20px_50px_rgba(0,0,0,0.6)] border border-white/10 overflow-hidden z-50 animate-in fade-in slide-in-from-bottom-2 duration-300 w-[240px]"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <div className="px-4 py-3 border-b border-white/5 bg-white/[0.02]">
+                  <div className="flex items-center space-x-2">
+                    <Clock size={14} className="text-amber-400" />
+                    <h3 className="text-[10px] font-black text-white uppercase tracking-[0.2em]">Sleep Timer</h3>
+                  </div>
+                </div>
+                
+                <div className="p-2 space-y-1">
+                  <div className="grid grid-cols-4 gap-1">
+                    {[15, 30, 45, 60].map((mins) => {
+                      const isActive = sleepTimerEnd !== null && Math.abs(sleepTimerEnd - (Date.now() + mins * 60000)) < 60000
+                      return (
+                        <button
+                          key={mins}
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            setSleepTimerEnd(Date.now() + mins * 60000)
+                            setShowSleepMenu(false)
+                          }}
+                          className={`rounded-md py-1.5 text-[11px] font-bold transition-all ${
+                            isActive 
+                              ? 'bg-amber-400/20 text-amber-400' 
+                              : 'bg-white/5 text-white/60 hover:bg-white/10 hover:text-white/90'
+                          }`}
+                        >
+                          {mins}m
+                        </button>
+                      )
+                    })}
+                  </div>
+                  
+                  <div className="pt-2 px-1 pb-1">
+                    <p className="text-[10px] font-bold tracking-tight text-white/50 mb-1.5 uppercase">Custom Time</p>
+                    <div className="flex space-x-2">
+                      <input 
+                        type="number"
+                        min="1"
+                        max="720"
+                        placeholder="Minutes"
+                        className="w-full bg-white/5 border border-white/10 rounded-md px-2 py-1.5 text-[11px] text-white placeholder-white/30 focus:outline-none focus:border-amber-400/50"
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            const val = parseInt(e.currentTarget.value)
+                            if (!isNaN(val) && val > 0) {
+                              setSleepTimerEnd(Date.now() + val * 60000)
+                              setShowSleepMenu(false)
+                            }
+                          }
+                        }}
+                      />
+                    </div>
+                  </div>
+
+                  <div className="pt-1 mt-1 border-t border-white/5">
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        setSleepTimerEnd(null)
+                        setShowSleepMenu(false)
+                      }}
+                      className={`w-full rounded-md py-1.5 text-[11px] font-bold transition-all ${
+                        sleepTimerEnd === null 
+                          ? 'bg-white/10 text-white' 
+                          : 'text-white/40 hover:bg-white/10 hover:text-white/80'
+                      }`}
+                    >
+                      Turn Off Timer
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+
+          <div className="relative flex items-center">
             {showAdvancedMenu && (
               <div 
                 className="absolute bottom-full right-0 mb-6 bg-[#111111]/90 backdrop-blur-2xl rounded-2xl shadow-[0_20px_50px_rgba(0,0,0,0.6)] border border-white/10 overflow-hidden z-50 animate-in fade-in slide-in-from-bottom-2 duration-300 w-[280px]"
@@ -360,6 +570,26 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
                       <p className="mt-0.5 text-[10px] font-medium leading-snug text-white/55">FPS Boost resumes below {highSpeedPerformanceRate}x. Sharpness and vibrance stay on.</p>
                     </div>
                   )}
+
+                  {/* Stats for Nerds */}
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      setShowStats(!showStats)
+                    }}
+                    className={`w-full flex items-center justify-between px-3 py-3 rounded-xl transition-all duration-200 group ${showStats ? 'bg-primary/10 text-primary' : 'text-white/60 hover:bg-white/5 hover:text-white'}`}
+                  >
+                    <div className="flex items-center space-x-3">
+                      <Activity size={18} className={showStats ? "text-primary" : "text-white/30"} />
+                      <div className="text-left">
+                        <p className="text-[13px] font-bold tracking-tight">Stats for Nerds</p>
+                        <p className="text-[10px] opacity-50 font-medium">Resolution, FPS, Drops</p>
+                      </div>
+                    </div>
+                    <div className={`flex-shrink-0 w-8 h-4.5 rounded-full relative transition-colors duration-300 ${showStats ? 'bg-primary' : 'bg-white/10'}`}>
+                      <div className={`absolute top-0.75 left-0.75 w-3 h-3 rounded-full bg-white transition-transform duration-300 ${showStats ? 'translate-x-3.5' : 'translate-x-0'}`} />
+                    </div>
+                  </button>
 
                   {currentVideo.type === 'series' && canControlPlayback && (
                     <button
@@ -525,6 +755,14 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
             >
               <Sparkles size={22} className={showAdvancedMenu ? "opacity-100" : "opacity-90 hover:opacity-100"} />
             </button>
+            {tourStep === 3 && (
+              <div className="absolute bottom-full right-0 mb-4 w-64 bg-primary text-black p-4 rounded-xl shadow-2xl z-50 animate-in fade-in zoom-in-95">
+                <h4 className="font-black text-[15px] mb-1 leading-tight tracking-tight">New: Stats for Nerds 📊</h4>
+                <p className="text-[12px] font-medium mb-3 text-black/80">Geek out with real-time video stats like framerate and resolution. Find it here in Advanced Settings.</p>
+                <button onClick={(e) => { e.stopPropagation(); nextTourStep(); }} className="w-full bg-black text-white rounded-md py-2 text-[11px] uppercase tracking-wider font-bold hover:bg-black/80 transition-colors">Got it</button>
+                <div className="absolute top-full right-[2px] border-8 border-transparent border-t-primary" />
+              </div>
+            )}
           </div>
           <div className="relative flex items-center">
             {showSpeedMenu && (

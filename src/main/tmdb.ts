@@ -1322,3 +1322,35 @@ export async function fetchTmdbReleaseInfo(id: number, type: 'movie' | 'series')
   }
 }
 
+export async function fetchTmdbKeywords(id: number, type: 'movie' | 'series'): Promise<string[]> {
+  const apiKey = getTmdbApiKey()
+  if (!apiKey) return []
+
+  try {
+    const endpoint = type === 'series' ? 'tv' : 'movie'
+    const url = `${TMDB_BASE}/${endpoint}/${id}/keywords?api_key=${apiKey}`
+    
+    if (!cachedTmdbIp) {
+      await resolveDnsDoH('api.themoviedb.org')
+    }
+
+    const response = await fetch(url, {
+      dispatcher: tmdbDispatcher,
+      signal: AbortSignal.timeout(8000),
+      headers: {
+        'User-Agent': 'MyCinema/1.3.0',
+        'Accept': 'application/json'
+      }
+    })
+
+    if (!response.ok) return []
+    const data = await response.json() as any
+    const keywordsArray = type === 'series' ? data.results : data.keywords
+    if (!Array.isArray(keywordsArray)) return []
+    
+    return keywordsArray.map((k: any) => k.name)
+  } catch (err) {
+    console.warn(`[TMDB] fetchTmdbKeywords failed for ${id}:`, err)
+    return []
+  }
+}

@@ -1478,6 +1478,47 @@ ipcMain.handle('remove-folder', (_, folderPath: string) => {
   return true
 })
 
+ipcMain.handle('delete-video-file', async (_, video: any) => {
+  try {
+    const itemsToDelete = db.getVideosToDelete(video)
+    
+    // Add fallback if array is empty but we have file_path (e.g. external media)
+    if (itemsToDelete.length === 0 && video.file_path && video.id) {
+      itemsToDelete.push({ id: video.id, file_path: video.file_path })
+    }
+
+    let deletedAny = false
+    for (const item of itemsToDelete) {
+      if (item.file_path && fs.existsSync(item.file_path)) {
+        try {
+          fs.unlinkSync(item.file_path)
+          deletedAny = true
+          const dir = path.dirname(item.file_path)
+          if (fs.readdirSync(dir).length === 0) {
+            fs.rmdirSync(dir)
+          }
+        } catch (err) {
+          console.error('Error deleting file:', err)
+        }
+      }
+      try {
+        db.deleteVideoAndProgress(item.id)
+        deletedAny = true
+      } catch (err) {
+        console.error('Error removing DB record:', err)
+      }
+    }
+    
+    if (deletedAny) {
+      BrowserWindow.getAllWindows().forEach(w => w.webContents.send('library-updated'))
+    }
+    return deletedAny
+  } catch (error) {
+    console.error('Failed to delete video file:', error)
+    return false
+  }
+})
+
 ipcMain.handle('scan-folder', async (_, folderPath) => {
   db.addFolder(folderPath)
   attachFolderWatcher(folderPath) // start watching immediately after adding
@@ -2266,6 +2307,10 @@ ipcMain.handle('fetch-trending-india', async (_, type: 'movie' | 'series' = 'mov
 
 ipcMain.handle('get-tmdb-release-info', async (_, id: number, type: 'movie' | 'series') => {
   return await tmdb.fetchTmdbReleaseInfo(id, type)
+})
+
+ipcMain.handle('get-tmdb-keywords', async (_, id: number, type: 'movie' | 'series') => {
+  return await tmdb.fetchTmdbKeywords(id, type)
 })
 
 ipcMain.handle('get-tmdb-title-logo', async (_, type: 'movie' | 'series', tmdbId: number) => {

@@ -774,4 +774,26 @@ export function findVideoByTmdbId(tmdbId: number) {
   `).get(tmdbId) as any
 }
 
+export function getVideosToDelete(video: any): any[] {
+  if (video.type === 'series') {
+    if (video.series_name) {
+      return db.prepare('SELECT id, file_path FROM videos WHERE series_name = ?').all(video.series_name) as any[]
+    }
+    return db.prepare('SELECT id, file_path FROM videos WHERE id = ?').all(video.id) as any[]
+  } else {
+    if (video.tmdb_id) {
+      return db.prepare('SELECT id, file_path FROM videos WHERE tmdb_id = ? AND type = ?').all(video.tmdb_id, video.type) as any[]
+    }
+    return db.prepare('SELECT id, file_path FROM videos WHERE id = ?').all(video.id) as any[]
+  }
+}
+
+export function deleteVideoAndProgress(id: number) {
+  const tx = db.transaction(() => {
+    db.prepare('DELETE FROM progress WHERE video_id = ?').run(id)
+    db.prepare('DELETE FROM videos WHERE id = ?').run(id)
+  })
+  tx()
+}
+
 export default db

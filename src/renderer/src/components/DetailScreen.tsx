@@ -81,58 +81,7 @@ const getTorrentStreamErrorMessage = (error?: string | null) => {
   return error
 }
 
-type VibeRule = {
-  label: string
-  tokens: string[]
-  genres?: string[]
-}
 
-const VIBE_RULES: VibeRule[] = [
-  { label: 'Space Survival', genres: ['science fiction', 'adventure'], tokens: ['space', 'astronaut', 'mission', 'mars', 'moon', 'planet', 'nasa', 'survival', 'alien', 'galaxy', 'interstellar', 'spaceship'] },
-  { label: 'Hard Sci-Fi', genres: ['science fiction', 'sci-fi'], tokens: ['science', 'scientist', 'physics', 'engineer', 'experiment', 'technology', 'future', 'astronaut', 'mission'] },
-  { label: 'High Drama', genres: ['drama'], tokens: ['drama', 'trauma', 'betrayal', 'grief', 'emotional', 'relationship', 'relationships', 'family'] },
-  { label: 'Teen Chaos', tokens: ['teen', 'teenage', 'high school', 'students', 'school', 'coming of age', 'adolescent', 'youth'] },
-  { label: 'Romance Heat', genres: ['romance'], tokens: ['love', 'romance', 'desire', 'crush', 'relationship', 'dating', 'sex', 'intimacy'] },
-  { label: 'Friend Group Energy', tokens: ['friends', 'friendship', 'group of', 'crew', 'classmates', 'social media'] },
-  { label: 'Dark & Messy', tokens: ['dark', 'drugs', 'addiction', 'crime', 'violence', 'secret', 'scandal', 'obsession'] },
-  { label: 'Mind Trip', genres: ['science fiction', 'sci-fi', 'mystery'], tokens: ['mind', 'reality', 'technology', 'future', 'dystopian', 'simulation', 'memory', 'experiment'] },
-  { label: 'Mystery Pull', genres: ['mystery', 'thriller'], tokens: ['mystery', 'missing', 'investigate', 'secret', 'killer', 'truth', 'detective'] },
-  { label: 'Crime Spiral', genres: ['crime'], tokens: ['crime', 'criminal', 'police', 'gang', 'murder', 'heist', 'drug dealer'] },
-  { label: 'Bingeable', tokens: ['series', 'season', 'episode', 'episodes', 'friends', 'mystery', 'secret'] },
-  { label: 'Comfort Watch', genres: ['comedy', 'family'], tokens: ['comedy', 'funny', 'warm', 'family', 'feel-good', 'friendship'] },
-  { label: 'Action Rush', genres: ['action', 'adventure'], tokens: ['action', 'mission', 'fight', 'battle', 'war', 'survive', 'chase'] },
-  { label: 'Supernatural', genres: ['fantasy', 'horror'], tokens: ['supernatural', 'ghost', 'monster', 'curse', 'witch', 'demon', 'haunted'] }
-]
-
-const splitGenres = (value?: string | null) => (
-  value ? value.split(',').map(genre => genre.trim()).filter(Boolean) : []
-)
-
-const getTasteText = (video: Video) => [
-  video.type,
-  video.title,
-  video.series_name,
-  video.tagline,
-  video.overview,
-  video.genres
-].filter(Boolean).join(' ').toLowerCase()
-
-const getVibeTags = (video: Video, genres: string[]) => {
-  const text = getTasteText(video)
-  const normalizedGenres = genres.map(genre => genre.toLowerCase())
-
-  const scored = VIBE_RULES.map(rule => {
-    const tokenHits = rule.tokens.filter(token => text.includes(token)).length
-    const genreHits = (rule.genres || []).filter(genre => normalizedGenres.includes(genre)).length
-    return { label: rule.label, score: tokenHits + genreHits * 2 }
-  })
-    .filter(item => item.score > 0)
-    .sort((a, b) => b.score - a.score)
-    .map(item => item.label)
-
-  const fallback = genres.slice(0, 3)
-  return Array.from(new Set([...scored, ...fallback])).slice(0, 5)
-}
 
 const getVibeColor = (vibe: string) => {
   switch (vibe) {
@@ -504,20 +453,22 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
     setResolvedLogoPath(null)
     setLogoLoadFailed(false)
 
-    if (!isTmdbBacked || !video.tmdb_id || video.logo_path) {
+    if (!isTmdbBacked || !video.tmdb_id) {
       return () => {
         cancelled = true
       }
     }
 
-    window.api.getTmdbTitleLogo(video.type === 'series' ? 'series' : 'movie', video.tmdb_id)
-      .then(logoPath => {
-        if (!cancelled) setResolvedLogoPath(logoPath || null)
-      })
-      .catch(err => {
-        console.error('[DetailScreen] Failed to fetch title logo:', err)
-        if (!cancelled) setResolvedLogoPath(null)
-      })
+    if (!video.logo_path) {
+      window.api.getTmdbTitleLogo(video.type === 'series' ? 'series' : 'movie', video.tmdb_id)
+        .then(logoPath => {
+          if (!cancelled) setResolvedLogoPath(logoPath || null)
+        })
+        .catch(err => {
+          console.error('[DetailScreen] Failed to fetch title logo:', err)
+          if (!cancelled) setResolvedLogoPath(null)
+        })
+    }
 
     window.api.getTmdbReleaseInfo(video.tmdb_id, video.type === 'series' ? 'series' : 'movie')
       .then(info => {
@@ -1047,13 +998,9 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
     return `${m}m`
   }
 
-  const genres = splitGenres(video.genres)
-  const fallbackVibes = getVibeTags(video, genres)
-  const visibleVibes = tmdbKeywords.length > 0
-    ? tmdbKeywords
-        .map(k => k.split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' '))
-        .slice(0, 5)
-    : fallbackVibes
+  const visibleVibes = tmdbKeywords
+    .map(k => k.split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' '))
+    .slice(0, 5)
   const sharePayload = getSharePayload()
   const downloadPrimaryLabel = isDownloadActive
     ? isDownloadPaused
@@ -1150,7 +1097,7 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
               {video.vote_average ? (
                 <div className="flex items-center gap-1.5 bg-white/[0.07] px-3 py-1.5 rounded-full border border-white/10 text-white">
                   <Star size={12} className="text-yellow-500 fill-yellow-500" />
-                  <span className="text-white/45">IMDb</span>
+                  <span className="text-white/45">TMDB</span>
                   <span>{video.vote_average.toFixed(1)}</span>
                 </div>
               ) : null}

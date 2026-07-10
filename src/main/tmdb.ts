@@ -135,6 +135,8 @@ const TMDB_TRAILER_CACHE_TTL = 1000 * 60 * 30
 const tmdbTitleLogoCache = new Map<string, { logoPath: string | null, timestamp: number }>()
 const TMDB_TITLE_LOGO_CACHE_TTL = 1000 * 60 * 60 * 24 * 30
 const TMDB_TITLE_LOGO_NEGATIVE_CACHE_TTL = 1000 * 60 * 60 * 24
+const tmdbKeywordsCache = new Map<string, { keywords: string[], timestamp: number }>()
+const TMDB_KEYWORDS_CACHE_TTL = 1000 * 60 * 60 * 12
 
 type TmdbTitleLogoDiskCache = {
   logoPath: string | null
@@ -1323,6 +1325,12 @@ export async function fetchTmdbReleaseInfo(id: number, type: 'movie' | 'series')
 }
 
 export async function fetchTmdbKeywords(id: number, type: 'movie' | 'series'): Promise<string[]> {
+  const cacheKey = `${type}:${id}`
+  const cached = tmdbKeywordsCache.get(cacheKey)
+  if (cached && Date.now() - cached.timestamp < TMDB_KEYWORDS_CACHE_TTL) {
+    return cached.keywords
+  }
+
   const apiKey = getTmdbApiKey()
   if (!apiKey) return []
 
@@ -1348,7 +1356,9 @@ export async function fetchTmdbKeywords(id: number, type: 'movie' | 'series'): P
     const keywordsArray = type === 'series' ? data.results : data.keywords
     if (!Array.isArray(keywordsArray)) return []
     
-    return keywordsArray.map((k: any) => k.name)
+    const keywords = keywordsArray.map((k: any) => k.name)
+    tmdbKeywordsCache.set(cacheKey, { keywords, timestamp: Date.now() })
+    return keywords
   } catch (err) {
     console.warn(`[TMDB] fetchTmdbKeywords failed for ${id}:`, err)
     return []

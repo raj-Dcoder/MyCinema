@@ -3,25 +3,21 @@ import { motion, AnimatePresence } from 'framer-motion'
 import { X, Film, Volume2, FastForward, Info } from 'lucide-react'
 
 export const LATEST_RELEASE = {
-  version: '1.28.0',
+  version: '1.28.1',
 }
 
 const newFeatures = [
   {
     icon: <Film size={24} className="text-gray-400" />,
-    text: "Completely overhauled video player for better performance and smoother playback."
-  },
-  {
-    icon: <Volume2 size={24} className="text-gray-400" />,
-    text: "New audio boost feature lets you increase volume for quiet videos."
-  },
-  {
-    icon: <FastForward size={24} className="text-gray-400" />,
-    text: "Automatically skip TV show intros with a single click."
+    text: "TMDB keyword tags are now loaded seamlessly from cache, removing jumpy text placeholders."
   },
   {
     icon: <Info size={24} className="text-gray-400" />,
-    text: "Interactive UI guides to help you discover new features."
+    text: "Correctly relabeled the detail screen's movie and series ratings from IMDb to TMDB."
+  },
+  {
+    icon: <FastForward size={24} className="text-gray-400" />,
+    text: "Fixed a bug where TMDB keywords weren't fetched when opening titles from the Trending sections."
   }
 ]
 

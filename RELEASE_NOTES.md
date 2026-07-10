@@ -1,3 +1,14 @@
+# MyCinema v1.28.1
+
+Patch release focused on more accurate metadata tags and smoother transitions in the detail screen.
+
+### UI & UX Polish
+- **Better Vibe Tags**: TMDB keyword tags are now loaded seamlessly from cache, removing jumpy text placeholders.
+- **Accurate Ratings**: Correctly relabeled the detail screen's movie and series ratings from IMDb to TMDB.
+- **Trending Keyword Fix**: Fixed a bug where TMDB keywords weren't fetched when opening a movie or series directly from the Trending sections.
+
+***
+
 # MyCinema v1.28.0
 
 Minor release focused on player stability, audio enhancements, and simpler onboarding.

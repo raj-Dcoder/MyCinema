@@ -11,7 +11,7 @@ import History from './pages/History'
 import SettingsPage from './pages/Settings'
 import VideoPlayer from './components/VideoPlayer'
 import DetailScreen from './components/DetailScreen'
-import { LATEST_RELEASE } from './components/WhatsNewOnboarding'
+import WhatsNewOnboarding, { LATEST_RELEASE } from './components/WhatsNewOnboarding'
 import { WindowControlsGuide } from './components/FeatureGuides'
 import Download from './pages/Download'
 import appLogo from './assets/mycinema-logo.png'
@@ -56,6 +56,9 @@ const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState<AppTab>('home')
   const [isSidebarExpanded, setIsSidebarExpanded] = useState(() => {
     return localStorage.getItem(SIDEBAR_EXPANDED_STORAGE_KEY) !== 'false'
+  })
+  const [showWhatsNew, setShowWhatsNew] = useState(() => {
+    return localStorage.getItem(getWhatsNewStorageKey(LATEST_RELEASE.version)) !== 'true'
   })
 
   const [playingVideo, setPlayingVideo] = useState<Video | null>(null)
@@ -124,10 +127,7 @@ const App: React.FC = () => {
     localStorage.setItem(SIDEBAR_EXPANDED_STORAGE_KEY, String(isSidebarExpanded))
   }, [isSidebarExpanded])
 
-  useEffect(() => {
-    // The large full-screen What's New reveal is intentionally suppressed.
-    localStorage.setItem(getWhatsNewStorageKey(LATEST_RELEASE.version), 'true')
-  }, [])
+
 
   useEffect(() => {
     window.api.isFullscreen().then(setIsFullscreen).catch(() => {})
@@ -781,7 +781,20 @@ const App: React.FC = () => {
         />
       )}
 
-      {/* Full-screen What's New onboarding is intentionally disabled for this release. */}
+      {/* Full-screen What's New onboarding */}
+      {showWhatsNew && (
+        <WhatsNewOnboarding
+          currentStep={0}
+          onNext={() => {}}
+          onPrevious={() => {}}
+          onStepChange={() => {}}
+          onClose={() => {
+            localStorage.setItem(getWhatsNewStorageKey(LATEST_RELEASE.version), 'true')
+            setShowWhatsNew(false)
+          }}
+        />
+      )}
+
       <WindowControlsGuide launchFullscreen={launchFullscreen} playingVideo={!!playingVideo} />
     </div>
   )

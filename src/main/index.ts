@@ -2313,6 +2313,15 @@ ipcMain.handle('get-tmdb-keywords', async (_, id: number, type: 'movie' | 'serie
   return await tmdb.fetchTmdbKeywords(id, type)
 })
 
+ipcMain.handle('save-video-keywords', (_, id: number, keywords: string[]) => {
+  try {
+    return db.saveVideoKeywords(id, keywords)
+  } catch (err) {
+    console.error('[Main] saveVideoKeywords error:', err)
+    return null
+  }
+})
+
 ipcMain.handle('get-tmdb-title-logo', async (_, type: 'movie' | 'series', tmdbId: number) => {
   if (type !== 'movie' && type !== 'series') return null
   return await tmdb.fetchTmdbTitleLogo(type, tmdbId)

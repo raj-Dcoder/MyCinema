@@ -59,6 +59,7 @@ interface Api {
   getTmdbTitleLogo: (type: 'movie' | 'series', tmdbId: number) => Promise<string | null>
   getTmdbReleaseInfo: (id: number, type: 'movie' | 'series') => Promise<import('./types').TmdbReleaseInfo | null>
   getTmdbKeywords: (id: number, type: 'movie' | 'series') => Promise<string[]>
+  saveVideoKeywords: (id: number, keywords: string[]) => Promise<any>
   getTmdbTrailer: (params: { tmdbId?: number | null; title: string; type: 'movie' | 'series'; year?: number | null; seasonNumber?: number | null; preferLatestSeason?: boolean }) => Promise<any | null>
   getTmdbSeriesCatalog: (tmdbId: number) => Promise<Array<{ seasonNumber: number; episodeNumber: number; name: string; overview: string | null; airDate: string | null; stillPath: string | null; released: boolean }>>
   getIntroDbSegments: (params: { imdbId?: string | null; tmdbId?: number | null; season?: number | null; episode?: number | null; filePath?: string | null; duration?: number | null }) => Promise<{

@@ -479,14 +479,34 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
         if (!cancelled) setReleaseInfo(null)
       })
 
-    window.api.getTmdbKeywords(video.tmdb_id, video.type === 'series' ? 'series' : 'movie')
-      .then(keywords => {
-        if (!cancelled) setTmdbKeywords(keywords || [])
-      })
-      .catch(err => {
-        console.error('[DetailScreen] Failed to fetch tmdb keywords:', err)
-        if (!cancelled) setTmdbKeywords([])
-      })
+    let existingKeywords = video.keywords as any
+    if (typeof existingKeywords === 'string') {
+      try {
+        existingKeywords = JSON.parse(existingKeywords)
+      } catch (e) {
+        existingKeywords = undefined
+      }
+      video.keywords = existingKeywords
+    }
+
+    if (Array.isArray(existingKeywords)) {
+      setTmdbKeywords(existingKeywords)
+    } else {
+      window.api.getTmdbKeywords(video.tmdb_id, video.type === 'series' ? 'series' : 'movie')
+        .then(keywords => {
+          if (!cancelled) {
+            setTmdbKeywords(keywords || [])
+            video.keywords = keywords || []
+            if (!video.isExternal && video.id) {
+              window.api.saveVideoKeywords(video.id, keywords || [])
+            }
+          }
+        })
+        .catch(err => {
+          console.error('[DetailScreen] Failed to fetch tmdb keywords:', err)
+          if (!cancelled) setTmdbKeywords([])
+        })
+    }
 
     return () => {
       cancelled = true

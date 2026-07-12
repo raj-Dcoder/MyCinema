@@ -1,3 +1,14 @@
+# MyCinema v1.28.2
+
+Patch release introducing smart caching and local persistence for movie and series vibe keywords.
+
+### Performance & Caching
+- **Persistent Local Keywords**: TMDB keywords for local library items are now saved directly to the database, ensuring they are instantly available across app restarts.
+- **Smart Memory Caching**: Keywords for trending and watchlist items are now bound directly to the UI cards, instantly loading when you revisit them in the same session without hitting the API again.
+- **Optimized API Usage**: Reduced unnecessary network calls to TMDB by intelligently skipping fetches when keyword data is already cached in memory or storage.
+
+***
+
 # MyCinema v1.28.1
 
 Patch release focused on more accurate metadata tags and smoother transitions in the detail screen.

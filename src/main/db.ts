@@ -131,6 +131,10 @@ export function initDb() {
     db.exec("ALTER TABLE watchlist ADD COLUMN category TEXT DEFAULT 'Watchlist'")
   }
 
+  if (!columnNames.includes('keywords')) {
+    db.exec("ALTER TABLE videos ADD COLUMN keywords TEXT")
+  }
+
   db.exec(`
     CREATE TABLE IF NOT EXISTS progress (
       video_id INTEGER PRIMARY KEY,
@@ -227,17 +231,28 @@ export function addVideo(video: any) {
 }
 
 export function getVideos() {
-  return db.prepare(`
+  const rows = db.prepare(`
     SELECT v.*, p.last_watched_time, p.completed, p.updated_at
     FROM videos v
     LEFT JOIN progress p ON v.id = p.video_id
     ORDER BY v.added_at DESC
   `).all()
+  return rows.map((row: any) => {
+    if (row.keywords) {
+      try { row.keywords = JSON.parse(row.keywords) } catch (e) { row.keywords = [] }
+    }
+    return row
+  })
 }
 
 export function deleteVideo(id: number) {
   const stmt = db.prepare('DELETE FROM videos WHERE id = ?')
   return stmt.run(id)
+}
+
+export function saveVideoKeywords(id: number, keywords: string[]) {
+  const stmt = db.prepare('UPDATE videos SET keywords = ? WHERE id = ?')
+  return stmt.run(JSON.stringify(keywords), id)
 }
 
 export function setPreferredVideoVersion(videoId: number) {

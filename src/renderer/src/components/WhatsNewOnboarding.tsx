@@ -3,21 +3,21 @@ import { motion, AnimatePresence } from 'framer-motion'
 import { X, Film, Volume2, FastForward, Info } from 'lucide-react'
 
 export const LATEST_RELEASE = {
-  version: '1.28.1',
+  version: '1.28.2',
 }
 
 const newFeatures = [
   {
+    icon: <FastForward size={24} className="text-gray-400" />,
+    text: "Vibe keywords for your local library are now saved permanently so they load instantly every time."
+  },
+  {
     icon: <Film size={24} className="text-gray-400" />,
-    text: "TMDB keyword tags are now loaded seamlessly from cache, removing jumpy text placeholders."
+    text: "Trending and watchlist cards now smartly cache keywords to make navigation buttery smooth."
   },
   {
     icon: <Info size={24} className="text-gray-400" />,
-    text: "Correctly relabeled the detail screen's movie and series ratings from IMDb to TMDB."
-  },
-  {
-    icon: <FastForward size={24} className="text-gray-400" />,
-    text: "Fixed a bug where TMDB keywords weren't fetched when opening titles from the Trending sections."
+    text: "Optimized TMDB network calls so your detail screens feel snappier than ever."
   }
 ]
 

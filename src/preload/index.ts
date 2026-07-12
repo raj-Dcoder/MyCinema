@@ -39,6 +39,7 @@ const api = {
   fetchTrendingIndia: (type: 'movie' | 'series' = 'movie') => ipcRenderer.invoke('fetch-trending-india', type),
   getTmdbTitleLogo: (type: 'movie' | 'series', tmdbId: number) => ipcRenderer.invoke('get-tmdb-title-logo', type, tmdbId),
   getTmdbKeywords: (id: number, type: 'movie' | 'series') => ipcRenderer.invoke('get-tmdb-keywords', id, type),
+  saveVideoKeywords: (id: number, keywords: string[]) => ipcRenderer.invoke('save-video-keywords', id, keywords),
   getTmdbReleaseInfo: (id: number, type: 'movie' | 'series') => ipcRenderer.invoke('get-tmdb-release-info', id, type),
   getTmdbTrailer: (params: { tmdbId?: number | null; title: string; type: 'movie' | 'series'; year?: number | null; seasonNumber?: number | null; preferLatestSeason?: boolean }) =>
     ipcRenderer.invoke('get-tmdb-trailer', params),

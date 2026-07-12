@@ -29,6 +29,7 @@ export interface Video {
   is_watchlist?: boolean
   category?: string
   media_type?: 'movie' | 'tv'
+  keywords?: string[]
 }
 
 export interface TmdbProvider {

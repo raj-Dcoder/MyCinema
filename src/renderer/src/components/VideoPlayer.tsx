@@ -3450,68 +3450,118 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
                         /* Local Tracks View */
                         <div className="px-1.5 pb-2 space-y-2">
                           {showSubtitleSyncPanel && (
-                            <div className={`mx-1.5 mb-3 rounded-xl border transition-all duration-300 ${
+                            <div className={`mx-1.5 mb-3 rounded-2xl border transition-all duration-300 overflow-hidden ${
                               subtitleSyncDisabled
                                 ? 'border-white/5 bg-white/[0.01] opacity-40 grayscale pointer-events-none'
-                                : 'border-white/8 bg-white/[0.02]'
+                                : 'border-white/10 bg-gradient-to-b from-white/[0.03] to-transparent'
                             }`}>
                               {/* Header row */}
-                              <div className="flex items-center justify-between px-3 pt-2.5 pb-2 border-b border-white/5">
-                                <span className="text-[9px] font-black uppercase tracking-[0.22em] text-white/30">
-                                  Subtitle Sync
-                                </span>
+                              <div className="flex items-center justify-between px-4 pt-3 pb-2">
                                 <div className="flex items-center gap-2">
-                                  <span className={`text-[11px] font-black tabular-nums ${subtitleOffsetIsZero ? 'text-white/40' : 'text-primary'}`}>
-                                    {subtitleSyncValue}
+                                  <div className="w-5 h-5 rounded-lg bg-primary/20 flex items-center justify-center">
+                                    <Subtitles size={11} className="text-primary" />
+                                  </div>
+                                  <span className="text-[9px] font-black uppercase tracking-[0.2em] text-white/40">
+                                    Sync
                                   </span>
+                                </div>
+                                <div className="flex items-center gap-2.5">
+                                  <div className={`flex items-center gap-1.5 px-2 py-0.5 rounded-lg ${
+                                    subtitleOffsetIsZero
+                                      ? 'bg-white/[0.04]'
+                                      : 'bg-primary/10'
+                                  }`}>
+                                    <span className={`text-[11px] font-bold tabular-nums ${
+                                      subtitleOffsetIsZero ? 'text-white/30' : 'text-primary'
+                                    }`}>
+                                      {subtitleSyncValue}
+                                    </span>
+                                  </div>
                                   {!subtitleOffsetIsZero && (
                                     <button
                                       onClick={(e) => { e.stopPropagation(); resetSubtitleOffset(); }}
-                                      className="flex items-center gap-1 rounded-lg border border-white/10 bg-white/[0.04] px-2 py-0.5 text-[9px] font-bold text-white/40 hover:text-white hover:border-white/20 transition-all"
-                                      title="Reset subtitle offset"
+                                      className="flex items-center gap-1 rounded-lg border border-white/10 bg-white/[0.04] px-2 py-1 text-[9px] font-bold text-white/40 hover:text-white hover:bg-white/[0.08] hover:border-white/20 transition-all active:scale-95"
+                                      title="Reset to 0"
                                     >
                                       <RotateCcw size={9} />
-                                      Reset
                                     </button>
                                   )}
                                 </div>
                               </div>
 
-                              {/* Rail */}
-                              <div className="px-3 pt-2.5 pb-1">
-                                <div className="flex items-center justify-between mb-1.5 text-[8px] font-black uppercase tracking-[0.18em] text-white/18">
-                                  <span>Earlier</span>
-                                  <span>Later</span>
+                              {/* Visual Rail */}
+                              <div className="px-4 pb-1">
+                                <div className="flex items-center justify-between mb-1.5 text-[8px] font-bold uppercase tracking-[0.15em] text-white/20">
+                                  <span>Behind</span>
+                                  <span>Ahead</span>
                                 </div>
-                                <div className="relative h-4">
-                                  <div className="absolute left-0 right-0 top-1/2 h-[2px] -translate-y-1/2 rounded-full bg-white/8" />
-                                  <div className="absolute left-1/2 top-1/2 h-2.5 w-px -translate-x-1/2 -translate-y-1/2 bg-white/15" />
+                                <div className="relative h-5">
+                                  <div className="absolute left-0 right-0 top-1/2 h-[3px] -translate-y-1/2 rounded-full bg-white/8" />
                                   <div
-                                    className={`absolute top-1/2 h-3.5 w-3.5 -translate-x-1/2 -translate-y-1/2 rounded-full shadow-sm ${
-                                      subtitleOffsetIsZero ? 'bg-white/60' : 'bg-primary shadow-primary/30'
+                                    className="absolute top-1/2 h-[3px] -translate-y-1/2 rounded-full bg-primary/40 transition-all duration-150"
+                                    style={{
+                                      left: subtitleOffsetIsZero ? '50%' : '50%',
+                                      width: subtitleOffsetIsZero ? '0%' : `calc(${Math.abs(parseFloat(subtitleSyncRailPercent) - 50)}% * 2)`,
+                                      transform: `translateX(${subtitleOffsetIsZero ? '-50%' : parseFloat(subtitleSyncRailPercent) < 50 ? '0%' : '-100%'})`,
+                                    }}
+                                  />
+                                  <div className="absolute left-1/2 top-1/2 h-3 w-0.5 -translate-x-1/2 -translate-y-1/2 bg-white/20 rounded-full" />
+                                  <div
+                                    className={`absolute top-1/2 -translate-x-1/2 -translate-y-1/2 w-4 h-4 rounded-full shadow-lg transition-all duration-150 ${
+                                      subtitleOffsetIsZero
+                                        ? 'bg-white/50'
+                                        : 'bg-primary shadow-primary/40 scale-110'
                                     }`}
                                     style={{ left: subtitleSyncRailPercent }}
                                   />
                                 </div>
+                                <div className="flex items-center justify-between mt-1 text-[8px] text-white/20 font-mono">
+                                  <span>-5s</span>
+                                  <span className="text-white/10">0</span>
+                                  <span>+5s</span>
+                                </div>
                               </div>
 
-                              {/* Nudge buttons */}
-                              <div className="px-3 pb-2.5 grid grid-cols-6 gap-1.5">
-                                {subtitleSyncControls.map((control) => (
-                                  <button
-                                    key={control.key}
-                                    onClick={(e) => { e.stopPropagation(); control.onClick(); }}
-                                    title={control.title}
-                                    className="h-8 rounded-lg border border-white/8 bg-white/[0.03] text-[10px] font-black text-white/60 hover:text-white hover:border-white/18 hover:bg-white/[0.07] transition-all active:scale-95"
-                                  >
-                                    {control.value}
-                                  </button>
-                                ))}
+                              {/* Preset buttons */}
+                              <div className="px-4 pb-3 pt-1">
+                                <div className="flex items-center justify-center gap-1.5">
+                                  <div className="flex-1 flex gap-1.5 justify-end">
+                                    {subtitleSyncControls.slice(0, 3).map((control) => (
+                                      <button
+                                        key={control.key}
+                                        onClick={(e) => { e.stopPropagation(); control.onClick(); }}
+                                        title={control.title}
+                                        className="w-9 h-8 rounded-xl border border-white/8 bg-white/[0.03] text-[10px] font-bold text-white/50 hover:text-white hover:border-white/20 hover:bg-white/[0.08] transition-all active:scale-90"
+                                      >
+                                        {control.value}
+                                      </button>
+                                    ))}
+                                  </div>
+                                  <div className="flex items-center justify-center w-8 h-8 rounded-xl bg-white/[0.03] border border-white/6">
+                                    <span className="text-[8px] font-bold text-white/20 tracking-widest">|</span>
+                                  </div>
+                                  <div className="flex-1 flex gap-1.5 justify-start">
+                                    {subtitleSyncControls.slice(3, 6).map((control) => (
+                                      <button
+                                        key={control.key}
+                                        onClick={(e) => { e.stopPropagation(); control.onClick(); }}
+                                        title={control.title}
+                                        className="w-9 h-8 rounded-xl border border-white/8 bg-white/[0.03] text-[10px] font-bold text-white/50 hover:text-white hover:border-white/20 hover:bg-white/[0.08] transition-all active:scale-90"
+                                      >
+                                        {control.value}
+                                      </button>
+                                    ))}
+                                  </div>
+                                </div>
                               </div>
 
                               {/* Keyboard hint */}
-                              <div className="px-3 pb-2.5 text-center text-[9px] text-white/25 font-medium tracking-wide">
-                                [ ] nudge &nbsp;·&nbsp; \ reset
+                              <div className="px-4 py-2 border-t border-white/5 bg-white/[0.01]">
+                                <p className="text-center text-[8px] text-white/20 font-medium tracking-wide">
+                                  <kbd className="font-mono bg-white/8 px-1 rounded text-[8px]">[</kbd> earlier &nbsp;·&nbsp;
+                                  <kbd className="font-mono bg-white/8 px-1 rounded text-[8px]">]</kbd> later &nbsp;·&nbsp;
+                                  <kbd className="font-mono bg-white/8 px-1 rounded text-[8px]">\</kbd> reset
+                                </p>
                               </div>
                             </div>
                           )}

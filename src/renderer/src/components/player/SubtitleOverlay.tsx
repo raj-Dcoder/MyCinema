@@ -1,7 +1,7 @@
 import React, { useEffect, useRef } from 'react'
 import { resolveSubtitleCue, type SubCue } from '../../utils/subtitleSync'
 
-export type SubtitleStyle = 'default' | 'clean'
+export type SubtitleStyle = 'default' | 'clean' | 'ott'
 
 export const SUBTITLE_STYLE_KEY = 'mycinema_subtitle_style'
 
@@ -81,36 +81,50 @@ export const SubtitleOverlay: React.FC<SubtitleOverlayProps> = ({
     }
   }, [activeSubKey, subtitleOffsetMs, subtitleLoading])
 
-  const isClean = subtitleStyle === 'clean'
+  const styleMap: Record<SubtitleStyle, React.CSSProperties> = {
+    default: {
+      fontSize: '26px',
+      fontWeight: 600,
+      color: 'white',
+      backgroundColor: 'rgba(0, 0, 0, 0.65)',
+      padding: '6px 22px',
+      borderRadius: '12px',
+      backdropFilter: 'blur(8px)',
+      border: '1px solid rgba(255, 255, 255, 0.1)',
+      textShadow: '0px 2px 4px rgba(0,0,0,0.5)',
+    },
+    clean: {
+      fontSize: '26px',
+      fontWeight: 600,
+      color: 'white',
+      background: 'none',
+      padding: '0px',
+      borderRadius: '0px',
+      border: 'none',
+      textShadow: '0px 1px 3px rgba(0,0,0,0.6)',
+      backdropFilter: 'none',
+    },
+    ott: {
+      fontSize: '24px',
+      fontWeight: 400,
+      color: 'white',
+      backgroundColor: 'rgba(0, 0, 0, 0.75)',
+      padding: '2px 10px',
+      borderRadius: '4px',
+      border: 'none',
+      textShadow: 'none',
+      backdropFilter: 'none',
+    },
+  }
 
   const dynamicStyle: React.CSSProperties = {
     bottom: subtitleBottom,
-    fontSize: '26px',
-    fontWeight: 600,
-    color: 'white',
     textAlign: 'center',
     maxWidth: '85%',
     lineHeight: 1.4,
     whiteSpace: 'pre-line',
     display: 'none',
-    ...(isClean
-      ? {
-          background: 'none',
-          padding: '0px',
-          borderRadius: '0px',
-          border: 'none',
-          textShadow: '0px 1px 3px rgba(0,0,0,0.6)',
-          backdropFilter: 'none',
-        }
-      : {
-          backgroundColor: 'rgba(0, 0, 0, 0.65)',
-          padding: '6px 22px',
-          borderRadius: '12px',
-          backdropFilter: 'blur(8px)',
-          border: '1px solid rgba(255, 255, 255, 0.1)',
-          textShadow: '0px 2px 4px rgba(0,0,0,0.5)',
-        }
-    ),
+    ...styleMap[subtitleStyle],
   }
 
   return (

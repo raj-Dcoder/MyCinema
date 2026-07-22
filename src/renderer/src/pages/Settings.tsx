@@ -260,6 +260,7 @@ const Settings: React.FC = () => {
             >
               <option value="default" className="bg-[#141414] text-white">Default (Blurred Background)</option>
               <option value="clean" className="bg-[#141414] text-white">Clean (No Background)</option>
+              <option value="ott" className="bg-[#141414] text-white">OTT Style (Netflix/Prime)</option>
             </select>
           </div>
         </section>

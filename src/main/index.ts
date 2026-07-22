@@ -1302,13 +1302,80 @@ ipcMain.handle('open-web-popup', (event, url: string, title?: string) => {
     }
   })
 
-  popup.webContents.on('did-finish-load', () => {
+  const updateBackButton = () => {
+    if (popup.webContents.canGoBack()) {
+      popup.webContents.executeJavaScript(`
+        if (!document.getElementById('mycinema-back-btn')) {
+          const btn = document.createElement('div');
+          btn.id = 'mycinema-back-btn';
+          btn.innerHTML = '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,0.9)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>';
+          Object.assign(btn.style, {
+            position: 'fixed',
+            bottom: '24px',
+            left: '24px',
+            width: '44px',
+            height: '44px',
+            backgroundColor: 'rgba(15, 23, 42, 0.75)',
+            backdropFilter: 'blur(12px)',
+            webkitBackdropFilter: 'blur(12px)',
+            border: '1px solid rgba(255, 255, 255, 0.1)',
+            borderRadius: '50%',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            cursor: 'pointer',
+            zIndex: '2147483647',
+            boxShadow: '0 8px 24px rgba(0, 0, 0, 0.4)',
+            transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+          });
+          btn.onmouseover = () => { 
+            btn.style.transform = 'scale(1.1) translateY(-2px)'; 
+            btn.style.backgroundColor = 'rgba(15, 23, 42, 0.95)'; 
+            btn.style.borderColor = 'rgba(6, 182, 212, 0.5)'; 
+            btn.style.boxShadow = '0 12px 28px rgba(6, 182, 212, 0.2)'; 
+          };
+          btn.onmouseout = () => { 
+            btn.style.transform = 'scale(1) translateY(0)'; 
+            btn.style.backgroundColor = 'rgba(15, 23, 42, 0.75)'; 
+            btn.style.borderColor = 'rgba(255, 255, 255, 0.1)'; 
+            btn.style.boxShadow = '0 8px 24px rgba(0, 0, 0, 0.4)'; 
+          };
+          btn.onclick = () => window.history.back();
+          document.body.appendChild(btn);
+        }
+      `).catch(() => {})
+    } else {
+      popup.webContents.executeJavaScript(`
+        const btn = document.getElementById('mycinema-back-btn');
+        if (btn) btn.remove();
+      `).catch(() => {})
+    }
+  }
+
+  popup.webContents.on('dom-ready', () => {
     popup.webContents.insertCSS(`
       ::-webkit-scrollbar { width: 8px; height: 8px; }
       ::-webkit-scrollbar-track { background: transparent; }
       ::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.2); border-radius: 4px; }
       ::-webkit-scrollbar-thumb:hover { background: rgba(255, 255, 255, 0.3); }
     `).catch(() => {})
+    updateBackButton()
+  })
+
+  popup.webContents.on('did-navigate-in-page', updateBackButton)
+  popup.webContents.on('did-navigate', updateBackButton)
+
+  // Force links that would open in a new window to open in the current popup instead
+  popup.webContents.setWindowOpenHandler(({ url }) => {
+    popup.loadURL(url)
+    return { action: 'deny' }
+  })
+
+  // Handle hardware/mouse back buttons
+  popup.on('app-command', (e, cmd) => {
+    if (cmd === 'browser-backward' && popup.webContents.canGoBack()) {
+      popup.webContents.goBack()
+    }
   })
 
   popup.loadURL(url)

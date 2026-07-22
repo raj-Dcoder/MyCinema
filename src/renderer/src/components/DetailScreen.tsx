@@ -179,6 +179,7 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
   const overviewRef = useRef<HTMLParagraphElement>(null)
   const [expandedOverview, setExpandedOverview] = useState(false)
   const [tmdbKeywords, setTmdbKeywords] = useState<string[]>([])
+  const [isWebPopupOpen, setIsWebPopupOpen] = useState(false)
 
 
   // Torrent Search State
@@ -622,12 +623,28 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
 
   const handleOpenMoctale = () => {
     const title = video.type === 'series' && video.series_name ? video.series_name : video.title
+    window.dispatchEvent(new CustomEvent('web-popup-opened'))
+    setIsWebPopupOpen(true)
+    const clearBlurOnFocus = () => {
+      window.dispatchEvent(new CustomEvent('web-popup-closed'))
+      setIsWebPopupOpen(false)
+      window.removeEventListener('focus', clearBlurOnFocus)
+    }
+    window.addEventListener('focus', clearBlurOnFocus)
     window.api.openWebPopup(getMoctaleUrl(video), `${title} — Moctale`)
   }
 
   const handleOpenGoogleSearch = () => {
     const searchTitle = video.type === 'series' && video.series_name ? video.series_name : video.title
     const query = encodeURIComponent(`${searchTitle} ${video.release_year || ''}`.trim())
+    window.dispatchEvent(new CustomEvent('web-popup-opened'))
+    setIsWebPopupOpen(true)
+    const clearBlurOnFocus = () => {
+      window.dispatchEvent(new CustomEvent('web-popup-closed'))
+      setIsWebPopupOpen(false)
+      window.removeEventListener('focus', clearBlurOnFocus)
+    }
+    window.addEventListener('focus', clearBlurOnFocus)
     window.api.openWebPopup(`https://www.google.com/search?q=${query}`, `${searchTitle} — Search`)
   }
 
@@ -989,12 +1006,14 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
     const handleGlobalMouseDown = (e: MouseEvent) => {
       // Mouse button 3 is the standard "Back" button, 4 is "Forward"
       if (e.button === 3 || e.button === 4) {
-        onClose()
+        if (!isWebPopupOpen) {
+          onClose()
+        }
       }
     }
     window.addEventListener('mousedown', handleGlobalMouseDown)
     return () => window.removeEventListener('mousedown', handleGlobalMouseDown)
-  }, [onClose])
+  }, [onClose, isWebPopupOpen])
 
 
   const getArtworkUrl = (artworkPath?: string, remoteSize: 'w342' | 'w780' | 'w1280' | 'original' = 'w780') => {

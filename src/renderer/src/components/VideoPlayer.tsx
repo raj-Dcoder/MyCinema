@@ -6,7 +6,7 @@ import { useWatchTogether } from '../hooks/useWatchTogether'
 import { WatchTogetherModal } from './WatchTogetherModal'
 import AIEnhancementRenderer from './AIEnhancementRenderer'
 import { PlayerControls } from './player/PlayerControls'
-import { SubtitleOverlay } from './player/SubtitleOverlay'
+import { SubtitleOverlay, SUBTITLE_STYLE_KEY } from './player/SubtitleOverlay'
 import { VideoStatsOverlay } from './player/VideoStatsOverlay'
 import { useAudioBoost, AudioBoostProfile, AudioBoostIntensity, AUDIO_BOOST_PROFILES, AUDIO_BOOST_INTENSITIES } from '../hooks/useAudioBoost'
 import { useIntroSkip, IntroDbSegment, getIntroDbSegmentKey, getIntroDbSegmentLabel, getIntroDbSegmentAccentClass, INTRODB_SKIP_END_PADDING_SECONDS, INTRODB_AUTO_SKIP_CONFIRMATION_MS } from '../hooks/useIntroSkip'
@@ -3780,6 +3780,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
         subtitleOffsetMs={subtitleOffsetMs}
         subtitleBottom={showControls ? '136px' : '48px'}
         subtitleLoading={subtitleLoading}
+        subtitleStyle={(localStorage.getItem(SUBTITLE_STYLE_KEY) as 'default' | 'clean') || 'default'}
       />
 
       {showStats && <VideoStatsOverlay videoRef={videoRef} />}

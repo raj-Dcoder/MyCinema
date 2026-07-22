@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react'
-import { FolderOpen, Trash2, Plus, HardDrive, AlertTriangle, Check, X as CloseIcon, Maximize2, Download, Upload, Image as ImageIcon } from 'lucide-react'
+import { FolderOpen, Trash2, Plus, HardDrive, AlertTriangle, Check, X as CloseIcon, Maximize2, Download, Upload, Image as ImageIcon, Subtitles } from 'lucide-react'
 import ProfilePictureModal from '../components/ProfilePictureModal'
+import { SUBTITLE_STYLE_KEY, type SubtitleStyle } from '../components/player/SubtitleOverlay'
 
 const Settings: React.FC = () => {
   const [folders, setFolders] = useState<any[]>([])
@@ -13,6 +14,9 @@ const Settings: React.FC = () => {
   const [launchFullscreen, setLaunchFullscreen] = useState(true)
   const [backupBusy, setBackupBusy] = useState(false)
   const [backupMessage, setBackupMessage] = useState<string | null>(null)
+  const [subtitleStyle, setSubtitleStyle] = useState<SubtitleStyle>(() => {
+    return (localStorage.getItem(SUBTITLE_STYLE_KEY) as SubtitleStyle) || 'default'
+  })
 
   const fetchFolders = async () => {
     const f = await window.api.getFolders()
@@ -228,6 +232,35 @@ const Settings: React.FC = () => {
                 }`}
               />
             </button>
+          </div>
+        </section>
+
+        <section>
+          <h3 className={sectionTitleClass}>Subtitles</h3>
+          <div className={`${panelClass} flex items-center justify-between gap-6 p-6`}>
+            <div className="flex items-center gap-4 min-w-0">
+              <div className={iconBoxClass}>
+                <Subtitles size={17} />
+              </div>
+              <div className="min-w-0">
+                <h4 className="text-xs font-black text-white uppercase tracking-tight">Subtitle Style</h4>
+                <p className="mt-0.5 text-[11px] font-medium leading-4 text-white/35">
+                  Choose how subtitles are displayed during playback.
+                </p>
+              </div>
+            </div>
+            <select
+              value={subtitleStyle}
+              onChange={(e) => {
+                const val = e.target.value as SubtitleStyle
+                setSubtitleStyle(val)
+                localStorage.setItem(SUBTITLE_STYLE_KEY, val)
+              }}
+              className="w-44 rounded-xl border border-white/10 bg-white/5 px-3 py-2.5 text-[11px] font-black uppercase tracking-widest text-white transition-all focus:border-primary focus:outline-none cursor-pointer"
+            >
+              <option value="default" className="bg-[#141414] text-white">Default (Blurred Background)</option>
+              <option value="clean" className="bg-[#141414] text-white">Clean (No Background)</option>
+            </select>
           </div>
         </section>
 

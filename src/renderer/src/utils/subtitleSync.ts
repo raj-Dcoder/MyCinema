@@ -4,8 +4,8 @@ export interface SubCue {
   text: string
 }
 
-export const SUBTITLE_SYNC_MIN_MS = -60_000
-export const SUBTITLE_SYNC_MAX_MS = 60_000
+export const SUBTITLE_SYNC_MIN_MS = -300_000
+export const SUBTITLE_SYNC_MAX_MS = 300_000
 export const SUBTITLE_SYNC_FINE_STEP_MS = 250
 export const SUBTITLE_SYNC_COARSE_STEP_MS = 2_000
 

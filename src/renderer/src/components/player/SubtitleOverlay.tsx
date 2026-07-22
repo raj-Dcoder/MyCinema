@@ -65,7 +65,7 @@ export const SubtitleOverlay: React.FC<SubtitleOverlayProps> = ({
         cancelAnimationFrame(rafRef.current)
       }
     }
-  }, [activeSubKey])
+  }, [activeSubKey, subtitleOffsetMs])
 
   // Clear cue index when track changes, or offset changes, or loading finishes
   useEffect(() => {

@@ -1285,6 +1285,37 @@ ipcMain.handle('window-close', (event) => {
   BrowserWindow.fromWebContents(event.sender)?.close()
 })
 
+ipcMain.handle('open-web-popup', (event, url: string, title?: string) => {
+  const parent = BrowserWindow.fromWebContents(event.sender) || BrowserWindow.getAllWindows()[0]
+  const popup = new BrowserWindow({
+    parent,
+    modal: true,
+    show: false,
+    width: 1000,
+    height: 700,
+    title: title || 'Browser',
+    autoHideMenuBar: true,
+    backgroundColor: '#0f172a',
+    webPreferences: {
+      nodeIntegration: false,
+      contextIsolation: true
+    }
+  })
+
+  popup.webContents.on('did-finish-load', () => {
+    popup.webContents.insertCSS(`
+      ::-webkit-scrollbar { width: 8px; height: 8px; }
+      ::-webkit-scrollbar-track { background: transparent; }
+      ::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.2); border-radius: 4px; }
+      ::-webkit-scrollbar-thumb:hover { background: rgba(255, 255, 255, 0.3); }
+    `).catch(() => {})
+  })
+
+  popup.loadURL(url)
+  popup.once('ready-to-show', () => popup.show())
+  return true
+})
+
 ipcMain.handle('get-app-settings', () => {
   return loadAppSettings()
 })

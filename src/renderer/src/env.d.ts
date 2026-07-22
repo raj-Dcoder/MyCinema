@@ -124,6 +124,7 @@ interface Api {
   searchOnlineSubtitles: (params: { query?: string; tmdbId?: number; season?: number; episode?: number; languages?: string; mediaType?: string; videoFilePath?: string }) => Promise<any>
   downloadOnlineSubtitle: (params: { fileId: number; videoFilePath: string; fileName?: string }) => Promise<any>
   minimizeWindow: () => Promise<void>
+  openWebPopup: (url: string, title?: string) => Promise<boolean>
   toggleFullscreen: () => Promise<boolean>
   isFullscreen: () => Promise<boolean>
   closeWindow: () => Promise<void>

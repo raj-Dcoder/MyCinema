@@ -621,13 +621,14 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
   }
 
   const handleOpenMoctale = () => {
-    window.open(getMoctaleUrl(video), '_blank')
+    const title = video.type === 'series' && video.series_name ? video.series_name : video.title
+    window.api.openWebPopup(getMoctaleUrl(video), `${title} — Moctale`)
   }
 
   const handleOpenGoogleSearch = () => {
     const searchTitle = video.type === 'series' && video.series_name ? video.series_name : video.title
     const query = encodeURIComponent(`${searchTitle} ${video.release_year || ''}`.trim())
-    window.open(`https://www.google.com/search?q=${query}`, '_blank')
+    window.api.openWebPopup(`https://www.google.com/search?q=${query}`, `${searchTitle} — Search`)
   }
 
   const getSharePayload = () => {

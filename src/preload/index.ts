@@ -112,6 +112,7 @@ const api = {
   downloadOnlineSubtitle: (params: { fileId: number; videoFilePath: string; fileName?: string }) =>
     ipcRenderer.invoke('download-opensubtitle', params),
   minimizeWindow: () => ipcRenderer.invoke('window-minimize'),
+  openWebPopup: (url: string, title?: string) => ipcRenderer.invoke('open-web-popup', url, title),
   toggleFullscreen: () => ipcRenderer.invoke('window-toggle-fullscreen'),
   isFullscreen: () => ipcRenderer.invoke('window-is-fullscreen'),
   closeWindow: () => ipcRenderer.invoke('window-close'),

@@ -4,6 +4,8 @@ import { resolveSubtitleCue, type SubCue } from '../../utils/subtitleSync'
 export type SubtitleStyle = 'default' | 'clean' | 'ott'
 
 export const SUBTITLE_STYLE_KEY = 'mycinema_subtitle_style'
+export const SUBTITLE_FONT_SIZE_KEY = 'mycinema_subtitle_font_size'
+export const SUBTITLE_POSITION_KEY = 'mycinema_subtitle_position'
 
 export interface SubtitleOverlayProps {
   videoRef: React.RefObject<HTMLVideoElement>
@@ -13,6 +15,8 @@ export interface SubtitleOverlayProps {
   subtitleBottom: string
   subtitleLoading: boolean
   subtitleStyle?: SubtitleStyle
+  subtitleFontSize?: number
+  subtitlePositionOffset?: number
 }
 
 export const SubtitleOverlay: React.FC<SubtitleOverlayProps> = ({
@@ -22,7 +26,9 @@ export const SubtitleOverlay: React.FC<SubtitleOverlayProps> = ({
   subtitleOffsetMs,
   subtitleBottom,
   subtitleLoading,
-  subtitleStyle = 'default'
+  subtitleStyle = 'default',
+  subtitleFontSize = 24,
+  subtitlePositionOffset = 0,
 }) => {
   const subtitleDivRef = useRef<HTMLDivElement>(null)
   const activeSubtitleCueIndexRef = useRef<number>(-1)
@@ -81,9 +87,11 @@ export const SubtitleOverlay: React.FC<SubtitleOverlayProps> = ({
     }
   }, [activeSubKey, subtitleOffsetMs, subtitleLoading])
 
+  const baseBottom = parseInt(subtitleBottom, 10)
+  const adjustedBottom = `${baseBottom + subtitlePositionOffset}px`
+
   const styleMap: Record<SubtitleStyle, React.CSSProperties> = {
     default: {
-      fontSize: '26px',
       fontWeight: 600,
       color: 'white',
       backgroundColor: 'rgba(0, 0, 0, 0.65)',
@@ -94,7 +102,6 @@ export const SubtitleOverlay: React.FC<SubtitleOverlayProps> = ({
       textShadow: '0px 2px 4px rgba(0,0,0,0.5)',
     },
     clean: {
-      fontSize: '26px',
       fontWeight: 600,
       color: 'white',
       background: 'none',
@@ -105,7 +112,6 @@ export const SubtitleOverlay: React.FC<SubtitleOverlayProps> = ({
       backdropFilter: 'none',
     },
     ott: {
-      fontSize: '24px',
       fontWeight: 400,
       color: 'white',
       backgroundColor: 'rgba(0, 0, 0, 0.75)',
@@ -118,7 +124,8 @@ export const SubtitleOverlay: React.FC<SubtitleOverlayProps> = ({
   }
 
   const dynamicStyle: React.CSSProperties = {
-    bottom: subtitleBottom,
+    bottom: adjustedBottom,
+    fontSize: `${subtitleFontSize}px`,
     textAlign: 'center',
     maxWidth: '85%',
     lineHeight: 1.4,

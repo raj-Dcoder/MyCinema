@@ -6,7 +6,7 @@ import { useWatchTogether } from '../hooks/useWatchTogether'
 import { WatchTogetherModal } from './WatchTogetherModal'
 import AIEnhancementRenderer from './AIEnhancementRenderer'
 import { PlayerControls } from './player/PlayerControls'
-import { SubtitleOverlay, SUBTITLE_STYLE_KEY, type SubtitleStyle } from './player/SubtitleOverlay'
+import { SubtitleOverlay, SUBTITLE_STYLE_KEY, SUBTITLE_FONT_SIZE_KEY, SUBTITLE_POSITION_KEY, type SubtitleStyle } from './player/SubtitleOverlay'
 import { VideoStatsOverlay } from './player/VideoStatsOverlay'
 import { useAudioBoost, AudioBoostProfile, AudioBoostIntensity, AUDIO_BOOST_PROFILES, AUDIO_BOOST_INTENSITIES } from '../hooks/useAudioBoost'
 import { useIntroSkip, IntroDbSegment, getIntroDbSegmentKey, getIntroDbSegmentLabel, getIntroDbSegmentAccentClass, INTRODB_SKIP_END_PADDING_SECONDS, INTRODB_AUTO_SKIP_CONFIRMATION_MS } from '../hooks/useIntroSkip'
@@ -459,7 +459,6 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
   const [infoLoading, setInfoLoading] = useState(false)
   const [showAllAudioInfo, setShowAllAudioInfo] = useState(false)
   const [showSubtitleSyncPanel, setShowSubtitleSyncPanel] = useState(false)
-  const [showSubtitleSyncModal, setShowSubtitleSyncModal] = useState(false)
   const [subtitleSyncInput, setSubtitleSyncInput] = useState('')
   
   // Online subtitle search state
@@ -1386,10 +1385,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
   }, [currentVideo.id, currentVideo.file_path])
 
 
-  useEffect(() => {
-    // Note: showSubtitleSyncModal is intentionally NOT closed when media menu closes
-    // so the user can keep syncing without the menu open
-  }, [showMediaMenu, showOnlineSearch])
+
 
   // ─────────────────────────────────────────────────────────────────────────────
   // ── Subtitle track state ──
@@ -2002,7 +1998,6 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
       showMediaMenu ||
       showOnlineSearch ||
       showSubtitleSyncPanel ||
-      showSubtitleSyncModal ||
       showSpeedMenu ||
       showSleepMenu ||
       showAdvancedMenu ||
@@ -2018,7 +2013,6 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
       setShowMediaMenu(false)
       setShowOnlineSearch(false)
       setShowSubtitleSyncPanel(false)
-      setShowSubtitleSyncModal(false)
       setShowSpeedMenu(false)
       setShowSleepMenu(false)
       setShowAdvancedMenu(false)
@@ -2810,51 +2804,6 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
   const subtitleSyncDisabled = activeSubKey === null
   const subtitleSyncValue = formatSubtitleOffsetMs(subtitleOffsetMs)
   const subtitleOffsetIsZero = subtitleOffsetMs === 0
-  const subtitleSyncRailPercent = `${((clampSubtitleOffsetMs(subtitleOffsetMs) - SUBTITLE_SYNC_MIN_MS) / (SUBTITLE_SYNC_MAX_MS - SUBTITLE_SYNC_MIN_MS)) * 100}%`
-  const subtitleSyncControls = [
-    {
-      key: 'earlier-xlarge',
-      value: '-5s',
-      title: 'Show subtitles 5 seconds earlier',
-      onClick: () => nudgeSubtitleOffset(-5000),
-      disabled: subtitleSyncDisabled
-    },
-    {
-      key: 'earlier-large',
-      value: '-2s',
-      title: 'Show subtitles 2 seconds earlier',
-      onClick: () => nudgeSubtitleOffset(-SUBTITLE_SYNC_COARSE_STEP_MS),
-      disabled: subtitleSyncDisabled
-    },
-    {
-      key: 'earlier-small',
-      value: '-0.5s',
-      title: 'Show subtitles 500 milliseconds earlier',
-      onClick: () => nudgeSubtitleOffset(-500),
-      disabled: subtitleSyncDisabled
-    },
-    {
-      key: 'later-small',
-      value: '+0.5s',
-      title: 'Show subtitles 500 milliseconds later',
-      onClick: () => nudgeSubtitleOffset(500),
-      disabled: subtitleSyncDisabled
-    },
-    {
-      key: 'later-large',
-      value: '+2s',
-      title: 'Show subtitles 2 seconds later',
-      onClick: () => nudgeSubtitleOffset(SUBTITLE_SYNC_COARSE_STEP_MS),
-      disabled: subtitleSyncDisabled
-    },
-    {
-      key: 'later-xlarge',
-      value: '+5s',
-      title: 'Show subtitles 5 seconds later',
-      onClick: () => nudgeSubtitleOffset(5000),
-      disabled: subtitleSyncDisabled
-    }
-  ] as const
 
   const updateVideoAspectRatio = () => {
     const videoEl = videoRef.current
@@ -3567,119 +3516,6 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
         </div>
       </div>
 
-      {/* ──────────────────────────────────────────────────────────
-           Subtitle Sync Modal — full featured panel, slides up
-           from bottom center when triggered from HUD pill
-      ────────────────────────────────────────────────────────── */}
-      {showSubtitleSyncModal && activeSubKey !== null && (
-        <div
-          className="absolute left-1/2 -translate-x-1/2 z-40 pointer-events-auto"
-          style={{ bottom: '158px', width: '360px' }}
-          onClick={(e) => e.stopPropagation()}
-        >
-          <div className="bg-[#111]/95 backdrop-blur-2xl border border-white/10 rounded-2xl shadow-[0_8px_40px_rgba(0,0,0,0.7)] overflow-hidden animate-in slide-in-from-bottom-4 fade-in duration-200">
-            {/* Header */}
-            <div className="flex items-center justify-between px-4 pt-3.5 pb-2.5 border-b border-white/5">
-              <div className="flex items-center gap-2">
-                <Subtitles size={14} className="text-primary" />
-                <span className="text-[11px] font-black text-white uppercase tracking-[0.2em]">Subtitle Sync</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <span className={`text-[16px] font-black tabular-nums ${subtitleOffsetIsZero ? 'text-white/40' : 'text-primary'}`}>
-                  {subtitleSyncValue}
-                </span>
-                {!subtitleOffsetIsZero && (
-                  <button
-                    onClick={() => resetSubtitleOffset()}
-                    className="flex items-center gap-1 rounded-lg border border-white/10 bg-white/[0.04] px-2 py-1 text-[10px] font-bold text-white/40 hover:text-white hover:border-white/25 transition-all"
-                    title="Reset to 0"
-                  >
-                    <RotateCcw size={10} />
-                    Reset
-                  </button>
-                )}
-                <button
-                  onClick={() => setShowSubtitleSyncModal(false)}
-                  className="w-6 h-6 flex items-center justify-center rounded-full text-white/30 hover:text-white hover:bg-white/10 transition-all text-xs"
-                  title="Close"
-                >
-                  ✕
-                </button>
-              </div>
-            </div>
-
-            {/* Visual Rail */}
-            <div className="px-4 pt-3 pb-1">
-              <div className="flex items-center justify-between mb-1.5 text-[9px] font-black uppercase tracking-[0.18em] text-white/25">
-                <span>Earlier (subtitles behind)</span>
-                <span>(subtitles ahead) Later</span>
-              </div>
-              <div className="relative h-5">
-                <div className="absolute left-0 right-0 top-1/2 h-[2px] -translate-y-1/2 rounded-full bg-white/8" />
-                <div className="absolute left-1/2 top-1/2 h-3 w-px -translate-x-1/2 -translate-y-1/2 bg-white/20" />
-                <div
-                  className={`absolute top-1/2 h-4 w-4 -translate-x-1/2 -translate-y-1/2 rounded-full shadow-md transition-all duration-150 ${
-                    subtitleOffsetIsZero ? 'bg-white/50' : 'bg-primary shadow-primary/40'
-                  }`}
-                  style={{ left: subtitleSyncRailPercent }}
-                />
-              </div>
-              <div className="flex items-center justify-between mt-1 text-[9px] text-white/25 font-medium">
-                <span>-5m</span>
-                <span>0</span>
-                <span>+5m</span>
-              </div>
-            </div>
-
-            {/* Preset buttons */}
-            <div className="px-4 pb-3 pt-1">
-              <p className="text-[9px] font-black text-white/30 uppercase tracking-widest mb-2">Presets</p>
-              <div className="grid grid-cols-6 gap-1.5 mb-3">
-                {subtitleSyncControls.map((control) => (
-                  <button
-                    key={control.key}
-                    onClick={() => control.onClick()}
-                    title={control.title}
-                    className="h-9 rounded-xl border border-white/8 bg-white/[0.04] text-[11px] font-black text-white/60 hover:text-white hover:border-white/18 hover:bg-white/[0.08] transition-all active:scale-95"
-                  >
-                    {control.value}
-                  </button>
-                ))}
-              </div>
-
-              {/* Fine nudge row */}
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={() => nudgeSubtitleOffset(-SUBTITLE_SYNC_FINE_STEP_MS)}
-                  className="flex-1 h-9 rounded-xl border border-white/8 bg-white/[0.04] text-[11px] font-black text-white/60 hover:text-primary hover:border-primary/30 hover:bg-primary/10 transition-all active:scale-95"
-                  title="250ms earlier"
-                >
-                  −250ms
-                </button>
-                <div className="text-[10px] text-white/25 font-bold tracking-widest px-1">FINE</div>
-                <button
-                  onClick={() => nudgeSubtitleOffset(SUBTITLE_SYNC_FINE_STEP_MS)}
-                  className="flex-1 h-9 rounded-xl border border-white/8 bg-white/[0.04] text-[11px] font-black text-white/60 hover:text-primary hover:border-primary/30 hover:bg-primary/10 transition-all active:scale-95"
-                  title="250ms later"
-                >
-                  +250ms
-                </button>
-              </div>
-            </div>
-
-            {/* Keyboard hint footer */}
-            <div className="px-4 py-2 border-t border-white/5 bg-white/[0.01]">
-              <p className="text-center text-[9px] text-white/25 font-medium tracking-wide">
-                <kbd className="font-mono bg-white/8 px-1 rounded">[ </kbd> earlier &nbsp;·&nbsp;
-                <kbd className="font-mono bg-white/8 px-1 rounded"> ]</kbd> later &nbsp;·&nbsp;
-                <kbd className="font-mono bg-white/8 px-1 rounded"> \</kbd> reset &nbsp;·&nbsp;
-                Saved per subtitle track
-              </p>
-            </div>
-          </div>
-        </div>
-      )}
-
       <SubtitleOverlay
         videoRef={videoRef}
         activeSubKey={activeSubKey}
@@ -3688,6 +3524,8 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
         subtitleBottom={showControls ? '136px' : '48px'}
         subtitleLoading={subtitleLoading}
         subtitleStyle={(localStorage.getItem(SUBTITLE_STYLE_KEY) as SubtitleStyle) || 'default'}
+        subtitleFontSize={parseInt(localStorage.getItem(SUBTITLE_FONT_SIZE_KEY) || '24', 10)}
+        subtitlePositionOffset={parseInt(localStorage.getItem(SUBTITLE_POSITION_KEY) || '0', 10)}
       />
 
       {showStats && <VideoStatsOverlay videoRef={videoRef} />}

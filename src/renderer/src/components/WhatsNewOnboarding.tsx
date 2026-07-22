@@ -1,23 +1,23 @@
 import React, { useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { X, Film, Volume2, FastForward, Info } from 'lucide-react'
+import { X, Film, Search, ArrowLeft, Eye } from 'lucide-react'
 
 export const LATEST_RELEASE = {
-  version: '1.28.2',
+  version: '1.29.0',
 }
 
 const newFeatures = [
   {
-    icon: <FastForward size={24} className="text-gray-400" />,
-    text: "Vibe keywords for your local library are now saved permanently so they load instantly every time."
+    icon: <Search size={24} className="text-gray-400" />,
+    text: "Instantly look up titles on Moctale or Google without ever leaving the app."
   },
   {
-    icon: <Film size={24} className="text-gray-400" />,
-    text: "Trending and watchlist cards now smartly cache keywords to make navigation buttery smooth."
+    icon: <ArrowLeft size={24} className="text-gray-400" />,
+    text: "Lightning-fast, dynamic back button for seamless navigation within external popups."
   },
   {
-    icon: <Info size={24} className="text-gray-400" />,
-    text: "Optimized TMDB network calls so your detail screens feel snappier than ever."
+    icon: <Eye size={24} className="text-gray-400" />,
+    text: "Focus Mode: main app dims when popups are active, completely preventing accidental clicks."
   }
 ]
 

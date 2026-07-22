@@ -1,3 +1,17 @@
+# MyCinema v1.29.0
+
+Deep dive into movies and series with seamless external web integration.
+
+### Web Integrations
+- **Moctale Reviews & Google Search**: Instantly look up titles on Moctale or Google without ever leaving the app. Links open in a sleek, native popup window.
+- **Smart Navigation**: Enjoy a lightning-fast, glassmorphic back button that dynamically appears when navigating within the popup, fully supporting Single Page Applications (SPAs).
+- **Focus Mode**: The main app background smoothly dims and blurs when a popup is active, completely preventing accidental clicks behind the active window.
+
+### Security & Privacy
+- **Sandboxed Web Views**: External websites (Moctale/Google) load inside an isolated, secure context without access to node internals or the app's file system, protecting your local data.
+
+***
+
 # MyCinema v1.28.2
 
 Patch release introducing smart caching and local persistence for movie and series vibe keywords.

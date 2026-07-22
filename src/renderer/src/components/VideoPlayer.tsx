@@ -3456,53 +3456,57 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
                                 ? 'border-white/5 bg-white/[0.01] opacity-40 grayscale pointer-events-none'
                                 : 'border-white/10 bg-white/[0.02]'
                             }`}>
-                              <div className="flex items-center gap-1.5 px-2.5 py-2">
-                                <span className={`text-[11px] font-bold tabular-nums min-w-[3.5rem] text-center ${
-                                  subtitleOffsetIsZero ? 'text-white/30' : 'text-primary'
-                                }`}>{subtitleSyncValue}</span>
-                                {!subtitleOffsetIsZero && (
+                              <div className="flex flex-col items-stretch gap-1.5 px-2.5 py-2">
+                                <div className="flex items-center gap-2">
+                                  <span className={`text-[11px] font-bold tabular-nums min-w-[3.5rem] text-center ${
+                                    subtitleOffsetIsZero ? 'text-white/30' : 'text-primary'
+                                  }`}>{subtitleSyncValue}</span>
+                                  {!subtitleOffsetIsZero && (
+                                    <button
+                                      onClick={(e) => { e.stopPropagation(); resetSubtitleOffset(); }}
+                                      className="w-6 h-6 flex items-center justify-center rounded-lg text-white/30 hover:text-white hover:bg-white/10 transition-all"
+                                    ><RotateCcw size={10} /></button>
+                                  )}
+                                </div>
+                                <div className="flex items-center gap-1.5">
                                   <button
-                                    onClick={(e) => { e.stopPropagation(); resetSubtitleOffset(); }}
-                                    className="w-6 h-6 flex items-center justify-center rounded-lg text-white/30 hover:text-white hover:bg-white/10 transition-all"
-                                  ><RotateCcw size={10} /></button>
-                                )}
-                                <div className="w-px h-5 bg-white/8 mx-0.5" />
-                                <button
-                                  onClick={(e) => { e.stopPropagation(); nudgeSubtitleOffset(-250); }}
-                                  className="h-7 px-2 rounded-lg border border-white/8 bg-white/[0.03] text-[10px] font-bold text-white/50 hover:text-white hover:border-white/20 transition-all active:scale-90"
-                                >−0.25s</button>
-                                <button
-                                  onClick={(e) => { e.stopPropagation(); nudgeSubtitleOffset(250); }}
-                                  className="h-7 px-2 rounded-lg border border-white/8 bg-white/[0.03] text-[10px] font-bold text-white/50 hover:text-white hover:border-white/20 transition-all active:scale-90"
-                                >+0.25s</button>
-                                <div className="w-px h-5 bg-white/8 mx-0.5" />
-                                <input
-                                  value={subtitleSyncInput}
-                                  onChange={(e) => setSubtitleSyncInput(e.target.value)}
-                                  onKeyDown={(e) => {
-                                    if (e.key === 'Enter') {
+                                    onClick={(e) => { e.stopPropagation(); nudgeSubtitleOffset(-250); }}
+                                    className="flex-1 h-8 rounded-lg border border-white/8 bg-white/[0.03] text-[10px] font-bold text-white/50 hover:text-white hover:border-white/20 transition-all active:scale-90"
+                                  >−0.25s</button>
+                                  <button
+                                    onClick={(e) => { e.stopPropagation(); nudgeSubtitleOffset(250); }}
+                                    className="flex-1 h-8 rounded-lg border border-white/8 bg-white/[0.03] text-[10px] font-bold text-white/50 hover:text-white hover:border-white/20 transition-all active:scale-90"
+                                  >+0.25s</button>
+                                </div>
+                                <div className="flex items-center gap-1.5">
+                                  <input
+                                    value={subtitleSyncInput}
+                                    onChange={(e) => setSubtitleSyncInput(e.target.value)}
+                                    onKeyDown={(e) => {
+                                      if (e.key === 'Enter') {
+                                        e.stopPropagation()
+                                        const val = parseInt(subtitleSyncInput, 10)
+                                        if (!isNaN(val) && val >= -300000 && val <= 300000) {
+                                          applySubtitleOffset(val, { showToast: true })
+                                          setSubtitleSyncInput('')
+                                        }
+                                      }
+                                    }}
+                                    placeholder="ms (e.g. 1500)"
+                                    className="flex-1 h-8 rounded-lg border border-white/8 bg-white/[0.03] px-2.5 text-[10px] font-mono text-white/60 placeholder:text-white/15 outline-none transition-all focus:border-primary/40"
+                                  />
+                                  <button
+                                    onClick={(e) => {
                                       e.stopPropagation()
                                       const val = parseInt(subtitleSyncInput, 10)
                                       if (!isNaN(val) && val >= -300000 && val <= 300000) {
                                         applySubtitleOffset(val, { showToast: true })
                                         setSubtitleSyncInput('')
                                       }
-                                    }
-                                  }}
-                                  placeholder="ms"
-                                  className="w-14 h-7 rounded-lg border border-white/8 bg-white/[0.03] px-2 text-[10px] font-mono text-white/60 placeholder:text-white/15 outline-none transition-all focus:border-primary/40"
-                                />
-                                <button
-                                  onClick={(e) => {
-                                    e.stopPropagation()
-                                    const val = parseInt(subtitleSyncInput, 10)
-                                    if (!isNaN(val) && val >= -300000 && val <= 300000) {
-                                      applySubtitleOffset(val, { showToast: true })
-                                      setSubtitleSyncInput('')
-                                    }
-                                  }}
-                                  className="h-7 px-2 rounded-lg bg-primary/20 border border-primary/30 text-[9px] font-bold text-primary hover:bg-primary/30 transition-all active:scale-90"
-                                >Apply</button>
+                                    }}
+                                    className="h-8 px-3 rounded-lg bg-primary/20 border border-primary/30 text-[9px] font-bold text-primary hover:bg-primary/30 transition-all active:scale-90"
+                                  >Apply</button>
+                                </div>
                               </div>
                             </div>
                           )}

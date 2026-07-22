@@ -3478,35 +3478,22 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
                                     className="flex-1 h-8 rounded-lg border border-white/8 bg-white/[0.03] text-[10px] font-bold text-white/50 hover:text-white hover:border-white/20 transition-all active:scale-90"
                                   >+0.25s</button>
                                 </div>
-                                <div className="flex items-center gap-1.5">
-                                  <input
-                                    value={subtitleSyncInput}
-                                    onChange={(e) => setSubtitleSyncInput(e.target.value)}
-                                    onKeyDown={(e) => {
-                                      if (e.key === 'Enter') {
-                                        e.stopPropagation()
-                                        const val = parseInt(subtitleSyncInput, 10)
-                                        if (!isNaN(val) && val >= -300000 && val <= 300000) {
-                                          applySubtitleOffset(val, { showToast: true })
-                                          setSubtitleSyncInput('')
-                                        }
-                                      }
-                                    }}
-                                    placeholder="ms (e.g. 1500)"
-                                    className="flex-1 h-8 rounded-lg border border-white/8 bg-white/[0.03] px-2.5 text-[10px] font-mono text-white/60 placeholder:text-white/15 outline-none transition-all focus:border-primary/40"
-                                  />
-                                  <button
-                                    onClick={(e) => {
+                                <input
+                                  value={subtitleSyncInput}
+                                  onChange={(e) => setSubtitleSyncInput(e.target.value)}
+                                  onKeyDown={(e) => {
+                                    if (e.key === 'Enter') {
                                       e.stopPropagation()
                                       const val = parseInt(subtitleSyncInput, 10)
                                       if (!isNaN(val) && val >= -300000 && val <= 300000) {
                                         applySubtitleOffset(val, { showToast: true })
                                         setSubtitleSyncInput('')
                                       }
-                                    }}
-                                    className="h-8 px-3 rounded-lg bg-primary/20 border border-primary/30 text-[9px] font-bold text-primary hover:bg-primary/30 transition-all active:scale-90"
-                                  >Apply</button>
-                                </div>
+                                    }
+                                  }}
+                                  placeholder="ms (e.g. 1500)"
+                                  className="h-8 rounded-lg border border-white/8 bg-white/[0.03] px-2.5 text-[10px] font-mono text-white/60 placeholder:text-white/15 outline-none transition-all focus:border-primary/40"
+                                />
                               </div>
                             </div>
                           )}

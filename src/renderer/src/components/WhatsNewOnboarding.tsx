@@ -60,8 +60,8 @@ const WhatsNewOnboarding: React.FC<WhatsNewOnboardingProps> = ({ onClose }) => {
           </button>
 
           <div className="mb-8 flex flex-col items-center">
-            <div className="mb-6 flex h-24 w-24 items-center justify-center rounded-full bg-[#00a884]/10">
-              <Film size={48} className="text-[#00a884]" />
+            <div className="mb-6 flex h-24 w-24 items-center justify-center rounded-full bg-primary/10">
+              <Film size={48} className="text-primary" />
             </div>
             <h2 className="text-2xl font-normal text-white">What's new in MyCinema</h2>
           </div>
@@ -69,7 +69,7 @@ const WhatsNewOnboarding: React.FC<WhatsNewOnboardingProps> = ({ onClose }) => {
           <div className="mb-10 space-y-6">
             {newFeatures.map((feature, idx) => (
               <div key={idx} className="flex items-start gap-4">
-                <div className="mt-0.5 shrink-0">{feature.icon}</div>
+                <div className="mt-0.5 shrink-0 text-primary">{feature.icon}</div>
                 <p className="text-[15px] leading-relaxed text-gray-300">
                   {feature.text}
                 </p>
@@ -80,7 +80,7 @@ const WhatsNewOnboarding: React.FC<WhatsNewOnboardingProps> = ({ onClose }) => {
           <div className="flex justify-center">
             <button
               onClick={onClose}
-              className="rounded-full bg-[#00a884] px-8 py-2.5 text-[15px] font-medium text-[#111b21] hover:bg-[#06cf9c] transition-colors"
+              className="rounded-full bg-primary px-8 py-2.5 text-[15px] font-medium text-white hover:bg-[#c40812] transition-colors"
             >
               Continue
             </button>

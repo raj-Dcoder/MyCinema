@@ -74,6 +74,7 @@ const App: React.FC = () => {
   const [videoControlsVisible, setVideoControlsVisible] = useState(false)
   const [activeDownloads, setActiveDownloads] = useState<ActiveDownload[]>([])
   const [dismissedDownloadTrayIds, setDismissedDownloadTrayIds] = useState<Set<string>>(() => new Set())
+  const [webPopupOpen, setWebPopupOpen] = useState(false)
   const homeScrollRef = useRef<HTMLDivElement | null>(null)
   const activePageScrollRef = useRef<HTMLDivElement | null>(null)
   const activeTabRef = useRef<AppTab>('home')
@@ -132,6 +133,17 @@ const App: React.FC = () => {
   useEffect(() => {
     window.api.isFullscreen().then(setIsFullscreen).catch(() => {})
     return window.api.onFullscreenChanged(setIsFullscreen)
+  }, [])
+
+  useEffect(() => {
+    const handlePopupOpened = () => setWebPopupOpen(true)
+    const handlePopupClosed = () => setWebPopupOpen(false)
+    window.addEventListener('web-popup-opened', handlePopupOpened)
+    window.addEventListener('web-popup-closed', handlePopupClosed)
+    return () => {
+      window.removeEventListener('web-popup-opened', handlePopupOpened)
+      window.removeEventListener('web-popup-closed', handlePopupClosed)
+    }
   }, [])
 
   useEffect(() => {
@@ -444,6 +456,12 @@ const App: React.FC = () => {
       onClick={handleAppSurfaceClick}
     >
       <WindowControls />
+
+      {/* Popup backdrop blur overlay — sits between WindowControls and main content */}
+      <div
+        className={`absolute inset-0 z-[200] transition-all duration-300 ${webPopupOpen ? 'pointer-events-auto' : 'pointer-events-none'}`}
+        style={webPopupOpen ? { backdropFilter: 'blur(4px)', background: 'rgba(0,0,0,0.35)' } : { backdropFilter: 'blur(0px)', background: 'transparent' }}
+      />
 
       {/* Sidebar */}
       <div className={`group/sidebar relative bg-white/[0.02] backdrop-blur-2xl flex flex-col border-r border-white/5 transition-[width] duration-300 ease-in-out z-40 ${isSidebarExpanded ? 'w-64' : 'w-20'}`}>

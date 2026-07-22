@@ -460,6 +460,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
   const [showAllAudioInfo, setShowAllAudioInfo] = useState(false)
   const [showSubtitleSyncPanel, setShowSubtitleSyncPanel] = useState(false)
   const [showSubtitleSyncModal, setShowSubtitleSyncModal] = useState(false)
+  const [subtitleSyncInput, setSubtitleSyncInput] = useState('')
   
   // Online subtitle search state
   const [onlineSubResults, setOnlineSubResults] = useState<any[]>([])
@@ -3522,46 +3523,55 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
                                 </div>
                               </div>
 
-                              {/* Preset buttons */}
+                              {/* Nudge buttons + manual input */}
                               <div className="px-4 pb-3 pt-1">
-                                <div className="flex items-center justify-center gap-1.5">
-                                  <div className="flex-1 flex gap-1.5 justify-end">
-                                    {subtitleSyncControls.slice(0, 3).map((control) => (
-                                      <button
-                                        key={control.key}
-                                        onClick={(e) => { e.stopPropagation(); control.onClick(); }}
-                                        title={control.title}
-                                        className="w-9 h-8 rounded-xl border border-white/8 bg-white/[0.03] text-[10px] font-bold text-white/50 hover:text-white hover:border-white/20 hover:bg-white/[0.08] transition-all active:scale-90"
-                                      >
-                                        {control.value}
-                                      </button>
-                                    ))}
-                                  </div>
-                                  <div className="flex items-center justify-center w-8 h-8 rounded-xl bg-white/[0.03] border border-white/6">
-                                    <span className="text-[8px] font-bold text-white/20 tracking-widest">|</span>
-                                  </div>
-                                  <div className="flex-1 flex gap-1.5 justify-start">
-                                    {subtitleSyncControls.slice(3, 6).map((control) => (
-                                      <button
-                                        key={control.key}
-                                        onClick={(e) => { e.stopPropagation(); control.onClick(); }}
-                                        title={control.title}
-                                        className="w-9 h-8 rounded-xl border border-white/8 bg-white/[0.03] text-[10px] font-bold text-white/50 hover:text-white hover:border-white/20 hover:bg-white/[0.08] transition-all active:scale-90"
-                                      >
-                                        {control.value}
-                                      </button>
-                                    ))}
-                                  </div>
+                                <div className="flex items-center gap-2">
+                                  <button
+                                    onClick={(e) => { e.stopPropagation(); nudgeSubtitleOffset(-250); }}
+                                    className="flex-1 h-9 rounded-xl border border-white/8 bg-white/[0.03] text-[11px] font-bold text-white/50 hover:text-white hover:border-white/20 hover:bg-white/[0.08] transition-all active:scale-90"
+                                    title="250ms earlier"
+                                  >
+                                    −0.25s
+                                  </button>
+                                  <button
+                                    onClick={(e) => { e.stopPropagation(); nudgeSubtitleOffset(250); }}
+                                    className="flex-1 h-9 rounded-xl border border-white/8 bg-white/[0.03] text-[11px] font-bold text-white/50 hover:text-white hover:border-white/20 hover:bg-white/[0.08] transition-all active:scale-90"
+                                    title="250ms later"
+                                  >
+                                    +0.25s
+                                  </button>
                                 </div>
-                              </div>
-
-                              {/* Keyboard hint */}
-                              <div className="px-4 py-2 border-t border-white/5 bg-white/[0.01]">
-                                <p className="text-center text-[8px] text-white/20 font-medium tracking-wide">
-                                  <kbd className="font-mono bg-white/8 px-1 rounded text-[8px]">[</kbd> earlier &nbsp;·&nbsp;
-                                  <kbd className="font-mono bg-white/8 px-1 rounded text-[8px]">]</kbd> later &nbsp;·&nbsp;
-                                  <kbd className="font-mono bg-white/8 px-1 rounded text-[8px]">\</kbd> reset
-                                </p>
+                                <div className="flex items-center gap-2 mt-2">
+                                  <input
+                                    value={subtitleSyncInput}
+                                    onChange={(e) => setSubtitleSyncInput(e.target.value)}
+                                    onKeyDown={(e) => {
+                                      if (e.key === 'Enter') {
+                                        e.stopPropagation()
+                                        const val = parseInt(subtitleSyncInput, 10)
+                                        if (!isNaN(val) && val >= -300000 && val <= 300000) {
+                                          applySubtitleOffset(val, { showToast: true })
+                                          setSubtitleSyncInput('')
+                                        }
+                                      }
+                                    }}
+                                    placeholder="ms (e.g. 1500)"
+                                    className="flex-1 h-9 rounded-xl border border-white/8 bg-white/[0.03] px-3 text-[11px] font-mono text-white/60 placeholder:text-white/15 outline-none transition-all focus:border-primary/40 focus:bg-white/[0.06]"
+                                  />
+                                  <button
+                                    onClick={(e) => {
+                                      e.stopPropagation()
+                                      const val = parseInt(subtitleSyncInput, 10)
+                                      if (!isNaN(val) && val >= -300000 && val <= 300000) {
+                                        applySubtitleOffset(val, { showToast: true })
+                                        setSubtitleSyncInput('')
+                                      }
+                                    }}
+                                    className="h-9 px-3 rounded-xl bg-primary/20 border border-primary/30 text-[10px] font-bold text-primary hover:bg-primary/30 transition-all active:scale-90"
+                                  >
+                                    Apply
+                                  </button>
+                                </div>
                               </div>
                             </div>
                           )}

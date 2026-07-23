@@ -1585,25 +1585,70 @@ ipcMain.handle('delete-video-file', async (_, video: any) => {
       itemsToDelete.push({ id: video.id, file_path: video.file_path })
     }
 
-    let deletedAny = false
+    // Stop any active torrents associated with these files before deleting
+    const downloadRoot = getDownloadPath()
     for (const item of itemsToDelete) {
-      if (item.file_path && fs.existsSync(item.file_path)) {
-        try {
-          fs.unlinkSync(item.file_path)
-          deletedAny = true
-          const dir = path.dirname(item.file_path)
-          if (fs.readdirSync(dir).length === 0) {
-            fs.rmdirSync(dir)
+      if (item.file_path && isPathInsideRoot(item.file_path, downloadRoot)) {
+        const relative = path.relative(downloadRoot, item.file_path)
+        const torrentId = relative.split(path.sep)[0]
+        if (torrentId) {
+          const torrent = activeTorrents.get(torrentId)
+          if (torrent) {
+            pausedTorrentIds.delete(torrentId)
+            clearTorrentProgressInterval(torrentId)
+            await destroyTorrentForDelete(torrent)
+            activeTorrents.delete(torrentId)
           }
-        } catch (err) {
-          console.error('Error deleting file:', err)
         }
       }
-      try {
-        db.deleteVideoAndProgress(item.id)
-        deletedAny = true
-      } catch (err) {
-        console.error('Error removing DB record:', err)
+    }
+
+    let deletedAny = false
+    const deletedTorrentDirs = new Set<string>()
+    for (const item of itemsToDelete) {
+      let fileDeleted = false
+      if (item.file_path && fs.existsSync(item.file_path)) {
+        for (const delay of [0, 500, 1500]) {
+          if (delay > 0) {
+            await new Promise(resolve => setTimeout(resolve, delay))
+          }
+          try {
+            // If file is inside the download root, delete the entire torrent directory
+            if (isPathInsideRoot(item.file_path, downloadRoot)) {
+              const relative = path.relative(downloadRoot, item.file_path)
+              const torrentRoot = path.resolve(downloadRoot, relative.split(path.sep)[0])
+              if (torrentRoot && !deletedTorrentDirs.has(torrentRoot) && fs.existsSync(torrentRoot)) {
+                deletedTorrentDirs.add(torrentRoot)
+                fs.rmSync(torrentRoot, { recursive: true, force: true, maxRetries: 2, retryDelay: 250 })
+                fileDeleted = true
+              }
+            } else {
+              // For files outside download root, delete the file and clean up empty parents
+              fs.rmSync(item.file_path, { force: true, maxRetries: 2, retryDelay: 250 })
+              fileDeleted = true
+              const dir = path.dirname(item.file_path)
+              if (fs.readdirSync(dir).length === 0) {
+                fs.rmdirSync(dir)
+              }
+            }
+            break
+          } catch (err) {
+            if (delay === 1500) {
+              console.error('Error deleting file:', err)
+            }
+          }
+        }
+      } else if (item.file_path) {
+        fileDeleted = true
+      }
+
+      if (fileDeleted) {
+        try {
+          db.deleteVideoAndProgress(item.id)
+          deletedAny = true
+        } catch (err) {
+          console.error('Error removing DB record:', err)
+        }
       }
     }
     

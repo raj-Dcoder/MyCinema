@@ -1,23 +1,15 @@
 import React, { useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { X, Film, Search, ArrowLeft, Eye } from 'lucide-react'
+import { X, Film } from 'lucide-react'
 
 export const LATEST_RELEASE = {
-  version: '1.29.0',
+  version: '1.29.1',
 }
 
 const newFeatures = [
   {
-    icon: <Search size={24} className="text-gray-400" />,
-    text: "Instantly look up titles on Moctale or Google without ever leaving the app."
-  },
-  {
-    icon: <ArrowLeft size={24} className="text-gray-400" />,
-    text: "Lightning-fast, dynamic back button for seamless navigation within external popups."
-  },
-  {
-    icon: <Eye size={24} className="text-gray-400" />,
-    text: "Focus Mode: main app dims when popups are active, completely preventing accidental clicks."
+    icon: <Film size={24} className="text-gray-400" />,
+    text: "Cleaner player controls with the Next Episode button removed for a focused, streamlined playback experience."
   }
 ]
 

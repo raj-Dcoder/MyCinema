@@ -6,7 +6,7 @@ import { useWatchTogether } from '../hooks/useWatchTogether'
 import { WatchTogetherModal } from './WatchTogetherModal'
 import AIEnhancementRenderer from './AIEnhancementRenderer'
 import { PlayerControls } from './player/PlayerControls'
-import { SubtitleOverlay } from './player/SubtitleOverlay'
+import { SubtitleOverlay, SUBTITLE_STYLE_KEY, SUBTITLE_FONT_SIZE_KEY, SUBTITLE_POSITION_KEY, type SubtitleStyle } from './player/SubtitleOverlay'
 import { VideoStatsOverlay } from './player/VideoStatsOverlay'
 import { useAudioBoost, AudioBoostProfile, AudioBoostIntensity, AUDIO_BOOST_PROFILES, AUDIO_BOOST_INTENSITIES } from '../hooks/useAudioBoost'
 import { useIntroSkip, IntroDbSegment, getIntroDbSegmentKey, getIntroDbSegmentLabel, getIntroDbSegmentAccentClass, INTRODB_SKIP_END_PADDING_SECONDS, INTRODB_AUTO_SKIP_CONFIRMATION_MS } from '../hooks/useIntroSkip'
@@ -458,6 +458,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
   const [infoLoading, setInfoLoading] = useState(false)
   const [showAllAudioInfo, setShowAllAudioInfo] = useState(false)
   const [showSubtitleSyncPanel, setShowSubtitleSyncPanel] = useState(false)
+  const [subtitleSyncInput, setSubtitleSyncInput] = useState('')
   
   // Online subtitle search state
   const [onlineSubResults, setOnlineSubResults] = useState<any[]>([])
@@ -1383,11 +1384,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
   }, [currentVideo.id, currentVideo.file_path])
 
 
-  useEffect(() => {
-    if (!showMediaMenu || showOnlineSearch) {
-      setShowSubtitleSyncPanel(false)
-    }
-  }, [showMediaMenu, showOnlineSearch])
+
 
   // ─────────────────────────────────────────────────────────────────────────────
   // ── Subtitle track state ──
@@ -2806,37 +2803,6 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
   const subtitleSyncDisabled = activeSubKey === null
   const subtitleSyncValue = formatSubtitleOffsetMs(subtitleOffsetMs)
   const subtitleOffsetIsZero = subtitleOffsetMs === 0
-  const subtitleSyncRailPercent = `${((clampSubtitleOffsetMs(subtitleOffsetMs) - SUBTITLE_SYNC_MIN_MS) / (SUBTITLE_SYNC_MAX_MS - SUBTITLE_SYNC_MIN_MS)) * 100}%`
-  const subtitleSyncControls = [
-    {
-      key: 'earlier-large',
-      value: '-2s',
-      title: 'Show subtitles 2 seconds earlier',
-      onClick: () => nudgeSubtitleOffset(-SUBTITLE_SYNC_COARSE_STEP_MS),
-      disabled: subtitleSyncDisabled
-    },
-    {
-      key: 'earlier-small',
-      value: '-250ms',
-      title: 'Show subtitles 250 milliseconds earlier',
-      onClick: () => nudgeSubtitleOffset(-SUBTITLE_SYNC_FINE_STEP_MS),
-      disabled: subtitleSyncDisabled
-    },
-    {
-      key: 'later-small',
-      value: '+250ms',
-      title: 'Show subtitles 250 milliseconds later',
-      onClick: () => nudgeSubtitleOffset(SUBTITLE_SYNC_FINE_STEP_MS),
-      disabled: subtitleSyncDisabled
-    },
-    {
-      key: 'later-large',
-      value: '+2s',
-      title: 'Show subtitles 2 seconds later',
-      onClick: () => nudgeSubtitleOffset(SUBTITLE_SYNC_COARSE_STEP_MS),
-      disabled: subtitleSyncDisabled
-    }
-  ] as const
 
   const updateVideoAspectRatio = () => {
     const videoEl = videoRef.current
@@ -3443,68 +3409,49 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
                         /* Local Tracks View */
                         <div className="px-1.5 pb-2 space-y-2">
                           {showSubtitleSyncPanel && (
-                            <div className={`mx-1.5 mb-3 rounded-xl border transition-all duration-300 ${
+                            <div className={`mx-1.5 mb-2 rounded-xl border transition-all ${
                               subtitleSyncDisabled
                                 ? 'border-white/5 bg-white/[0.01] opacity-40 grayscale pointer-events-none'
-                                : 'border-white/8 bg-white/[0.02]'
+                                : 'border-white/10 bg-white/[0.02]'
                             }`}>
-                              {/* Header row */}
-                              <div className="flex items-center justify-between px-3 pt-2.5 pb-2 border-b border-white/5">
-                                <span className="text-[9px] font-black uppercase tracking-[0.22em] text-white/30">
-                                  Subtitle Sync
-                                </span>
+                              <div className="flex flex-col items-stretch gap-1.5 px-2.5 py-2">
                                 <div className="flex items-center gap-2">
-                                  <span className={`text-[11px] font-black tabular-nums ${subtitleOffsetIsZero ? 'text-white/40' : 'text-primary'}`}>
-                                    {subtitleSyncValue}
-                                  </span>
+                                  <span className={`text-[11px] font-bold tabular-nums min-w-[3.5rem] text-center ${
+                                    subtitleOffsetIsZero ? 'text-white/30' : 'text-primary'
+                                  }`}>{subtitleSyncValue}</span>
                                   {!subtitleOffsetIsZero && (
                                     <button
                                       onClick={(e) => { e.stopPropagation(); resetSubtitleOffset(); }}
-                                      className="flex items-center gap-1 rounded-lg border border-white/10 bg-white/[0.04] px-2 py-0.5 text-[9px] font-bold text-white/40 hover:text-white hover:border-white/20 transition-all"
-                                      title="Reset subtitle offset"
-                                    >
-                                      <RotateCcw size={9} />
-                                      Reset
-                                    </button>
+                                      className="w-6 h-6 flex items-center justify-center rounded-lg text-white/30 hover:text-white hover:bg-white/10 transition-all"
+                                    ><RotateCcw size={10} /></button>
                                   )}
                                 </div>
-                              </div>
-
-                              {/* Rail */}
-                              <div className="px-3 pt-2.5 pb-1">
-                                <div className="flex items-center justify-between mb-1.5 text-[8px] font-black uppercase tracking-[0.18em] text-white/18">
-                                  <span>Earlier</span>
-                                  <span>Later</span>
-                                </div>
-                                <div className="relative h-4">
-                                  <div className="absolute left-0 right-0 top-1/2 h-[2px] -translate-y-1/2 rounded-full bg-white/8" />
-                                  <div className="absolute left-1/2 top-1/2 h-2.5 w-px -translate-x-1/2 -translate-y-1/2 bg-white/15" />
-                                  <div
-                                    className={`absolute top-1/2 h-3.5 w-3.5 -translate-x-1/2 -translate-y-1/2 rounded-full shadow-sm ${
-                                      subtitleOffsetIsZero ? 'bg-white/60' : 'bg-primary shadow-primary/30'
-                                    }`}
-                                    style={{ left: subtitleSyncRailPercent }}
-                                  />
-                                </div>
-                              </div>
-
-                              {/* Nudge buttons */}
-                              <div className="px-3 pb-2.5 grid grid-cols-4 gap-1.5">
-                                {subtitleSyncControls.map((control) => (
+                                <div className="flex items-center gap-1.5">
                                   <button
-                                    key={control.key}
-                                    onClick={(e) => { e.stopPropagation(); control.onClick(); }}
-                                    title={control.title}
-                                    className="h-8 rounded-lg border border-white/8 bg-white/[0.03] text-[10px] font-black text-white/60 hover:text-white hover:border-white/18 hover:bg-white/[0.07] transition-all active:scale-95"
-                                  >
-                                    {control.value}
-                                  </button>
-                                ))}
-                              </div>
-
-                              {/* Keyboard hint */}
-                              <div className="px-3 pb-2.5 text-center text-[9px] text-white/25 font-medium tracking-wide">
-                                [ ] nudge &nbsp;·&nbsp; \ reset
+                                    onClick={(e) => { e.stopPropagation(); nudgeSubtitleOffset(-250); }}
+                                    className="flex-1 h-8 rounded-lg border border-white/8 bg-white/[0.03] text-[10px] font-bold text-white/50 hover:text-white hover:border-white/20 transition-all active:scale-90"
+                                  >−0.25s</button>
+                                  <button
+                                    onClick={(e) => { e.stopPropagation(); nudgeSubtitleOffset(250); }}
+                                    className="flex-1 h-8 rounded-lg border border-white/8 bg-white/[0.03] text-[10px] font-bold text-white/50 hover:text-white hover:border-white/20 transition-all active:scale-90"
+                                  >+0.25s</button>
+                                </div>
+                                <input
+                                  value={subtitleSyncInput}
+                                  onChange={(e) => setSubtitleSyncInput(e.target.value)}
+                                  onKeyDown={(e) => {
+                                    if (e.key === 'Enter') {
+                                      e.stopPropagation()
+                                      const val = parseInt(subtitleSyncInput, 10)
+                                      if (!isNaN(val) && val >= -300000 && val <= 300000) {
+                                        applySubtitleOffset(val, { showToast: true })
+                                        setSubtitleSyncInput('')
+                                      }
+                                    }
+                                  }}
+                                  placeholder="ms (e.g. 1500)"
+                                  className="h-8 rounded-lg border border-white/8 bg-white/[0.03] px-2.5 text-[10px] font-mono text-white/60 placeholder:text-white/15 outline-none transition-all focus:border-primary/40"
+                                />
                               </div>
                             </div>
                           )}
@@ -3532,9 +3479,14 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
                                   <div className={`flex-shrink-0 w-5 h-5 rounded-full border-2 flex items-center justify-center transition-colors ${isActive ? 'border-primary bg-primary' : 'border-white/20 group-hover:border-white/40'}`}>
                                     {isActive && <Check size={12} strokeWidth={4} className="text-white" />}
                                   </div>
-                                  <span className="text-[14px] font-semibold truncate tracking-tight">
+                                  <span className="text-[14px] font-semibold truncate tracking-tight flex-1">
                                     {track.label}
                                   </span>
+                                  {isActive && !subtitleOffsetIsZero && (
+                                    <span className="flex-shrink-0 text-[10px] font-black tabular-nums px-1.5 py-0.5 rounded-md bg-primary/20 text-primary border border-primary/30">
+                                      {subtitleSyncValue}
+                                    </span>
+                                  )}
                                 </button>
                                 )
                               })}
@@ -3580,6 +3532,9 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
         subtitleOffsetMs={subtitleOffsetMs}
         subtitleBottom={showControls ? '136px' : '48px'}
         subtitleLoading={subtitleLoading}
+        subtitleStyle={(localStorage.getItem(SUBTITLE_STYLE_KEY) as SubtitleStyle) || 'default'}
+        subtitleFontSize={parseInt(localStorage.getItem(SUBTITLE_FONT_SIZE_KEY) || '24', 10)}
+        subtitlePositionOffset={parseInt(localStorage.getItem(SUBTITLE_POSITION_KEY) || '0', 10)}
       />
 
       {showStats && <VideoStatsOverlay videoRef={videoRef} />}

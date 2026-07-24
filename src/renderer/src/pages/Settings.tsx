@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react'
-import { FolderOpen, Trash2, Plus, HardDrive, AlertTriangle, Check, X as CloseIcon, Maximize2, Download, Upload, Image as ImageIcon } from 'lucide-react'
+import { FolderOpen, Trash2, Plus, HardDrive, AlertTriangle, Check, X as CloseIcon, Maximize2, Download, Upload, Image as ImageIcon, Subtitles } from 'lucide-react'
 import ProfilePictureModal from '../components/ProfilePictureModal'
+import { SUBTITLE_STYLE_KEY, SUBTITLE_FONT_SIZE_KEY, SUBTITLE_POSITION_KEY, type SubtitleStyle } from '../components/player/SubtitleOverlay'
 
 const Settings: React.FC = () => {
   const [folders, setFolders] = useState<any[]>([])
@@ -13,6 +14,15 @@ const Settings: React.FC = () => {
   const [launchFullscreen, setLaunchFullscreen] = useState(true)
   const [backupBusy, setBackupBusy] = useState(false)
   const [backupMessage, setBackupMessage] = useState<string | null>(null)
+  const [subtitleStyle, setSubtitleStyle] = useState<SubtitleStyle>(() => {
+    return (localStorage.getItem(SUBTITLE_STYLE_KEY) as SubtitleStyle) || 'default'
+  })
+  const [subtitleFontSize, setSubtitleFontSize] = useState(() => {
+    return parseInt(localStorage.getItem(SUBTITLE_FONT_SIZE_KEY) || '24', 10)
+  })
+  const [subtitlePosition, setSubtitlePosition] = useState(() => {
+    return parseInt(localStorage.getItem(SUBTITLE_POSITION_KEY) || '0', 10)
+  })
 
   const fetchFolders = async () => {
     const f = await window.api.getFolders()
@@ -228,6 +238,101 @@ const Settings: React.FC = () => {
                 }`}
               />
             </button>
+          </div>
+        </section>
+
+        <section>
+          <h3 className={sectionTitleClass}>Subtitles</h3>
+
+          <div className="space-y-3">
+            <div className={`${panelClass} flex items-center justify-between gap-6 p-6`}>
+              <div className="flex items-center gap-4 min-w-0">
+                <div className={iconBoxClass}>
+                  <Subtitles size={17} />
+                </div>
+                <div className="min-w-0">
+                  <h4 className="text-xs font-black text-white uppercase tracking-tight">Subtitle Style</h4>
+                  <p className="mt-0.5 text-[11px] font-medium leading-4 text-white/35">
+                    Choose how subtitles are displayed during playback.
+                  </p>
+                </div>
+              </div>
+              <select
+                value={subtitleStyle}
+                onChange={(e) => {
+                  const val = e.target.value as SubtitleStyle
+                  setSubtitleStyle(val)
+                  localStorage.setItem(SUBTITLE_STYLE_KEY, val)
+                }}
+                className="w-44 rounded-xl border border-white/10 bg-white/5 px-3 py-2.5 text-[11px] font-black uppercase tracking-widest text-white transition-all focus:border-primary focus:outline-none cursor-pointer"
+              >
+                <option value="default" className="bg-[#141414] text-white">Default (Blurred Background)</option>
+                <option value="clean" className="bg-[#141414] text-white">Clean (No Background)</option>
+                <option value="ott" className="bg-[#141414] text-white">OTT Style (Netflix/Prime)</option>
+              </select>
+            </div>
+
+            <div className={`${panelClass} flex items-center justify-between gap-6 p-6`}>
+              <div className="flex items-center gap-4 min-w-0">
+                <div className={iconBoxClass}>
+                  <span className="text-[13px] font-black tracking-tight text-white/70">Aa</span>
+                </div>
+                <div className="min-w-0">
+                  <h4 className="text-xs font-black text-white uppercase tracking-tight">Font Size</h4>
+                  <p className="mt-0.5 text-[11px] font-medium leading-4 text-white/35">
+                    {subtitleFontSize}px
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-center gap-3 w-48">
+                <span className="text-[11px] text-white/30 font-bold">14</span>
+                <input
+                  type="range"
+                  min="14"
+                  max="48"
+                  value={subtitleFontSize}
+                  onChange={(e) => {
+                    const val = parseInt(e.target.value, 10)
+                    setSubtitleFontSize(val)
+                    localStorage.setItem(SUBTITLE_FONT_SIZE_KEY, val.toString())
+                  }}
+                  className="flex-1 h-1.5 rounded-full appearance-none cursor-pointer bg-white/10 accent-primary
+                    [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-primary [&::-webkit-slider-thumb]:shadow-lg [&::-webkit-slider-thumb]:shadow-primary/40 [&::-webkit-slider-thumb]:border-2 [&::-webkit-slider-thumb]:border-white/20"
+                />
+                <span className="text-[11px] text-white/30 font-bold">48</span>
+              </div>
+            </div>
+
+            <div className={`${panelClass} flex items-center justify-between gap-6 p-6`}>
+              <div className="flex items-center gap-4 min-w-0">
+                <div className={iconBoxClass}>
+                  <span className="text-[15px] leading-none font-black text-white/70">↕</span>
+                </div>
+                <div className="min-w-0">
+                  <h4 className="text-xs font-black text-white uppercase tracking-tight">Vertical Position</h4>
+                  <p className="mt-0.5 text-[11px] font-medium leading-4 text-white/35">
+                    {subtitlePosition === 0 ? 'Default' : subtitlePosition > 0 ? `+${subtitlePosition}px up` : `${subtitlePosition}px down`}
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-center gap-3 w-48">
+                <span className="text-[11px] text-white/30 font-bold">Down</span>
+                <input
+                  type="range"
+                  min="-40"
+                  max="40"
+                  value={subtitlePosition}
+                  onChange={(e) => {
+                    const val = parseInt(e.target.value, 10)
+                    setSubtitlePosition(val)
+                    localStorage.setItem(SUBTITLE_POSITION_KEY, val.toString())
+                  }}
+                  className="flex-1 h-1.5 rounded-full appearance-none cursor-pointer bg-white/10 accent-primary
+                    [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-primary [&::-webkit-slider-thumb]:shadow-lg [&::-webkit-slider-thumb]:shadow-primary/40 [&::-webkit-slider-thumb]:border-2 [&::-webkit-slider-thumb]:border-white/20"
+                />
+                <span className="text-[11px] text-white/30 font-bold">Up</span>
+              </div>
+            </div>
           </div>
         </section>
 

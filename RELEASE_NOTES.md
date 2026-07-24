@@ -1,3 +1,13 @@
+# MyCinema v1.29.4
+
+Frosted glass glow — What's New now feels like a premium overlay.
+
+### UI & UX Polish
+- **Glassmorphism Overlay**: Added `backdrop-blur-xl` to the What's New background — the app content bleeds through with a frosted glass effect, making each slide's mood gradient pop.
+- **Cinematic What's New**: Full-screen slide deck with per-slide moods (cinematic purple, social cyan, celebrate orange), cursor-follow glow, floating particles, and energetic CTAs.
+
+***
+
 # MyCinema v1.29.3
 
 Gen Z minimal — cleaner, faster, no fluff.

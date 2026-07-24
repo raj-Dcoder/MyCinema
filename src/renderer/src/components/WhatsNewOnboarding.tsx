@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion'
 import { Sparkles, Sliders, Users, ChevronRight } from 'lucide-react'
 
 export const LATEST_RELEASE = {
-  version: '1.29.3',
+  version: '1.29.4',
   eyebrow: "What's New",
   slides: [
     {
@@ -14,7 +14,7 @@ export const LATEST_RELEASE = {
       headline: 'Subs, fully loaded.',
       highlight: 'fully loaded',
       support: 'Font size, position, OTT-style — everything you need, no HUD clutter.',
-      signal: 'v1.29.3',
+      signal: 'v1.29.4',
       cta: 'Nice',
       mood: {
         name: 'cinematic',
@@ -51,9 +51,9 @@ export const LATEST_RELEASE = {
       layout: 'celebrate',
       icon: Sparkles,
       kicker: 'Polish',
-      headline: 'Delete that actually deletes.',
-      highlight: 'actually deletes',
-      support: 'Torrents stop safely, folders clean up, no ghost DB records — plus a fresh new look.',
+      headline: 'Frosted glass, fresh vibe.',
+      highlight: 'Frosted glass',
+      support: 'Backdrop blur makes every slide pop. Same cinematic feel, now with glassmorphism.',
       signal: 'Done',
       cta: 'Watch now',
       mood: {

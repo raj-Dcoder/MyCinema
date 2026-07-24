@@ -1,6 +1,6 @@
 {
   "name": "mycinema",
-  "version": "1.29.3",
+  "version": "1.29.4",
   "main": "./out/main/index.js",
   "scripts": {
     "dev": "electron-vite dev",

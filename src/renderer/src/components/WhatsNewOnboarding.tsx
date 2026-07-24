@@ -129,7 +129,7 @@ const WhatsNewOnboarding: React.FC<{ onClose: () => void }> = ({ onClose }) => {
     <div
       ref={containerRef}
       onMouseMove={handleMouseMove}
-      className="fixed inset-0 z-[200] flex items-center justify-center overflow-hidden bg-black"
+      className="fixed inset-0 z-[200] flex items-center justify-center overflow-hidden bg-black/60 backdrop-blur-xl"
       style={{ background: slide.mood.backdrop }}
     >
       {/* Cursor glow */}

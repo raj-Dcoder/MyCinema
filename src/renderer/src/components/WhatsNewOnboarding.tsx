@@ -3,13 +3,14 @@ import { motion, AnimatePresence } from 'framer-motion'
 import { X, Bug, Sparkles, PlusCircle } from 'lucide-react'
 
 export const LATEST_RELEASE = {
-  version: '1.29.1',
+  version: '1.29.2',
 }
 
 const releaseNotes: { type: NoteType; icon: React.ReactNode; text: string }[] = [
-  { type: 'fixed', icon: <Bug size={16} />, text: 'Duplicate Next Episode button removed from player' },
-  { type: 'improved', icon: <Sparkles size={16} />, text: 'Player controls cleaned up for smoother playback' },
-  { type: 'new', icon: <PlusCircle size={16} />, text: 'Faster navigation with optimized transitions' },
+  { type: 'improved', icon: <Sparkles size={16} />, text: 'Compact update button in sidebar shows text labels — Update / 45% / Install — no more guessing' },
+  { type: 'new', icon: <PlusCircle size={16} />, text: 'Status dot indicators: red for available, green when update is ready to install' },
+  { type: 'improved', icon: <Sparkles size={16} />, text: 'Redesigned update cards in expanded sidebar: clean borders, version info, dedicated action buttons per state' },
+  { type: 'improved', icon: <Sparkles size={16} />, text: 'What\'s New dialog simplified to compact modal with color-coded Fixed / Improved / New badges' },
 ]
 
 const typeConfig: Record<NoteType, { label: string; dot: string; border: string; bg: string; text: string }> = {

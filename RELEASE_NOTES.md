@@ -1,9 +1,11 @@
-# MyCinema v1.29.1
+# MyCinema v1.29.2
 
-Cleaner player controls with the removal of the Next Episode button.
+Polished update experience and a cleaner What's New dialog.
 
 ### UI & UX Polish
-- **Cleaner Player Controls**: Removed the "Next Episode" button from the player control bar, giving the playback buttons a more focused, streamlined layout with no distractions.
+- **Compact Update Button**: The update button in the sidebar is now smaller, shows text labels (Update / % / Install), and uses cleaner status indicators — no more guessing what state your update is in.
+- **Professional Update Cards**: Expanded update panels (available, downloading, ready) are redesigned with a subtle, professional look — clear status, version info, and a single action button.
+- **Simpler What's New Dialog**: Replaced the full-screen cinematic onboarding with a compact modal that groups changes into Fixed / Improved / New categories for faster reading.
 
 ***
 

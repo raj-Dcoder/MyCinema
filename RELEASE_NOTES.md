@@ -1,3 +1,22 @@
+# MyCinema v1.29.3
+
+Gen Z minimal — cleaner, faster, no fluff.
+
+### UI & UX Polish
+- **Minimal What's New**: Stripped the dialog down to bare essentials — gradient accent bar, staggered icon list, and a gradient "Got it" button. Made for the scroll, not the slideshow.
+- **Removed Dead Props**: Cleaned up unused slide-navigation props from the What's New component — less code, less debt.
+
+### Subtitle Experience
+- **Full Subtitle Overhaul (merged)**: Font size & vertical position controls, OTT-style (Netflix/Prime) option, style selection (default/clean), redesigned inline sync panel with compact single-row nudge bar, removed floating HUD pill.
+
+### Watch Together
+- **Real Names**: Participants now show actual profile names instead of "Guest 1/2". Host gets a `(Host)` badge. Join/leave notifications with 4s auto-dismiss.
+
+### Delete Fixes
+- **Delete That Actually Works**: Stops WebTorrent before deleting (fixes Windows file locking), deletes entire torrent directory, removes DB record only on success. Fixed race condition crash from concurrent `torrent.destroy()` calls.
+
+***
+
 # MyCinema v1.29.2
 
 Polished update experience and a cleaner What's New dialog.

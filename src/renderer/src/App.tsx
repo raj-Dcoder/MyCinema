@@ -817,13 +817,8 @@ const App: React.FC = () => {
         />
       )}
 
-      {/* Full-screen What's New onboarding */}
       {showWhatsNew && (
         <WhatsNewOnboarding
-          currentStep={0}
-          onNext={() => {}}
-          onPrevious={() => {}}
-          onStepChange={() => {}}
           onClose={() => {
             localStorage.setItem(getWhatsNewStorageKey(LATEST_RELEASE.version), 'true')
             setShowWhatsNew(false)

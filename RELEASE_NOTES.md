@@ -1,3 +1,12 @@
+# MyCinema v1.29.1
+
+Cleaner player controls with the removal of the Next Episode button.
+
+### UI & UX Polish
+- **Cleaner Player Controls**: Removed the "Next Episode" button from the player control bar, giving the playback buttons a more focused, streamlined layout with no distractions.
+
+***
+
 # MyCinema v1.29.0
 
 Deep dive into movies and series with seamless external web integration.

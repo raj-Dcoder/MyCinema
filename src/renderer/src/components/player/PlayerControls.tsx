@@ -23,7 +23,6 @@ export interface PlayerControlsProps {
   roomId: string | null
   volume: number
   currentVideo: Video
-  hasNextEpisode: boolean
   canControlPlayback: boolean
   showEpisodesPanel: boolean
   showInfoPanel: boolean
@@ -58,7 +57,6 @@ export interface PlayerControlsProps {
   seek: (seconds: number) => void
   seekToTime: (time: number) => void
   togglePlay: (e: React.MouseEvent) => void
-  playNextEpisode: () => void
   handleVolumeChange: (e: React.ChangeEvent<HTMLInputElement>) => void
   setShowEpisodesPanel: (show: boolean) => void
   handleOpenFolder: () => void
@@ -112,7 +110,6 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
   roomId,
   volume,
   currentVideo,
-  hasNextEpisode,
   canControlPlayback,
   showEpisodesPanel,
   showInfoPanel,
@@ -146,7 +143,6 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
   seek,
   seekToTime,
   togglePlay,
-  playNextEpisode,
   handleVolumeChange,
   setShowEpisodesPanel,
   handleOpenFolder,
@@ -327,13 +323,6 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
           <button onClick={() => seek(10)} className="text-white hover:text-primary hover:translate-x-1 transition-all" title="Forward 10s">
             <FastForward size={28} fill="currentColor" />
           </button>
-          
-          {currentVideo.type === 'series' && hasNextEpisode && (
-            <button onClick={playNextEpisode} className="text-white/60 hover:text-primary transition-all ml-2 group/next" title="Next Episode">
-              <span className="text-sm font-bold tracking-wide mr-1.5 opacity-0 group-hover/next:opacity-100 transition-opacity">Next</span>
-              <SkipNext size={20} className="group-hover/next:text-primary transition-colors" />
-            </button>
-          )}
 
           {/* Volume */}
           <div className="flex items-center space-x-2">

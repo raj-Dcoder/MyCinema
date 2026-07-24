@@ -4,10 +4,17 @@ import { createPeerSetup, SyncMessage } from '../utils/p2pSync';
 
 const generateShortId = () => Math.random().toString(36).substring(2, 8).toUpperCase();
 
+const getUserName = () => localStorage.getItem('mycinema_user_name') || 'User';
+
+interface Participant {
+  peerId: string;
+  name: string;
+}
+
 interface UseWatchTogetherReturn {
   isHost: boolean;
   roomId: string | null;
-  participants: string[];
+  participants: Participant[];
   localPeerId: string | null;
   isConnecting: boolean;
   error: string | null;
@@ -23,6 +30,7 @@ interface UseWatchTogetherReturn {
   setPushToTalkActive: (active: boolean) => void;
   onReceiveSyncObj: React.MutableRefObject<((msg: SyncMessage) => void) | null>;
   debugLogs: string[];
+  notifications: { id: number; text: string }[];
 }
 
 interface RemoteAudioStream {
@@ -33,7 +41,7 @@ interface RemoteAudioStream {
 export function useWatchTogether(): UseWatchTogetherReturn {
   const [isHost, setIsHost] = useState(false);
   const [roomId, setRoomId] = useState<string | null>(null);
-  const [participants, setParticipants] = useState<string[]>([]);
+  const [participants, setParticipants] = useState<Participant[]>([]);
   const [isConnecting, setIsConnecting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [voiceError, setVoiceError] = useState<string | null>(null);
@@ -54,6 +62,23 @@ export function useWatchTogether(): UseWatchTogetherReturn {
   const localStreamRef = useRef<MediaStream | null>(null);
   const mediaCallsRef = useRef<MediaConnection[]>([]);
   const onReceiveSyncObj = useRef<((msg: SyncMessage) => void) | null>(null);
+  const participantsRef = useRef<Participant[]>([]);
+  const hostNameRef = useRef<string>('Host');
+  const notifCounterRef = useRef(0);
+
+  const [notifications, setNotifications] = useState<{ id: number; text: string }[]>([]);
+
+  useEffect(() => {
+    participantsRef.current = participants;
+  }, [participants]);
+
+  const addNotification = useCallback((text: string) => {
+    const id = ++notifCounterRef.current;
+    setNotifications(prev => [...prev, { id, text }]);
+    setTimeout(() => {
+      setNotifications(prev => prev.filter(n => n.id !== id));
+    }, 4000);
+  }, []);
 
   const stopVoice = useCallback(() => {
     mediaCallsRef.current.forEach(call => call.close());
@@ -133,13 +158,40 @@ export function useWatchTogether(): UseWatchTogetherReturn {
 
   const handleIncomingMessage = useCallback((data: unknown, senderPeer?: string) => {
     // Basic validation
-    if (data && typeof data === 'object' && 'type' in data && 'time' in data) {
-      const msg = { ...(data as SyncMessage), speakerId: (data as SyncMessage).speakerId || senderPeer };
-      if (onReceiveSyncObj.current) {
-        onReceiveSyncObj.current(msg);
+    if (data && typeof data === 'object' && 'type' in data) {
+      const msg = data as any;
+      if (msg.type === 'USER_INFO' && senderPeer) {
+        setParticipants(prev =>
+          prev.some(p => p.peerId === senderPeer)
+            ? prev.map(p => p.peerId === senderPeer ? { ...p, name: msg.name || 'Guest' } : p)
+            : [...prev, { peerId: senderPeer, name: msg.name || 'Guest' }]
+        );
+        addNotification(`${msg.name || 'Guest'} joined`);
+        return;
+      }
+      if (msg.type === 'HOST_INFO' && senderPeer) {
+        hostNameRef.current = msg.name || 'Host';
+        setParticipants(prev => {
+          const exists = prev.some(p => p.peerId === senderPeer);
+          return exists
+            ? prev.map(p => p.peerId === senderPeer ? { ...p, name: msg.name || 'Host' } : p)
+            : [...prev, { peerId: senderPeer, name: msg.name || 'Host' }];
+        });
+        return;
+      }
+      if (msg.type === 'USER_LEFT') {
+        addNotification(`${msg.name || 'Someone'} left`);
+        setParticipants(prev => prev.filter(p => p.name !== msg.name));
+        return;
+      }
+      if ('time' in msg) {
+        const syncMsg = { ...msg, speakerId: msg.speakerId || senderPeer };
+        if (onReceiveSyncObj.current) {
+          onReceiveSyncObj.current(syncMsg);
+        }
       }
     }
-  }, []);
+  }, [addNotification]);
 
   const startHosting = useCallback(() => {
     cleanup();
@@ -175,13 +227,15 @@ export function useWatchTogether(): UseWatchTogetherReturn {
 
       bindIncomingVoiceCalls(peer);
 
-      peer.on('connection', (conn: any) => {
+peer.on('connection', (conn: any) => {
         addLog(`[Host] Incoming connection from: ${conn.peer}`);
         conn.on('open', () => {
           addLog(`[Host] Connection OPEN: ${conn.peer}`);
           connectionsRef.current.push(conn);
-          setParticipants(prev => [...prev, conn.peer]);
-          
+          const hostName = getUserName();
+          setParticipants(prev => [...prev, { peerId: conn.peer, name: 'Guest' }]);
+          conn.send({ type: 'HOST_INFO', time: 0, name: hostName });
+
           conn.on('data', (data: any) => {
             handleIncomingMessage(data, conn.peer);
             if (data && typeof data === 'object' && 'type' in data && ['TALK_START', 'TALK_END'].includes(data.type)) {
@@ -193,9 +247,11 @@ export function useWatchTogether(): UseWatchTogetherReturn {
 
           conn.on('close', () => {
             addLog(`[Host] Connection CLOSED: ${conn.peer}`);
+            const left = participantsRef.current.find(p => p.peerId === conn.peer);
             connectionsRef.current = connectionsRef.current.filter(c => c.peer !== conn.peer);
-            setParticipants(prev => prev.filter(p => p !== conn.peer));
+            setParticipants(prev => prev.filter(p => p.peerId !== conn.peer));
             removeRemoteStream(conn.peer);
+            if (left) addNotification(`${left.name} left`);
           });
 
           if (localStreamRef.current) connectVoiceToPeer(conn.peer);
@@ -244,13 +300,17 @@ export function useWatchTogether(): UseWatchTogetherReturn {
         setIsHost(false);
         setRoomId(idToJoin.toUpperCase());
         setIsConnecting(false);
+        const guestName = getUserName();
+        conn.send({ type: 'USER_INFO', time: 0, name: guestName });
 
         conn.on('data', (data: any) => {
-          handleIncomingMessage(data);
+          handleIncomingMessage(data, fullHostId);
         });
 
         conn.on('close', () => {
-          setError('Host disconnected.');
+          const hostName = hostNameRef.current;
+          addNotification(`${hostName} left (session ended)`);
+          setError(`${hostName} disconnected.`);
           cleanup(false);
         });
       });
@@ -324,8 +384,10 @@ export function useWatchTogether(): UseWatchTogetherReturn {
   }, []);
 
   const leaveRoom = useCallback(() => {
-    cleanup();
-  }, [cleanup]);
+    const name = getUserName();
+    broadcastState({ type: 'USER_LEFT', time: 0, name });
+    setTimeout(() => cleanup(), 100);
+  }, [broadcastState, cleanup]);
 
   useEffect(() => {
     return () => {
@@ -351,6 +413,7 @@ export function useWatchTogether(): UseWatchTogetherReturn {
     startVoiceSession,
     setPushToTalkActive,
     onReceiveSyncObj,
-    debugLogs
+    debugLogs,
+    notifications
   };
 }

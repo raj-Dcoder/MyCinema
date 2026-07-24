@@ -166,7 +166,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
     setBookmarks(prev => prev.filter(b => b.time !== time))
   }, [])
 
-  const { isHost, roomId, participants, localPeerId, isConnecting, error, voiceError, voiceEnabled, isMicActive, remoteAudioStreams, startHosting, joinRoom, leaveRoom, broadcastState, startVoiceSession, setPushToTalkActive, onReceiveSyncObj, debugLogs } = useWatchTogether()
+  const { isHost, roomId, participants, localPeerId, isConnecting, error, voiceError, voiceEnabled, isMicActive, remoteAudioStreams, startHosting, joinRoom, leaveRoom, broadcastState, startVoiceSession, setPushToTalkActive, onReceiveSyncObj, debugLogs, notifications } = useWatchTogether()
   const [showWatchTogetherState, setShowWatchTogetherState] = useState(false)
   const [activeSpeakerId, setActiveSpeakerId] = useState<string | null>(null)
   const [talkResumeCountdown, setTalkResumeCountdown] = useState<number | null>(null)
@@ -360,9 +360,8 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
   const getSpeakerLabel = (speakerId: string | null) => {
     if (!speakerId) return 'Someone'
     if (speakerId === localPeerId) return 'You'
-    if (speakerId.startsWith('mycinema-wt-')) return 'Host'
-    const guestIndex = participants.indexOf(speakerId)
-    return guestIndex >= 0 ? `Guest ${guestIndex + 1}` : 'Friend'
+    const participant = participants.find(p => p.peerId === speakerId)
+    return participant ? participant.name : 'Friend'
   }
 
   const beginPushToTalk = async () => {
@@ -3212,6 +3211,16 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
               <span className="truncate">{activeIntroDbActionLabel}</span>
             </span>
           </button>
+        </div>
+      )}
+
+      {notifications.length > 0 && (
+        <div className="absolute top-20 left-1/2 -translate-x-1/2 z-50 flex flex-col items-center gap-2 pointer-events-none">
+          {notifications.map((n) => (
+            <div key={n.id} className="rounded-full border border-white/10 bg-black/75 px-5 py-2 text-sm text-white shadow-2xl backdrop-blur-xl">
+              {n.text}
+            </div>
+          ))}
         </div>
       )}
 

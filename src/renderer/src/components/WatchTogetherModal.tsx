@@ -1,10 +1,12 @@
 import React, { useState } from 'react';
-import { Users, X, Link, Play, Copy, Check, Info } from 'lucide-react';
+import { Users, X, Link, Play, Copy, Check } from 'lucide-react';
+
+const getUserName = () => localStorage.getItem('mycinema_user_name') || 'User';
 
 interface Props {
   isHost: boolean;
   roomId: string | null;
-  participants: string[];
+  participants: { peerId: string; name: string }[];
   isConnecting: boolean;
   error: string | null;
   startHosting: () => void;
@@ -118,32 +120,38 @@ export function WatchTogetherModal({
                    </span>
                  </div>
                  
-                 {isHost ? (
-                    participants.length === 0 ? (
-                      <div className="text-center p-6 border border-dashed border-white/10 rounded-lg">
-                        <Users className="w-8 h-8 text-white/20 mx-auto mb-2" />
-                        <p className="text-sm text-white/40">Waiting for friends to join...</p>
+{isHost ? (
+                     participants.length === 0 ? (
+                       <div className="text-center p-6 border border-dashed border-white/10 rounded-lg">
+                         <Users className="w-8 h-8 text-white/20 mx-auto mb-2" />
+                         <p className="text-sm text-white/40">Waiting for friends to join...</p>
+                       </div>
+                     ) : (
+                       <div className="space-y-2 max-h-40 overflow-y-auto">
+                         <div className="bg-indigo-500/10 border border-indigo-500/20 rounded p-2 text-sm flex items-center gap-2">
+                           <div className="w-2 h-2 rounded-full bg-indigo-400" />
+                           {getUserName()} (Host)
+                         </div>
+                         {participants.map((p, i) => (
+                            <div key={p.peerId || i} className="bg-white/5 border border-white/10 rounded p-2 text-sm flex items-center gap-2">
+                              <div className="w-2 h-2 rounded-full bg-green-400" />
+                              {p.name || 'Guest'}
+                            </div>
+                         ))}
+                       </div>
+                     )
+                  ) : (
+                    <div className="space-y-2 max-h-40 overflow-y-auto">
+                      <div className="bg-indigo-500/10 border border-indigo-500/20 rounded p-2 text-sm flex items-center gap-2">
+                        <div className="w-2 h-2 rounded-full bg-indigo-400" />
+                        {participants.length > 0 ? `${participants[0].name} (Host)` : 'Host'}
                       </div>
-                    ) : (
-                      <div className="space-y-2 max-h-40 overflow-y-auto">
-                        <div className="bg-indigo-500/10 border border-indigo-500/20 rounded p-2 text-sm flex items-center gap-2">
-                          <div className="w-2 h-2 rounded-full bg-indigo-400" />
-                          You (Host)
-                        </div>
-                        {participants.map((p, i) => (
-                           <div key={i} className="bg-white/5 border border-white/10 rounded p-2 text-sm flex items-center gap-2">
-                             <div className="w-2 h-2 rounded-full bg-green-400" />
-                             Guest {i + 1}
-                           </div>
-                        ))}
+                      <div className="bg-white/5 border border-white/10 rounded p-2 text-sm flex items-center gap-2">
+                        <div className="w-2 h-2 rounded-full bg-green-400" />
+                        You
                       </div>
-                    )
-                 ) : (
-                   <div className="p-4 bg-white/5 rounded-lg text-sm text-white/60 flex items-start gap-3">
-                     <Info className="w-5 h-5 text-indigo-400 shrink-0 mt-0.5" />
-                     <p>You are connected to the host. The host controls playback. Keep your video open.</p>
-                   </div>
-                 )}
+                    </div>
+                  )}
                </div>
 
                <button

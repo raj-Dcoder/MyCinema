@@ -4329,8 +4329,12 @@ async function startWebTorrent(torrentId: string, magnetUrl: string, title: stri
     broadcastProgress(torrentId, torrent, 'done')
     console.log(`[Torrent] Download complete: ${title}`)
     setTimeout(() => {
-      if (!torrent.destroyed) torrent.destroy()
       markTorrentInactive(torrentId)
+      if (!torrent.destroyed) {
+        try { torrent.destroy() } catch (e) {
+          console.warn('[Torrent] Destroy already in progress:', e)
+        }
+      }
     }, 5000)
   })
 

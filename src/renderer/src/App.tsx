@@ -537,14 +537,14 @@ const App: React.FC = () => {
           </div>
         </div>
 
-        <div className={`overflow-hidden px-4 transition-all duration-300 ${!isSidebarExpanded && updateState.status !== 'idle' ? 'max-h-20 pb-4 opacity-100' : 'max-h-0 pb-0 opacity-0'}`}>
+        <div className={`overflow-hidden px-4 transition-all duration-300 ${!isSidebarExpanded && updateState.status !== 'idle' ? 'max-h-16 pb-3 opacity-100' : 'max-h-0 pb-0 opacity-0'}`}>
           <button
-            className={`relative mx-auto flex h-12 w-12 items-center justify-center rounded-2xl border transition-all ${
+            className={`relative mx-auto flex items-center gap-1.5 h-9 rounded-lg border px-3 transition-all ${
               updateState.status === 'ready'
-                ? 'border-emerald-300/35 bg-emerald-400/15 text-emerald-200 shadow-lg shadow-emerald-950/30'
+                ? 'border-emerald-500/25 bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20'
                 : updateState.status === 'downloading'
-                  ? 'border-cyan-300/35 bg-cyan-400/15 text-cyan-200 shadow-lg shadow-cyan-950/30'
-                  : 'border-cyan-300/25 bg-cyan-400/10 text-cyan-200 shadow-lg shadow-cyan-950/20 hover:bg-cyan-400/20'
+                  ? 'border-primary/25 bg-primary/10 text-primary hover:bg-primary/20'
+                  : 'border-primary/25 bg-primary/10 text-primary hover:bg-primary/20'
             }`}
             title={
               updateState.status === 'ready'
@@ -559,72 +559,90 @@ const App: React.FC = () => {
             }}
           >
             {updateState.status === 'downloading' ? (
-              <>
-                <RefreshCw size={20} className="animate-spin" />
-                <span className="absolute -bottom-1 rounded-md bg-cyan-300 px-1.5 py-0.5 text-[8px] font-black text-slate-950">
-                  {updateState.percent ?? 0}%
-                </span>
-              </>
+              <RefreshCw size={14} className="animate-spin shrink-0" />
+            ) : updateState.status === 'ready' ? (
+              <DownloadIcon size={14} className="shrink-0" />
             ) : (
-              <DownloadIcon size={21} />
+              <DownloadIcon size={14} className="shrink-0" />
             )}
+            <span className="text-xs font-semibold">
+              {updateState.status === 'available' && 'Update'}
+              {updateState.status === 'downloading' && `${updateState.percent ?? 0}%`}
+              {updateState.status === 'ready' && 'Install'}
+            </span>
             {updateState.status === 'available' && (
-              <span className="absolute right-2 top-2 h-2.5 w-2.5 rounded-full bg-cyan-300 shadow-[0_0_12px_rgba(103,232,249,0.85)]" />
+              <span className="h-1.5 w-1.5 rounded-full bg-primary shadow-[0_0_8px_rgba(229,9,20,0.7)]" />
             )}
             {updateState.status === 'ready' && (
-              <span className="absolute right-2 top-2 h-2.5 w-2.5 rounded-full bg-emerald-300 shadow-[0_0_12px_rgba(110,231,183,0.85)]" />
+              <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.7)]" />
             )}
           </button>
         </div>
 
-        <div className={`overflow-hidden px-4 transition-all duration-300 ${isSidebarExpanded && updateState.status !== 'idle' ? 'max-h-56 pb-4 opacity-100' : 'max-h-0 pb-0 opacity-0'}`}>
-          <div className="rounded-2xl border border-cyan-400/20 bg-cyan-400/10 p-4">
-            {updateState.status === 'available' && (
-              <div className="space-y-3">
-                <p className="text-sm font-bold text-white">
-                  New update available{updateState.version ? `: v${updateState.version}` : ''}
-                </p>
-                <p className="text-xs font-medium text-white/60">
-                  Download it when you're ready.
-                </p>
-                <button
-                  onClick={handleStartUpdateDownload}
-                  className="w-full rounded-xl bg-cyan-400 px-4 py-3 text-sm font-black text-slate-950 transition-colors hover:bg-cyan-300"
-                >
-                  Download Update
-                </button>
-              </div>
-            )}
-
-            {updateState.status === 'downloading' && (
-              <div className="space-y-3">
-                <div className="flex items-center justify-between gap-3">
-                  <p className="text-sm font-bold text-white">Downloading update</p>
-                  <span className="text-xs font-black text-cyan-300">{updateState.percent ?? 0}%</span>
+        <div className={`overflow-hidden px-4 transition-all duration-300 ${isSidebarExpanded && updateState.status !== 'idle' ? 'max-h-60 pb-3 opacity-100' : 'max-h-0 pb-0 opacity-0'}`}>
+          {updateState.status === 'available' && (
+            <div className="rounded-xl border border-white/5 bg-white/[0.03] p-4">
+              <div className="flex items-center gap-2.5 mb-3">
+                <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary/10">
+                  <DownloadIcon size={15} className="text-primary" />
                 </div>
-                <div className="h-2 overflow-hidden rounded-full bg-white/10">
-                  <div
-                    className="h-full rounded-full bg-gradient-to-r from-cyan-400 to-emerald-400 transition-all duration-300"
-                    style={{ width: `${updateState.percent ?? 0}%` }}
-                  />
+                <div>
+                  <p className="text-sm font-semibold text-white">Update Available</p>
+                  {updateState.version && (
+                    <p className="text-xs text-white/40">v{updateState.version} is ready to download</p>
+                  )}
                 </div>
               </div>
-            )}
+              <button
+                onClick={handleStartUpdateDownload}
+                className="w-full rounded-lg bg-primary py-2 text-xs font-semibold text-white hover:bg-[#c40812] transition-colors"
+              >
+                Download Update
+              </button>
+            </div>
+          )}
 
-            {updateState.status === 'ready' && (
-              <div className="space-y-3">
-                <p className="text-sm font-bold text-white">
-                  Update ready{updateState.version ? `: v${updateState.version}` : ''}
-                </p>
-                <button
-                  onClick={() => window.api.installUpdate()}
-                  className="w-full rounded-xl bg-cyan-400 px-4 py-3 text-sm font-black text-slate-950 transition-colors hover:bg-cyan-300"
-                >
-                  Restart and Install
-                </button>
+          {updateState.status === 'downloading' && (
+            <div className="rounded-xl border border-white/5 bg-white/[0.03] p-4">
+              <div className="flex items-center gap-2.5 mb-3">
+                <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary/10">
+                  <RefreshCw size={15} className="text-primary animate-spin" />
+                </div>
+                <div>
+                  <p className="text-sm font-semibold text-white">Downloading</p>
+                  <p className="text-xs text-white/40">{updateState.percent ?? 0}% complete</p>
+                </div>
               </div>
-            )}
-          </div>
+              <div className="h-1.5 overflow-hidden rounded-full bg-white/10">
+                <div
+                  className="h-full rounded-full bg-primary transition-all duration-300"
+                  style={{ width: `${updateState.percent ?? 0}%` }}
+                />
+              </div>
+            </div>
+          )}
+
+          {updateState.status === 'ready' && (
+            <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/[0.04] p-4">
+              <div className="flex items-center gap-2.5 mb-3">
+                <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-emerald-500/10">
+                  <DownloadIcon size={15} className="text-emerald-400" />
+                </div>
+                <div>
+                  <p className="text-sm font-semibold text-white">Update Ready</p>
+                  {updateState.version && (
+                    <p className="text-xs text-white/40">v{updateState.version} installed</p>
+                  )}
+                </div>
+              </div>
+              <button
+                onClick={() => window.api.installUpdate()}
+                className="w-full rounded-lg bg-emerald-500 py-2 text-xs font-semibold text-white hover:bg-emerald-400 transition-colors"
+              >
+                Restart & Install
+              </button>
+            </div>
+          )}
         </div>
 
         {/* User Profile */}

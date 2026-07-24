@@ -1,17 +1,24 @@
 import React, { useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { X, Film } from 'lucide-react'
+import { X, Bug, Sparkles, PlusCircle } from 'lucide-react'
 
 export const LATEST_RELEASE = {
   version: '1.29.1',
 }
 
-const newFeatures = [
-  {
-    icon: <Film size={24} className="text-gray-400" />,
-    text: "Cleaner player controls with the Next Episode button removed for a focused, streamlined playback experience."
-  }
+const releaseNotes: { type: NoteType; icon: React.ReactNode; text: string }[] = [
+  { type: 'fixed', icon: <Bug size={16} />, text: 'Duplicate Next Episode button removed from player' },
+  { type: 'improved', icon: <Sparkles size={16} />, text: 'Player controls cleaned up for smoother playback' },
+  { type: 'new', icon: <PlusCircle size={16} />, text: 'Faster navigation with optimized transitions' },
 ]
+
+const typeConfig: Record<NoteType, { label: string; dot: string; border: string; bg: string; text: string }> = {
+  fixed: { label: 'Fixed', dot: 'bg-red-500', border: 'border-red-500/20', bg: 'bg-red-500/10', text: 'text-red-400' },
+  improved: { label: 'Improved', dot: 'bg-blue-500', border: 'border-blue-500/20', bg: 'bg-blue-500/10', text: 'text-blue-400' },
+  new: { label: 'New', dot: 'bg-emerald-500', border: 'border-emerald-500/20', bg: 'bg-emerald-500/10', text: 'text-emerald-400' },
+}
+
+type NoteType = 'fixed' | 'improved' | 'new'
 
 type WhatsNewOnboardingProps = {
   currentStep: number
@@ -34,49 +41,49 @@ const WhatsNewOnboarding: React.FC<WhatsNewOnboardingProps> = ({ onClose }) => {
   }, [onClose])
 
   return (
-    <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/60 backdrop-blur-sm">
+    <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/70 backdrop-blur-sm">
       <AnimatePresence>
         <motion.div
-          initial={{ opacity: 0, scale: 0.95 }}
-          animate={{ opacity: 1, scale: 1 }}
-          exit={{ opacity: 0, scale: 0.95 }}
-          transition={{ duration: 0.2 }}
-          className="relative w-full max-w-[480px] rounded-2xl bg-[#111b21] p-8 text-white shadow-2xl"
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          exit={{ opacity: 0, y: 20 }}
+          transition={{ duration: 0.25, ease: 'easeOut' }}
+          className="relative w-full max-w-[420px] rounded-xl bg-[#0e1419] p-6 text-white shadow-2xl border border-white/5"
         >
           <button
             onClick={onClose}
-            className="absolute right-4 top-4 text-gray-400 hover:text-white"
+            className="absolute right-3 top-3 flex h-7 w-7 items-center justify-center rounded-lg text-white/30 hover:bg-white/10 hover:text-white transition-colors"
             aria-label="Close"
           >
-            <X size={24} />
+            <X size={16} />
           </button>
 
-          <div className="mb-8 flex flex-col items-center">
-            <div className="mb-6 flex h-24 w-24 items-center justify-center rounded-full bg-primary/10">
-              <Film size={48} className="text-primary" />
-            </div>
-            <h2 className="text-2xl font-normal text-white">What's new in MyCinema</h2>
+          <div className="mb-6">
+            <h2 className="text-lg font-bold text-white">What's new</h2>
+            <p className="text-sm text-white/40 mt-0.5">v{LATEST_RELEASE.version}</p>
           </div>
 
-          <div className="mb-10 space-y-6">
-            {newFeatures.map((feature, idx) => (
-              <div key={idx} className="flex items-start gap-4">
-                <div className="mt-0.5 shrink-0 text-primary">{feature.icon}</div>
-                <p className="text-[15px] leading-relaxed text-gray-300">
-                  {feature.text}
-                </p>
-              </div>
-            ))}
+          <div className="space-y-2.5 mb-6">
+            {releaseNotes.map((note, idx) => {
+              const cfg = typeConfig[note.type]
+              return (
+                <div key={idx} className={`flex items-start gap-3 rounded-lg border ${cfg.border} ${cfg.bg} p-3`}>
+                  <span className={`mt-0.5 shrink-0 ${cfg.text}`}>{note.icon}</span>
+                  <div className="flex-1 min-w-0">
+                    <span className={`text-xs font-semibold uppercase tracking-wide ${cfg.text}`}>{cfg.label}</span>
+                    <p className="text-sm text-white/80 mt-0.5 leading-snug">{note.text}</p>
+                  </div>
+                </div>
+              )
+            })}
           </div>
 
-          <div className="flex justify-center">
-            <button
-              onClick={onClose}
-              className="rounded-full bg-primary px-8 py-2.5 text-[15px] font-medium text-white hover:bg-[#c40812] transition-colors"
-            >
-              Continue
-            </button>
-          </div>
+          <button
+            onClick={onClose}
+            className="w-full rounded-lg bg-primary py-2.5 text-sm font-semibold text-white hover:bg-[#c40812] transition-colors"
+          >
+            Got it
+          </button>
         </motion.div>
       </AnimatePresence>
     </div>

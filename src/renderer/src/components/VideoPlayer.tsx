@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react'
+import React, { useCallback, useEffect, useRef, useState, useMemo } from 'react'
 import { Play, Pause, Rewind, FastForward, X, Maximize, Minimize, Volume2, VolumeX, Subtitles, Music, SkipForward as SkipNext, ArrowLeft, MessageSquareText, AlertTriangle, Check, Monitor, RectangleHorizontal, Crop, FolderOpen, Info, Film, HardDrive, ChevronDown, ChevronUp, ListVideo, Users, Search, Globe, Loader2, Download, RotateCcw, Zap, Sparkles, Wand2, PictureInPicture2, Mic, MicOff } from 'lucide-react'
 import { Video } from '../types'
 import { getMediaUnitIdentity, groupMediaVersions } from '../utils/mediaVersions'
@@ -2910,6 +2910,17 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
   playNextEpisodeRef.current = playNextEpisode
   seekToTimeRef.current = seekToTime
 
+  const nextEpisodeStillUrl = useMemo(() => {
+    if (currentVideo.type !== 'series' || !hasNextEpisode || seriesEpisodes.length === 0) return null
+    const episodes = groupMediaVersions(seriesEpisodes).map(g => g.representative)
+    const idx = episodes.findIndex(e => getMediaUnitIdentity(e) === getMediaUnitIdentity(currentVideo))
+    if (idx !== -1 && idx < episodes.length - 1) {
+      const cardEp = episodes[idx + 1]
+      return episodeStillMapRef.current[`${cardEp.season}-${cardEp.episode}`] || getArtworkUrl(cardEp.backdrop_path, 'w342')
+    }
+    return null
+  }, [currentVideo, hasNextEpisode, seriesEpisodes])
+
   return (
     <div 
       ref={playerShellRef}
@@ -2932,6 +2943,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
       onPointerLeave={handlePointerUpOrLeave}
       onPointerCancel={handlePointerUpOrLeave}
     >
+      {nextEpisodeStillUrl && <img src={nextEpisodeStillUrl} style={{ display: 'none' }} alt="" />}
       <div
         className="relative overflow-hidden bg-black"
         style={{

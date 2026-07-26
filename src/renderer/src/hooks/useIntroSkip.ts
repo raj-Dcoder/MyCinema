@@ -19,7 +19,7 @@ export interface AutoSkipTransitionState {
   id: number
 }
 
-export const INTRODB_SKIP_PROMPT_LEAD_SECONDS = 8
+export const INTRODB_SKIP_PROMPT_LEAD_SECONDS = 11
 export const INTRODB_SKIP_OVERLAP_SECONDS = 1
 export const INTRODB_SKIP_END_PADDING_SECONDS = 0.15
 export const INTRODB_AUTO_SKIP_CONFIRMATION_MS = 700

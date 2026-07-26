@@ -115,7 +115,7 @@ function nodeHttpsRequestOnce(
   url: string,
   opts: { method?: string; headers?: Record<string, string>; body?: string; timeoutMs?: number; resolvedHost?: string; redirectsCount?: number; signal?: AbortSignal } = {}
 ): Promise<string> {
-  const { method = 'GET', headers = {}, body, timeoutMs = 10000, resolvedHost, redirectsCount = 0, signal = getActiveTorrentSourceSignal() } = opts
+  const { method = 'GET', headers = {}, body, timeoutMs = 30000, resolvedHost, redirectsCount = 0, signal = getActiveTorrentSourceSignal() } = opts
   return new Promise((resolve, reject) => {
     if (signal?.aborted) {
       reject(new DOMException('Aborted', 'AbortError'))
@@ -205,7 +205,7 @@ function nodeHttpsRequestOnce(
 }
 
 // Make HTTPS GET requests using the OS resolver first; custom DNS is only a fallback.
-function nodeHttpGet(url: string, timeoutMs: number = 10000): Promise<any> {
+function nodeHttpGet(url: string, timeoutMs: number = 30000): Promise<any> {
   return nodeHttpRequest(url, { timeoutMs }).then((data) => {
     if (typeof data !== 'string') return data
     try { return JSON.parse(data) } catch { return null }

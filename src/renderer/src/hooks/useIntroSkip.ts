@@ -19,12 +19,13 @@ export interface AutoSkipTransitionState {
   id: number
 }
 
-export const INTRODB_SKIP_PROMPT_LEAD_SECONDS = 3
+export const INTRODB_SKIP_PROMPT_LEAD_SECONDS = 8
+export const INTRODB_SKIP_OVERLAP_SECONDS = 1
 export const INTRODB_SKIP_END_PADDING_SECONDS = 0.15
 export const INTRODB_AUTO_SKIP_CONFIRMATION_MS = 700
 export const INTRODB_AUTO_SKIP_STORAGE_KEY = 'mycinema_introdb_auto_skip'
 export const INTRODB_AUTO_SKIP_SEEK_TRANSITION_MS = 180
-export const INTRODB_AUTO_SKIP_NEXT_TRANSITION_MS = 240
+export const INTRODB_AUTO_SKIP_NEXT_TRANSITION_MS = 50
 export const INTRODB_RECAP_PROMPT_VISIBLE_SECONDS = 8
 
 export function getIntroDbSegmentKey(segment: IntroDbSegment): string {
@@ -147,7 +148,11 @@ export function useIntroSkip({
         const promptStart = Math.max(0, segment.startSec - INTRODB_SKIP_PROMPT_LEAD_SECONDS)
         const promptEnd = segment.type === 'recap'
           ? Math.min(segmentEnd - 0.25, segment.startSec + INTRODB_RECAP_PROMPT_VISIBLE_SECONDS)
-          : segmentEnd - 0.25
+          : segment.type === 'outro'
+            ? autoSkipIntroOutroEnabled
+              ? segment.startSec + INTRODB_SKIP_OVERLAP_SECONDS + 0.5
+              : segmentEnd - 0.25
+            : segmentEnd - 0.25
         return !dismissedIntroDbSegmentKeys.has(key) &&
           currentTime >= promptStart &&
           currentTime < promptEnd
@@ -177,7 +182,12 @@ export function useIntroSkip({
     : ''
     
   const activeIntroDbAutoSkipProgress = activeIntroDbSegment && activeIntroDbSegmentCanAutoSkip && autoSkipIntroOutroEnabled
-    ? Math.max(0, Math.min(1, 1 - ((activeIntroDbSegment.startSec - currentTime) / INTRODB_SKIP_PROMPT_LEAD_SECONDS)))
+    ? (() => {
+        const overlap = activeIntroDbSegment.type === 'outro' ? INTRODB_SKIP_OVERLAP_SECONDS : 0
+        const totalWindow = INTRODB_SKIP_PROMPT_LEAD_SECONDS + overlap
+        const skipTarget = activeIntroDbSegment.startSec + overlap
+        return Math.max(0, Math.min(1, 1 - ((skipTarget - currentTime) / totalWindow)))
+      })()
     : 0
 
   const dismissIntroDbSegment = useCallback((segment: IntroDbSegment) => {
@@ -190,40 +200,15 @@ export function useIntroSkip({
 
   const skipIntroDbSegment = useCallback((segment: IntroDbSegment, options: { automatic?: boolean } = {}) => {
     const isOutroAdvance = segment.type === 'outro' && hasNextEpisode
-    
-    if (options.automatic) {
-      const transitionMs = isOutroAdvance ? INTRODB_AUTO_SKIP_NEXT_TRANSITION_MS : INTRODB_AUTO_SKIP_SEEK_TRANSITION_MS
-      
-      setAutoSkipTransition({
-        show: true,
-        label: isOutroAdvance ? 'Playing next episode...' : `Skipping ${getIntroDbSegmentLabel(segment.type).toLowerCase()}...`,
-        id: Date.now()
-      })
 
-      if (autoSkipTransitionTimerRef.current) clearTimeout(autoSkipTransitionTimerRef.current)
-      autoSkipTransitionTimerRef.current = setTimeout(() => {
-        dismissIntroDbSegment(segment)
-        onSkipSegment(segment)
-
-        if (autoSkipTransitionTimerRef.current) clearTimeout(autoSkipTransitionTimerRef.current)
-        autoSkipTransitionTimerRef.current = setTimeout(() => {
-          setAutoSkipTransition(prev => prev ? {
-            ...prev,
-            label: isOutroAdvance
-              ? 'Next episode started'
-              : `${getIntroDbSegmentLabel(segment.type)} skipped`,
-          } : null)
-
-          if (autoSkipTransitionTimerRef.current) clearTimeout(autoSkipTransitionTimerRef.current)
-          autoSkipTransitionTimerRef.current = setTimeout(() => {
-            setAutoSkipTransition(null)
-          }, INTRODB_AUTO_SKIP_CONFIRMATION_MS)
-        }, 150)
-      }, transitionMs)
-    } else {
+    if (isOutroAdvance || options.automatic) {
       dismissIntroDbSegment(segment)
       onSkipSegment(segment)
+      return
     }
+
+    dismissIntroDbSegment(segment)
+    onSkipSegment(segment)
   }, [hasNextEpisode, dismissIntroDbSegment, onSkipSegment])
 
   // Automatic skip effect
@@ -237,8 +222,11 @@ export function useIntroSkip({
       isSeeking
     ) return
 
+    const skipThreshold = activeIntroDbSegment.type === 'outro'
+      ? activeIntroDbSegment.startSec + INTRODB_SKIP_OVERLAP_SECONDS
+      : activeIntroDbSegment.startSec
     if (
-      currentTime < activeIntroDbSegment.startSec ||
+      currentTime < skipThreshold ||
       currentTime >= activeIntroDbSegment.endSec - 0.25
     ) return
 

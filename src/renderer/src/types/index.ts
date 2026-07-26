@@ -9,6 +9,7 @@ export interface Video {
   duration?: number
   poster_path?: string
   backdrop_path?: string
+  still_path?: string
   logo_path?: string
   overview?: string
   tagline?: string

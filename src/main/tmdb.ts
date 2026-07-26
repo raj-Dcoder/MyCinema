@@ -1270,7 +1270,7 @@ export async function fetchTmdbReleaseInfo(id: number, type: 'movie' | 'series')
 
     const response = await fetch(url, {
       dispatcher: tmdbDispatcher,
-      signal: AbortSignal.timeout(10000),
+      signal: AbortSignal.timeout(30000),
       headers: {
         'User-Agent': 'MyCinema/1.3.0',
         'Accept': 'application/json'

@@ -27,6 +27,13 @@ const isTorrentStreamPath = (filePath?: string | null) => Boolean(filePath?.star
 const getVideoSourceUrl = (filePath: string) => (
   isTorrentStreamPath(filePath) ? filePath : `media://file/${encodeURIComponent(filePath)}`
 )
+const getArtworkUrl = (artworkPath?: string | null, remoteSize: 'w342' | 'w780' | 'w1280' | 'original' = 'w780') => {
+  if (!artworkPath) return null
+  if (artworkPath.startsWith('http')) {
+    return artworkPath.replace(/\/t\/p\/(w342|w500|w780|w1280|original)\//, `/t/p/${remoteSize}/`)
+  }
+  return `media://file/${encodeURIComponent(artworkPath)}`
+}
 
 interface SeriesSubtitleStatus {
   label: string
@@ -331,6 +338,14 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
   const audioRef = useRef<HTMLAudioElement>(null)
   const lastSeekTimeRef = useRef(0)
   const [hasNextEpisode, setHasNextEpisode] = useState(false)
+  const [crossFade, setCrossFade] = useState(false)
+  const crossFadeRef = useRef(false)
+  const episodeTransitionGuardRef = useRef(false)
+  const episodeStillMapRef = useRef<Record<string, string>>({})
+  const episodeNameMapRef = useRef<Record<string, string>>({})
+  const cardRef = useRef<HTMLDivElement>(null)
+  const [cardRect, setCardRect] = useState({ w: 220, h: 140 })
+
   const clickTimeoutRef = useRef<NodeJS.Timeout | null>(null)
   const fullscreenToggleInFlightRef = useRef(false)
   const timeRef = useRef(0)
@@ -450,6 +465,19 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
     isPlaying,
     isSeeking
   })
+
+  useEffect(() => {
+    const el = cardRef.current
+    if (!el) return
+    const ro = new ResizeObserver(() => {
+      const rect = el.getBoundingClientRect()
+      if (rect.width > 0 && rect.height > 0) {
+        setCardRect({ w: rect.width, h: rect.height })
+      }
+    })
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [activeIntroDbSegment, hasNextEpisode])
 
   const [showInfoPanel, setShowInfoPanel] = useState(false)
   const [showEpisodesPanel, setShowEpisodesPanel] = useState(false)
@@ -802,6 +830,53 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
       setHasNextEpisode(false)
     }
   }
+
+  // Keep ref in sync for safe access in callbacks
+  useEffect(() => {
+    crossFadeRef.current = crossFade
+  }, [crossFade])
+
+  // Clear guard ref when transition ends
+  useEffect(() => {
+    if (!crossFade) {
+      episodeTransitionGuardRef.current = false
+    }
+  }, [crossFade])
+
+  // Fetch TMDB episode catalog for the next-episode card
+  useEffect(() => {
+    if (currentVideo.type !== 'series' || !currentVideo.tmdb_id) return
+    let cancelled = false
+    window.api.getTmdbSeriesCatalog(currentVideo.tmdb_id).then(catalog => {
+      if (cancelled) return
+      const stills: Record<string, string> = {}
+      const names: Record<string, string> = {}
+      for (const ep of catalog) {
+        if (ep.stillPath) {
+          stills[`${ep.seasonNumber}-${ep.episodeNumber}`] = ep.stillPath
+        }
+        names[`${ep.seasonNumber}-${ep.episodeNumber}`] = ep.name
+      }
+      episodeStillMapRef.current = stills
+      episodeNameMapRef.current = names
+    }).catch(() => {})
+    return () => { cancelled = true }
+  }, [currentVideo.tmdb_id, currentVideo.type])
+
+  // Measure card dimensions for the border progress SVG
+  useEffect(() => {
+    const el = cardRef.current
+    if (!el) return
+    setCardRect({ w: el.offsetWidth, h: el.offsetHeight })
+    const ro = new ResizeObserver(entries => {
+      for (const entry of entries) {
+        const { width, height } = entry.contentRect
+        setCardRect({ w: width, h: height })
+      }
+    })
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [])
 
   const formatTrackLabel = (track: any, defaultIndex: number) => {
     let langName = ''
@@ -1946,18 +2021,27 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
 
   const playNextEpisode = async () => {
     if (currentVideo.type === 'series' && currentVideo.series_name) {
+      if (episodeTransitionGuardRef.current) return
+      episodeTransitionGuardRef.current = true
+
       const episodeVersions: Video[] = seriesEpisodes.length > 0 ? seriesEpisodes : await window.api.getSeriesInfo(currentVideo.series_name)
       const episodes = groupMediaVersions(episodeVersions).map(group => group.representative)
       const currentIdentity = getMediaUnitIdentity(currentVideo)
       const currentIndex = episodes.findIndex(episode => getMediaUnitIdentity(episode) === currentIdentity)
       if (currentIndex !== -1 && currentIndex < episodes.length - 1) {
-        forceRestartRef.current = true
-        setForceRestart(true)
-        setCurrentVideo(episodes[currentIndex + 1])
+        const nextEp = episodes[currentIndex + 1]
+        setCrossFade(true)
+        setTimeout(() => {
+          forceRestartRef.current = true
+          setForceRestart(true)
+          setCurrentVideo(nextEp)
+        }, 200)
       } else {
+        episodeTransitionGuardRef.current = false
         onClose()
       }
     } else {
+      episodeTransitionGuardRef.current = false
       onClose()
     }
   }
@@ -2848,7 +2932,14 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
       onPointerLeave={handlePointerUpOrLeave}
       onPointerCancel={handlePointerUpOrLeave}
     >
-      <div className="relative overflow-hidden bg-black" style={videoSurfaceStyle}>
+      <div
+        className="relative overflow-hidden bg-black"
+        style={{
+          ...videoSurfaceStyle,
+          transition: `opacity ${crossFade ? '200ms' : '300ms'} ease-in-out`,
+          opacity: crossFade ? 0 : 1
+        }}
+      >
         <video
           ref={videoRef}
           crossOrigin="anonymous"
@@ -2941,7 +3032,12 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
             }
           }
         }}
-        onCanPlay={hideBufferingIndicator}
+        onCanPlay={() => {
+          hideBufferingIndicator()
+          if (crossFadeRef.current) {
+            setCrossFade(false)
+          }
+        }}
         onLoadedMetadata={() => {
           if (videoRef.current) {
             setHasVideoMetadata(true)
@@ -3147,36 +3243,112 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
       )}
 
       {activeIntroDbSegment && (
-        <div className={`absolute ${shouldShowTalkControl ? 'bottom-52' : 'bottom-32'} right-10 z-[60] flex max-w-[calc(100%-5rem)] items-center justify-end gap-4 video-controls animate-in fade-in slide-in-from-bottom-2 duration-200`}>
-          <button
-            onClick={(e) => {
-              e.stopPropagation()
-              dismissIntroDbSegment(activeIntroDbSegment)
-            }}
-            className="h-14 min-w-[136px] rounded-lg border border-white/10 bg-[#2b2b2d]/95 px-6 text-[15px] font-extrabold text-white/75 shadow-2xl backdrop-blur-xl transition-all hover:bg-[#353537] hover:text-white active:scale-95"
-            title={`Keep watching ${activeIntroDbSegment.type === 'outro' ? 'credits' : getIntroDbSegmentLabel(activeIntroDbSegment.type).toLowerCase()}`}
-          >
-            <span className="block truncate">{activeIntroDbWatchLabel}</span>
-          </button>
-          <button
-            onClick={(e) => {
-              e.stopPropagation()
-              skipIntroDbSegment(activeIntroDbSegment)
-            }}
-            className="relative h-14 min-w-[148px] overflow-hidden rounded-lg bg-white/90 px-6 text-[15px] font-extrabold text-black shadow-2xl transition-all hover:bg-white active:scale-95"
-            title={`${activeIntroDbActionLabel}${autoSkipIntroOutroEnabled && activeIntroDbSegmentCanAutoSkip && activeIntroDbAutoSkipCountdown > 0 ? ` automatically in ${activeIntroDbAutoSkipCountdown}s` : ''}`}
-          >
-            {autoSkipIntroOutroEnabled && activeIntroDbSegmentCanAutoSkip && (
-              <span
-                className="absolute inset-y-0 left-0 bg-black/10 transition-[width] duration-200 ease-linear"
-                style={{ width: `${activeIntroDbAutoSkipProgress * 100}%` }}
-              />
-            )}
-            <span className="relative flex items-center justify-center gap-2 whitespace-nowrap">
-              <Play size={18} fill="currentColor" />
-              <span className="truncate">{activeIntroDbActionLabel}</span>
-            </span>
-          </button>
+        <div className={`absolute ${shouldShowTalkControl ? 'bottom-52' : 'bottom-32'} right-10 z-[60] flex items-end justify-end video-controls animate-in fade-in slide-in-from-bottom-2 duration-200`}>
+          {activeIntroDbSegment.type === 'outro' && hasNextEpisode ? (
+            <div className="relative">
+              <div ref={cardRef} className="relative flex flex-col rounded-xl overflow-hidden bg-white/90 shadow-2xl w-[220px]">
+                <button
+                  onClick={(e) => { e.stopPropagation(); dismissIntroDbSegment(activeIntroDbSegment) }}
+                  className="absolute top-2 right-2 z-10 flex h-6 w-6 items-center justify-center rounded-full bg-black/30 text-white/80 hover:bg-black/50 hover:text-white transition-colors"
+                >
+                  <X size={14} strokeWidth={3} />
+                </button>
+                {(() => {
+                  const episodes = seriesEpisodes.length > 0 ? groupMediaVersions(seriesEpisodes).map(g => g.representative) : []
+                  const idx = episodes.findIndex(e => getMediaUnitIdentity(e) === getMediaUnitIdentity(currentVideo))
+                  const cardEp = idx !== -1 && idx < episodes.length - 1 ? episodes[idx + 1] : null
+                  return cardEp ? (
+                    <button
+                      onClick={(e) => { e.stopPropagation(); skipIntroDbSegment(activeIntroDbSegment) }}
+                      className="relative flex flex-col text-left"
+                    >
+                      {(() => {
+                        const stillUrl = episodeStillMapRef.current[`${cardEp.season}-${cardEp.episode}`] || getArtworkUrl(cardEp.backdrop_path, 'w342')
+                        return stillUrl ? (
+                          <div className="relative w-full aspect-video overflow-hidden">
+                            <img src={stillUrl} alt="" className="absolute inset-0 w-full h-full object-cover" />
+                            <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-black/10 to-transparent" />
+                          </div>
+                        ) : null
+                      })()}
+                      <div className="relative px-4 pt-2.5 pb-3">
+                        <p className="text-[13px] font-extrabold text-black leading-tight truncate">{episodeNameMapRef.current[`${cardEp.season}-${cardEp.episode}`] || cardEp.title || currentVideo.series_name}</p>
+                        {cardEp.season != null && cardEp.episode != null && (
+                          <p className="text-[11px] font-semibold text-black/50 mt-0.5">S{cardEp.season} · E{cardEp.episode}</p>
+                        )}
+                      </div>
+                    </button>
+                  ) : (
+                    <button
+                      onClick={(e) => { e.stopPropagation(); skipIntroDbSegment(activeIntroDbSegment) }}
+                      className="relative flex items-center justify-center gap-2 px-6 py-4"
+                    >
+                      <Play size={18} fill="currentColor" />
+                      <span className="text-[15px] font-extrabold text-black truncate">Next Episode</span>
+                    </button>
+                  )
+                })()}
+              </div>
+              {autoSkipIntroOutroEnabled && (() => {
+                const { w, h } = cardRect
+                if (w <= 0 || h <= 0) return null
+                
+                const distance = 8
+                const strokePadding = 2
+                const g = distance + strokePadding
+                const r_card = 12
+                const rawR = r_card + distance
+                
+                const minX = strokePadding
+                const minY = strokePadding
+                const maxX = w + 2 * g - strokePadding
+                const maxY = h + 2 * g - strokePadding
+                const W = maxX - minX
+                const H = maxY - minY
+                const R = Math.min(rawR, W / 2, H / 2)
+                
+                const cx = w / 2 + g
+                const perimeter = 2 * (W + H) - 8 * R + 2 * Math.PI * R
+                
+                const path = [
+                  `M ${cx} ${maxY}`,
+                  `L ${minX + R} ${maxY}`,
+                  `A ${R} ${R} 0 0 1 ${minX} ${maxY - R}`,
+                  `L ${minX} ${minY + R}`,
+                  `A ${R} ${R} 0 0 1 ${minX + R} ${minY}`,
+                  `L ${maxX - R} ${minY}`,
+                  `A ${R} ${R} 0 0 1 ${maxX} ${minY + R}`,
+                  `L ${maxX} ${maxY - R}`,
+                  `A ${R} ${R} 0 0 1 ${maxX - R} ${maxY}`,
+                  `L ${cx} ${maxY}`
+                ].join(' ')
+
+                return (
+                  <svg className="absolute pointer-events-none z-10" style={{ top: -g, left: -g, width: `calc(100% + ${2 * g}px)`, height: `calc(100% + ${2 * g}px)` }} viewBox={`0 0 ${w + 2 * g} ${h + 2 * g}`}>
+                    <path d={path} fill="none" stroke="white" strokeWidth={2} strokeOpacity={0.12} strokeLinecap="round" strokeLinejoin="round" />
+                    <path d={path} fill="none" stroke="white" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" strokeDasharray={perimeter} strokeDashoffset={perimeter * (1 - activeIntroDbAutoSkipProgress)} style={{ transition: 'stroke-dashoffset 0.25s linear' }} />
+                  </svg>
+                )
+              })()}
+            </div>
+          ) : (
+            <button
+              onClick={(e) => { e.stopPropagation(); skipIntroDbSegment(activeIntroDbSegment) }}
+              className="relative h-14 min-w-[148px] overflow-hidden rounded-lg bg-white/90 px-6 text-[15px] font-extrabold text-black shadow-2xl transition-all hover:bg-white active:scale-95"
+              title={`${activeIntroDbActionLabel}${autoSkipIntroOutroEnabled && activeIntroDbSegmentCanAutoSkip && activeIntroDbAutoSkipCountdown > 0 ? ` automatically in ${activeIntroDbAutoSkipCountdown}s` : ''}`}
+            >
+              {autoSkipIntroOutroEnabled && activeIntroDbSegmentCanAutoSkip && (
+                <span
+                  className="absolute inset-y-0 left-0 bg-black/10"
+                  style={{ width: `${activeIntroDbAutoSkipProgress * 100}%` }}
+                />
+              )}
+              <span className="relative flex items-center justify-center gap-2 whitespace-nowrap">
+                <Play size={18} fill="currentColor" />
+                <span className="truncate">{activeIntroDbActionLabel}</span>
+              </span>
+            </button>
+          )}
         </div>
       )}
 

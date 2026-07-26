@@ -1,10 +1,22 @@
-# MyCinema v1.29.4
+# MyCinema v1.30.0
 
-Frosted glass glow — What's New now feels like a premium overlay.
+Smooth episode transitions with Netflix-style cards and a perimeter progress ring.
+
+### Features
+- **Cinematic Episode Transition**: Episode switching now uses a cross-fade — the video fades out, the next episode loads, then fades back in.
 
 ### UI & UX Polish
-- **Glassmorphism Overlay**: Added `backdrop-blur-xl` to the What's New background — the app content bleeds through with a frosted glass effect, making each slide's mood gradient pop.
-- **Cinematic What's New**: Full-screen slide deck with per-slide moods (cinematic purple, social cyan, celebrate orange), cursor-follow glow, floating particles, and energetic CTAs.
+- **Next-Episode Card**: Replaced the old skip button with a compact Netflix-style card (thumbnail + TMDB episode name + S·E info) that appears before the outro credits.
+- **Perimeter Progress Ring**: A sleek progress line traces around the card's border, starting from bottom-center and completing a full lap in 12 seconds.
+- **Smarter Auto-Skip**: Card shows 11s before credits start; auto-skip fires 1s into the credits. When auto-skip is off, the card stays visible through the full segment.
+- **Cleaner Episode Title**: When TMDB doesn't return an episode name, the card now shows "Episode N" instead of a raw filename.
+
+### Bug Fixes
+- **Auto-Skip Actually Fires**: Fixed a race condition where the card segment went inactive at the exact same moment the skip should trigger — the skip now always fires.
+- **No More Double Skips**: Added a guard ref that prevents `playNextEpisode` from being called twice during a transition.
+
+### Reliability
+- **Increased HTTP Timeouts**: Raised timeout from 10s to 30s for TMDB and network requests to reduce failures on slow connections.
 
 ***
 

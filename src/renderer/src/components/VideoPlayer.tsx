@@ -3284,7 +3284,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
                         ) : null
                       })()}
                       <div className="relative px-4 pt-2.5 pb-3">
-                        <p className="text-[13px] font-extrabold text-black leading-tight truncate">{episodeNameMapRef.current[`${cardEp.season}-${cardEp.episode}`] || cardEp.title || currentVideo.series_name}</p>
+                        <p className="text-[13px] font-extrabold text-black leading-tight truncate">{episodeNameMapRef.current[`${cardEp.season}-${cardEp.episode}`] || `Episode ${cardEp.episode}` || currentVideo.series_name}</p>
                         {cardEp.season != null && cardEp.episode != null && (
                           <p className="text-[11px] font-semibold text-black/50 mt-0.5">S{cardEp.season} · E{cardEp.episode}</p>
                         )}

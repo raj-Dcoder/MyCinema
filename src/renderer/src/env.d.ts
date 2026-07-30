@@ -56,6 +56,8 @@ interface Api {
   clearAllData: () => Promise<boolean>
   fetchTrending: (type: 'movie' | 'series') => Promise<any[]>
   fetchTrendingIndia: (type?: 'movie' | 'series') => Promise<any[]>
+  fetchTrendingKdrama: () => Promise<any[]>
+  fetchTrendingAnime: () => Promise<any[]>
   getTmdbTitleLogo: (type: 'movie' | 'series', tmdbId: number) => Promise<string | null>
   getTmdbReleaseInfo: (id: number, type: 'movie' | 'series') => Promise<import('./types').TmdbReleaseInfo | null>
   getTmdbKeywords: (id: number, type: 'movie' | 'series') => Promise<string[]>

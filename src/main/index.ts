@@ -2448,6 +2448,14 @@ ipcMain.handle('fetch-trending-india', async (_, type: 'movie' | 'series' = 'mov
   return await tmdb.fetchTrendingInIndia(type)
 })
 
+ipcMain.handle('fetch-trending-kdrama', async () => {
+  return await tmdb.fetchTrendingKdrama()
+})
+
+ipcMain.handle('fetch-trending-anime', async () => {
+  return await tmdb.fetchTrendingAnime()
+})
+
 ipcMain.handle('get-tmdb-release-info', async (_, id: number, type: 'movie' | 'series') => {
   return await tmdb.fetchTmdbReleaseInfo(id, type)
 })

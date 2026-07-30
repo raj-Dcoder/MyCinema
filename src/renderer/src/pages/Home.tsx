@@ -26,6 +26,8 @@ type HomeSnapshot = {
   trendingSeries: Video[]
   trendingIndiaMovies: Video[]
   trendingIndiaSeries: Video[]
+  trendingKdrama: Video[]
+  trendingAnime: Video[]
   trendingIndia?: Video[]
   timestamp: number
 }
@@ -59,6 +61,8 @@ const readHomeSnapshot = (): HomeSnapshot | null => {
       trendingIndiaSeries: Array.isArray(parsed.trendingIndiaSeries)
         ? parsed.trendingIndiaSeries
         : legacyTrendingIndia.filter(video => video.type === 'series'),
+      trendingKdrama: Array.isArray(parsed.trendingKdrama) ? parsed.trendingKdrama : [],
+      trendingAnime: Array.isArray(parsed.trendingAnime) ? parsed.trendingAnime : [],
       timestamp: typeof parsed.timestamp === 'number' ? parsed.timestamp : 0
     }
   } catch {
@@ -74,7 +78,9 @@ const writeHomeSnapshot = (snapshot: Omit<HomeSnapshot, 'timestamp'>) => {
     snapshot.trendingMovies,
     snapshot.trendingSeries,
     snapshot.trendingIndiaMovies,
-    snapshot.trendingIndiaSeries
+    snapshot.trendingIndiaSeries,
+    snapshot.trendingKdrama,
+    snapshot.trendingAnime
   ].some(items => items.length > 0)
 
   if (!hasAnyContent) return
@@ -355,7 +361,7 @@ const SearchResultCard: React.FC<{
   )
 }
 
-type SectionHeaderTone = 'red' | 'cyan' | 'amber' | 'violet' | 'emerald'
+type SectionHeaderTone = 'red' | 'cyan' | 'amber' | 'violet' | 'emerald' | 'rose' | 'blue' | 'orange' | 'indigo'
 
 const sectionHeaderToneClasses: Record<SectionHeaderTone, {
   icon: string
@@ -386,6 +392,26 @@ const sectionHeaderToneClasses: Record<SectionHeaderTone, {
     icon: 'border-emerald-400/35 bg-emerald-400/15 text-emerald-200 shadow-emerald-950/20',
     eyebrow: 'text-emerald-200',
     underline: 'from-emerald-400 via-emerald-300 to-transparent'
+  },
+  rose: {
+    icon: 'border-rose-400/35 bg-rose-400/15 text-rose-200 shadow-rose-950/20',
+    eyebrow: 'text-rose-200',
+    underline: 'from-rose-400 via-rose-300 to-transparent'
+  },
+  blue: {
+    icon: 'border-blue-400/35 bg-blue-400/15 text-blue-200 shadow-blue-950/20',
+    eyebrow: 'text-blue-200',
+    underline: 'from-blue-400 via-blue-300 to-transparent'
+  },
+  orange: {
+    icon: 'border-orange-400/35 bg-orange-400/15 text-orange-200 shadow-orange-950/20',
+    eyebrow: 'text-orange-200',
+    underline: 'from-orange-400 via-orange-300 to-transparent'
+  },
+  indigo: {
+    icon: 'border-indigo-400/35 bg-indigo-400/15 text-indigo-200 shadow-indigo-950/20',
+    eyebrow: 'text-indigo-200',
+    underline: 'from-indigo-400 via-indigo-300 to-transparent'
   }
 }
 
@@ -442,6 +468,8 @@ const Home: React.FC<HomeProps> = ({ onPlay, onShowDetail, onNavigate, refreshKe
   const [trendingSeries, setTrendingSeries] = useState<Video[]>(() => initialSnapshotRef.current?.trendingSeries || [])
   const [trendingIndiaMovies, setTrendingIndiaMovies] = useState<Video[]>(() => initialSnapshotRef.current?.trendingIndiaMovies || [])
   const [trendingIndiaSeries, setTrendingIndiaSeries] = useState<Video[]>(() => initialSnapshotRef.current?.trendingIndiaSeries || [])
+  const [trendingKdrama, setTrendingKdrama] = useState<Video[]>(() => initialSnapshotRef.current?.trendingKdrama || [])
+  const [trendingAnime, setTrendingAnime] = useState<Video[]>(() => initialSnapshotRef.current?.trendingAnime || [])
   const [allLibraryVideos, setAllLibraryVideos] = useState<Video[]>([])
   const [localDataLoaded, setLocalDataLoaded] = useState(() => Boolean(initialSnapshotRef.current))
   const [homeFolderScanPath, setHomeFolderScanPath] = useState<string | null>(null)
@@ -451,6 +479,8 @@ const Home: React.FC<HomeProps> = ({ onPlay, onShowDetail, onNavigate, refreshKe
   const globalSeriesRef = useRef<HorizontalScrollRowHandle>(null)
   const indiaMoviesRef = useRef<HorizontalScrollRowHandle>(null)
   const indiaSeriesRef = useRef<HorizontalScrollRowHandle>(null)
+  const kdramaRef = useRef<HorizontalScrollRowHandle>(null)
+  const animeRef = useRef<HorizontalScrollRowHandle>(null)
   const [showContinueLeft, setShowContinueLeft] = useState(false)
   const [showContinueRight, setShowContinueRight] = useState(false)
   const [isContinueHovered, setIsContinueHovered] = useState(false)
@@ -510,6 +540,14 @@ const Home: React.FC<HomeProps> = ({ onPlay, onShowDetail, onNavigate, refreshKe
 
     if (indiaMovies.length > 0) setTrendingIndiaMovies(indiaMovies)
     if (indiaSeries.length > 0) setTrendingIndiaSeries(indiaSeries)
+
+    const [kdrama, anime] = await Promise.all([
+      window.api.fetchTrendingKdrama().catch(err => { console.error('Trending Kdrama Error:', err); return [] }),
+      window.api.fetchTrendingAnime().catch(err => { console.error('Trending Anime Error:', err); return [] })
+    ])
+
+    if (kdrama.length > 0) setTrendingKdrama(kdrama)
+    if (anime.length > 0) setTrendingAnime(anime)
   }, [])
 
   const fetchData = useCallback(async () => {
@@ -569,7 +607,9 @@ const Home: React.FC<HomeProps> = ({ onPlay, onShowDetail, onNavigate, refreshKe
         trendingMovies,
         trendingSeries,
         trendingIndiaMovies,
-        trendingIndiaSeries
+        trendingIndiaSeries,
+        trendingKdrama,
+        trendingAnime
       })
       snapshotTimerRef.current = null
     }, 600)
@@ -580,7 +620,7 @@ const Home: React.FC<HomeProps> = ({ onPlay, onShowDetail, onNavigate, refreshKe
         snapshotTimerRef.current = null
       }
     }
-  }, [continueWatching, recentMovies, recentSeries, trendingMovies, trendingSeries, trendingIndiaMovies, trendingIndiaSeries])
+  }, [continueWatching, recentMovies, recentSeries, trendingMovies, trendingSeries, trendingIndiaMovies, trendingIndiaSeries, trendingKdrama, trendingAnime])
 
   const suppressNextHomeClick = () => {
     suppressContentClickUntilRef.current = Date.now() + 350
@@ -1082,7 +1122,7 @@ const Home: React.FC<HomeProps> = ({ onPlay, onShowDetail, onNavigate, refreshKe
       {/* 2. Recently Added Movies */}
       <section className="mx-auto mt-7 max-w-[1600px] px-8">
         <SectionHeader
-          eyebrow="Library"
+          eyebrow=""
           title="Recently Added Movies"
           icon={<Film size={18} />}
           tone="emerald"
@@ -1117,7 +1157,7 @@ const Home: React.FC<HomeProps> = ({ onPlay, onShowDetail, onNavigate, refreshKe
       {/* 3. Recently Added Series */}
       <section className="mx-auto mt-7 max-w-[1600px] px-8">
         <SectionHeader
-          eyebrow="Library"
+          eyebrow=""
           title="Recently Added Series"
           icon={<Tv size={18} />}
           tone="cyan"
@@ -1152,7 +1192,7 @@ const Home: React.FC<HomeProps> = ({ onPlay, onShowDetail, onNavigate, refreshKe
       {/* 4. Global Trending Movies Section */}
       <section className="mx-auto mt-7 max-w-[1600px] px-8">
         <SectionHeader
-          eyebrow="Discovery"
+          eyebrow=""
           title="Global Trending Movies"
           icon={<Film size={18} />}
           tone="red"
@@ -1178,7 +1218,7 @@ const Home: React.FC<HomeProps> = ({ onPlay, onShowDetail, onNavigate, refreshKe
       {/* 4. Global Trending Series Section */}
       <section className="mx-auto mt-7 max-w-[1600px] px-8">
         <SectionHeader
-          eyebrow="Discovery"
+          eyebrow=""
           title="Global Trending Series"
           icon={<Tv size={18} />}
           tone="cyan"
@@ -1204,8 +1244,8 @@ const Home: React.FC<HomeProps> = ({ onPlay, onShowDetail, onNavigate, refreshKe
       {/* 5. India Trending Movies Section */}
       <section className="mx-auto mt-7 max-w-[1600px] px-8">
         <SectionHeader
-          eyebrow="India"
-          title="India Trending Movies"
+          eyebrow=""
+          title="Indian Trending Movies"
           icon={<Film size={18} />}
           tone="amber"
           onScrollToStart={() => indiaMoviesRef.current?.scrollToStart()}
@@ -1230,8 +1270,8 @@ const Home: React.FC<HomeProps> = ({ onPlay, onShowDetail, onNavigate, refreshKe
       {/* 6. India Trending Series Section */}
       <section className="mx-auto mt-7 max-w-[1600px] px-8">
         <SectionHeader
-          eyebrow="India"
-          title="India Trending Series"
+          eyebrow=""
+          title="Indian Trending Series"
           icon={<Tv size={18} />}
           tone="violet"
           onScrollToStart={() => indiaSeriesRef.current?.scrollToStart()}
@@ -1246,6 +1286,58 @@ const Home: React.FC<HomeProps> = ({ onPlay, onShowDetail, onNavigate, refreshKe
             </div>
           ))}
           {trendingIndiaSeries.length === 0 && Array.from({ length: TRENDING_RAIL_LIMIT }, (_, i) => i + 1).map(i => (
+            <div key={i} className={POSTER_RAIL_CARD_CLASS}>
+              <VideoCardSkeleton />
+            </div>
+          ))}
+        </HorizontalScrollRow>
+      </section>
+
+      {/* 7. Trending Kdramas Section */}
+      <section className="mx-auto mt-7 max-w-[1600px] px-8">
+        <SectionHeader
+          eyebrow=""
+          title="Trending Kdramas"
+          icon={<Tv size={18} />}
+          tone="rose"
+          onScrollToStart={() => kdramaRef.current?.scrollToStart()}
+        />
+        <HorizontalScrollRow ref={kdramaRef} contentClassName="gap-5">
+          {trendingKdrama.map(video => (
+            <div
+              key={video.tmdb_id || video.id}
+              className={POSTER_RAIL_CARD_CLASS}
+            >
+              <VideoCard video={video} onPlay={handlePlayFromHome} onShowDetail={handleShowDetailFromHome} />
+            </div>
+          ))}
+          {trendingKdrama.length === 0 && Array.from({ length: TRENDING_RAIL_LIMIT }, (_, i) => i + 1).map(i => (
+            <div key={i} className={POSTER_RAIL_CARD_CLASS}>
+              <VideoCardSkeleton />
+            </div>
+          ))}
+        </HorizontalScrollRow>
+      </section>
+
+      {/* 8. Trending Animes Section */}
+      <section className="mx-auto mt-7 max-w-[1600px] px-8">
+        <SectionHeader
+          eyebrow=""
+          title="Trending Animes"
+          icon={<Film size={18} />}
+          tone="orange"
+          onScrollToStart={() => animeRef.current?.scrollToStart()}
+        />
+        <HorizontalScrollRow ref={animeRef} contentClassName="gap-5">
+          {trendingAnime.map(video => (
+            <div
+              key={video.tmdb_id || video.id}
+              className={POSTER_RAIL_CARD_CLASS}
+            >
+              <VideoCard video={video} onPlay={handlePlayFromHome} onShowDetail={handleShowDetailFromHome} />
+            </div>
+          ))}
+          {trendingAnime.length === 0 && Array.from({ length: TRENDING_RAIL_LIMIT }, (_, i) => i + 1).map(i => (
             <div key={i} className={POSTER_RAIL_CARD_CLASS}>
               <VideoCardSkeleton />
             </div>

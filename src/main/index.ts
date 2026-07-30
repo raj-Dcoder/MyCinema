@@ -2456,6 +2456,26 @@ ipcMain.handle('fetch-trending-anime', async () => {
   return await tmdb.fetchTrendingAnime()
 })
 
+ipcMain.handle('fetch-trending-netflix', async (_, type: 'movie' | 'series') => {
+  return await tmdb.fetchTrendingNetflix(type)
+})
+
+ipcMain.handle('fetch-trending-prime-video', async (_, type: 'movie' | 'series') => {
+  return await tmdb.fetchTrendingPrimeVideo(type)
+})
+
+ipcMain.handle('fetch-trending-jiohotstar', async (_, type: 'movie' | 'series') => {
+  return await tmdb.fetchTrendingJioHotstar(type)
+})
+
+ipcMain.handle('fetch-trending-apple-tv', async (_, type: 'movie' | 'series') => {
+  return await tmdb.fetchTrendingAppleTv(type)
+})
+
+ipcMain.handle('fetch-trending-hbo-max', async (_, type: 'movie' | 'series') => {
+  return await tmdb.fetchTrendingHboMax(type)
+})
+
 ipcMain.handle('get-tmdb-release-info', async (_, id: number, type: 'movie' | 'series') => {
   return await tmdb.fetchTmdbReleaseInfo(id, type)
 })

@@ -529,9 +529,12 @@ async function fetchTrendingByCountry(
   countryCode: string,
   countryName: string,
   type: 'movie' | 'series' = 'movie',
-  includeOttFilter = true
+  includeOttFilter = true,
+  providerId?: string
 ): Promise<any[]> {
-  const cacheKey = `trending:${countryCode}:watchable-now:v10:${type}`
+  const cacheKey = providerId
+    ? `trending:ott:${providerId}:${countryCode}:${type}:v1`
+    : `trending:${countryCode}:watchable-now:v10:${type}`
   const cached = readTmdbListCache(cacheKey, `${countryName} watchable trending ${type}`)
   if (cached && cached.length > 0) return cached
 
@@ -571,8 +574,13 @@ async function fetchTrendingByCountry(
       page: '1',
       region: countryCode,
       sort_by: 'popularity.desc',
-      watch_region: countryCode,
-      with_origin_country: countryCode
+      watch_region: countryCode
+    }
+
+    if (providerId) {
+      baseWatchParams.with_watch_providers = providerId
+    } else {
+      baseWatchParams.with_origin_country = countryCode
     }
 
     if (includeOttFilter) {
@@ -775,6 +783,32 @@ export async function fetchTrendingAnime(): Promise<any[]> {
     if (stale && stale.length > 0) return stale
     return []
   }
+}
+
+// ── OTT Platform helpers ──────────────────────────────────────
+
+async function fetchTrendingOnProvider(providerId: string, providerName: string, type: 'movie' | 'series'): Promise<any[]> {
+  return fetchTrendingByCountry('IN', providerName, type, true, providerId)
+}
+
+export function fetchTrendingNetflix(type: 'movie' | 'series'): Promise<any[]> {
+  return fetchTrendingOnProvider('8', 'Netflix', type)
+}
+
+export function fetchTrendingPrimeVideo(type: 'movie' | 'series'): Promise<any[]> {
+  return fetchTrendingOnProvider('119', 'Prime Video', type)
+}
+
+export function fetchTrendingJioHotstar(type: 'movie' | 'series'): Promise<any[]> {
+  return fetchTrendingOnProvider('118', 'JioHotstar', type)
+}
+
+export function fetchTrendingAppleTv(type: 'movie' | 'series'): Promise<any[]> {
+  return fetchTrendingOnProvider('2', 'Apple TV', type)
+}
+
+export function fetchTrendingHboMax(type: 'movie' | 'series'): Promise<any[]> {
+  return fetchTrendingOnProvider('384', 'HBO Max', type)
 }
 
 export async function fetchTmdbMetadata(

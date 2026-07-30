@@ -58,6 +58,11 @@ interface Api {
   fetchTrendingIndia: (type?: 'movie' | 'series') => Promise<any[]>
   fetchTrendingKdrama: () => Promise<any[]>
   fetchTrendingAnime: () => Promise<any[]>
+  fetchTrendingNetflix: (type: 'movie' | 'series') => Promise<any[]>
+  fetchTrendingPrimeVideo: (type: 'movie' | 'series') => Promise<any[]>
+  fetchTrendingJioHotstar: (type: 'movie' | 'series') => Promise<any[]>
+  fetchTrendingAppleTv: (type: 'movie' | 'series') => Promise<any[]>
+  fetchTrendingHboMax: (type: 'movie' | 'series') => Promise<any[]>
   getTmdbTitleLogo: (type: 'movie' | 'series', tmdbId: number) => Promise<string | null>
   getTmdbReleaseInfo: (id: number, type: 'movie' | 'series') => Promise<import('./types').TmdbReleaseInfo | null>
   getTmdbKeywords: (id: number, type: 'movie' | 'series') => Promise<string[]>

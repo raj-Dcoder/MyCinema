@@ -583,7 +583,36 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
         title: displayTitle,
         file_path: result.url,
         duration: 0,
-        isExternal: false
+        isExternal: false,
+        logo_path: video.logo_path || resolvedLogoPath
+      })
+    } catch (err: any) {
+      setTorrentStreamError(getTorrentStreamErrorMessage(err?.message))
+    } finally {
+      setStartingTorrentStream(false)
+    }
+  }
+
+  const handlePlayEpisodeStream = async (downloadId: string, season: number, episode: number) => {
+    setTorrentStreamError(null)
+    setStartingTorrentStream(true)
+    try {
+      const result = await window.api.prepareTorrentStream(downloadId)
+      if (!result?.url) {
+        setTorrentStreamError(getTorrentStreamErrorMessage(result?.error))
+        return
+      }
+
+      onPlay({
+        ...video,
+        id: -Math.abs(Date.now()),
+        title: displayTitle,
+        season: season,
+        episode: episode,
+        file_path: result.url,
+        duration: 0,
+        isExternal: false,
+        logo_path: video.logo_path || resolvedLogoPath
       })
     } catch (err: any) {
       setTorrentStreamError(getTorrentStreamErrorMessage(err?.message))
@@ -1715,13 +1744,24 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
                   ) : (
                     (episodesBySeason[selectedSeason || 1] || []).map((ep, idx) => {
                       const isCurrentEpisode = Boolean(ep.localVideo && getMediaUnitIdentity(ep.localVideo) === getMediaUnitIdentity(video))
-                      const isUpcoming = !ep.released && !ep.localVideo
-                      const isMissing = ep.released && !ep.localVideo
+                      const epDownload = activeDownloads.find(d => 
+                        (d.mediaType === 'series' || (video.type === 'series' && d.mediaType !== 'movie')) && 
+                        d.tmdbId === video.tmdb_id && 
+                        Number(d.season) === ep.season && 
+                        Number(d.episode) === ep.episode &&
+                        d.status !== 'completed' && d.status !== 'done' && d.status !== 'error'
+                      )
+                      const isDownloading = Boolean(epDownload)
+                      const epDownloadProgress = epDownload ? Math.max(0, Math.min(100, Number(epDownload.progress || 0))) : 0
+
+                      const isUpcoming = !ep.released && !ep.localVideo && !isDownloading
+                      const isMissing = ep.released && !ep.localVideo && !isDownloading
                       return (
                       <button
                         key={`${ep.season}:${ep.episode}`}
                         onClick={() => {
                           if (ep.localVideo) onPlay(ep.localVideo)
+                          else if (isDownloading && epDownload) handlePlayEpisodeStream(epDownload.id, ep.season, ep.episode)
                           else if (isMissing) void handleOpenEpisodeSources(ep.season, ep.episode)
                         }}
                         disabled={isUpcoming}
@@ -1733,8 +1773,14 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
                             : 'bg-white/[0.045] border-white/[0.07] hover:bg-white/[0.08] hover:border-white/15'
                         }`}
                       >
-                        <div className={`w-32 h-[72px] shrink-0 rounded-lg flex items-center justify-center mr-4 transition-all text-sm font-black italic relative overflow-hidden shadow-md ${
-                          isCurrentEpisode ? 'bg-red-600 text-white' : isMissing ? 'bg-primary/15 text-primary' : 'bg-black/40 text-muted group-hover:bg-red-600 group-hover:text-white'
+                        {isDownloading && (
+                          <div 
+                            className="absolute inset-y-0 left-0 bg-green-500/[0.08] z-0 transition-all duration-300"
+                            style={{ width: `${epDownloadProgress}%` }}
+                          />
+                        )}
+                        <div className={`w-32 h-[72px] shrink-0 rounded-lg flex items-center justify-center mr-4 transition-all text-sm font-black italic relative overflow-hidden shadow-md z-10 ${
+                          isCurrentEpisode ? 'bg-red-600 text-white' : isDownloading ? 'bg-green-500/20 text-green-400 border border-green-500/30' : isMissing ? 'bg-primary/15 text-primary' : 'bg-black/40 text-muted group-hover:bg-red-600 group-hover:text-white'
                         }`}>
                           {ep.stillPath ? (
                             <img src={getArtworkUrl(ep.stillPath, 'w342') || undefined} alt="" className="absolute inset-0 w-full h-full object-cover opacity-80 group-hover:opacity-100 transition-opacity" />
@@ -1744,7 +1790,7 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
                             </span>
                           )}
                         </div>
-                        <div className="flex-1 truncate">
+                        <div className="flex-1 truncate z-10">
                           <div className="text-sm font-bold text-white truncate mb-0.5">
                             S{ep.season.toString().padStart(2, '0')} E{ep.episode.toString().padStart(2, '0')}
                           </div>
@@ -1752,13 +1798,13 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
                             {ep.title}{ep.versionCount > 1 ? ` • ${ep.versionCount} versions` : ''}
                           </div>
                           <div className={`mt-1 text-[8px] font-black uppercase tracking-widest ${
-                            ep.localVideo ? 'text-emerald-300/70' : isMissing ? 'text-primary/80' : 'text-white/30'
+                            ep.localVideo ? 'text-emerald-300/70' : isDownloading ? 'text-green-400' : isMissing ? 'text-primary/80' : 'text-white/30'
                           }`}>
-                            {ep.localVideo ? 'In library' : isMissing ? 'Released • choose source' : ep.airDate ? `Upcoming • ${ep.airDate}` : 'Upcoming'}
+                            {ep.localVideo ? 'In library' : isDownloading ? `Downloading • ${Math.round(epDownloadProgress)}%` : isMissing ? 'Released • choose source' : ep.airDate ? `Upcoming • ${ep.airDate}` : 'Upcoming'}
                           </div>
                         </div>
-                        <div className={`ml-4 transition-opacity ${isUpcoming ? 'opacity-40' : 'opacity-0 group-hover:opacity-100'}`}>
-                          {ep.localVideo ? <Play size={16} className="text-red-600" fill="currentColor" /> : isMissing ? <Download size={16} className="text-primary" /> : <Calendar size={16} className="text-white/40" />}
+                        <div className={`ml-4 transition-opacity z-10 ${isUpcoming ? 'opacity-40' : 'opacity-0 group-hover:opacity-100'}`}>
+                          {ep.localVideo ? <Play size={16} className="text-red-600" fill="currentColor" /> : isDownloading ? <Play size={16} className="text-green-400 animate-pulse" fill="currentColor" /> : isMissing ? <Download size={16} className="text-primary" /> : <Calendar size={16} className="text-white/40" />}
                         </div>
                       </button>
                       )

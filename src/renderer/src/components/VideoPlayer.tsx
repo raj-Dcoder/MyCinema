@@ -310,6 +310,26 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
   const [isPiPActive, setIsPiPActive] = useState(false)
   const [isPiPSupported, setIsPiPSupported] = useState(false)
   const [isBuffering, setIsBuffering] = useState(false)
+  const [isTorrentLoading, setIsTorrentLoading] = useState(isTorrentStream)
+  const [torrentBuffering, setTorrentBuffering] = useState(false)
+  const [torrentLoadProgress, setTorrentLoadProgress] = useState(0)
+  const [torrentLoadingFading, setTorrentLoadingFading] = useState(false)
+  const showTorrentOverlay = isTorrentLoading || torrentBuffering
+
+  useEffect(() => {
+    if (showTorrentOverlay && isTorrentStream) {
+      const interval = setInterval(() => {
+        setTorrentLoadProgress(prev => {
+          if (prev < 95) {
+            return prev + (95 - prev) * 0.1
+          }
+          return prev
+        })
+      }, 200)
+      return () => clearInterval(interval)
+    }
+  }, [showTorrentOverlay, isTorrentStream])
+
   const [audioTracks, setAudioTracks] = useState<any[]>([])
   const [selectedAudioId, setSelectedAudioId] = useState<string>('')
   const [hasVideoMetadata, setHasVideoMetadata] = useState(false)
@@ -3024,13 +3044,33 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
         onEnded={handleEnded}
         onWaiting={() => {
           if (startupExternalAudioBarrierRef.current || externalAudioSeekBarrierRef.current) return
-          showBufferingIndicatorSoon()
+          if (isTorrentStream) {
+            if (!isTorrentLoading) {
+              setTorrentBuffering(true)
+              setTorrentLoadProgress(0)
+              setTorrentLoadingFading(false)
+            }
+          } else {
+            showBufferingIndicatorSoon()
+          }
           if (highSpeedPlaybackActive && fpsBoostEnabled) {
             activateHighSpeedPerformanceMode('Buffering at high speed; FPS Boost eased to help playback catch up')
           }
           if (audioRef.current && audioRef.current.src) audioRef.current.pause()
         }}
         onPlaying={() => { 
+          if (isTorrentStream && (isTorrentLoading || torrentBuffering)) {
+            setTorrentLoadProgress(100)
+            setTimeout(() => {
+              setTorrentLoadingFading(true)
+            }, 300)
+            setTimeout(() => {
+              setIsTorrentLoading(false)
+              setTorrentBuffering(false)
+              setTorrentLoadingFading(false)
+              setTorrentLoadProgress(0)
+            }, 1000)
+          }
           hideBufferingIndicator(); 
           if (isTorrentStreamPath(currentVideo.file_path)) {
             forceTorrentNativeAudio()
@@ -3079,6 +3119,10 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
             }
             setAudioTracks(tracksArray)
           }
+        }}
+        onProgress={() => {
+          // Native video buffering events are often unreliable for local torrent streams,
+          // so we rely on the simulated progress in the useEffect above instead.
         }}
         onLoadedData={updateVideoAspectRatio}
         onResize={updateVideoAspectRatio}
@@ -3235,8 +3279,59 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
 
       {/* 2x / Rev2x indicators are now injected imperatively via speedToastRef — no JSX needed here */}
 
+      {/* Torrent Loading Overlay */}
+      {(isTorrentLoading || torrentBuffering) && (
+        <div 
+          className={`absolute inset-0 z-30 overflow-hidden flex flex-col items-center justify-center transition-opacity duration-700 ease-out ${torrentLoadingFading ? 'opacity-0 pointer-events-none' : 'opacity-100'} ${isTorrentLoading ? 'bg-[#080d16]' : 'bg-black/80 backdrop-blur-md'}`}
+        >
+          {/* Backdrop */}
+          {isTorrentLoading && currentVideo.backdrop_path && (
+            <img 
+              src={getArtworkUrl(currentVideo.backdrop_path, 'w1280') || ''} 
+              alt="" 
+              className="absolute inset-0 w-full h-full object-cover opacity-[0.25] blur-[8px] scale-[1.05]"
+            />
+          )}
+          
+          {/* Logo or Title */}
+          <div className="relative z-10 w-full max-w-xl px-12 flex items-center justify-center drop-shadow-2xl" style={{ animation: 'torrent-logo-breathe 3s ease-in-out infinite' }}>
+            {currentVideo.logo_path ? (
+              <div className="relative w-full flex items-center justify-center">
+                {/* Base Logo (Grayscale, Faded) */}
+                <img 
+                  src={getArtworkUrl(currentVideo.logo_path, 'original') || ''} 
+                  alt="" 
+                  className="w-full max-h-[160px] object-contain opacity-25 grayscale"
+                />
+                {/* Reveal Logo (Full Color) */}
+                <img 
+                  src={getArtworkUrl(currentVideo.logo_path, 'original') || ''} 
+                  alt="" 
+                  className="absolute inset-0 w-full max-h-[160px] object-contain transition-[clip-path] duration-300 ease-linear"
+                  style={{ 
+                    clipPath: `polygon(0 0, ${torrentLoadProgress}% 0, ${torrentLoadProgress}% 100%, 0 100%)`
+                  }}
+                />
+              </div>
+            ) : (
+              <div className="relative text-center w-full max-w-2xl px-8 flex justify-center">
+                <h1 className="text-4xl md:text-5xl font-black text-white/25 tracking-wider uppercase drop-shadow-xl m-0">{currentVideo.title || currentVideo.series_name}</h1>
+                <h1 
+                  className="absolute text-4xl md:text-5xl font-black text-white tracking-wider uppercase drop-shadow-xl transition-[clip-path] duration-300 ease-linear m-0"
+                  style={{
+                    clipPath: `polygon(0 0, ${torrentLoadProgress}% 0, ${torrentLoadProgress}% 100%, 0 100%)`
+                  }}
+                >
+                  {currentVideo.title || currentVideo.series_name}
+                </h1>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* Buffering Indicator */}
-      {isBuffering && (
+      {isBuffering && !isTorrentStream && (
         <div className="absolute inset-0 flex items-center justify-center bg-black/20 pointer-events-none">
           <div className="w-16 h-16 border-4 border-primary border-t-transparent rounded-full animate-spin" />
         </div>

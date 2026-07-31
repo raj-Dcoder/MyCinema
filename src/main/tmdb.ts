@@ -466,10 +466,12 @@ export async function fetchTmdbTitleLogo(type: 'movie' | 'series', tmdbId: numbe
   return logoPath
 }
 
-export async function fetchTrending(type: 'movie' | 'series'): Promise<any[]> {
+export async function fetchTrending(type: 'movie' | 'series', forceRefresh = false): Promise<any[]> {
   const cacheKey = `trending:v4:${type}:week`
-  const cached = readTmdbListCache(cacheKey, `trending ${type}`)
-  if (cached && cached.length > 0) return cached
+  if (!forceRefresh) {
+    const cached = readTmdbListCache(cacheKey, `trending ${type}`)
+    if (cached && cached.length > 0) return cached
+  }
 
   const apiKey = getTmdbApiKey()
   if (!apiKey) {
@@ -530,13 +532,20 @@ async function fetchTrendingByCountry(
   countryName: string,
   type: 'movie' | 'series' = 'movie',
   includeOttFilter = true,
-  providerId?: string
+  providerId?: string,
+  skipDateWindow = false,
+  limit = 20,
+  sortBy = 'popularity.desc',
+  minVoteCount = 0,
+  forceRefresh = false
 ): Promise<any[]> {
   const cacheKey = providerId
-    ? `trending:ott:${providerId}:${countryCode}:${type}:v1`
+    ? `trending:ott:${providerId}:${countryCode}:${type}:v7`
     : `trending:${countryCode}:watchable-now:v10:${type}`
-  const cached = readTmdbListCache(cacheKey, `${countryName} watchable trending ${type}`)
-  if (cached && cached.length > 0) return cached
+  if (!forceRefresh) {
+    const cached = readTmdbListCache(cacheKey, `${countryName} watchable trending ${type}`)
+    if (cached && cached.length > 0) return cached
+  }
 
   const apiKey = getTmdbApiKey()
   if (!apiKey) {
@@ -572,14 +581,18 @@ async function fetchTrendingByCountry(
       include_adult: 'false',
       language: 'en-US',
       page: '1',
-      region: countryCode,
-      sort_by: 'popularity.desc',
-      watch_region: countryCode
+      sort_by: sortBy,
+      ...(countryCode ? { region: countryCode, watch_region: countryCode } : {})
+    }
+
+    if (minVoteCount > 0) {
+      baseWatchParams['vote_count.gte'] = String(minVoteCount)
     }
 
     if (providerId) {
       baseWatchParams.with_watch_providers = providerId
     } else {
+      baseWatchParams.region = countryCode
       baseWatchParams.with_origin_country = countryCode
     }
 
@@ -591,14 +604,18 @@ async function fetchTrendingByCountry(
       addWatchableTask('movie', new URLSearchParams({
         ...baseWatchParams,
         include_video: 'false',
-        'primary_release_date.gte': formatTmdbDate(recentCutoff),
-        'primary_release_date.lte': formatTmdbDate(today)
+        ...(skipDateWindow ? {} : {
+          'primary_release_date.gte': formatTmdbDate(recentCutoff),
+          'primary_release_date.lte': formatTmdbDate(today)
+        })
       }), `${countryName} OTT popular movies`)
     } else {
       addWatchableTask('tv', new URLSearchParams({
         ...baseWatchParams,
-        'first_air_date.gte': formatTmdbDate(recentCutoff),
-        'first_air_date.lte': formatTmdbDate(today)
+        ...(skipDateWindow ? {} : {
+          'first_air_date.gte': formatTmdbDate(recentCutoff),
+          'first_air_date.lte': formatTmdbDate(today)
+        })
       }), `${countryName} OTT popular series`)
     }
 
@@ -635,7 +652,7 @@ async function fetchTrendingByCountry(
       return scoreB - scoreA
     })
 
-    const ranked = candidates.slice(0, 20)
+    const ranked = candidates.slice(0, limit)
 
     const results = await Promise.all(ranked.map(async ({ item, mediaType }) => ({
       id: item.id,
@@ -666,25 +683,27 @@ async function fetchTrendingByCountry(
   }
 }
 
-export async function fetchTrendingInIndia(type: 'movie' | 'series' = 'movie'): Promise<any[]> {
+export async function fetchTrendingInIndia(type: 'movie' | 'series' = 'movie', forceRefresh = false): Promise<any[]> {
   const legacyCacheKey = `trending:IN:watchable-now:v8:${type}`
   const legacyCached = readTmdbListCache(legacyCacheKey, `legacy India OTT trending ${type}`, true)
 
-  const results = await fetchTrendingByCountry('IN', 'India', type)
+  const results = await fetchTrendingByCountry('IN', 'India', type, true, undefined, false, 20, 'popularity.desc', 0, forceRefresh)
 
   if (results.length > 0) return results
   if (legacyCached && legacyCached.length > 0) return legacyCached
   return []
 }
 
-export async function fetchTrendingKdrama(): Promise<any[]> {
-  return fetchTrendingByCountry('KR', 'Korea', 'series')
+export async function fetchTrendingKdrama(forceRefresh = false): Promise<any[]> {
+  return fetchTrendingByCountry('KR', 'Korea', 'series', true, undefined, false, 20, 'popularity.desc', 0, forceRefresh)
 }
 
-export async function fetchTrendingAnime(): Promise<any[]> {
-  const cacheKey = 'trending:anime:v2'
-  const cached = readTmdbListCache(cacheKey, 'anime trending')
-  if (cached && cached.length > 0) return cached
+export async function fetchTrendingAnime(forceRefresh = false): Promise<any[]> {
+  const cacheKey = 'trending:anime:v3'
+  if (!forceRefresh) {
+    const cached = readTmdbListCache(cacheKey, 'anime trending')
+    if (cached && cached.length > 0) return cached
+  }
 
   const apiKey = getTmdbApiKey()
   if (!apiKey) return []
@@ -719,7 +738,8 @@ export async function fetchTrendingAnime(): Promise<any[]> {
       page: '1',
       sort_by: 'popularity.desc',
       with_origin_country: 'JP',
-      with_genres: '16'
+      with_genres: '16',
+      with_watch_monetization_types: 'flatrate|free|ads'
     }
 
     addWatchableTask('movie', new URLSearchParams({
@@ -787,28 +807,24 @@ export async function fetchTrendingAnime(): Promise<any[]> {
 
 // ── OTT Platform helpers ──────────────────────────────────────
 
-async function fetchTrendingOnProvider(providerId: string, providerName: string, type: 'movie' | 'series'): Promise<any[]> {
-  return fetchTrendingByCountry('IN', providerName, type, true, providerId)
+async function fetchTrendingOnProvider(providerId: string, providerName: string, type: 'movie' | 'series', region = 'US', forceRefresh = false): Promise<any[]> {
+  return fetchTrendingByCountry(region, providerName, type, false, providerId, false, 12, 'popularity.desc', 0, forceRefresh)
 }
 
-export function fetchTrendingNetflix(type: 'movie' | 'series'): Promise<any[]> {
-  return fetchTrendingOnProvider('8', 'Netflix', type)
+export function fetchTrendingNetflix(type: 'movie' | 'series', forceRefresh = false): Promise<any[]> {
+  return fetchTrendingOnProvider('8', 'Netflix', type, 'US', forceRefresh)
 }
 
-export function fetchTrendingPrimeVideo(type: 'movie' | 'series'): Promise<any[]> {
-  return fetchTrendingOnProvider('119', 'Prime Video', type)
+export function fetchTrendingPrimeVideo(type: 'movie' | 'series', forceRefresh = false): Promise<any[]> {
+  return fetchTrendingOnProvider('9', 'Prime Video', type, 'US', forceRefresh)
 }
 
-export function fetchTrendingJioHotstar(type: 'movie' | 'series'): Promise<any[]> {
-  return fetchTrendingOnProvider('118', 'JioHotstar', type)
+export function fetchTrendingJioHotstar(type: 'movie' | 'series', forceRefresh = false): Promise<any[]> {
+  return fetchTrendingOnProvider('118', 'JioHotstar', type, 'IN', forceRefresh)
 }
 
-export function fetchTrendingAppleTv(type: 'movie' | 'series'): Promise<any[]> {
-  return fetchTrendingOnProvider('2', 'Apple TV', type)
-}
-
-export function fetchTrendingHboMax(type: 'movie' | 'series'): Promise<any[]> {
-  return fetchTrendingOnProvider('384', 'HBO Max', type)
+export function fetchTrendingAppleTv(type: 'movie' | 'series', forceRefresh = false): Promise<any[]> {
+  return fetchTrendingOnProvider('2', 'Apple TV', type, 'US', forceRefresh)
 }
 
 export async function fetchTmdbMetadata(

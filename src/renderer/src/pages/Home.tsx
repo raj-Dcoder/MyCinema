@@ -34,8 +34,6 @@ type HomeSnapshot = {
   trendingJioHotstarSeries: Video[]
   trendingAppleMovies: Video[]
   trendingAppleSeries: Video[]
-  trendingHboMovies: Video[]
-  trendingHboSeries: Video[]
   trendingPrimeMovies: Video[]
   trendingPrimeSeries: Video[]
   trendingIndia?: Video[]
@@ -79,8 +77,6 @@ const readHomeSnapshot = (): HomeSnapshot | null => {
       trendingJioHotstarSeries: Array.isArray(parsed.trendingJioHotstarSeries) ? parsed.trendingJioHotstarSeries : [],
       trendingAppleMovies: Array.isArray(parsed.trendingAppleMovies) ? parsed.trendingAppleMovies : [],
       trendingAppleSeries: Array.isArray(parsed.trendingAppleSeries) ? parsed.trendingAppleSeries : [],
-      trendingHboMovies: Array.isArray(parsed.trendingHboMovies) ? parsed.trendingHboMovies : [],
-      trendingHboSeries: Array.isArray(parsed.trendingHboSeries) ? parsed.trendingHboSeries : [],
       trendingPrimeMovies: Array.isArray(parsed.trendingPrimeMovies) ? parsed.trendingPrimeMovies : [],
       trendingPrimeSeries: Array.isArray(parsed.trendingPrimeSeries) ? parsed.trendingPrimeSeries : [],
       timestamp: typeof parsed.timestamp === 'number' ? parsed.timestamp : 0
@@ -107,8 +103,6 @@ const writeHomeSnapshot = (snapshot: Omit<HomeSnapshot, 'timestamp'>) => {
     snapshot.trendingJioHotstarSeries,
     snapshot.trendingAppleMovies,
     snapshot.trendingAppleSeries,
-    snapshot.trendingHboMovies,
-    snapshot.trendingHboSeries,
     snapshot.trendingPrimeMovies,
     snapshot.trendingPrimeSeries
   ].some(items => items.length > 0)
@@ -451,16 +445,16 @@ const SectionHeader: React.FC<{
   icon: React.ReactNode
   tone?: SectionHeaderTone
   action?: React.ReactNode
-  onScrollToStart?: () => void
-}> = ({ title, eyebrow, icon, tone = 'red', action, onScrollToStart }) => {
+  onRefresh?: () => void
+}> = ({ title, eyebrow, icon, tone = 'red', action, onRefresh }) => {
   const toneClasses = sectionHeaderToneClasses[tone]
   const iconTileClassName = `flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border transition-all ${toneClasses.icon}`
-  const iconTile = onScrollToStart ? (
+  const iconTile = onRefresh ? (
     <button
       type="button"
-      aria-label={`Back to start of ${title}`}
-      title="Back to start"
-      onClick={onScrollToStart}
+      aria-label={`Refresh ${title}`}
+      title="Refresh"
+      onClick={onRefresh}
       className={`${iconTileClassName} cursor-pointer hover:-translate-y-0.5 hover:brightness-125 active:translate-y-0 active:scale-95`}
     >
       {icon}
@@ -506,8 +500,6 @@ const Home: React.FC<HomeProps> = ({ onPlay, onShowDetail, onNavigate, refreshKe
   const [trendingJioHotstarSeries, setTrendingJioHotstarSeries] = useState<Video[]>(() => initialSnapshotRef.current?.trendingJioHotstarSeries || [])
   const [trendingAppleMovies, setTrendingAppleMovies] = useState<Video[]>(() => initialSnapshotRef.current?.trendingAppleMovies || [])
   const [trendingAppleSeries, setTrendingAppleSeries] = useState<Video[]>(() => initialSnapshotRef.current?.trendingAppleSeries || [])
-  const [trendingHboMovies, setTrendingHboMovies] = useState<Video[]>(() => initialSnapshotRef.current?.trendingHboMovies || [])
-  const [trendingHboSeries, setTrendingHboSeries] = useState<Video[]>(() => initialSnapshotRef.current?.trendingHboSeries || [])
   const [trendingPrimeMovies, setTrendingPrimeMovies] = useState<Video[]>(() => initialSnapshotRef.current?.trendingPrimeMovies || [])
   const [trendingPrimeSeries, setTrendingPrimeSeries] = useState<Video[]>(() => initialSnapshotRef.current?.trendingPrimeSeries || [])
   const [allLibraryVideos, setAllLibraryVideos] = useState<Video[]>([])
@@ -527,8 +519,6 @@ const Home: React.FC<HomeProps> = ({ onPlay, onShowDetail, onNavigate, refreshKe
   const jioHotstarSeriesRef = useRef<HorizontalScrollRowHandle>(null)
   const appleMoviesRef = useRef<HorizontalScrollRowHandle>(null)
   const appleSeriesRef = useRef<HorizontalScrollRowHandle>(null)
-  const hboMoviesRef = useRef<HorizontalScrollRowHandle>(null)
-  const hboSeriesRef = useRef<HorizontalScrollRowHandle>(null)
   const primeMoviesRef = useRef<HorizontalScrollRowHandle>(null)
   const primeSeriesRef = useRef<HorizontalScrollRowHandle>(null)
   const [showContinueLeft, setShowContinueLeft] = useState(false)
@@ -552,6 +542,16 @@ const Home: React.FC<HomeProps> = ({ onPlay, onShowDetail, onNavigate, refreshKe
   const isSearchOpenRef = useRef(false)
   const suppressContentClickUntilRef = useRef(0)
   const didRunInitialRefreshRef = useRef(false)
+  const discoveryTimersRef = useRef<number[]>([])
+
+  const refresh = (fetcher: () => Promise<any[]>, setter: (data: any[]) => void) => async () => {
+    try {
+      const results = await fetcher()
+      if (results.length > 0) setter(results)
+    } catch (err) {
+      console.error('Section refresh failed:', err)
+    }
+  }
 
   const refreshLocalHomeData = useCallback(async () => {
     try {
@@ -575,59 +575,60 @@ const Home: React.FC<HomeProps> = ({ onPlay, onShowDetail, onNavigate, refreshKe
   }, [])
 
   const fetchDiscoveryData = useCallback(async () => {
+    discoveryTimersRef.current.forEach(clearTimeout)
+    discoveryTimersRef.current = []
+
     const [trendingM, trendingS] = await Promise.all([
-      window.api.fetchTrending('movie').catch(err => { console.error('Trending Movies Error:', err); return [] }),
-      window.api.fetchTrending('series').catch(err => { console.error('Trending Series Error:', err); return [] })
+      window.api.fetchTrending('movie').catch(() => []),
+      window.api.fetchTrending('series').catch(() => [])
     ])
 
     if (trendingM.length > 0) setTrendingMovies(trendingM)
     if (trendingS.length > 0) setTrendingSeries(trendingS)
 
-    const [indiaMovies, indiaSeries] = await Promise.all([
-      window.api.fetchTrendingIndia('movie').catch(err => { console.error('Trending India Movies Error:', err); return [] }),
-      window.api.fetchTrendingIndia('series').catch(err => { console.error('Trending India Series Error:', err); return [] })
-    ])
+    const t1 = window.setTimeout(async () => {
+      const [indiaMovies, indiaSeries] = await Promise.all([
+        window.api.fetchTrendingIndia('movie').catch(() => []),
+        window.api.fetchTrendingIndia('series').catch(() => [])
+      ])
+      if (indiaMovies.length > 0) setTrendingIndiaMovies(indiaMovies)
+      if (indiaSeries.length > 0) setTrendingIndiaSeries(indiaSeries)
 
-    if (indiaMovies.length > 0) setTrendingIndiaMovies(indiaMovies)
-    if (indiaSeries.length > 0) setTrendingIndiaSeries(indiaSeries)
+      const [kdrama, anime] = await Promise.all([
+        window.api.fetchTrendingKdrama().catch(() => []),
+        window.api.fetchTrendingAnime().catch(() => [])
+      ])
+      if (kdrama.length > 0) setTrendingKdrama(kdrama)
+      if (anime.length > 0) setTrendingAnime(anime)
+    }, 500)
+    discoveryTimersRef.current.push(t1)
 
-    const [kdrama, anime] = await Promise.all([
-      window.api.fetchTrendingKdrama().catch(err => { console.error('Trending Kdrama Error:', err); return [] }),
-      window.api.fetchTrendingAnime().catch(err => { console.error('Trending Anime Error:', err); return [] })
-    ])
-
-    if (kdrama.length > 0) setTrendingKdrama(kdrama)
-    if (anime.length > 0) setTrendingAnime(anime)
-
-    const [
-      netflixM, netflixS,
-      jioM, jioS,
-      appleM, appleS,
-      hboM, hboS,
-      primeM, primeS
-    ] = await Promise.all([
-      window.api.fetchTrendingNetflix('movie').catch(() => []),
-      window.api.fetchTrendingNetflix('series').catch(() => []),
-      window.api.fetchTrendingJioHotstar('movie').catch(() => []),
-      window.api.fetchTrendingJioHotstar('series').catch(() => []),
-      window.api.fetchTrendingAppleTv('movie').catch(() => []),
-      window.api.fetchTrendingAppleTv('series').catch(() => []),
-      window.api.fetchTrendingHboMax('movie').catch(() => []),
-      window.api.fetchTrendingHboMax('series').catch(() => []),
-      window.api.fetchTrendingPrimeVideo('movie').catch(() => []),
-      window.api.fetchTrendingPrimeVideo('series').catch(() => [])
-    ])
-
-    if (netflixM.length > 0) setTrendingNetflixMovies(netflixM)
-    if (netflixS.length > 0) setTrendingNetflixSeries(netflixS)
-    if (jioM.length > 0) setTrendingJioHotstarMovies(jioM)
-    if (jioS.length > 0) setTrendingJioHotstarSeries(jioS)
-    if (appleM.length > 0) setTrendingAppleMovies(appleM)
-    if (appleS.length > 0) setTrendingAppleSeries(appleS)
-    if (hboM.length > 0) setTrendingHboMovies(hboM)
-    if (hboS.length > 0) setTrendingHboSeries(hboS)
-    if (primeM.length > 0) setTrendingPrimeMovies(primeM)
-    if (primeS.length > 0) setTrendingPrimeSeries(primeS)
+    const t2 = window.setTimeout(async () => {
+      const [
+        netflixM, netflixS,
+        jioM, jioS,
+        appleM, appleS,
+        primeM, primeS
+      ] = await Promise.all([
+        window.api.fetchTrendingNetflix('movie').catch(() => []),
+        window.api.fetchTrendingNetflix('series').catch(() => []),
+        window.api.fetchTrendingJioHotstar('movie').catch(() => []),
+        window.api.fetchTrendingJioHotstar('series').catch(() => []),
+        window.api.fetchTrendingAppleTv('movie').catch(() => []),
+        window.api.fetchTrendingAppleTv('series').catch(() => []),
+        window.api.fetchTrendingPrimeVideo('movie').catch(() => []),
+        window.api.fetchTrendingPrimeVideo('series').catch(() => [])
+      ])
+      if (netflixM.length > 0) setTrendingNetflixMovies(netflixM)
+      if (netflixS.length > 0) setTrendingNetflixSeries(netflixS)
+      if (jioM.length > 0) setTrendingJioHotstarMovies(jioM)
+      if (jioS.length > 0) setTrendingJioHotstarSeries(jioS)
+      if (appleM.length > 0) setTrendingAppleMovies(appleM)
+      if (appleS.length > 0) setTrendingAppleSeries(appleS)
+      if (primeM.length > 0) setTrendingPrimeMovies(primeM)
+      if (primeS.length > 0) setTrendingPrimeSeries(primeS)
+    }, 1500)
+    discoveryTimersRef.current.push(t2)
   }, [])
 
   const fetchData = useCallback(async () => {
@@ -652,6 +653,8 @@ const Home: React.FC<HomeProps> = ({ onPlay, onShowDetail, onNavigate, refreshKe
     window.addEventListener('mycinema_name_updated', handleNameUpdate)
 
     return () => {
+      discoveryTimersRef.current.forEach(clearTimeout)
+      discoveryTimersRef.current = []
       cleanupLibraryUpdates()
       window.removeEventListener('mycinema_name_updated', handleNameUpdate)
     }
@@ -696,8 +699,6 @@ const Home: React.FC<HomeProps> = ({ onPlay, onShowDetail, onNavigate, refreshKe
         trendingJioHotstarSeries,
         trendingAppleMovies,
         trendingAppleSeries,
-        trendingHboMovies,
-        trendingHboSeries,
         trendingPrimeMovies,
         trendingPrimeSeries
       })
@@ -710,7 +711,7 @@ const Home: React.FC<HomeProps> = ({ onPlay, onShowDetail, onNavigate, refreshKe
         snapshotTimerRef.current = null
       }
     }
-  }, [continueWatching, recentMovies, recentSeries, trendingMovies, trendingSeries, trendingIndiaMovies, trendingIndiaSeries, trendingKdrama, trendingAnime, trendingNetflixMovies, trendingNetflixSeries, trendingJioHotstarMovies, trendingJioHotstarSeries, trendingAppleMovies, trendingAppleSeries, trendingHboMovies, trendingHboSeries, trendingPrimeMovies, trendingPrimeSeries])
+  }, [continueWatching, recentMovies, recentSeries, trendingMovies, trendingSeries, trendingIndiaMovies, trendingIndiaSeries, trendingKdrama, trendingAnime, trendingNetflixMovies, trendingNetflixSeries, trendingJioHotstarMovies, trendingJioHotstarSeries, trendingAppleMovies, trendingAppleSeries, trendingPrimeMovies, trendingPrimeSeries])
 
   const suppressNextHomeClick = () => {
     suppressContentClickUntilRef.current = Date.now() + 350
@@ -1286,7 +1287,7 @@ const Home: React.FC<HomeProps> = ({ onPlay, onShowDetail, onNavigate, refreshKe
           title="Global Trending Movies"
           icon={<Film size={18} />}
           tone="red"
-          onScrollToStart={() => globalMoviesRef.current?.scrollToStart()}
+          onRefresh={refresh(() => window.api.fetchTrending('movie', true), setTrendingMovies)}
         />
         <HorizontalScrollRow ref={globalMoviesRef} contentClassName="gap-5">
           {trendingMovies.map(video => (
@@ -1312,7 +1313,7 @@ const Home: React.FC<HomeProps> = ({ onPlay, onShowDetail, onNavigate, refreshKe
           title="Global Trending Series"
           icon={<Tv size={18} />}
           tone="cyan"
-          onScrollToStart={() => globalSeriesRef.current?.scrollToStart()}
+          onRefresh={refresh(() => window.api.fetchTrending('series', true), setTrendingSeries)}
         />
         <HorizontalScrollRow ref={globalSeriesRef} contentClassName="gap-5">
           {trendingSeries.map(video => (
@@ -1338,7 +1339,7 @@ const Home: React.FC<HomeProps> = ({ onPlay, onShowDetail, onNavigate, refreshKe
           title="Indian Trending Movies"
           icon={<Film size={18} />}
           tone="amber"
-          onScrollToStart={() => indiaMoviesRef.current?.scrollToStart()}
+          onRefresh={refresh(() => window.api.fetchTrendingIndia('movie', true), setTrendingIndiaMovies)}
         />
         <HorizontalScrollRow ref={indiaMoviesRef} contentClassName="gap-5">
           {trendingIndiaMovies.map(video => (
@@ -1364,7 +1365,7 @@ const Home: React.FC<HomeProps> = ({ onPlay, onShowDetail, onNavigate, refreshKe
           title="Indian Trending Series"
           icon={<Tv size={18} />}
           tone="violet"
-          onScrollToStart={() => indiaSeriesRef.current?.scrollToStart()}
+          onRefresh={refresh(() => window.api.fetchTrendingIndia('series', true), setTrendingIndiaSeries)}
         />
         <HorizontalScrollRow ref={indiaSeriesRef} contentClassName="gap-5">
           {trendingIndiaSeries.map(video => (
@@ -1390,7 +1391,7 @@ const Home: React.FC<HomeProps> = ({ onPlay, onShowDetail, onNavigate, refreshKe
           title="Trending Kdramas"
           icon={<Tv size={18} />}
           tone="rose"
-          onScrollToStart={() => kdramaRef.current?.scrollToStart()}
+          onRefresh={refresh(() => window.api.fetchTrendingKdrama(true), setTrendingKdrama)}
         />
         <HorizontalScrollRow ref={kdramaRef} contentClassName="gap-5">
           {trendingKdrama.map(video => (
@@ -1416,7 +1417,7 @@ const Home: React.FC<HomeProps> = ({ onPlay, onShowDetail, onNavigate, refreshKe
           title="Trending Animes"
           icon={<Film size={18} />}
           tone="orange"
-          onScrollToStart={() => animeRef.current?.scrollToStart()}
+          onRefresh={refresh(() => window.api.fetchTrendingAnime(true), setTrendingAnime)}
         />
         <HorizontalScrollRow ref={animeRef} contentClassName="gap-5">
           {trendingAnime.map(video => (
@@ -1437,7 +1438,7 @@ const Home: React.FC<HomeProps> = ({ onPlay, onShowDetail, onNavigate, refreshKe
 
       {/* 9. Netflix Movies Section */}
       <section className="mx-auto mt-7 max-w-[1600px] px-8">
-        <SectionHeader eyebrow="" title="Netflix Movies" icon={<Film size={18} />} tone="red" onScrollToStart={() => netflixMoviesRef.current?.scrollToStart()} />
+        <SectionHeader eyebrow="" title="Netflix Movies" icon={<Film size={18} />} tone="red" onRefresh={refresh(() => window.api.fetchTrendingNetflix('movie', true), setTrendingNetflixMovies)} />
         <HorizontalScrollRow ref={netflixMoviesRef} contentClassName="gap-5">
           {trendingNetflixMovies.map(video => (
             <div key={video.tmdb_id || video.id} className={POSTER_RAIL_CARD_CLASS}>
@@ -1452,7 +1453,7 @@ const Home: React.FC<HomeProps> = ({ onPlay, onShowDetail, onNavigate, refreshKe
 
       {/* 10. Netflix Series Section */}
       <section className="mx-auto mt-7 max-w-[1600px] px-8">
-        <SectionHeader eyebrow="" title="Netflix Series" icon={<Tv size={18} />} tone="cyan" onScrollToStart={() => netflixSeriesRef.current?.scrollToStart()} />
+        <SectionHeader eyebrow="" title="Netflix Series" icon={<Tv size={18} />} tone="cyan" onRefresh={refresh(() => window.api.fetchTrendingNetflix('series', true), setTrendingNetflixSeries)} />
         <HorizontalScrollRow ref={netflixSeriesRef} contentClassName="gap-5">
           {trendingNetflixSeries.map(video => (
             <div key={video.tmdb_id || video.id} className={POSTER_RAIL_CARD_CLASS}>
@@ -1467,7 +1468,7 @@ const Home: React.FC<HomeProps> = ({ onPlay, onShowDetail, onNavigate, refreshKe
 
       {/* 11. JioHotstar Movies Section */}
       <section className="mx-auto mt-7 max-w-[1600px] px-8">
-        <SectionHeader eyebrow="" title="JioHotstar Movies" icon={<Film size={18} />} tone="amber" onScrollToStart={() => jioHotstarMoviesRef.current?.scrollToStart()} />
+        <SectionHeader eyebrow="" title="JioHotstar Movies" icon={<Film size={18} />} tone="amber" onRefresh={refresh(() => window.api.fetchTrendingJioHotstar('movie', true), setTrendingJioHotstarMovies)} />
         <HorizontalScrollRow ref={jioHotstarMoviesRef} contentClassName="gap-5">
           {trendingJioHotstarMovies.map(video => (
             <div key={video.tmdb_id || video.id} className={POSTER_RAIL_CARD_CLASS}>
@@ -1482,7 +1483,7 @@ const Home: React.FC<HomeProps> = ({ onPlay, onShowDetail, onNavigate, refreshKe
 
       {/* 12. JioHotstar Series Section */}
       <section className="mx-auto mt-7 max-w-[1600px] px-8">
-        <SectionHeader eyebrow="" title="JioHotstar Series" icon={<Tv size={18} />} tone="violet" onScrollToStart={() => jioHotstarSeriesRef.current?.scrollToStart()} />
+        <SectionHeader eyebrow="" title="JioHotstar Series" icon={<Tv size={18} />} tone="violet" onRefresh={refresh(() => window.api.fetchTrendingJioHotstar('series', true), setTrendingJioHotstarSeries)} />
         <HorizontalScrollRow ref={jioHotstarSeriesRef} contentClassName="gap-5">
           {trendingJioHotstarSeries.map(video => (
             <div key={video.tmdb_id || video.id} className={POSTER_RAIL_CARD_CLASS}>
@@ -1497,7 +1498,7 @@ const Home: React.FC<HomeProps> = ({ onPlay, onShowDetail, onNavigate, refreshKe
 
       {/* 13. Apple TV Movies Section */}
       <section className="mx-auto mt-7 max-w-[1600px] px-8">
-        <SectionHeader eyebrow="" title="Apple TV Movies" icon={<Film size={18} />} tone="emerald" onScrollToStart={() => appleMoviesRef.current?.scrollToStart()} />
+        <SectionHeader eyebrow="" title="Apple TV Movies" icon={<Film size={18} />} tone="emerald" onRefresh={refresh(() => window.api.fetchTrendingAppleTv('movie', true), setTrendingAppleMovies)} />
         <HorizontalScrollRow ref={appleMoviesRef} contentClassName="gap-5">
           {trendingAppleMovies.map(video => (
             <div key={video.tmdb_id || video.id} className={POSTER_RAIL_CARD_CLASS}>
@@ -1512,7 +1513,7 @@ const Home: React.FC<HomeProps> = ({ onPlay, onShowDetail, onNavigate, refreshKe
 
       {/* 14. Apple TV Series Section */}
       <section className="mx-auto mt-7 max-w-[1600px] px-8">
-        <SectionHeader eyebrow="" title="Apple TV Series" icon={<Tv size={18} />} tone="rose" onScrollToStart={() => appleSeriesRef.current?.scrollToStart()} />
+        <SectionHeader eyebrow="" title="Apple TV Series" icon={<Tv size={18} />} tone="rose" onRefresh={refresh(() => window.api.fetchTrendingAppleTv('series', true), setTrendingAppleSeries)} />
         <HorizontalScrollRow ref={appleSeriesRef} contentClassName="gap-5">
           {trendingAppleSeries.map(video => (
             <div key={video.tmdb_id || video.id} className={POSTER_RAIL_CARD_CLASS}>
@@ -1525,39 +1526,9 @@ const Home: React.FC<HomeProps> = ({ onPlay, onShowDetail, onNavigate, refreshKe
         </HorizontalScrollRow>
       </section>
 
-      {/* 15. HBO Max Movies Section */}
+      {/* 15. Prime Video Movies Section */}
       <section className="mx-auto mt-7 max-w-[1600px] px-8">
-        <SectionHeader eyebrow="" title="HBO Max Movies" icon={<Film size={18} />} tone="blue" onScrollToStart={() => hboMoviesRef.current?.scrollToStart()} />
-        <HorizontalScrollRow ref={hboMoviesRef} contentClassName="gap-5">
-          {trendingHboMovies.map(video => (
-            <div key={video.tmdb_id || video.id} className={POSTER_RAIL_CARD_CLASS}>
-              <VideoCard video={video} onPlay={handlePlayFromHome} onShowDetail={handleShowDetailFromHome} />
-            </div>
-          ))}
-          {trendingHboMovies.length === 0 && Array.from({ length: TRENDING_RAIL_LIMIT }, (_, i) => i + 1).map(i => (
-            <div key={i} className={POSTER_RAIL_CARD_CLASS}><VideoCardSkeleton /></div>
-          ))}
-        </HorizontalScrollRow>
-      </section>
-
-      {/* 16. HBO Max Series Section */}
-      <section className="mx-auto mt-7 max-w-[1600px] px-8">
-        <SectionHeader eyebrow="" title="HBO Max Series" icon={<Tv size={18} />} tone="orange" onScrollToStart={() => hboSeriesRef.current?.scrollToStart()} />
-        <HorizontalScrollRow ref={hboSeriesRef} contentClassName="gap-5">
-          {trendingHboSeries.map(video => (
-            <div key={video.tmdb_id || video.id} className={POSTER_RAIL_CARD_CLASS}>
-              <VideoCard video={video} onPlay={handlePlayFromHome} onShowDetail={handleShowDetailFromHome} />
-            </div>
-          ))}
-          {trendingHboSeries.length === 0 && Array.from({ length: TRENDING_RAIL_LIMIT }, (_, i) => i + 1).map(i => (
-            <div key={i} className={POSTER_RAIL_CARD_CLASS}><VideoCardSkeleton /></div>
-          ))}
-        </HorizontalScrollRow>
-      </section>
-
-      {/* 17. Prime Video Movies Section */}
-      <section className="mx-auto mt-7 max-w-[1600px] px-8">
-        <SectionHeader eyebrow="" title="Prime Video Movies" icon={<Film size={18} />} tone="indigo" onScrollToStart={() => primeMoviesRef.current?.scrollToStart()} />
+        <SectionHeader eyebrow="" title="Prime Video Movies" icon={<Film size={18} />} tone="indigo" onRefresh={refresh(() => window.api.fetchTrendingPrimeVideo('movie', true), setTrendingPrimeMovies)} />
         <HorizontalScrollRow ref={primeMoviesRef} contentClassName="gap-5">
           {trendingPrimeMovies.map(video => (
             <div key={video.tmdb_id || video.id} className={POSTER_RAIL_CARD_CLASS}>
@@ -1572,7 +1543,7 @@ const Home: React.FC<HomeProps> = ({ onPlay, onShowDetail, onNavigate, refreshKe
 
       {/* 18. Prime Video Series Section */}
       <section className="mx-auto mt-7 max-w-[1600px] px-8">
-        <SectionHeader eyebrow="" title="Prime Video Series" icon={<Tv size={18} />} tone="violet" onScrollToStart={() => primeSeriesRef.current?.scrollToStart()} />
+        <SectionHeader eyebrow="" title="Prime Video Series" icon={<Tv size={18} />} tone="violet" onRefresh={refresh(() => window.api.fetchTrendingPrimeVideo('series', true), setTrendingPrimeSeries)} />
         <HorizontalScrollRow ref={primeSeriesRef} contentClassName="gap-5">
           {trendingPrimeSeries.map(video => (
             <div key={video.tmdb_id || video.id} className={POSTER_RAIL_CARD_CLASS}>

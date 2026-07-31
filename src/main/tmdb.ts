@@ -540,7 +540,7 @@ async function fetchTrendingByCountry(
   forceRefresh = false
 ): Promise<any[]> {
   const cacheKey = providerId
-    ? `trending:ott:${providerId}:${countryCode}:${type}:v7`
+    ? `trending:ott:${providerId}:${countryCode}:${type}:v8`
     : `trending:${countryCode}:watchable-now:v10:${type}`
   if (!forceRefresh) {
     const cached = readTmdbListCache(cacheKey, `${countryName} watchable trending ${type}`)
@@ -820,7 +820,7 @@ export function fetchTrendingPrimeVideo(type: 'movie' | 'series', forceRefresh =
 }
 
 export function fetchTrendingJioHotstar(type: 'movie' | 'series', forceRefresh = false): Promise<any[]> {
-  return fetchTrendingOnProvider('118', 'JioHotstar', type, 'IN', forceRefresh)
+  return fetchTrendingOnProvider('2336', 'JioHotstar', type, 'IN', forceRefresh)
 }
 
 export function fetchTrendingAppleTv(type: 'movie' | 'series', forceRefresh = false): Promise<any[]> {

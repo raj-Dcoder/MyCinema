@@ -1,3 +1,12 @@
+# MyCinema v1.31.1
+
+JioHotstar sections now load.
+
+### Bug Fixes
+- **JioHotstar Sections Fixed**: JioHotstar Movies and JioHotstar Series were stuck loading because the app was querying an outdated Hotstar provider ID that TMDB no longer serves. Updated to the current JioHotstar provider ID — both sections now load their latest popular content normally.
+
+***
+
 # MyCinema v1.31.0
 
 Curated discovery — regional and OTT sections now show exactly the right content, ranked by what's hot right now.

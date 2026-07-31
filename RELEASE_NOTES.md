@@ -1,3 +1,21 @@
+# MyCinema v1.31.0
+
+Curated discovery — regional and OTT sections now show exactly the right content, ranked by what's hot right now.
+
+### New Discovery Sections
+- **Regional Trending**: Dedicated Indian Movies, Indian Series, Trending Kdramas, and Trending Animes sections — each filtered by country of origin so you always see authentic content.
+- **OTT Platform Sections**: Netflix, Prime Video, JioHotstar, and Apple TV sections (Movies + Series) that list only titles actually available on that platform — no random cross-platform filler.
+
+### Smarter Content Filtering
+- **Accurate Content**: Every section is strictly filtered — Indian sections show Indian titles, Kdramas are Korean, Animes are Japanese animation, and OTT sections show only what's streamable on that platform. Unreleased or unavailable titles never appear.
+- **Latest Trending Logic**: OTT sections now rank the newest popular releases (last 3 months) instead of decade-old classics — fresh, currently-hyped movies and shows first.
+
+### Performance & UX
+- **One-Click Section Refresh**: Every section header button now re-fetches its own latest content instantly with a single click.
+- **Smoother Loading**: Content loads in staggered waves instead of all at once — faster startup, no more lag, and fewer API hiccups.
+
+***
+
 # MyCinema v1.30.0
 
 Smooth episode transitions with Netflix-style cards and a perimeter progress ring.

@@ -54,8 +54,14 @@ interface Api {
     error?: string
   }>
   clearAllData: () => Promise<boolean>
-  fetchTrending: (type: 'movie' | 'series') => Promise<any[]>
-  fetchTrendingIndia: (type?: 'movie' | 'series') => Promise<any[]>
+  fetchTrending: (type: 'movie' | 'series', forceRefresh?: boolean) => Promise<any[]>
+  fetchTrendingIndia: (type?: 'movie' | 'series', forceRefresh?: boolean) => Promise<any[]>
+  fetchTrendingKdrama: (forceRefresh?: boolean) => Promise<any[]>
+  fetchTrendingAnime: (forceRefresh?: boolean) => Promise<any[]>
+  fetchTrendingNetflix: (type: 'movie' | 'series', forceRefresh?: boolean) => Promise<any[]>
+  fetchTrendingPrimeVideo: (type: 'movie' | 'series', forceRefresh?: boolean) => Promise<any[]>
+  fetchTrendingJioHotstar: (type: 'movie' | 'series', forceRefresh?: boolean) => Promise<any[]>
+  fetchTrendingAppleTv: (type: 'movie' | 'series', forceRefresh?: boolean) => Promise<any[]>
   getTmdbTitleLogo: (type: 'movie' | 'series', tmdbId: number) => Promise<string | null>
   getTmdbReleaseInfo: (id: number, type: 'movie' | 'series') => Promise<import('./types').TmdbReleaseInfo | null>
   getTmdbKeywords: (id: number, type: 'movie' | 'series') => Promise<string[]>

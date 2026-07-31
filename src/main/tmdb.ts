@@ -466,10 +466,12 @@ export async function fetchTmdbTitleLogo(type: 'movie' | 'series', tmdbId: numbe
   return logoPath
 }
 
-export async function fetchTrending(type: 'movie' | 'series'): Promise<any[]> {
+export async function fetchTrending(type: 'movie' | 'series', forceRefresh = false): Promise<any[]> {
   const cacheKey = `trending:v4:${type}:week`
-  const cached = readTmdbListCache(cacheKey, `trending ${type}`)
-  if (cached && cached.length > 0) return cached
+  if (!forceRefresh) {
+    const cached = readTmdbListCache(cacheKey, `trending ${type}`)
+    if (cached && cached.length > 0) return cached
+  }
 
   const apiKey = getTmdbApiKey()
   if (!apiKey) {
@@ -525,23 +527,36 @@ export async function fetchTrending(type: 'movie' | 'series'): Promise<any[]> {
   }
 }
 
-export async function fetchTrendingInIndia(type: 'movie' | 'series' = 'movie'): Promise<any[]> {
-  const cacheKey = `trending:IN:watchable-now:v9:${type}`
-  const legacyCacheKey = `trending:IN:watchable-now:v8:${type}`
-  const cached = readTmdbListCache(cacheKey, `India watchable trending ${type}`)
-  if (cached && cached.length > 0) return cached
-  const legacyCached = readTmdbListCache(legacyCacheKey, `legacy India OTT trending ${type}`, true)
+async function fetchTrendingByCountry(
+  countryCode: string,
+  countryName: string,
+  type: 'movie' | 'series' = 'movie',
+  includeOttFilter = true,
+  providerId?: string,
+  skipDateWindow = false,
+  limit = 20,
+  sortBy = 'popularity.desc',
+  minVoteCount = 0,
+  forceRefresh = false
+): Promise<any[]> {
+  const cacheKey = providerId
+    ? `trending:ott:${providerId}:${countryCode}:${type}:v8`
+    : `trending:${countryCode}:watchable-now:v10:${type}`
+  if (!forceRefresh) {
+    const cached = readTmdbListCache(cacheKey, `${countryName} watchable trending ${type}`)
+    if (cached && cached.length > 0) return cached
+  }
 
   const apiKey = getTmdbApiKey()
   if (!apiKey) {
-    console.warn('[TMDB] TMDB_API_KEY is not set — skipping India trending fetch')
+    console.warn(`[TMDB] TMDB_API_KEY is not set — skipping ${countryName} trending fetch`)
     return []
   }
 
   try {
     const today = new Date()
     const recentCutoff = new Date(today)
-    recentCutoff.setMonth(recentCutoff.getMonth() - 3) // Strict 3-month window for absolute freshest OTT drops
+    recentCutoff.setMonth(recentCutoff.getMonth() - 3)
 
     if (!cachedTmdbIp) {
       await resolveDnsDoH('api.themoviedb.org')
@@ -561,64 +576,83 @@ export async function fetchTrendingInIndia(type: 'movie' | 'series' = 'movie'): 
       )
     }
 
-    const baseWatchParams = {
+    const baseWatchParams: Record<string, string> = {
       api_key: apiKey,
       include_adult: 'false',
       language: 'en-US',
       page: '1',
-      region: 'IN',
-      sort_by: 'popularity.desc',
-      watch_region: 'IN',
-      // Strict OTT monetisation filters: Subscription, Free, or Ad-supported.
-      with_watch_monetization_types: 'flatrate|free|ads',
-      // Guarantee the content originates from India
-      with_origin_country: 'IN'
+      sort_by: sortBy,
+      ...(countryCode ? { region: countryCode, watch_region: countryCode } : {})
+    }
+
+    if (minVoteCount > 0) {
+      baseWatchParams['vote_count.gte'] = String(minVoteCount)
+    }
+
+    if (providerId) {
+      baseWatchParams.with_watch_providers = providerId
+    } else {
+      baseWatchParams.region = countryCode
+      baseWatchParams.with_origin_country = countryCode
+    }
+
+    if (includeOttFilter) {
+      baseWatchParams.with_watch_monetization_types = 'flatrate|free|ads'
     }
 
     if (type === 'movie') {
       addWatchableTask('movie', new URLSearchParams({
         ...baseWatchParams,
         include_video: 'false',
-        'primary_release_date.gte': formatTmdbDate(recentCutoff),
-        'primary_release_date.lte': formatTmdbDate(today)
-      }), 'India OTT popular movies')
+        ...(skipDateWindow ? {} : {
+          'primary_release_date.gte': formatTmdbDate(recentCutoff),
+          'primary_release_date.lte': formatTmdbDate(today)
+        })
+      }), `${countryName} OTT popular movies`)
     } else {
       addWatchableTask('tv', new URLSearchParams({
         ...baseWatchParams,
-        'first_air_date.gte': formatTmdbDate(recentCutoff),
-        'first_air_date.lte': formatTmdbDate(today)
-      }), 'India OTT popular series')
+        ...(skipDateWindow ? {} : {
+          'first_air_date.gte': formatTmdbDate(recentCutoff),
+          'first_air_date.lte': formatTmdbDate(today)
+        })
+      }), `${countryName} OTT popular series`)
     }
 
     const watchableResults = await Promise.all(watchableTasks)
-    
-    // We'll gather candidates and sort them strictly by TMDB's popularity score
-    const candidates: Array<{ item: any, mediaType: TmdbWatchableMediaType, popularity: number }> = []
+
+    const candidates: Array<{ item: any, mediaType: TmdbWatchableMediaType, popularity: number, daysOld: number }> = []
 
     for (const result of watchableResults) {
       if (!result || !result.data || !result.data.results) continue
-      
+
       for (const item of result.data.results) {
         if (!item?.id || item.adult) continue
         if (!item.poster_path && !item.backdrop_path) continue
-        
-        // Exclude unreleased items
+
         const releaseDate = getTmdbReleaseDate(item, result.mediaType)
         if (releaseDate && new Date(releaseDate).getTime() > Date.now()) continue
-        
+
+        const daysOld = releaseDate
+          ? Math.max(0, (Date.now() - new Date(releaseDate).getTime()) / 86400000)
+          : 90
+
         candidates.push({
           item,
           mediaType: result.mediaType,
-          popularity: Number(item.popularity || 0)
+          popularity: Number(item.popularity || 0),
+          daysOld
         })
       }
     }
 
-    // Sort by pure popularity descending
-    candidates.sort((a, b) => b.popularity - a.popularity)
-    
-    // Take the top 12 trending items
-    const ranked = candidates.slice(0, 12)
+    candidates.sort((a, b) => {
+      const scoreA = a.popularity * (1 + 90 / (a.daysOld + 30))
+      const scoreB = b.popularity * (1 + 90 / (b.daysOld + 30))
+      return scoreB - scoreA
+    })
+
+    const ranked = candidates.slice(0, limit)
 
     const results = await Promise.all(ranked.map(async ({ item, mediaType }) => ({
       id: item.id,
@@ -635,22 +669,162 @@ export async function fetchTrendingInIndia(type: 'movie' | 'series' = 'movie'): 
       isExternal: true
     })))
 
-    console.log(`[TMDB] Built ${results.length} India OTT trending ${type}`)
+    console.log(`[TMDB] Built ${results.length} ${countryName} OTT trending ${type}`)
     if (results.length > 0) {
-      writeTmdbListCache(cacheKey, `India watchable trending ${type}`, results)
-    } else if (legacyCached && legacyCached.length > 0) {
-      console.log(`[TMDB] Falling back to legacy India OTT trending cache for ${type}`)
-      // Removed writing legacyCached to cacheKey to avoid poisoning
-      return legacyCached
+      writeTmdbListCache(cacheKey, `${countryName} watchable trending ${type}`, results)
     }
 
     return results
   } catch (err) {
-    console.error(`[TMDB] Error fetching India watchable trending ${type}:`, err)
-    const stale = readTmdbListCache(cacheKey, `India watchable trending ${type}`, true)
+    console.error(`[TMDB] Error fetching ${countryName} watchable trending ${type}:`, err)
+    const stale = readTmdbListCache(cacheKey, `${countryName} watchable trending ${type}`, true)
     if (stale && stale.length > 0) return stale
-    return legacyCached && legacyCached.length > 0 ? legacyCached : []
+    return []
   }
+}
+
+export async function fetchTrendingInIndia(type: 'movie' | 'series' = 'movie', forceRefresh = false): Promise<any[]> {
+  const legacyCacheKey = `trending:IN:watchable-now:v8:${type}`
+  const legacyCached = readTmdbListCache(legacyCacheKey, `legacy India OTT trending ${type}`, true)
+
+  const results = await fetchTrendingByCountry('IN', 'India', type, true, undefined, false, 20, 'popularity.desc', 0, forceRefresh)
+
+  if (results.length > 0) return results
+  if (legacyCached && legacyCached.length > 0) return legacyCached
+  return []
+}
+
+export async function fetchTrendingKdrama(forceRefresh = false): Promise<any[]> {
+  return fetchTrendingByCountry('KR', 'Korea', 'series', true, undefined, false, 20, 'popularity.desc', 0, forceRefresh)
+}
+
+export async function fetchTrendingAnime(forceRefresh = false): Promise<any[]> {
+  const cacheKey = 'trending:anime:v3'
+  if (!forceRefresh) {
+    const cached = readTmdbListCache(cacheKey, 'anime trending')
+    if (cached && cached.length > 0) return cached
+  }
+
+  const apiKey = getTmdbApiKey()
+  if (!apiKey) return []
+
+  try {
+    const today = new Date()
+    const recentCutoff = new Date(today)
+    recentCutoff.setMonth(recentCutoff.getMonth() - 6)
+
+    if (!cachedTmdbIp) {
+      await resolveDnsDoH('api.themoviedb.org')
+    }
+
+    const watchableTasks: Array<Promise<{ data: any, mediaType: TmdbWatchableMediaType } | null>> = []
+
+    const addWatchableTask = (mediaType: TmdbWatchableMediaType, params: URLSearchParams, label: string) => {
+      const url = `${TMDB_BASE}/discover/${mediaType}?${params.toString()}`
+      watchableTasks.push(
+        fetchTmdbJson(url, apiKey, label)
+          .then((data) => ({ data, mediaType }))
+          .catch((err: any) => {
+            console.warn(`[TMDB] ${label} failed: ${err.message}`)
+            return null
+          })
+      )
+    }
+
+    const baseParams: Record<string, string> = {
+      api_key: apiKey,
+      include_adult: 'false',
+      language: 'en-US',
+      page: '1',
+      sort_by: 'popularity.desc',
+      with_origin_country: 'JP',
+      with_genres: '16',
+      with_watch_monetization_types: 'flatrate|free|ads'
+    }
+
+    addWatchableTask('movie', new URLSearchParams({
+      ...baseParams,
+      include_video: 'false',
+      'primary_release_date.gte': formatTmdbDate(recentCutoff),
+      'primary_release_date.lte': formatTmdbDate(today)
+    }), 'Anime movies')
+
+    addWatchableTask('tv', new URLSearchParams({
+      ...baseParams,
+      'first_air_date.gte': formatTmdbDate(recentCutoff),
+      'first_air_date.lte': formatTmdbDate(today)
+    }), 'Anime series')
+
+    const watchableResults = await Promise.all(watchableTasks)
+    const candidates: Array<{ item: any, mediaType: TmdbWatchableMediaType, popularity: number, daysOld: number }> = []
+
+    for (const result of watchableResults) {
+      if (!result || !result.data || !result.data.results) continue
+      for (const item of result.data.results) {
+        if (!item?.id || item.adult) continue
+        if (!item.poster_path && !item.backdrop_path) continue
+        const releaseDate = getTmdbReleaseDate(item, result.mediaType)
+        if (releaseDate && new Date(releaseDate).getTime() > Date.now()) continue
+        const daysOld = releaseDate
+          ? Math.max(0, (Date.now() - new Date(releaseDate).getTime()) / 86400000)
+          : 90
+        candidates.push({ item, mediaType: result.mediaType, popularity: Number(item.popularity || 0), daysOld })
+      }
+    }
+
+    candidates.sort((a, b) => {
+      const scoreA = a.popularity * (1 + 90 / (a.daysOld + 30))
+      const scoreB = b.popularity * (1 + 90 / (b.daysOld + 30))
+      return scoreB - scoreA
+    })
+    const ranked = candidates.slice(0, 20)
+
+    const results = await Promise.all(ranked.map(async ({ item, mediaType }) => ({
+      id: item.id,
+      tmdb_id: item.id,
+      title: item.title || item.name,
+      overview: item.overview,
+      poster_path: item.poster_path ? `${TMDB_IMG}${item.poster_path}` : null,
+      backdrop_path: item.backdrop_path ? `${TMDB_BACKDROP}${item.backdrop_path}` : null,
+      logo_path: item.id ? await fetchTmdbTitleLogo(mediaType === 'tv' ? 'series' : 'movie', item.id) : null,
+      vote_average: item.vote_average,
+      release_year: getTmdbReleaseDate(item, mediaType).substring(0, 4),
+      release_date: getTmdbReleaseDate(item, mediaType),
+      type: mediaType === 'tv' ? 'series' : 'movie',
+      isExternal: true
+    })))
+
+    console.log(`[TMDB] Built ${results.length} trending anime`)
+    if (results.length > 0) writeTmdbListCache(cacheKey, 'anime trending', results)
+    return results
+  } catch (err) {
+    console.error('[TMDB] Error fetching trending anime:', err)
+    const stale = readTmdbListCache(cacheKey, 'anime trending', true)
+    if (stale && stale.length > 0) return stale
+    return []
+  }
+}
+
+// ── OTT Platform helpers ──────────────────────────────────────
+
+async function fetchTrendingOnProvider(providerId: string, providerName: string, type: 'movie' | 'series', region = 'US', forceRefresh = false): Promise<any[]> {
+  return fetchTrendingByCountry(region, providerName, type, false, providerId, false, 12, 'popularity.desc', 0, forceRefresh)
+}
+
+export function fetchTrendingNetflix(type: 'movie' | 'series', forceRefresh = false): Promise<any[]> {
+  return fetchTrendingOnProvider('8', 'Netflix', type, 'US', forceRefresh)
+}
+
+export function fetchTrendingPrimeVideo(type: 'movie' | 'series', forceRefresh = false): Promise<any[]> {
+  return fetchTrendingOnProvider('9', 'Prime Video', type, 'US', forceRefresh)
+}
+
+export function fetchTrendingJioHotstar(type: 'movie' | 'series', forceRefresh = false): Promise<any[]> {
+  return fetchTrendingOnProvider('2336', 'JioHotstar', type, 'IN', forceRefresh)
+}
+
+export function fetchTrendingAppleTv(type: 'movie' | 'series', forceRefresh = false): Promise<any[]> {
+  return fetchTrendingOnProvider('2', 'Apple TV', type, 'US', forceRefresh)
 }
 
 export async function fetchTmdbMetadata(

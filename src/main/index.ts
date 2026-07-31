@@ -2440,12 +2440,36 @@ ipcMain.handle('search-tmdb', async (_, query: string) => {
   }
 })
 
-ipcMain.handle('fetch-trending', async (_, type: 'movie' | 'series') => {
-  return await tmdb.fetchTrending(type)
+ipcMain.handle('fetch-trending', async (_, type: 'movie' | 'series', forceRefresh?: boolean) => {
+  return await tmdb.fetchTrending(type, forceRefresh)
 })
 
-ipcMain.handle('fetch-trending-india', async (_, type: 'movie' | 'series' = 'movie') => {
-  return await tmdb.fetchTrendingInIndia(type)
+ipcMain.handle('fetch-trending-india', async (_, type: 'movie' | 'series' = 'movie', forceRefresh?: boolean) => {
+  return await tmdb.fetchTrendingInIndia(type, forceRefresh)
+})
+
+ipcMain.handle('fetch-trending-kdrama', async (_, forceRefresh?: boolean) => {
+  return await tmdb.fetchTrendingKdrama(forceRefresh)
+})
+
+ipcMain.handle('fetch-trending-anime', async (_, forceRefresh?: boolean) => {
+  return await tmdb.fetchTrendingAnime(forceRefresh)
+})
+
+ipcMain.handle('fetch-trending-netflix', async (_, type: 'movie' | 'series', forceRefresh?: boolean) => {
+  return await tmdb.fetchTrendingNetflix(type, forceRefresh)
+})
+
+ipcMain.handle('fetch-trending-prime-video', async (_, type: 'movie' | 'series', forceRefresh?: boolean) => {
+  return await tmdb.fetchTrendingPrimeVideo(type, forceRefresh)
+})
+
+ipcMain.handle('fetch-trending-jiohotstar', async (_, type: 'movie' | 'series', forceRefresh?: boolean) => {
+  return await tmdb.fetchTrendingJioHotstar(type, forceRefresh)
+})
+
+ipcMain.handle('fetch-trending-apple-tv', async (_, type: 'movie' | 'series', forceRefresh?: boolean) => {
+  return await tmdb.fetchTrendingAppleTv(type, forceRefresh)
 })
 
 ipcMain.handle('get-tmdb-release-info', async (_, id: number, type: 'movie' | 'series') => {

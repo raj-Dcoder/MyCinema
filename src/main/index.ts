@@ -756,8 +756,7 @@ async function getPreparedTorrentFile(downloadId: string, fileIndex?: number): P
         }
       }
     }
-    logTorrentServeErrorThrottled(
-      downloadId,
+    console.error(
       `[TorrentStream] Download is not active for "${downloadId}" — ` +
       `tempStreams has key: ${tempStreams.has(downloadId)}, activeTorrents has key: ${activeTorrents.has(downloadId)}, ` +
       `temp ids: [${Array.from(tempStreams.keys()).join(', ')}], active ids: [${Array.from(activeTorrents.keys()).join(', ')}]`
@@ -977,11 +976,7 @@ function registerMediaProtocol(): void {
         }
       })
     } catch (error: any) {
-      const url = new URL(request.url)
-      logTorrentServeErrorThrottled(
-        decodeURIComponent(url.pathname.replace(/^\/+/, '')),
-        `[TorrentStream] Failed to serve torrent stream: ${error?.message || error} | URL: ${request.url}`
-      )
+      console.error('[TorrentStream] Failed to serve torrent stream:', error, '| URL:', request.url)
       return new Response(error?.message || 'Torrent stream unavailable', { status: 503 })
     }
   })
@@ -1587,10 +1582,6 @@ app.whenReady().then(() => {
   const savedFolders = db.getFolders() as any[]
   savedFolders.forEach(f => attachFolderWatcher(f.path))
 
-  // Remove temp stream data orphaned by crashes / force-kills / locked files.
-  // Skipped in dev multi-client mode, where other instances own the folder.
-  if (!allowDevMultiClient) sweepOrphanedTempStreams()
-
   app.on('browser-window-created', (_, window) => {
     optimizer.watchWindowShortcuts(window)
   })
@@ -1787,18 +1778,6 @@ ipcMain.on('update-video-progress', (_, videoId, time, completed, isClosing) => 
   db.updateVideoProgress(videoId, time, completed, Boolean(isClosing))
   if (isClosing) {
     BrowserWindow.getAllWindows().forEach(w => w.webContents.send('library-updated'))
-  }
-})
-
-// Creates/updates the persistent library row for a streamed (torrent) movie or
-// episode so it can appear in Continue Watching. Keyed on a stable synthetic
-// `stream://` path, since torrent URLs are ephemeral.
-ipcMain.handle('upsert-stream-video', (_, meta) => {
-  try {
-    return db.upsertStreamVideo(meta || {})
-  } catch (err) {
-    console.error('[DB] upsertStreamVideo failed:', err)
-    return -1
   }
 })
 
@@ -2629,73 +2608,19 @@ function cleanupTempStream(id: string): void {
   try {
     if (entry.torrent && !entry.torrent.destroyed) entry.torrent.destroy()
   } catch {}
-  removeTempStreamFolder(entry.folder)
-}
-
-// Remove a temp stream folder with retries. On Windows the video element / OS
-// may still hold file handles for a moment after the torrent is destroyed, so
-// retry with backoff instead of giving up (a leftover folder would otherwise
-// be orphaned disk garbage).
-function removeTempStreamFolder(folder: string): void {
-  let attempts = 0
-  const tryRemove = (): void => {
-    attempts += 1
-    try {
-      if (fs.existsSync(folder)) {
-        fs.rmSync(folder, { recursive: true, force: true })
-      }
-      return
-    } catch {}
-    if (attempts < 4) {
-      setTimeout(tryRemove, 2000 * attempts) // 2s, 4s, 6s
-    } else {
-      console.warn(`[TempStream] Folder still locked after ${attempts} attempts: ${folder}. Will be swept on next launch.`)
-    }
-  }
-  tryRemove()
-}
-
-// Delete every leftover temp stream folder from a previous session. At startup
-// the in-memory tempStreams map is empty, so ANY folder under MyCinemaStreams is
-// orphaned — this covers crashes, force-kills, and locked files that could not
-// be removed at quit time. Only the primary instance may sweep (dev multi-client
-// instances share the temp root with live streams).
-function sweepOrphanedTempStreams(): void {
-  const root = getTempStreamPath()
   try {
-    if (!fs.existsSync(root)) return
-    const children = fs.readdirSync(root)
-    if (children.length === 0) return
-    console.log(`[TempStream] Startup sweep: removing ${children.length} leftover stream folder(s) from a previous session`)
-    let attempts = 0
-    const trySweep = (): void => {
-      attempts += 1
-      let remaining = 0
-      let lastError: unknown = null
-      try {
-        for (const child of fs.readdirSync(root)) {
-          try {
-            fs.rmSync(path.join(root, child), { recursive: true, force: true })
-          } catch (err) {
-            remaining += 1
-            lastError = err
-          }
-        }
-      } catch (err) {
-        lastError = err
-      }
-      if (remaining > 0 && attempts < 6) {
-        console.log(`[TempStream] ${remaining} folder(s) still locked, retrying sweep (${attempts}/6)…`)
-        setTimeout(trySweep, 5000)
-      } else if (remaining > 0) {
-        console.warn(`[TempStream] Sweep left ${remaining} folder(s) locked: ${lastError}. Will retry on next launch.`)
-      } else if (attempts > 1) {
-        console.log('[TempStream] Startup sweep complete')
-      }
+    if (entry.folder && fs.existsSync(entry.folder)) {
+      fs.rmSync(entry.folder, { recursive: true, force: true })
     }
-    trySweep()
-  } catch (err) {
-    console.warn('[TempStream] Startup sweep failed:', err)
+  } catch {
+    // File handle may still be open for a moment; retry shortly after
+    setTimeout(() => {
+      try {
+        if (entry.folder && fs.existsSync(entry.folder)) {
+          fs.rmSync(entry.folder, { recursive: true, force: true })
+        }
+      } catch {}
+    }, 2000)
   }
 }
 
@@ -2743,21 +2668,6 @@ function getDownloadPath(): string {
   const dlPath = path.join(app.getPath('downloads'), 'MyCinema')
   if (!fs.existsSync(dlPath)) fs.mkdirSync(dlPath, { recursive: true })
   return dlPath
-}
-
-// Chromium retries failed media requests aggressively, so a video element that
-// still references a stopped stream can hammer this handler at high frequency.
-// Throttle the diagnostics to one line per stream id every few seconds instead
-// of flooding the console.
-const lastTorrentServeErrorLog = new Map<string, number>()
-function logTorrentServeErrorThrottled(downloadId: string, message: string): void {
-  const now = Date.now()
-  const last = lastTorrentServeErrorLog.get(downloadId) || 0
-  if (now - last >= 3000) {
-    lastTorrentServeErrorLog.set(downloadId, now)
-    console.error(message)
-    if (lastTorrentServeErrorLog.size > 500) lastTorrentServeErrorLog.clear()
-  }
 }
 
 function formatBytes(bytes: any): string {
@@ -5227,13 +5137,6 @@ ipcMain.handle('start-temp-stream', async (_, magnetUrl: string, title?: string,
 ipcMain.handle('stop-temp-stream', async (_, id: string) => {
   cleanupTempStream(id)
   return true
-})
-
-// Lets the renderer distinguish "transient torrent error (still active)" from
-// "stream was stopped/cleaned (dead)" — the video element stops retrying the
-// dead URL only once it knows the stream is really gone.
-ipcMain.handle('check-temp-stream-active', (_, id: string) => {
-  return tempStreams.has(id) || activeTorrents.has(id) || completedTorrentStreams.has(id)
 })
 
 ipcMain.handle('get-temp-stream-episodes', async (_, streamId: string) => {

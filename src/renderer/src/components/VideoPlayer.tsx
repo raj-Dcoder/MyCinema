@@ -131,10 +131,9 @@ interface VideoPlayerProps {
   video: Video
   onClose: () => void
   onControlsVisibilityChange?: (visible: boolean) => void
-  onStreamActiveChange?: (streamId: string | null) => void
 }
 
-const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVisibilityChange, onStreamActiveChange }) => {
+const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVisibilityChange }) => {
   const videoRef = useRef<HTMLVideoElement>(null)
   
   const [isPlaying, setIsPlaying] = useState(false)
@@ -318,10 +317,6 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
   const currentVideoRef = useRef<Video>(video)
   currentVideoRef.current = currentVideo
   const isTorrentStream = isTorrentStreamPath(currentVideo.file_path)
-  // Streaming mode from the very first frame: a `stream://` entry is a stream
-  // being re-resolved (Continue Watching resume), so the player must render
-  // with streaming controls immediately — never the local-file player UI.
-  const isStreamingMode = isTorrentStream || currentVideo.file_path?.startsWith('stream://')
   const [isSeeking, setIsSeeking] = useState(false)
   const [isFullscreen, setIsFullscreen] = useState(false)
   const [isWindowFullscreen, setIsWindowFullscreen] = useState(false)
@@ -333,66 +328,6 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
   const [torrentLoadProgress, setTorrentLoadProgress] = useState(0)
   const [torrentLoadingFading, setTorrentLoadingFading] = useState(false)
   const showTorrentOverlay = isTorrentLoading || torrentBuffering
-
-  // Show the standard torrent-loading overlay (backdrop + logo reveal) for any
-  // stream switch (magnet change, episode change, auto-next). Must be called in
-  // the same batch as the video swap so the overlay never flashes.
-  const showTorrentLoadingScreen = () => {
-    setStreamEntryPhase(null)
-    setIsTorrentLoading(true)
-    setTorrentBuffering(false)
-    setTorrentLoadingFading(false)
-    setTorrentLoadProgress(0)
-  }
-
-  // Phase model for Continue Watching `stream://` entries: the player mounts
-  // instantly with the stored metadata while a live source is resolved in the
-  // background. The resolved torrent swaps in when ready.
-  const [streamEntryPhase, setStreamEntryPhase] = useState<null
-    | { status: 'searching' }
-    | { status: 'starting'; count: number }
-    | { status: 'error'; message: string }>(
-      () => currentVideo.file_path?.startsWith('stream://') ? { status: 'searching' } : null
-    )
-
-  // Simulated reveal progress for the resolution overlay (mirrors the torrent
-  // loading reveal: searching → ~60%, starting → ~92%).
-  const [resolutionProgress, setResolutionProgress] = useState(0)
-
-  useEffect(() => {
-    if (streamEntryPhase === null || streamEntryPhase.status === 'error') {
-      setResolutionProgress(0)
-      return
-    }
-    const target = streamEntryPhase.status === 'searching' ? 60 : 92
-    if (streamEntryPhase.status === 'searching') setResolutionProgress(0)
-    const interval = setInterval(() => {
-      setResolutionProgress(prev => {
-        if (prev >= target) return prev
-        return Math.min(target, prev + 3 + Math.random() * 7)
-      })
-    }, 280)
-    return () => clearInterval(interval)
-  }, [streamEntryPhase])
-
-  // The original TMDB title logo (fetched lazily; CW entries / plain plays
-  // don't carry it in their video object).
-  const [resolvedLogoPath, setResolvedLogoPath] = useState<string | null>(null)
-  const displayLogoPath = currentVideo.logo_path || resolvedLogoPath
-
-  useEffect(() => {
-    if (currentVideo.logo_path) {
-      setResolvedLogoPath(currentVideo.logo_path)
-      return
-    }
-    setResolvedLogoPath(null)
-    if (!currentVideo.tmdb_id || (currentVideo.type !== 'movie' && currentVideo.type !== 'series')) return
-    let cancelled = false
-    window.api.getTmdbTitleLogo(currentVideo.type, currentVideo.tmdb_id).then((path: string | null) => {
-      if (!cancelled && path) setResolvedLogoPath(path)
-    }).catch(() => {})
-    return () => { cancelled = true }
-  }, [currentVideo.id, currentVideo.file_path, currentVideo.tmdb_id, currentVideo.type, currentVideo.logo_path])
 
   useEffect(() => {
     if (showTorrentOverlay && isTorrentStream) {
@@ -1311,16 +1246,11 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
       () => syncToken === externalAudioSeekTokenRef.current,
       trackObj.embedded
     )
-    if (!ready) {
-      if (syncToken === externalAudioSeekTokenRef.current) {
-        externalAudioSeekBarrierRef.current = false
-        if (shouldPlay) {
-          videoEl.play().catch(e => console.log('Video resume after audio seek failed:', e))
-        }
+    if (!ready || syncToken !== externalAudioSeekTokenRef.current) {
+      externalAudioSeekBarrierRef.current = false
+      if (shouldPlay && syncToken === externalAudioSeekTokenRef.current) {
+        videoEl.play().catch(e => console.log('Video resume after audio seek failed:', e))
       }
-      return
-    }
-    if (syncToken !== externalAudioSeekTokenRef.current) {
       return
     }
 
@@ -1330,65 +1260,16 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
       return
     }
 
-    if (!keepVideoPlaying) {
-      videoEl.play().catch(e => console.log('Video resume after audio seek failed:', e))
-    }
-
-    // The separate audio file is usually already downloaded, so it can start
-    // instantly — but after a seek the video may still be buffering the target
-    // position (torrent streaming). Starting the audio now would play sound
-    // over a frozen picture, so gate it on the video actually playing. If the
-    // user pauses (or a newer seek supersedes this one), bail out — the
-    // video's onPlay/onPlaying handlers restart the audio on resume.
-    if (videoEl.paused) {
-      externalAudioSeekBarrierRef.current = false
-      return
-    }
-    if (videoEl.readyState < 3) {
-      if (isTorrentStream) {
-        setTorrentBuffering(true)
-        setTorrentLoadProgress(0)
-        setTorrentLoadingFading(false)
-      } else {
-        showBufferingIndicatorSoon()
-      }
-      await new Promise<void>((resolve) => {
-        const onStarted = () => {
-          videoEl.removeEventListener('pause', onStopped)
-          videoEl.removeEventListener('seeking', onStopped)
-          videoEl.removeEventListener('emptied', onStopped)
-          resolve()
-        }
-        const onStopped = () => {
-          videoEl.removeEventListener('playing', onStarted)
-          videoEl.removeEventListener('canplay', onStarted)
-          resolve()
-        }
-        videoEl.addEventListener('playing', onStarted, { once: true })
-        videoEl.addEventListener('canplay', onStarted, { once: true })
-        videoEl.addEventListener('pause', onStopped, { once: true })
-        videoEl.addEventListener('seeking', onStopped, { once: true })
-        videoEl.addEventListener('emptied', onStopped, { once: true })
-      })
-      if (syncToken !== externalAudioSeekTokenRef.current) {
-        return
-      }
-      if (videoEl.paused) {
-        externalAudioSeekBarrierRef.current = false
-        return
-      }
-    }
-
-    // The video is (about to be) playing — hand the audio element back to the
-    // normal onWaiting/onPlaying handlers, which keep it in sync if playback
-    // stalls again.
-    externalAudioSeekBarrierRef.current = false
-
     try {
-      await audioEl.play()
-      audioEl.playbackRate = playbackRate
-    } catch (e) {
-      console.log('Audio play after seek sync failed:', e)
+      if (keepVideoPlaying) {
+        await audioEl.play()
+        audioEl.playbackRate = playbackRate
+      } else {
+        await Promise.allSettled([audioEl.play(), videoEl.play()])
+        audioEl.playbackRate = playbackRate
+      }
+    } finally {
+      externalAudioSeekBarrierRef.current = false
     }
   }
 
@@ -1403,171 +1284,6 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
 
     videoEl.play().catch(e => console.log('Video resume after seek failed:', e))
     setIsPlaying(true)
-  }
-
-  const getCurrentDuration = () => {
-    const videoEl = videoRef.current
-    return videoEl && Number.isFinite(videoEl.duration) && videoEl.duration > 0 ? videoEl.duration : 0
-  }
-
-  const buildStreamMetaFrom = (video: Video, duration: number) => {
-    const isSeries = video.type === 'series'
-    return {
-      title: video.title,
-      type: video.type,
-      series_name: isSeries ? video.series_name || video.title : undefined,
-      season: isSeries ? (video.season || 1) : undefined,
-      episode: isSeries ? (video.episode || 1) : undefined,
-      tmdb_id: video.tmdb_id,
-      poster_path: video.poster_path,
-      backdrop_path: video.backdrop_path,
-      overview: video.overview,
-      release_year: video.release_year,
-      vote_average: video.vote_average,
-      logo_path: video.logo_path || displayLogoPath,
-      duration
-    }
-  }
-
-  // Persist a streamed (torrent) movie/episode into the library + progress DB so
-  // it shows up in Continue Watching with poster, episode label and progress.
-  const persistStreamPlayback = async (video: Video, time: number, completed: boolean, isClosing: boolean) => {
-    if (!isTorrentStreamPath(video.file_path)) return
-    if (video.type !== 'movie' && video.type !== 'series') return
-    const id = await window.api.upsertStreamVideo(buildStreamMetaFrom(video, getCurrentDuration()))
-    if (id > 0) {
-      window.api.updateVideoProgress(id, time, completed, isClosing)
-    }
-  }
-
-  // Continue Watching entries carry a synthetic `stream://` path — the player
-  // is already on screen (poster/title + status overlay) while this resolves a
-  // live torrent source, then swaps the real URL into the player. The entry's
-  // persistent DB id is kept so playback resumes from the saved position.
-  const resolvePendingStreamEntry = async () => {
-    const video = currentVideoRef.current
-    if (!video.file_path?.startsWith('stream://')) return
-    const token = playerSessionTokenRef.current
-    const isSeries = video.type === 'series'
-    const title = (isSeries ? video.series_name || video.title : video.title) || ''
-    setStreamEntryPhase({ status: 'searching' })
-    try {
-      const requestId = `cw-${Date.now()}-${Math.random().toString(36).slice(2)}`
-      const results = await window.api.searchTorrentSources(
-        title,
-        String(video.release_year || ''),
-        isSeries ? 'tv' : 'movie',
-        video.tmdb_id || 0,
-        requestId
-      )
-      if (token !== playerSessionTokenRef.current || isPlayerClosingRef.current) return
-
-      let best: any
-      if (isSeries) {
-        const targetSeason = video.season ?? 1
-        const targetEpisode = video.episode ?? 1
-        best = (results || [])
-          .filter((s: any) => s.parsedEpisode === targetEpisode && (s.parsedSeason ?? 1) === targetSeason)
-          .sort((a: any, b: any) => (b.seeds || 0) - (a.seeds || 0))[0]
-      } else {
-        best = (results || []).sort((a: any, b: any) => (b.seeds || 0) - (a.seeds || 0))[0]
-      }
-      if (!best?.magnet) {
-        setStreamEntryPhase({
-          status: 'error',
-          message: `Could not find sources for "${title}"${isSeries ? ` (S${video.season ?? 1} E${video.episode ?? 1})` : ''}.`
-        })
-        return
-      }
-
-      setStreamEntryPhase({ status: 'starting', count: (results || []).length })
-      const result = await window.api.startTempStream(
-        best.magnet,
-        title,
-        isSeries ? { season: video.season ?? 1, episode: video.episode ?? 1 } : undefined
-      )
-      if (token !== playerSessionTokenRef.current || isPlayerClosingRef.current) {
-        // Player was closed while the torrent was being prepared — clean up.
-        if (result?.streamId) window.api.stopTempStream(result.streamId)
-        return
-      }
-      if (!result?.url) {
-        setStreamEntryPhase({ status: 'error', message: result?.error || 'Failed to start the stream.' })
-        return
-      }
-
-      // Seamless overlay handoff: hide the resolution overlay, show the
-      // standard torrent-loading overlay, then swap in the live URL.
-      setIsTorrentLoading(true)
-      setTorrentBuffering(false)
-      setTorrentLoadingFading(false)
-      setStreamEntryPhase(null)
-      setCurrentVideo({
-        ...video,
-        file_path: result.url,
-        duration: video.duration || 0,
-        isExternal: false,
-        season: result.parsedSeason ?? video.season,
-        episode: result.parsedEpisode ?? video.episode,
-        streamSourceId: result.streamId,
-        sourceMagnet: best.magnet
-      })
-    } catch (err: any) {
-      if (token === playerSessionTokenRef.current) {
-        setStreamEntryPhase({ status: 'error', message: err?.message || 'Failed to resume the stream.' })
-      }
-    }
-  }
-
-  // The video element references a torrent:// URL whose stream was stopped or
-  // cleaned (crash, error, user switch). Re-start it from the saved magnet so
-  // playback can continue without closing the player.
-  const retryDeadStream = async () => {
-    const video = currentVideoRef.current
-    if (!video.sourceMagnet || isPlayerClosingRef.current) return
-    setStreamEntryPhase({ status: 'searching' })
-    const token = playerSessionTokenRef.current
-    try {
-      const result = await window.api.startTempStream(
-        video.sourceMagnet,
-        video.title || 'Stream',
-        video.type === 'series'
-          ? { season: Number(video.season || 1), episode: Number(video.episode || 1) }
-          : undefined
-      )
-      if (token !== playerSessionTokenRef.current || isPlayerClosingRef.current) {
-        if (result?.streamId) window.api.stopTempStream(result.streamId)
-        return
-      }
-      if (!result?.url) {
-        setStreamEntryPhase({ status: 'error', message: result?.error || 'Failed to restart the stream.' })
-        return
-      }
-      showTorrentLoadingScreen()
-      setCurrentVideo({
-        ...video,
-        file_path: result.url,
-        duration: video.duration || 0,
-        isExternal: false,
-        season: result.parsedSeason ?? video.season,
-        episode: result.parsedEpisode ?? video.episode,
-        streamSourceId: result.streamId,
-        sourceMagnet: video.sourceMagnet
-      })
-    } catch (err: any) {
-      if (token === playerSessionTokenRef.current) {
-        setStreamEntryPhase({ status: 'error', message: err?.message || 'Failed to restart the stream.' })
-      }
-    }
-  }
-
-  const retryStreamEntry = () => {
-    const video = currentVideoRef.current
-    if (video.file_path?.startsWith('stream://')) {
-      void resolvePendingStreamEntry()
-    } else {
-      void retryDeadStream()
-    }
   }
 
   useEffect(() => {
@@ -1676,20 +1392,12 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
     const sessionToken = playerSessionTokenRef.current
 
     const fetchProgress = async () => {
-      if (currentVideo.id < 0) {
+      if (isTorrentStreamPath(currentVideo.file_path) || currentVideo.id < 0) {
         startupResumeTimeRef.current = 0
         if (!isCancelled) setStartupProgressReady(true)
         return
       }
-      let progressId = currentVideo.id
-      if (isTorrentStreamPath(currentVideo.file_path)) {
-        // Make sure the stream entry exists (and maps to its persistent DB id)
-        // so a resume position can be read back for Continue Watching plays.
-        const id = await window.api.upsertStreamVideo(buildStreamMetaFrom(currentVideo, 0))
-        if (isCancelled || isPlayerClosingRef.current || sessionToken !== playerSessionTokenRef.current) return
-        if (id > 0) progressId = id
-      }
-      const progress = await window.api.getVideoProgress(progressId)
+      const progress = await window.api.getVideoProgress(currentVideo.id)
       if (isCancelled || isPlayerClosingRef.current || sessionToken !== playerSessionTokenRef.current) return
       let targetTime = progress?.last_watched_time || 0
       
@@ -1815,39 +1523,23 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
     clearActiveSubtitleSelection(false)
     setConvertedSubPaths(new Map())
 
-    clearActiveSubtitleSelection(false)
-    setConvertedSubPaths(new Map())
+    fetchProgress()
+    checkNextEpisode(currentVideo)
+    setIsPlaying(false)
+    if (startupVideoEl) {
+      startupVideoEl.volume = volume
+      startupVideoEl.muted = false
+      startupVideoEl.load()
 
-    const isPendingStreamEntry = currentVideo.file_path?.startsWith('stream://')
-    if (isPendingStreamEntry) {
-      // Continue Watching entry: never load the synthetic stream:// path as
-      // media. Keep the resolution overlay up and swap in the live torrent URL
-      // once `resolvePendingStreamEntry` finds a source.
-      if (startupVideoEl) {
-        startupVideoEl.removeAttribute('src')
-        startupVideoEl.load()
+      metadataTrackLoader = () => {
+        applyStartupResumeTime()
+        void fetchMediaTracks()
       }
-      setStartupProgressReady(true)
-      void resolvePendingStreamEntry()
-    } else {
-      fetchProgress()
-      checkNextEpisode(currentVideo)
-      setIsPlaying(false)
-      if (startupVideoEl) {
-        startupVideoEl.volume = volume
-        startupVideoEl.muted = false
-        startupVideoEl.load()
 
-        metadataTrackLoader = () => {
-          applyStartupResumeTime()
-          void fetchMediaTracks()
-        }
-
-        if (startupVideoEl.readyState >= 1) {
-          metadataTrackLoader()
-        } else {
-          startupVideoEl.addEventListener('loadedmetadata', metadataTrackLoader, { once: true })
-        }
+      if (startupVideoEl.readyState >= 1) {
+        metadataTrackLoader()
+      } else {
+        startupVideoEl.addEventListener('loadedmetadata', metadataTrackLoader, { once: true })
       }
     }
 
@@ -1917,12 +1609,6 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
       }
     }
   }, [currentVideo.id, currentVideo.file_path])
-
-  // Keep the parent app's active temp-stream bookkeeping in sync as the player
-  // starts/switches torrent streams (incl. Continue Watching resolution).
-  useEffect(() => {
-    onStreamActiveChange?.(currentVideo.streamSourceId || null)
-  }, [currentVideo.streamSourceId, onStreamActiveChange])
 
 
 
@@ -2434,16 +2120,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
   }, [isHost, roomId])
 
   useEffect(() => {
-    const isStream = isTorrentStreamPath(currentVideo.file_path)
-    // `currentVideo` is captured per effect run, so the cleanup write targets
-    // the exact episode that was playing, not the one that replaces it.
-    const saveTick = (time: number, completed: boolean, isClosing: boolean) => {
-      if (isStream) {
-        void persistStreamPlayback(currentVideo, time, completed, isClosing)
-      } else if (currentVideo.id >= 0) {
-        window.api.updateVideoProgress(currentVideo.id, time, completed, isClosing)
-      }
-    }
+    if (isTorrentStreamPath(currentVideo.file_path) || currentVideo.id < 0) return
 
     const interval = setInterval(() => {
       if (videoRef.current && !videoRef.current.paused) {
@@ -2454,7 +2131,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
         timeRef.current = time
         durationRef.current = total
         
-        saveTick(time, completed, false)
+        window.api.updateVideoProgress(currentVideo.id, time, completed, false)
       }
     }, 60000)
 
@@ -2463,7 +2140,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
       const time = timeRef.current
       const total = durationRef.current || 1
       const completed = time / total > 0.95
-      saveTick(time, completed, true)
+      window.api.updateVideoProgress(currentVideo.id, time, completed, true)
     }
   }, [currentVideo.id])
 
@@ -2556,9 +2233,6 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
 
       console.log('[Audio] External audio failed too many times; falling back to native audio')
       audioFailureCountRef.current = 0
-      // Clear the probe results so the track pool becomes native-only and the
-      // selection effect below can never resurrect the broken external pipeline.
-      setEmbeddedAudio([])
       const nativeTrack = availableAudio.find(a => a.native)
       setSelectedAudioId(nativeTrack ? nativeTrack.id : '')
       if (videoEl) {
@@ -2798,6 +2472,10 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
         setEpisodeSwitchState({ status: 'error', label: result?.error || 'Failed to start stream' })
         return null
       }
+      const previousStreamId = currentVideo.streamSourceId
+      if (previousStreamId && previousStreamId !== result.streamId) {
+        window.api.stopTempStream(previousStreamId)
+      }
       setEpisodeSwitchState(null)
       return {
         ...currentVideo,
@@ -2868,15 +2546,11 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
     const resolved = await resolveEpisodeForPlay(targetSeason, targetEpisode)
     if (!resolved) return
     setEpisodeSwitchState(null)
-    showTorrentLoadingScreen()
     setCrossFade(true)
     setTimeout(() => {
       forceRestartRef.current = true
       setForceRestart(true)
       setCurrentVideo(resolved)
-      if (currentVideo.streamSourceId && currentVideo.streamSourceId !== resolved.streamSourceId) {
-        window.api.stopTempStream(currentVideo.streamSourceId)
-      }
     }, 200)
   }
 
@@ -2916,15 +2590,14 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
           nextEpisodePrefetchRef.current = null
           episodeSwitchOccurredRef.current = true
           const previousStreamId = currentVideo.streamSourceId
-          showTorrentLoadingScreen()
+          if (previousStreamId && previousStreamId !== prefetched.video.streamSourceId) {
+            window.api.stopTempStream(previousStreamId)
+          }
           setCrossFade(true)
           setTimeout(() => {
             forceRestartRef.current = true
             setForceRestart(true)
             setCurrentVideo(prefetched.video)
-            if (previousStreamId && previousStreamId !== prefetched.video.streamSourceId) {
-              window.api.stopTempStream(previousStreamId)
-            }
           }, 200)
           return
         }
@@ -2932,15 +2605,11 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
         episodeSwitchOccurredRef.current = true
         const resolved = await resolveEpisodeForPlay(target.season, target.episode)
         if (resolved) {
-          showTorrentLoadingScreen()
           setCrossFade(true)
           setTimeout(() => {
             forceRestartRef.current = true
             setForceRestart(true)
             setCurrentVideo(resolved)
-            if (currentVideo.streamSourceId && currentVideo.streamSourceId !== resolved.streamSourceId) {
-              window.api.stopTempStream(currentVideo.streamSourceId)
-            }
           }, 200)
           return
         }
@@ -3113,8 +2782,10 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
       }
       const streamUrl = result.url
       const previousStreamId = currentVideo.streamSourceId
+      if (previousStreamId && previousStreamId !== result.streamId) {
+        window.api.stopTempStream(previousStreamId)
+      }
       setShowMagnetsPanel(false)
-      showTorrentLoadingScreen()
       setCrossFade(true)
       setTimeout(() => {
         forceRestartRef.current = true
@@ -3131,11 +2802,6 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
           streamSourceId: result.streamId,
           sourceMagnet: source.magnet
         })
-        // Stop the old stream only AFTER the new URL is live — otherwise the
-        // video element holds a dead src and Chromium retries it in a loop.
-        if (previousStreamId && previousStreamId !== result.streamId) {
-          window.api.stopTempStream(previousStreamId)
-        }
       }, 200)
     } catch (err: any) {
       setMagnetsError(err?.message || 'Failed to start stream')
@@ -3791,11 +3457,6 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
     const isOutroAdvance = segment.type === 'outro' && hasNextEpisode
     if (isOutroAdvance) {
       if (isTorrentStream || currentVideo.id < 0) {
-        if (isTorrentStream) {
-          const completedAt = durationRef.current || duration || segment.endSec
-          timeRef.current = completedAt
-          void persistStreamPlayback(currentVideo, completedAt, true, true)
-        }
         playNextEpisode()
         return
       }
@@ -4081,7 +3742,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
         <video
           ref={videoRef}
           crossOrigin="anonymous"
-          src={currentVideo.file_path?.startsWith('stream://') ? undefined : getVideoSourceUrl(currentVideo.file_path)}
+          src={getVideoSourceUrl(currentVideo.file_path)}
           className={`h-full w-full outline-none ${showControls ? 'subs-up' : 'subs-down'} opacity-100`}
           style={{ 
             objectFit: videoObjectFit,
@@ -4242,28 +3903,6 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
           console.error('Video Error:', e)
           const error = (e.target as HTMLVideoElement).error
           console.error('Video Error Details:', error?.message, error?.code)
-          const videoEl = e.target as HTMLVideoElement
-          const src = videoEl.getAttribute('src') || ''
-          if (!src.startsWith('torrent://') || isPlayerClosingRef.current) return
-          if (streamEntryPhase?.status === 'searching' || streamEntryPhase?.status === 'starting') return
-          let streamId = ''
-          try {
-            streamId = decodeURIComponent(new URL(src).pathname.replace(/^\/+/, ''))
-          } catch { return }
-          if (!streamId) return
-          // If the stream was stopped/cleaned, the src is permanently dead and
-          // Chromium retries it at high frequency. Clear it and surface a
-          // clear error instead of an infinite request loop.
-          window.api.checkTempStreamActive(streamId).then((active: boolean) => {
-            if (active || isPlayerClosingRef.current) return
-            const current = currentVideoRef.current
-            if (current.file_path !== src) return
-            if (videoEl) {
-              videoEl.removeAttribute('src')
-              videoEl.load()
-            }
-            setStreamEntryPhase({ status: 'error', message: 'This stream stopped working. Retry to find a new source.' })
-          }).catch(() => {})
         }}
         >
         </video>
@@ -4447,75 +4086,6 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
 
       {/* 2x / Rev2x indicators are now injected imperatively via speedToastRef — no JSX needed here */}
 
-      {/* Continue Watching Stream Resolution Overlay */}
-      {streamEntryPhase && (
-        <div className="absolute inset-0 z-30 overflow-hidden flex flex-col items-center justify-center bg-[#080d16]">
-          {currentVideo.backdrop_path && (
-            <img
-              src={getArtworkUrl(currentVideo.backdrop_path, 'w1280') || ''}
-              alt=""
-              className="absolute inset-0 w-full h-full object-cover opacity-[0.25] blur-[8px] scale-[1.05]"
-            />
-          )}
-
-          <div className="relative z-10 w-full max-w-xl px-12 flex items-center justify-center drop-shadow-2xl" style={{ animation: 'torrent-logo-breathe 3s ease-in-out infinite' }}>
-            {displayLogoPath ? (
-              <div className="relative w-full flex items-center justify-center">
-                {/* Base Logo (Grayscale, Faded) */}
-                <img
-                  src={getArtworkUrl(displayLogoPath, 'original') || ''}
-                  alt=""
-                  className="w-full max-h-[160px] object-contain opacity-25 grayscale"
-                />
-                {/* Reveal Logo (Full Color) */}
-                <img
-                  src={getArtworkUrl(displayLogoPath, 'original') || ''}
-                  alt=""
-                  className="absolute inset-0 w-full max-h-[160px] object-contain transition-[clip-path] duration-300 ease-linear"
-                  style={{
-                    clipPath: `polygon(0 0, ${resolutionProgress}% 0, ${resolutionProgress}% 100%, 0 100%)`
-                  }}
-                />
-              </div>
-            ) : (
-              <div className="relative text-center w-full max-w-2xl px-8 flex justify-center">
-                <h1 className="text-4xl md:text-5xl font-black text-white/25 tracking-wider uppercase drop-shadow-xl m-0">{currentVideo.title || currentVideo.series_name}</h1>
-                <h1
-                  className="absolute text-4xl md:text-5xl font-black text-white tracking-wider uppercase drop-shadow-xl transition-[clip-path] duration-300 ease-linear m-0"
-                  style={{
-                    clipPath: `polygon(0 0, ${resolutionProgress}% 0, ${resolutionProgress}% 100%, 0 100%)`
-                  }}
-                >
-                  {currentVideo.title || currentVideo.series_name}
-                </h1>
-              </div>
-            )}
-          </div>
-
-          {streamEntryPhase.status === 'error' && (
-            <div className="relative z-10 mt-6 flex max-w-md flex-col items-center gap-5 px-8">
-              <p className="text-center text-sm font-medium text-white/80">{streamEntryPhase.message}</p>
-              <div className="flex items-center gap-3">
-                <button
-                  type="button"
-                  onClick={() => void retryStreamEntry()}
-                  className="inline-flex items-center justify-center rounded-full bg-white px-6 py-2.5 text-[11px] font-black uppercase tracking-widest text-black transition-all hover:bg-white/80"
-                >
-                  Retry
-                </button>
-                <button
-                  type="button"
-                  onClick={onClose}
-                  className="inline-flex items-center justify-center rounded-full bg-white/10 px-6 py-2.5 text-[11px] font-black uppercase tracking-widest text-white transition-all hover:bg-white/20"
-                >
-                  Close
-                </button>
-              </div>
-            </div>
-          )}
-        </div>
-      )}
-
       {/* Torrent Loading Overlay */}
       {(isTorrentLoading || torrentBuffering) && (
         <div 
@@ -4532,17 +4102,17 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
           
           {/* Logo or Title */}
           <div className="relative z-10 w-full max-w-xl px-12 flex items-center justify-center drop-shadow-2xl" style={{ animation: 'torrent-logo-breathe 3s ease-in-out infinite' }}>
-            {displayLogoPath ? (
+            {currentVideo.logo_path ? (
               <div className="relative w-full flex items-center justify-center">
                 {/* Base Logo (Grayscale, Faded) */}
                 <img 
-                  src={getArtworkUrl(displayLogoPath, 'original') || ''} 
+                  src={getArtworkUrl(currentVideo.logo_path, 'original') || ''} 
                   alt="" 
                   className="w-full max-h-[160px] object-contain opacity-25 grayscale"
                 />
                 {/* Reveal Logo (Full Color) */}
                 <img 
-                  src={getArtworkUrl(displayLogoPath, 'original') || ''} 
+                  src={getArtworkUrl(currentVideo.logo_path, 'original') || ''} 
                   alt="" 
                   className="absolute inset-0 w-full max-h-[160px] object-contain transition-[clip-path] duration-300 ease-linear"
                   style={{ 
@@ -5074,7 +4644,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
         showEpisodesPanel={showEpisodesPanel}
         showMagnetsPanel={showMagnetsPanel}
         showInfoPanel={showInfoPanel}
-        isTorrentStream={isStreamingMode}
+        isTorrentStream={isTorrentStream}
         aspectMode={aspectMode}
         showAdvancedMenu={showAdvancedMenu}
         showSpeedMenu={showSpeedMenu}

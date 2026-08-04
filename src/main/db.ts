@@ -134,9 +134,6 @@ export function initDb() {
   if (!columnNames.includes('keywords')) {
     db.exec("ALTER TABLE videos ADD COLUMN keywords TEXT")
   }
-  if (!columnNames.includes('logo_path')) {
-    db.exec("ALTER TABLE videos ADD COLUMN logo_path TEXT")
-  }
 
   db.exec(`
     CREATE TABLE IF NOT EXISTS progress (
@@ -197,61 +194,6 @@ export function initDb() {
   }
 }
 
-export function upsertStreamVideo(meta: any): number {
-  const type = meta.type === 'series' ? 'series' : 'movie'
-  const seriesName = type === 'series' ? meta.series_name || meta.title : null
-  const season = type === 'series' ? (meta.season || 1) : null
-  const episode = type === 'series' ? (meta.episode || 1) : null
-  const keyBase = meta.tmdb_id
-    ? `tmdb/${meta.tmdb_id}`
-    : `t/${encodeURIComponent(((seriesName || meta.title) || 'unknown').toLowerCase().trim())}`
-  const filePath = type === 'series'
-    ? `stream://${keyBase}/s${season}e${episode}`
-    : `stream://${keyBase}`
-
-  const stmt = db.prepare(`
-    INSERT INTO videos (
-      title, file_path, type, series_name, season, episode, duration, poster_path, backdrop_path, overview, release_year, vote_average, tmdb_id, logo_path
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    ON CONFLICT(file_path) DO UPDATE SET
-      title = excluded.title,
-      type = excluded.type,
-      series_name = excluded.series_name,
-      season = excluded.season,
-      episode = excluded.episode,
-      duration = CASE
-        WHEN excluded.duration > 0 THEN excluded.duration
-        ELSE videos.duration
-      END,
-      poster_path = COALESCE(excluded.poster_path, videos.poster_path),
-      backdrop_path = COALESCE(excluded.backdrop_path, videos.backdrop_path),
-      overview = COALESCE(excluded.overview, videos.overview),
-      release_year = COALESCE(excluded.release_year, videos.release_year),
-      vote_average = COALESCE(excluded.vote_average, videos.vote_average),
-      tmdb_id = COALESCE(excluded.tmdb_id, videos.tmdb_id),
-      logo_path = COALESCE(excluded.logo_path, videos.logo_path)
-  `)
-  stmt.run(
-    seriesName || meta.title,
-    filePath,
-    type,
-    seriesName,
-    season,
-    episode,
-    meta.duration || 0,
-    meta.poster_path || null,
-    meta.backdrop_path || null,
-    meta.overview || null,
-    meta.release_year || null,
-    meta.vote_average || null,
-    meta.tmdb_id || null,
-    meta.logo_path || null
-  )
-
-  const row = db.prepare('SELECT id FROM videos WHERE file_path = ?').get(filePath) as any
-  return row ? row.id : -1
-}
-
 export function addVideo(video: any) {
   const stmt = db.prepare(`
     INSERT INTO videos (
@@ -293,7 +235,6 @@ export function getVideos() {
     SELECT v.*, p.last_watched_time, p.completed, p.updated_at
     FROM videos v
     LEFT JOIN progress p ON v.id = p.video_id
-    WHERE v.file_path NOT LIKE 'stream://%'
     ORDER BY v.added_at DESC
   `).all()
   return rows.map((row: any) => {
@@ -463,7 +404,7 @@ export function updateVideoMetadata(id: number, metadata: any) {
 export function getSeriesInfo(seriesName: string) {
   return db.prepare(`
     SELECT * FROM videos 
-    WHERE series_name = ? AND file_path NOT LIKE 'stream://%'
+    WHERE series_name = ? 
     ORDER BY season ASC, episode ASC, is_preferred DESC, added_at DESC
   `).all(seriesName)
 }
@@ -843,7 +784,7 @@ export function findVideoByTmdbId(tmdbId: number) {
     SELECT v.*, p.last_watched_time, p.completed
     FROM videos v
     LEFT JOIN progress p ON v.id = p.video_id
-    WHERE v.tmdb_id = ? AND v.file_path NOT LIKE 'stream://%'
+    WHERE v.tmdb_id = ?
     LIMIT 1
   `).get(tmdbId) as any
 }

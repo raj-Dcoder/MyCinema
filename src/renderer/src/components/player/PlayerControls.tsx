@@ -5,7 +5,7 @@ import { AudioBoostProfile, AudioBoostIntensity, AUDIO_BOOST_PROFILES, AUDIO_BOO
 import {
   SkipForward as SkipNext, Loader2, Rewind, Pause, Play, FastForward, Volume2, ListVideo, FolderOpen,
   Users, Info, Crop, RectangleHorizontal, Monitor, Sparkles, Zap, Wand2, PictureInPicture2,
-  Minimize, Maximize, Bookmark, Clock, Activity
+  Minimize, Maximize, Bookmark, Clock, Activity, Magnet
 } from 'lucide-react'
 
 export interface PlayerControlsProps {
@@ -25,6 +25,7 @@ export interface PlayerControlsProps {
   currentVideo: Video
   canControlPlayback: boolean
   showEpisodesPanel: boolean
+  showMagnetsPanel: boolean
   showInfoPanel: boolean
   isTorrentStream: boolean
   aspectMode: 'cover' | 'fill' | 'contain'
@@ -59,6 +60,7 @@ export interface PlayerControlsProps {
   togglePlay: (e: React.MouseEvent) => void
   handleVolumeChange: (e: React.ChangeEvent<HTMLInputElement>) => void
   setShowEpisodesPanel: (show: boolean) => void
+  setShowMagnetsPanel: (show: boolean) => void
   handleOpenFolder: () => void
   setShowWatchTogetherState: (show: boolean) => void
   handleToggleInfoPanel: () => void
@@ -112,6 +114,7 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
   currentVideo,
   canControlPlayback,
   showEpisodesPanel,
+  showMagnetsPanel,
   showInfoPanel,
   isTorrentStream,
   aspectMode,
@@ -134,7 +137,6 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
   showSleepMenu,
   showStats,
   bookmarks,
-
   handleProgressMouseMove,
   handleProgressMouseLeave,
   handleSeekChange,
@@ -145,6 +147,7 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
   togglePlay,
   handleVolumeChange,
   setShowEpisodesPanel,
+  setShowMagnetsPanel,
   handleOpenFolder,
   setShowWatchTogetherState,
   handleToggleInfoPanel,
@@ -383,6 +386,17 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
               title="Episodes"
             >
               <ListVideo size={22} className="opacity-90 hover:opacity-100" />
+            </button>
+          )}
+
+          {/* Magnets */}
+          {(currentVideo.type === 'series' || isTorrentStream) && (
+            <button
+              onClick={(e) => { e.stopPropagation(); setShowMagnetsPanel(!showMagnetsPanel); }}
+              className={`transition-colors flex items-center ${showMagnetsPanel ? 'text-primary' : 'text-white hover:text-primary'}`}
+              title="Magnets"
+            >
+              <Magnet size={22} className="opacity-90 hover:opacity-100" />
             </button>
           )}
 

@@ -16,6 +16,7 @@ interface Api {
   deleteVideoFile: (video: any) => Promise<boolean>
   getVideoProgress: (videoId: number) => Promise<any>
   updateVideoProgress: (videoId: number, time: number, completed: boolean, isClosing?: boolean) => void
+  upsertStreamVideo: (meta: any) => Promise<number>
   scanFolder: (path: string) => Promise<void>
   getContinueWatching: () => Promise<any[]>
   playVideo: (videoId: number) => Promise<void>
@@ -111,6 +112,10 @@ interface Api {
   retryTorrentDownload: (id: string) => Promise<boolean>
   getActiveDownloads: () => Promise<any[]>
   prepareTorrentStream: (id: string) => Promise<{ url?: string; fileName?: string; size?: number; error?: string }>
+  startTempStream: (magnetUrl: string, title?: string, options?: { fileIndex?: number; season?: number; episode?: number }) => Promise<{ url?: string; fileName?: string; size?: number; streamId?: string; parsedSeason?: number | null; parsedEpisode?: number | null; error?: string }>
+  stopTempStream: (id: string) => Promise<boolean>
+  checkTempStreamActive: (id: string) => Promise<boolean>
+  getTempStreamEpisodes: (streamId: string) => Promise<{ error?: string; episodes?: { index: number; fileName: string; size: number; season: number | null; episode: number | null; isSeasonPack: boolean }[] }>
   onDownloadsChanged: (callback: () => void) => () => void
   onTorrentProgress: (callback: (data: any) => void) => () => void
   // File utilities

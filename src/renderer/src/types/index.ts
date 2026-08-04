@@ -31,6 +31,8 @@ export interface Video {
   category?: string
   media_type?: 'movie' | 'tv'
   keywords?: string[]
+  streamSourceId?: string
+  sourceMagnet?: string
 }
 
 export interface TmdbProvider {

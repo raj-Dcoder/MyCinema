@@ -82,6 +82,7 @@ const App: React.FC = () => {
   const windowControlsHideTimerRef = useRef<number | null>(null)
   const appFullscreenTapTimerRef = useRef<number | null>(null)
   const appFullscreenToggleInFlightRef = useRef(false)
+  const activeTempStreamRef = useRef<string | null>(null)
 
   const getScrollElement = (tab: AppTab) => {
     return tab === 'home' ? homeScrollRef.current : activePageScrollRef.current
@@ -288,6 +289,22 @@ const App: React.FC = () => {
   ]
 
   const handlePlayVideo = (video: Video) => {
+    if (video.file_path?.startsWith('stream://')) {
+      // Continue Watching entry: open the player instantly with the saved
+      // metadata — the player resolves a live torrent source in the background
+      // and swaps it in, so there is no dead time on this call.
+      setPlayingVideo(video)
+      return
+    }
+    if (video.streamSourceId) {
+      const previousStreamId = activeTempStreamRef.current
+      // Switching to a different temp stream (e.g. next episode's magnet):
+      // stop the previous one so torrents don't pile up.
+      if (previousStreamId && previousStreamId !== video.streamSourceId) {
+        window.api.stopTempStream(previousStreamId)
+      }
+      activeTempStreamRef.current = video.streamSourceId
+    }
     setPlayingVideo(video)
   }
 
@@ -811,9 +828,23 @@ const App: React.FC = () => {
           video={playingVideo} 
           onClose={() => {
             setPlayingVideo(null)
+            if (activeTempStreamRef.current) {
+              window.api.stopTempStream(activeTempStreamRef.current)
+              activeTempStreamRef.current = null
+            }
             setHomeRefreshKey(k => k + 1)
           }} 
           onControlsVisibilityChange={setVideoControlsVisible}
+          onStreamActiveChange={(streamId) => {
+            if (streamId) {
+              if (activeTempStreamRef.current && activeTempStreamRef.current !== streamId) {
+                window.api.stopTempStream(activeTempStreamRef.current)
+              }
+              activeTempStreamRef.current = streamId
+            } else {
+              activeTempStreamRef.current = null
+            }
+          }}
         />
       )}
 

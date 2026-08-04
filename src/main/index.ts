@@ -33,6 +33,15 @@ process.on('uncaughtException', (error) => {
   }
 
   console.error('[Main] Uncaught exception:', error)
+
+  // Node.js internal assertion (e.g. ERR_INTERNAL_ASSERTION in the net module's
+  // family autoselection) is a Node bug, not app code — don't kill the whole app.
+  const errorCode = (error as any)?.code
+  if (errorCode === 'ERR_INTERNAL_ASSERTION') {
+    console.warn('[Main] Ignoring Node internal assertion; continuing.')
+    return
+  }
+
   throw error
 })
 
@@ -673,6 +682,38 @@ function waitForTorrentReady(torrent: any, timeoutMs = 25000): Promise<void> {
   })
 }
 
+// Wait until the beginning of a torrent file has actual downloaded bytes.
+// WebTorrent pre-creates sparse files on disk, so fs.existsSync is NOT enough
+// to know a file is playable — ffmpeg must read real data from the file header.
+function waitForTorrentFilePrefix(torrent: any, file: any, targetBytes: number, timeoutMs = 20000): Promise<boolean> {
+  if (!file || !torrent || torrent.destroyed || file.length === 0) return Promise.resolve(false)
+  const target = Math.min(file.length, targetBytes)
+  if ((file.downloaded || 0) >= target) return Promise.resolve(true)
+  return new Promise((resolve) => {
+    const startedAt = Date.now()
+    let settled = false
+    const cleanup = () => {
+      clearInterval(interval)
+      torrent.removeListener?.('download', onDownload)
+    }
+    const finish = (ok: boolean) => {
+      if (settled) return
+      settled = true
+      cleanup()
+      resolve(ok)
+    }
+    const check = () => {
+      if (torrent.destroyed) { finish(false); return }
+      if ((file.downloaded || 0) >= target) { finish(true); return }
+      if (Date.now() - startedAt > timeoutMs) { finish((file.downloaded || 0) > 0); return }
+    }
+    const onDownload = () => check()
+    const interval = setInterval(check, 400)
+    torrent.on('download', onDownload)
+    check()
+  })
+}
+
 function getPlayableTorrentFile(torrent: any): any | null {
   if (!torrent || !Array.isArray(torrent.files)) return null
   const videoFiles = torrent.files.filter((file: any) => isVideoFilePath(file?.path || file?.name))
@@ -680,24 +721,112 @@ function getPlayableTorrentFile(torrent: any): any | null {
   return videoFiles.sort((a: any, b: any) => (b.length || 0) - (a.length || 0))[0]
 }
 
-async function getPreparedTorrentFile(downloadId: string): Promise<any> {
-  const torrent = activeTorrents.get(downloadId)
-  if (!torrent || torrent.destroyed) throw new Error('Download is not active')
-
-  await waitForTorrentReady(torrent)
-  const file = getPlayableTorrentFile(torrent)
-  if (!file) throw new Error('No playable video file found in this torrent')
-
-  try {
-    for (const other of torrent.files || []) {
-      if (other === file) other.select?.()
-      else other.deselect?.()
+async function getPreparedTorrentFile(downloadId: string, fileIndex?: number): Promise<any> {
+  const tempEntry = tempStreams.get(downloadId)
+  const torrent = activeTorrents.get(downloadId) || tempEntry?.torrent
+  if (!torrent || torrent.destroyed) {
+    // A temp-stream torrent can be destroyed by WebTorrent on transient
+    // network errors; recreate it from the stored magnet so playback survives.
+    if (tempEntry?.magnetUrl) {
+      const revived = await reviveTempStream(downloadId, tempEntry.magnetUrl, fileIndex)
+      return revived
     }
-  } catch (err) {
-    console.warn('[TorrentStream] Could not reprioritize torrent files:', err)
+    // A completed persistent download may have had its torrent destroyed while
+    // the video element is still streaming — serve the file from disk instead.
+    const completed = completedTorrentStreams.get(downloadId)
+    if (completed) {
+      let fileName: string | null = null
+      if (typeof fileIndex === 'number' && Number.isFinite(fileIndex)) {
+        const candidate = completed.files[fileIndex]
+        if (candidate && isVideoFilePath(candidate)) fileName = candidate
+      }
+      if (!fileName) {
+        const videos = completed.files.filter(isVideoFilePath)
+        fileName = videos.sort((a, b) => {
+          const sa = fs.existsSync(path.join(completed.folder, a)) ? fs.statSync(path.join(completed.folder, a)).size : 0
+          const sb = fs.existsSync(path.join(completed.folder, b)) ? fs.statSync(path.join(completed.folder, b)).size : 0
+          return sb - sa
+        })[0] || null
+      }
+      if (fileName) {
+        const stub = makeDiskFileStub(downloadId, fileName)
+        if (stub) {
+          console.log(`[TorrentStream] Serving completed download "${downloadId}" from disk: ${fileName}`)
+          return stub
+        }
+      }
+    }
+    logTorrentServeErrorThrottled(
+      downloadId,
+      `[TorrentStream] Download is not active for "${downloadId}" — ` +
+      `tempStreams has key: ${tempStreams.has(downloadId)}, activeTorrents has key: ${activeTorrents.has(downloadId)}, ` +
+      `temp ids: [${Array.from(tempStreams.keys()).join(', ')}], active ids: [${Array.from(activeTorrents.keys()).join(', ')}]`
+    )
+    throw new Error('Download is not active')
   }
 
+  await waitForTorrentReady(torrent)
+  let file: any = null
+  if (typeof fileIndex === 'number' && Number.isFinite(fileIndex)) {
+    const candidate = torrent.files?.[fileIndex]
+    if (candidate && isVideoFilePath(candidate?.path || candidate?.name)) file = candidate
+  }
+  if (!file) file = getPlayableTorrentFile(torrent)
+  if (!file) throw new Error('No playable video file found in this torrent')
+
+  prioritizeTorrentPlaybackFiles(torrent, file)
+
   return file
+}
+
+async function reviveTempStream(id: string, magnetUrl: string, fileIndex?: number): Promise<any> {
+  const client = await getWebTorrentClient()
+
+  // If the destroyed torrent is still mid-removal from the client, wait for it
+  // to fully leave before re-adding (otherwise client.add returns the dead one).
+  for (let attempt = 0; attempt < 20; attempt++) {
+    const existing = await client.get(magnetUrl)
+    if (!existing) break
+    if (!existing.destroyed) {
+      await waitForTorrentReady(existing)
+      let file: any = null
+      if (typeof fileIndex === 'number' && Number.isFinite(fileIndex)) {
+        const candidate = existing.files?.[fileIndex]
+        if (candidate && isVideoFilePath(candidate?.path || candidate?.name)) file = candidate
+      }
+      if (!file) file = getPlayableTorrentFile(existing)
+      if (!file) throw new Error('No playable video file found in this torrent')
+      tempStreams.set(id, { torrent: existing, folder: tempStreams.get(id)?.folder || path.join(getTempStreamPath(), id), magnetUrl })
+      prioritizeTorrentPlaybackFiles(existing, file)
+      return file
+    }
+    await new Promise(resolve => setTimeout(resolve, 500))
+  }
+
+  console.warn('[TorrentStream] Temp stream torrent died, recreating:', id)
+  const folder = path.join(getTempStreamPath(), id)
+  fs.mkdirSync(folder, { recursive: true })
+  const torrent = client.add(magnetUrl, {
+    path: folder,
+    announce: EXTRA_TRACKERS
+  })
+  tempStreams.set(id, { torrent, folder, magnetUrl })
+
+  try {
+    await waitForTorrentReady(torrent)
+    let file: any = null
+    if (typeof fileIndex === 'number' && Number.isFinite(fileIndex)) {
+      const candidate = torrent.files?.[fileIndex]
+      if (candidate && isVideoFilePath(candidate?.path || candidate?.name)) file = candidate
+    }
+    if (!file) file = getPlayableTorrentFile(torrent)
+    if (!file) throw new Error('No playable video file found in this torrent')
+    prioritizeTorrentPlaybackFiles(torrent, file)
+    return file
+  } catch (err) {
+    cleanupTempStream(id)
+    throw err
+  }
 }
 
 function registerMediaProtocol(): void {
@@ -797,7 +926,11 @@ function registerMediaProtocol(): void {
       const downloadId = decodeURIComponent(url.pathname.replace(/^\/+/, ''))
       if (!downloadId) return new Response('Missing download id', { status: 400 })
 
-      const file = await getPreparedTorrentFile(downloadId)
+      const fileParam = url.searchParams.get('file')
+      const fileIndex = fileParam !== null && fileParam !== ''
+        ? parseInt(fileParam, 10)
+        : undefined
+      const file = await getPreparedTorrentFile(downloadId, Number.isFinite(fileIndex) ? fileIndex : undefined)
       const fileSize = Number(file.length || 0)
       if (!fileSize) return new Response('File is not ready', { status: 503 })
 
@@ -844,7 +977,11 @@ function registerMediaProtocol(): void {
         }
       })
     } catch (error: any) {
-      console.error('[TorrentStream] Failed to serve torrent stream:', error)
+      const url = new URL(request.url)
+      logTorrentServeErrorThrottled(
+        decodeURIComponent(url.pathname.replace(/^\/+/, '')),
+        `[TorrentStream] Failed to serve torrent stream: ${error?.message || error} | URL: ${request.url}`
+      )
       return new Response(error?.message || 'Torrent stream unavailable', { status: 503 })
     }
   })
@@ -892,8 +1029,208 @@ function registerSubtitleProtocol(): void {
   })
 }
 
+function getTorrentStreamIdFromPath(filePath: string): string | null {
+  const prefix = 'torrent://stream/'
+  if (!filePath || !filePath.startsWith(prefix)) return null
+  const raw = filePath.slice(prefix.length).split(/[?#]/)[0]
+  if (!raw) return null
+  try {
+    return decodeURIComponent(raw)
+  } catch {
+    return raw
+  }
+}
+
+function getTorrentStreamFileIndexFromPath(filePath: string): number | null {
+  const qIndex = filePath.indexOf('?')
+  if (qIndex < 0) return null
+  try {
+    const raw = new URLSearchParams(filePath.slice(qIndex + 1)).get('file')
+    if (raw == null) return null
+    const idx = parseInt(raw, 10)
+    return Number.isFinite(idx) ? idx : null
+  } catch {
+    return null
+  }
+}
+
+async function getTorrentAudioTracks(torrentId: string, fileIndex?: number | null): Promise<any[]> {
+  const entry = tempStreams.get(torrentId)
+  const torrent = entry?.torrent || activeTorrents.get(torrentId)
+  if (!torrent || torrent.destroyed) {
+    // Completed persistent download whose torrent was cleaned up — probe the
+    // files from disk.
+    const completed = completedTorrentStreams.get(torrentId)
+    if (!completed) return []
+    const result: any[] = []
+    const videos = completed.files.filter(isVideoFilePath)
+    const videoName = videos[0]
+    if (videoName) {
+      const localPath = path.join(completed.folder, videoName)
+      if (fs.existsSync(localPath)) {
+        try {
+          const embedded = await getEmbeddedAudio(localPath)
+          for (const e of embedded) {
+            result.push({ ...e, embedded: true })
+          }
+        } catch (err) {
+          console.error('Torrent video embedded audio probe failed:', err)
+        }
+      }
+    }
+    const audioFiles = completed.files.filter(isAudioFilePath)
+    for (let i = 0; i < audioFiles.length; i++) {
+      result.push({
+        embedded: false,
+        index: i,
+        language: 'Unknown',
+        title: audioFiles[i] || `Audio track ${i + 1}`,
+        codec: String(audioFiles[i] || '').split('.').pop()?.toLowerCase() || 'unknown',
+        channels: 0
+      })
+    }
+    return result
+  }
+
+  try {
+    await waitForTorrentReady(torrent)
+  } catch {
+    return []
+  }
+
+  const result: any[] = []
+
+  // Probe the video file itself for embedded audio streams so they can be
+  // switched through the ffmpeg audio:// pipeline. Chromium's audioTracks API
+  // is unreliable, so embedded streams get routed there instead of native
+  // track toggling. Embedded streams come first so they stay the default.
+  try {
+    const opts: { fileIndex?: number } = {}
+    if (typeof fileIndex === 'number' && Number.isFinite(fileIndex)) opts.fileIndex = fileIndex
+    const selected = selectTorrentVideoFile(torrent, opts)
+    if (selected && selected.file) {
+      selected.file.select?.(50)
+      const enoughBytes = Math.min(selected.file.length || 0, 4 * 1024 * 1024)
+      await waitForTorrentFilePrefix(torrent, selected.file, enoughBytes, 8000)
+      const localPath = path.join(torrent.path, selected.file.path || selected.file.name || '')
+      if (fs.existsSync(localPath)) {
+        const embedded = await getEmbeddedAudio(localPath)
+        for (const e of embedded) {
+          result.push({ ...e, embedded: true })
+        }
+      }
+    }
+  } catch (err) {
+    console.error('Torrent video embedded audio probe failed:', err)
+  }
+
+  const audioFiles = (torrent.files || []).filter((f: any) => isAudioFilePath(f?.path || f?.name))
+  for (let i = 0; i < audioFiles.length; i++) {
+    const f = audioFiles[i]
+    result.push({
+      embedded: false,
+      index: i,
+      language: 'Unknown',
+      title: f.name || f.path || `Audio track ${i + 1}`,
+      codec: String(f.name || f.path || '').split('.').pop()?.toLowerCase() || 'unknown',
+      channels: 0
+    })
+  }
+  return result
+}
+
+async function resolveTorrentAudioSource(filePath: string, trackIndex: string): Promise<{ localPath: string } | null> {
+  const torrentId = getTorrentStreamIdFromPath(filePath)
+  if (!torrentId) return null
+  const entry = tempStreams.get(torrentId)
+  const torrent = entry?.torrent || activeTorrents.get(torrentId)
+  if (!torrent || torrent.destroyed) {
+    // Completed persistent download — serve the audio file from disk.
+    const completed = completedTorrentStreams.get(torrentId)
+    if (!completed) return null
+    const index = parseInt(trackIndex, 10)
+    if (!Number.isFinite(index)) return null
+    const audioFiles = completed.files.filter(isAudioFilePath)
+    const fileName = audioFiles[index]
+    if (!fileName) return null
+    const localPath = path.join(completed.folder, fileName)
+    return fs.existsSync(localPath) ? { localPath } : null
+  }
+  try {
+    await waitForTorrentReady(torrent)
+  } catch {
+    return null
+  }
+  const audioFiles = (torrent.files || []).filter((f: any) => isAudioFilePath(f?.path || f?.name))
+  const index = parseInt(trackIndex, 10)
+  if (!Number.isFinite(index)) return null
+  const audioFile = audioFiles[index]
+  if (!audioFile) return null
+
+  // The audio file must have REAL bytes on disk before ffmpeg can read it —
+  // WebTorrent leaves sparse/empty files otherwise, which made track switching
+  // appear to do nothing. Prioritize its pieces and wait for the header.
+  try {
+    audioFile.select?.(50)
+    const enoughBytes = Math.min(audioFile.length || 0, 3 * 1024 * 1024)
+    await waitForTorrentFilePrefix(torrent, audioFile, enoughBytes)
+  } catch {
+    // fall through — if the file still has no data, the existsSync check below wins
+  }
+  const localPath = path.join(torrent.path, audioFile.path || audioFile.name || '')
+  if (!fs.existsSync(localPath)) {
+    console.error(`[Audio] Separate track "${audioFile.name || audioFile.path}" for "${torrentId}" missing on disk`)
+    return null
+  }
+  return { localPath }
+}
+
+async function resolveTorrentEmbeddedAudioSource(filePath: string, streamIndex: string): Promise<{ localPath: string; streamIndex: number } | null> {
+  const torrentId = getTorrentStreamIdFromPath(filePath)
+  if (!torrentId) return null
+  const index = parseInt(streamIndex, 10)
+  if (!Number.isFinite(index)) return null
+  const entry = tempStreams.get(torrentId)
+  const torrent = entry?.torrent || activeTorrents.get(torrentId)
+  if (!torrent || torrent.destroyed) {
+    // Completed persistent download — probe the video file from disk.
+    const completed = completedTorrentStreams.get(torrentId)
+    if (!completed) return null
+    const videos = completed.files.filter(isVideoFilePath)
+    const videoName = videos[0]
+    if (!videoName) return null
+    const localPath = path.join(completed.folder, videoName)
+    return fs.existsSync(localPath) ? { localPath, streamIndex: index } : null
+  }
+  try {
+    await waitForTorrentReady(torrent)
+  } catch {
+    return null
+  }
+
+  const fileIndex = getTorrentStreamFileIndexFromPath(filePath)
+  const opts: { fileIndex?: number } = {}
+  if (fileIndex != null) opts.fileIndex = fileIndex
+  const selected = selectTorrentVideoFile(torrent, opts)
+  if (!selected || !selected.file) return null
+
+  try {
+    selected.file.select?.(50)
+    const enoughBytes = Math.min(selected.file.length || 0, 4 * 1024 * 1024)
+    await waitForTorrentFilePrefix(torrent, selected.file, enoughBytes)
+  } catch {
+    // fall through — if the file still has no data, the existsSync check below wins
+  }
+  const localPath = path.join(torrent.path, selected.file.path || selected.file.name || '')
+  if (!fs.existsSync(localPath)) {
+    console.error(`[Audio] Embedded stream source video "${selected.file.name || selected.file.path}" for "${torrentId}" missing on disk`)
+    return null
+  }
+  return { localPath, streamIndex: index }
+}
+
 function registerAudioProtocol(): void {
-  protocol.handle('audio', (request) => {
+  protocol.handle('audio', async (request) => {
     try {
       const url = new URL(request.url)
       const prefix = 'audio://file/'
@@ -903,25 +1240,46 @@ function registerAudioProtocol(): void {
         normalizedPath = normalizedPath.slice(1)
       }
 
-      // Security: block path traversal
-      if (!isSafeFilePath(normalizedPath)) {
-        console.error(`[Protocol] 403 Forbidden audio path: ${normalizedPath}`)
-        return new Response('Forbidden', { status: 403 })
-      }
-
-      if (!fs.existsSync(normalizedPath)) {
-        return new Response('Not Found', { status: 404 })
-      }
-
       const trackIndex = url.searchParams.get('track') || '1'
+      const streamIndex = url.searchParams.get('stream')
       const start = parseFloat(url.searchParams.get('time') || '0')
-      
+
+      let sourcePath: string
+      let mapArg: string
+      if (normalizedPath.startsWith('torrent://stream/')) {
+        if (streamIndex != null && streamIndex !== '') {
+          // Embedded audio stream inside the torrent video file
+          const resolved = await resolveTorrentEmbeddedAudioSource(normalizedPath, streamIndex)
+          if (!resolved) return new Response('Audio track unavailable', { status: 404 })
+          sourcePath = resolved.localPath
+          mapArg = `0:${resolved.streamIndex}`
+        } else {
+          // Separate audio file inside a temp stream / active download torrent
+          const resolved = await resolveTorrentAudioSource(normalizedPath, trackIndex)
+          if (!resolved) return new Response('Audio track unavailable', { status: 404 })
+          sourcePath = resolved.localPath
+          mapArg = '0:a:0'
+        }
+      } else {
+        // Security: block path traversal
+        if (!isSafeFilePath(normalizedPath)) {
+          console.error(`[Protocol] 403 Forbidden audio path: ${normalizedPath}`)
+          return new Response('Forbidden', { status: 403 })
+        }
+
+        if (!fs.existsSync(normalizedPath)) {
+          return new Response('Not Found', { status: 404 })
+        }
+        sourcePath = normalizedPath
+        mapArg = `0:${trackIndex}`
+      }
+
       const pass = new PassThrough()
 
-      const cmd = ffmpeg(normalizedPath)
+      const cmd = ffmpeg(sourcePath)
         .setStartTime(start)
         .outputOptions([
-          `-map 0:${trackIndex}`,
+          `-map ${mapArg}`,
           '-vn',
           '-sn',
           '-c:a libmp3lame',
@@ -1229,6 +1587,10 @@ app.whenReady().then(() => {
   const savedFolders = db.getFolders() as any[]
   savedFolders.forEach(f => attachFolderWatcher(f.path))
 
+  // Remove temp stream data orphaned by crashes / force-kills / locked files.
+  // Skipped in dev multi-client mode, where other instances own the folder.
+  if (!allowDevMultiClient) sweepOrphanedTempStreams()
+
   app.on('browser-window-created', (_, window) => {
     optimizer.watchWindowShortcuts(window)
   })
@@ -1249,6 +1611,7 @@ app.on('before-quit', () => {
   activeTorrents.forEach(t => { try { t.destroy() } catch {} })
   activeTorrents.clear()
   pausedTorrentIds.clear()
+  cleanupAllTempStreams()
   if (webtorrentClient) { try { webtorrentClient.destroy() } catch {} }
 })
 
@@ -1424,6 +1787,18 @@ ipcMain.on('update-video-progress', (_, videoId, time, completed, isClosing) => 
   db.updateVideoProgress(videoId, time, completed, Boolean(isClosing))
   if (isClosing) {
     BrowserWindow.getAllWindows().forEach(w => w.webContents.send('library-updated'))
+  }
+})
+
+// Creates/updates the persistent library row for a streamed (torrent) movie or
+// episode so it can appear in Continue Watching. Keyed on a stable synthetic
+// `stream://` path, since torrent URLs are ephemeral.
+ipcMain.handle('upsert-stream-video', (_, meta) => {
+  try {
+    return db.upsertStreamVideo(meta || {})
+  } catch (err) {
+    console.error('[DB] upsertStreamVideo failed:', err)
+    return -1
   }
 })
 
@@ -1677,6 +2052,10 @@ ipcMain.handle('get-embedded-subtitles', async (_, filePath: string) => {
 })
 
 ipcMain.handle('get-embedded-audio', async (_, filePath: string) => {
+  const torrentId = getTorrentStreamIdFromPath(filePath)
+  if (torrentId) {
+    return await getTorrentAudioTracks(torrentId, getTorrentStreamFileIndexFromPath(filePath))
+  }
   if (!isSafeFilePath(filePath)) {
     console.error(`[IPC] 403 Forbidden path in get-embedded-audio: ${filePath}`)
     return []
@@ -1865,6 +2244,9 @@ function findBestExternalSubtitle(videoFilePath: string): string | null {
 }
 
 ipcMain.handle('get-subtitles', async (_, filePath: string) => {
+  if (getTorrentStreamIdFromPath(filePath)) {
+    return null
+  }
   if (!isSafeFilePath(filePath)) {
     console.error(`[IPC] 403 Forbidden path in get-subtitles: ${filePath}`)
     return null
@@ -2208,6 +2590,119 @@ const activeTorrents = new Map<string, any>() // id -> torrent instance
 const torrentProgressIntervals = new Map<string, NodeJS.Timeout>()
 const pausedTorrentIds = new Set<string>()
 
+// ─── Temp Stream (watch & forget) Engine ────────────────────────────────────
+const tempStreams = new Map<string, { torrent: any; folder: string; magnetUrl: string }>()
+
+// Persistent downloads that completed get their torrent destroyed — but a video
+// element may still be streaming from them. Record their disk layout so the
+// torrent:// and audio:// handlers can serve the files straight from disk.
+const completedTorrentStreams = new Map<string, { folder: string; files: string[] }>()
+
+function makeDiskFileStub(downloadId: string, fileName: string): any {
+  const entry = completedTorrentStreams.get(downloadId)
+  if (!entry) return null
+  const localPath = path.join(entry.folder, fileName)
+  if (!fs.existsSync(localPath)) return null
+  const size = fs.statSync(localPath).size
+  return {
+    length: size,
+    name: fileName,
+    path: fileName,
+    createReadStream: (opts: { start?: number; end?: number } = {}) =>
+      fs.createReadStream(localPath, {
+        start: opts.start ?? 0,
+        end: opts.end ?? size - 1,
+        highWaterMark: 5 * 1024 * 1024
+      })
+  }
+}
+
+function getTempStreamPath(): string {
+  return path.join(app.getPath('temp'), 'MyCinemaStreams')
+}
+
+function cleanupTempStream(id: string): void {
+  const entry = tempStreams.get(id)
+  if (!entry) return
+  console.log(`[TempStream] Cleaning up stream "${id}" (${entry.torrent ? entry.torrent.name || 'unnamed' : 'no torrent'})`)
+  tempStreams.delete(id)
+  try {
+    if (entry.torrent && !entry.torrent.destroyed) entry.torrent.destroy()
+  } catch {}
+  removeTempStreamFolder(entry.folder)
+}
+
+// Remove a temp stream folder with retries. On Windows the video element / OS
+// may still hold file handles for a moment after the torrent is destroyed, so
+// retry with backoff instead of giving up (a leftover folder would otherwise
+// be orphaned disk garbage).
+function removeTempStreamFolder(folder: string): void {
+  let attempts = 0
+  const tryRemove = (): void => {
+    attempts += 1
+    try {
+      if (fs.existsSync(folder)) {
+        fs.rmSync(folder, { recursive: true, force: true })
+      }
+      return
+    } catch {}
+    if (attempts < 4) {
+      setTimeout(tryRemove, 2000 * attempts) // 2s, 4s, 6s
+    } else {
+      console.warn(`[TempStream] Folder still locked after ${attempts} attempts: ${folder}. Will be swept on next launch.`)
+    }
+  }
+  tryRemove()
+}
+
+// Delete every leftover temp stream folder from a previous session. At startup
+// the in-memory tempStreams map is empty, so ANY folder under MyCinemaStreams is
+// orphaned — this covers crashes, force-kills, and locked files that could not
+// be removed at quit time. Only the primary instance may sweep (dev multi-client
+// instances share the temp root with live streams).
+function sweepOrphanedTempStreams(): void {
+  const root = getTempStreamPath()
+  try {
+    if (!fs.existsSync(root)) return
+    const children = fs.readdirSync(root)
+    if (children.length === 0) return
+    console.log(`[TempStream] Startup sweep: removing ${children.length} leftover stream folder(s) from a previous session`)
+    let attempts = 0
+    const trySweep = (): void => {
+      attempts += 1
+      let remaining = 0
+      let lastError: unknown = null
+      try {
+        for (const child of fs.readdirSync(root)) {
+          try {
+            fs.rmSync(path.join(root, child), { recursive: true, force: true })
+          } catch (err) {
+            remaining += 1
+            lastError = err
+          }
+        }
+      } catch (err) {
+        lastError = err
+      }
+      if (remaining > 0 && attempts < 6) {
+        console.log(`[TempStream] ${remaining} folder(s) still locked, retrying sweep (${attempts}/6)…`)
+        setTimeout(trySweep, 5000)
+      } else if (remaining > 0) {
+        console.warn(`[TempStream] Sweep left ${remaining} folder(s) locked: ${lastError}. Will retry on next launch.`)
+      } else if (attempts > 1) {
+        console.log('[TempStream] Startup sweep complete')
+      }
+    }
+    trySweep()
+  } catch (err) {
+    console.warn('[TempStream] Startup sweep failed:', err)
+  }
+}
+
+function cleanupAllTempStreams(): void {
+  for (const id of Array.from(tempStreams.keys())) cleanupTempStream(id)
+}
+
 function clearTorrentProgressInterval(id: string): void {
   const interval = torrentProgressIntervals.get(id)
   if (interval) {
@@ -2248,6 +2743,21 @@ function getDownloadPath(): string {
   const dlPath = path.join(app.getPath('downloads'), 'MyCinema')
   if (!fs.existsSync(dlPath)) fs.mkdirSync(dlPath, { recursive: true })
   return dlPath
+}
+
+// Chromium retries failed media requests aggressively, so a video element that
+// still references a stopped stream can hammer this handler at high frequency.
+// Throttle the diagnostics to one line per stream id every few seconds instead
+// of flooding the console.
+const lastTorrentServeErrorLog = new Map<string, number>()
+function logTorrentServeErrorThrottled(downloadId: string, message: string): void {
+  const now = Date.now()
+  const last = lastTorrentServeErrorLog.get(downloadId) || 0
+  if (now - last >= 3000) {
+    lastTorrentServeErrorLog.set(downloadId, now)
+    console.error(message)
+    if (lastTorrentServeErrorLog.size > 500) lastTorrentServeErrorLog.clear()
+  }
 }
 
 function formatBytes(bytes: any): string {
@@ -4352,6 +4862,14 @@ async function startWebTorrent(torrentId: string, magnetUrl: string, title: stri
     clearTorrentProgressInterval(torrentId)
     broadcastProgress(torrentId, torrent, 'done')
     console.log(`[Torrent] Download complete: ${title}`)
+    // Remember the disk layout so an in-flight video stream can keep reading
+    // after the torrent instance is destroyed below.
+    if (torrent.path) {
+      completedTorrentStreams.set(torrentId, {
+        folder: torrent.path,
+        files: (torrent.files || []).map((f: any) => f.path || f.name || '')
+      })
+    }
     setTimeout(() => {
       markTorrentInactive(torrentId)
       if (!torrent.destroyed) {
@@ -4575,6 +5093,175 @@ ipcMain.handle('prepare-torrent-stream', async (_, id: string) => {
   }
 })
 
+function getMagnetInfoHash(magnetUrl?: string | null): string | null {
+  if (!magnetUrl) return null
+  const match = magnetUrl.match(/urn:btih:([a-zA-Z0-9]+)/i)
+  return match ? match[1].toLowerCase() : null
+}
+
+// ─── IPC: Temp Stream (watch & forget) ───────────────────────────────────────
+function getTorrentFileTvMeta(file: any): { parsedSeason: number | null; parsedEpisode: number | null } {
+  const meta = parseTvTorrentMetadata(file?.path || file?.name || '')
+  return {
+    parsedSeason: meta.parsedSeason ?? null,
+    parsedEpisode: meta.parsedEpisode ?? null
+  }
+}
+
+// Pick which video file a temp stream should play.
+// - fileIndex: exact file
+// - season/episode: closest episode match (exact, then first of the season)
+// - otherwise: first episode of the pack (or largest file for movies/singles)
+function selectTorrentVideoFile(
+  torrent: any,
+  opts: { fileIndex?: number; season?: number; episode?: number } = {}
+): { file: any; index: number } | null {
+  if (!torrent || !Array.isArray(torrent.files)) return null
+  const videoFiles = (torrent.files as any[])
+    .map((f: any, i: number) => ({ f, i }))
+    .filter(({ f }) => isVideoFilePath(f?.path || f?.name))
+  if (videoFiles.length === 0) return null
+
+  if (typeof opts.fileIndex === 'number' && Number.isFinite(opts.fileIndex)) {
+    const exactFile = videoFiles.find(v => v.i === opts.fileIndex)
+    if (exactFile) return { file: exactFile.f, index: exactFile.i }
+  }
+
+  if (opts.episode != null || opts.season != null) {
+    const parsed = videoFiles.map(({ f, i }) => ({ f, i, meta: parseTvTorrentMetadata(f?.path || f?.name || '') }))
+    const targetSeason = opts.season ?? 1
+    const exact = parsed.find(p => p.meta.parsedEpisode === opts.episode && (p.meta.parsedSeason ?? 1) === targetSeason)
+    if (exact) return { file: exact.f, index: exact.i }
+    const sameSeason = parsed
+      .filter(p => (p.meta.parsedSeason ?? 1) === targetSeason && typeof p.meta.parsedEpisode === 'number')
+      .sort((a, b) => (a.meta.parsedEpisode as number) - (b.meta.parsedEpisode as number))
+    if (sameSeason.length > 0) return { file: sameSeason[0].f, index: sameSeason[0].i }
+  }
+
+  // Default: first episode (season packs play E01..E0N in one go)
+  const withEpisodes = videoFiles
+    .map(({ f, i }) => ({ f, i, meta: parseTvTorrentMetadata(f?.path || f?.name || '') }))
+    .filter(p => typeof p.meta.parsedEpisode === 'number')
+    .sort((a, b) =>
+      (a.meta.parsedSeason ?? 1) - (b.meta.parsedSeason ?? 1) ||
+      (a.meta.parsedEpisode as number) - (b.meta.parsedEpisode as number)
+    )
+  if (withEpisodes.length > 0) return { file: withEpisodes[0].f, index: withEpisodes[0].i }
+
+  const bySize = videoFiles.sort((a, b) => (b.f.length || 0) - (a.f.length || 0))[0]
+  return { file: bySize.f, index: bySize.i }
+}
+
+function buildTempStreamResult(
+  torrentId: string,
+  file: any,
+  fileIndex: number,
+  streamId?: string
+): { url: string; fileName: string; size: number; streamId?: string; parsedSeason: number | null; parsedEpisode: number | null } {
+  return {
+    url: `torrent://stream/${encodeURIComponent(torrentId)}?file=${fileIndex}`,
+    fileName: file.name || file.path || 'Torrent video',
+    size: file.length || 0,
+    streamId,
+    ...getTorrentFileTvMeta(file)
+  }
+}
+
+ipcMain.handle('start-temp-stream', async (_, magnetUrl: string, title?: string, options?: { fileIndex?: number; season?: number; episode?: number }) => {
+  try {
+    const enrichedMagnetUrl = enrichMagnetWithTrackers(magnetUrl)
+    const infoHash = getMagnetInfoHash(enrichedMagnetUrl)
+
+    // If this magnet is already an active persistent download, stream from it
+    // instead of adding a second torrent (WebTorrent dedupes by infoHash anyway).
+    for (const [id, torrent] of activeTorrents) {
+      if (!torrent || torrent.destroyed) continue
+      if (infoHash && torrent.infoHash?.toLowerCase() === infoHash) {
+        await waitForTorrentReady(torrent)
+        const selected = selectTorrentVideoFile(torrent, options)
+        if (!selected) throw new Error('No playable video file found in this torrent')
+        console.log(`[TempStream] Reusing ACTIVE download "${id}" (no temp entry created) for magnet ${infoHash}`)
+        return buildTempStreamResult(id, selected.file, selected.index)
+      }
+    }
+
+    // If a temp stream for this magnet is already running, reuse it
+    for (const [sid, entry] of tempStreams) {
+      if (!entry.torrent || entry.torrent.destroyed) continue
+      if (infoHash && entry.torrent.infoHash?.toLowerCase() === infoHash) {
+        await waitForTorrentReady(entry.torrent)
+        const selected = selectTorrentVideoFile(entry.torrent, options)
+        if (!selected) throw new Error('No playable video file found in this torrent')
+        return buildTempStreamResult(sid, selected.file, selected.index, sid)
+      }
+    }
+
+    const streamId = crypto.randomUUID()
+    const folder = path.join(getTempStreamPath(), streamId)
+    fs.mkdirSync(folder, { recursive: true })
+
+    const client = await getWebTorrentClient()
+    const torrent = client.add(enrichedMagnetUrl, {
+      path: folder,
+      announce: EXTRA_TRACKERS
+    })
+    tempStreams.set(streamId, { torrent, folder, magnetUrl: enrichedMagnetUrl })
+
+    try {
+      await waitForTorrentReady(torrent)
+      const selected = selectTorrentVideoFile(torrent, options)
+      if (!selected) throw new Error('No playable video file found in this torrent')
+      prioritizeTorrentPlaybackFiles(torrent, selected.file)
+      console.log(`[TempStream] Started stream "${streamId}" for ${title} -> ${selected.file.name || selected.file.path}`)
+      return buildTempStreamResult(streamId, selected.file, selected.index, streamId)
+    } catch (err: any) {
+      cleanupTempStream(streamId)
+      throw err
+    }
+  } catch (err: any) {
+    console.error('[TempStream] Start failed:', err)
+    return { error: err?.message || 'Temp stream unavailable' }
+  }
+})
+
+ipcMain.handle('stop-temp-stream', async (_, id: string) => {
+  cleanupTempStream(id)
+  return true
+})
+
+// Lets the renderer distinguish "transient torrent error (still active)" from
+// "stream was stopped/cleaned (dead)" — the video element stops retrying the
+// dead URL only once it knows the stream is really gone.
+ipcMain.handle('check-temp-stream-active', (_, id: string) => {
+  return tempStreams.has(id) || activeTorrents.has(id) || completedTorrentStreams.has(id)
+})
+
+ipcMain.handle('get-temp-stream-episodes', async (_, streamId: string) => {
+  const entry = tempStreams.get(streamId)
+  const torrent = entry?.torrent
+  if (!torrent || torrent.destroyed) return { error: 'Stream is not active' }
+  try {
+    await waitForTorrentReady(torrent)
+  } catch (err: any) {
+    return { error: err?.message || 'Torrent metadata is not ready yet' }
+  }
+  const episodes: any[] = []
+  ;(torrent.files || []).forEach((f: any, index: number) => {
+    const filePath = f?.path || f?.name || ''
+    if (!isVideoFilePath(filePath)) return
+    const meta = parseTvTorrentMetadata(filePath)
+    episodes.push({
+      index,
+      fileName: f.name || f.path || '',
+      size: f.length || 0,
+      season: meta.parsedSeason ?? null,
+      episode: meta.parsedEpisode ?? null,
+      isSeasonPack: Boolean(meta.isSeasonPack)
+    })
+  })
+  return { episodes }
+})
+
 function normalizeTorrentRelativePath(relativePath: string): string {
   return path.normalize(relativePath).replace(/^(\.\.(\\|\/|$))+/, '')
 }
@@ -4711,6 +5398,34 @@ function collectMatchingEpisodeFileTargets(
 
 function isVideoFilePath(candidate?: string | null): boolean {
   return Boolean(candidate && VIDEO_EXTS.has(path.extname(candidate).toLowerCase()))
+}
+
+const AUDIO_EXTS = new Set([
+  '.mka', '.aac', '.ac3', '.eac3', '.dts', '.dtshd', '.dtsma', '.mp3', '.flac',
+  '.opus', '.ogg', '.oga', '.m4a', '.wav', '.wma', '.amr', '.aiff', '.aif', '.ape'
+])
+
+function isAudioFilePath(candidate?: string | null): boolean {
+  return Boolean(candidate && AUDIO_EXTS.has(path.extname(candidate).toLowerCase()))
+}
+
+// Prioritize the playable video file and any separate audio track files so
+// playback (video + audio) can start immediately, while deselecting everything
+// else (subtitles, extras, other episodes) to avoid downloading the whole pack.
+function prioritizeTorrentPlaybackFiles(torrent: any, playable: any): void {
+  if (!Array.isArray(torrent.files)) return
+  try {
+    for (const other of torrent.files) {
+      const otherPath = other?.path || other?.name
+      if (other === playable || isAudioFilePath(otherPath)) {
+        other.select?.(50)
+      } else {
+        other.deselect?.()
+      }
+    }
+  } catch (err) {
+    console.warn('[TorrentStream] Could not reprioritize torrent files:', err)
+  }
 }
 
 function getDownloadSourceNames(torrent: any, download: any): string[] {
@@ -5044,7 +5759,8 @@ ipcMain.handle('download-opensubtitle', async (_, params: {
   if (!OPENSUBTITLES_API_KEY) {
     return { error: 'No OpenSubtitles API key configured' }
   }
-  if (!isSafeFilePath(params.videoFilePath)) {
+  const isTorrentStream = getTorrentStreamIdFromPath(params.videoFilePath) !== null
+  if (!isTorrentStream && !isSafeFilePath(params.videoFilePath)) {
     console.error(`[OpenSubtitles] 403 Forbidden video path: ${params.videoFilePath}`)
     return { error: 'Invalid video path' }
   }
@@ -5082,9 +5798,18 @@ ipcMain.handle('download-opensubtitle', async (_, params: {
     const srtResponse = await net.fetch(downloadUrl)
     const srtContent = await srtResponse.text()
 
-    // Step 3: Save the SRT file alongside the video
-    const videoDir = path.dirname(params.videoFilePath)
-    const videoBaseName = path.basename(params.videoFilePath, path.extname(params.videoFilePath))
+    // Step 3: Save the SRT file alongside the video (or in userData for streams)
+    let videoDir: string
+    let videoBaseName: string
+    if (isTorrentStream) {
+      videoDir = path.join(app.getPath('userData'), 'subtitles', 'streams')
+      fs.mkdirSync(videoDir, { recursive: true })
+      const safeName = String(params.fileName || 'torrent-stream').replace(/[\\/:*?"<>|]/g, '_')
+      videoBaseName = safeName.replace(/\.[a-z0-9]{2,5}$/i, '')
+    } else {
+      videoDir = path.dirname(params.videoFilePath)
+      videoBaseName = path.basename(params.videoFilePath, path.extname(params.videoFilePath))
+    }
     const srtPath = path.join(videoDir, `${videoBaseName}.opensubtitles.${params.fileId}.srt`)
 
     fs.writeFileSync(srtPath, srtContent, 'utf-8')

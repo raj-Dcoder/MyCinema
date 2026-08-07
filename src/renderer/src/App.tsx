@@ -820,14 +820,27 @@ const App: React.FC = () => {
         <VideoPlayer 
           video={playingVideo} 
           onClose={() => {
+            const id = activeTempStreamRef.current
+            activeTempStreamRef.current = null
             setPlayingVideo(null)
-            if (activeTempStreamRef.current) {
-              window.api.stopTempStream(activeTempStreamRef.current)
-              activeTempStreamRef.current = null
+            if (id) {
+              // Give Chromium's media pipeline 2 seconds to fully release its
+              // read handles on the torrent files before we ask WebTorrent to
+              // destroy and delete them. 800ms was not enough on slower machines
+              // (confirmed by the Windows "Folder In Use" error during testing).
+              setTimeout(() => {
+                window.api.stopTempStream(id).catch(() => {})
+              }, 2000)
             }
             setHomeRefreshKey(k => k + 1)
           }} 
           onControlsVisibilityChange={setVideoControlsVisible}
+          onStreamChange={(streamId) => {
+            // Keep the tracked stream in sync with the one the player is really
+            // using (episode / magnet switches happen inside the player, so the
+            // value set in handlePlayVideo can go stale).
+            activeTempStreamRef.current = streamId
+          }}
         />
       )}
 

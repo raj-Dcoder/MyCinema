@@ -756,11 +756,6 @@ async function getPreparedTorrentFile(downloadId: string, fileIndex?: number): P
         }
       }
     }
-    console.error(
-      `[TorrentStream] Download is not active for "${downloadId}" — ` +
-      `tempStreams has key: ${tempStreams.has(downloadId)}, activeTorrents has key: ${activeTorrents.has(downloadId)}, ` +
-      `temp ids: [${Array.from(tempStreams.keys()).join(', ')}], active ids: [${Array.from(activeTorrents.keys()).join(', ')}]`
-    )
     throw new Error('Download is not active')
   }
 
@@ -976,8 +971,10 @@ function registerMediaProtocol(): void {
         }
       })
     } catch (error: any) {
-      console.error('[TorrentStream] Failed to serve torrent stream:', error, '| URL:', request.url)
-      return new Response(error?.message || 'Torrent stream unavailable', { status: 503 })
+      if (error?.message !== 'Download is not active') {
+        console.error('[TorrentStream] Failed to serve torrent stream:', error?.message || error, '| URL:', request.url)
+      }
+      return new Response(error?.message || 'Torrent stream unavailable', { status: 404 })
     }
   })
 }
@@ -1105,8 +1102,8 @@ async function getTorrentAudioTracks(torrentId: string, fileIndex?: number | nul
     const selected = selectTorrentVideoFile(torrent, opts)
     if (selected && selected.file) {
       selected.file.select?.(50)
-      const enoughBytes = Math.min(selected.file.length || 0, 4 * 1024 * 1024)
-      await waitForTorrentFilePrefix(torrent, selected.file, enoughBytes, 8000)
+      const enoughBytes = Math.min(selected.file.length || 0, 1024 * 1024)
+      await waitForTorrentFilePrefix(torrent, selected.file, enoughBytes, 6000)
       const localPath = path.join(torrent.path, selected.file.path || selected.file.name || '')
       if (fs.existsSync(localPath)) {
         const embedded = await getEmbeddedAudio(localPath)
@@ -1211,8 +1208,8 @@ async function resolveTorrentEmbeddedAudioSource(filePath: string, streamIndex: 
 
   try {
     selected.file.select?.(50)
-    const enoughBytes = Math.min(selected.file.length || 0, 4 * 1024 * 1024)
-    await waitForTorrentFilePrefix(torrent, selected.file, enoughBytes)
+    const enoughBytes = Math.min(selected.file.length || 0, 1024 * 1024)
+    await waitForTorrentFilePrefix(torrent, selected.file, enoughBytes, 6000)
   } catch {
     // fall through — if the file still has no data, the existsSync check below wins
   }
@@ -1266,21 +1263,24 @@ function registerAudioProtocol(): void {
           return new Response('Not Found', { status: 404 })
         }
         sourcePath = normalizedPath
-        mapArg = `0:${trackIndex}`
+        mapArg = streamIndex != null && streamIndex !== '' ? `0:${streamIndex}` : `0:${trackIndex}`
       }
 
       const pass = new PassThrough()
 
       const cmd = ffmpeg(sourcePath)
-        .setStartTime(start)
-        .outputOptions([
-          `-map ${mapArg}`,
-          '-vn',
-          '-sn',
-          '-c:a libmp3lame',
-          '-b:a 192k',
-          '-f mp3'
-        ])
+      if (Number.isFinite(start) && start > 0) {
+        cmd.setStartTime(start)
+      }
+      cmd.outputOptions([
+        `-map ${mapArg}`,
+        '-vn',
+        '-sn',
+        '-c:a libmp3lame',
+        '-b:a 192k',
+        '-ac 2',
+        '-f mp3'
+      ])
         .on('error', (err) => {
           if (!err.message.includes('Output stream closed') && !err.message.includes('SIGKILL') && !err.message.includes('The operation was aborted')) {
             // Gracefully fall back — d3d11va may not be supported on all machines
@@ -3267,6 +3267,7 @@ function normalizeTorrentSources(sources: any[], mediaType: string): any[] {
     // Parse Season / Episode metadata
     let enrichedSources = sources.map(src => {
       const normalized = normalizeTorrentSourceHindiFlag({ ...src })
+      normalized.isHevc = /\b(hevc|h\.?265|x265|265)\b/i.test(normalized.title || '')
       if (mediaType === 'tv') {
         const metadata = parseTvTorrentMetadata(normalized.title)
         normalized.parsedSeason = metadata.parsedSeason

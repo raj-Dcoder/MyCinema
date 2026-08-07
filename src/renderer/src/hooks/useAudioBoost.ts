@@ -150,6 +150,8 @@ export function useAudioBoost({ videoRef, audioRef, isPlaying, selectedAudioId, 
   const audioCtxRef = useRef<AudioContext | null>(null)
   const videoSourceNodeRef = useRef<MediaElementAudioSourceNode | null>(null)
   const audioSourceNodeRef = useRef<MediaElementAudioSourceNode | null>(null)
+  const videoGainNodeRef = useRef<GainNode | null>(null)
+  const audioGainNodeRef = useRef<GainNode | null>(null)
   const bassFilterRef = useRef<BiquadFilterNode | null>(null)
   const lowMidFilterRef = useRef<BiquadFilterNode | null>(null)
   const clarityFilterRef = useRef<BiquadFilterNode | null>(null)
@@ -243,14 +245,24 @@ export function useAudioBoost({ videoRef, audioRef, isPlaying, selectedAudioId, 
           boostGainRef.current = ctx.createGain()
         }
 
+        if (!videoGainNodeRef.current) {
+          videoGainNodeRef.current = ctx.createGain()
+          videoGainNodeRef.current.connect(bassFilterRef.current)
+        }
+
+        if (!audioGainNodeRef.current) {
+          audioGainNodeRef.current = ctx.createGain()
+          audioGainNodeRef.current.connect(bassFilterRef.current)
+        }
+
         if (videoRef.current && !videoSourceNodeRef.current) {
           videoSourceNodeRef.current = ctx.createMediaElementSource(videoRef.current)
-          videoSourceNodeRef.current.connect(bassFilterRef.current)
+          videoSourceNodeRef.current.connect(videoGainNodeRef.current)
         }
 
         if (audioRef.current && !audioSourceNodeRef.current) {
           audioSourceNodeRef.current = ctx.createMediaElementSource(audioRef.current)
-          audioSourceNodeRef.current.connect(bassFilterRef.current)
+          audioSourceNodeRef.current.connect(audioGainNodeRef.current)
         }
 
         if (!audioBoostChainConnectedRef.current) {
@@ -292,6 +304,15 @@ export function useAudioBoost({ videoRef, audioRef, isPlaying, selectedAudioId, 
       const scaledThreshold = active
         ? profile.compressorThreshold + ((1 - intensity.amount) * 8)
         : 0
+
+      // Route audio output strictly based on whether selected track is native vs external
+      const isExternalAudio = Boolean(selectedAudioId && (selectedAudioId.startsWith('ext-') || selectedAudioId.startsWith('ext-emb-')))
+      if (videoGainNodeRef.current) {
+        setParam(videoGainNodeRef.current.gain, isExternalAudio ? 0 : 1, now, 0.02)
+      }
+      if (audioGainNodeRef.current) {
+        setParam(audioGainNodeRef.current.gain, isExternalAudio ? 1 : 0, now, 0.02)
+      }
 
       if (bassFilterRef.current) {
         setParam(bassFilterRef.current.gain, scaledGain(profile.bassGain), now)

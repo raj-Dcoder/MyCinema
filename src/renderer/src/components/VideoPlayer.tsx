@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useRef, useState, useMemo } from 'react'
 import { Play, Pause, Rewind, FastForward, X, Maximize, Minimize, Volume2, VolumeX, Subtitles, Music, SkipForward as SkipNext, ArrowLeft, MessageSquareText, AlertTriangle, Check, Monitor, RectangleHorizontal, Crop, FolderOpen, Info, Film, HardDrive, ChevronDown, ChevronUp, ListVideo, Users, Search, Globe, Loader2, Download, RotateCcw, Zap, Sparkles, Wand2, PictureInPicture2, Mic, MicOff, Magnet } from 'lucide-react'
 import { Video } from '../types'
 import { getMediaUnitIdentity, groupMediaVersions } from '../utils/mediaVersions'
-import { getTorrentSourceHealthScore, getTorrentSourceSpeedLabel } from '../utils/torrentSources'
+import { getTorrentSourceHealthScore, getTorrentSourceSpeedLabel, isHevcSource } from '../utils/torrentSources'
 import { useWatchTogether } from '../hooks/useWatchTogether'
 import { WatchTogetherModal } from './WatchTogetherModal'
 import AIEnhancementRenderer from './AIEnhancementRenderer'
@@ -131,9 +131,10 @@ interface VideoPlayerProps {
   video: Video
   onClose: () => void
   onControlsVisibilityChange?: (visible: boolean) => void
+  onStreamChange?: (streamId: string | null) => void
 }
 
-const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVisibilityChange }) => {
+const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVisibilityChange, onStreamChange }) => {
   const videoRef = useRef<HTMLVideoElement>(null)
   
   const [isPlaying, setIsPlaying] = useState(false)
@@ -314,6 +315,23 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
   const [subtitlePath, setSubtitlePath] = useState<string | null>(null)
   const [volume, setVolume] = useState(1)
   const [currentVideo, setCurrentVideo] = useState<Video>(video)
+
+  // Tell the parent which watch-and-forget temp stream this player is currently
+  // using. The parent owns stopping it when the player closes (it does so via a
+  // regular close handler, NOT an unmount effect — see `onClose` — an unmount
+  // effect would stop the stream during React StrictMode's fake dev unmount).
+  // `streamSourceId` is only ever set for temp streams (never persistent downloads),
+  // so nothing saved locally can be deleted through this path.
+  const onStreamChangeRef = useRef(onStreamChange)
+  onStreamChangeRef.current = onStreamChange
+  const lastReportedStreamIdRef = useRef<string | null>(null)
+  useEffect(() => {
+    const id = currentVideo.streamSourceId || null
+    if (id !== lastReportedStreamIdRef.current) {
+      lastReportedStreamIdRef.current = id
+      onStreamChangeRef.current?.(id)
+    }
+  }, [currentVideo.streamSourceId])
   const currentVideoRef = useRef<Video>(video)
   currentVideoRef.current = currentVideo
   const isTorrentStream = isTorrentStreamPath(currentVideo.file_path)
@@ -542,10 +560,24 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
   const [episodeSwitchState, setEpisodeSwitchState] = useState<{ status: 'searching' | 'error'; label?: string } | null>(null)
 
   // In-player magnet sources panel
+  const initialSources = currentVideo.fetchedSources || video.fetchedSources || []
   const [showMagnetsPanel, setShowMagnetsPanel] = useState(false)
-  const [magnetsSources, setMagnetsSources] = useState<any[]>([])
+  const [magnetsSources, setMagnetsSources] = useState<any[]>(initialSources)
   const [magnetsSearching, setMagnetsSearching] = useState(false)
-  const [magnetsStatus, setMagnetsStatus] = useState<{ found: number; completed: number; total: number; done: boolean; cached?: boolean }>({ found: 0, completed: 0, total: 0, done: false })
+  const [magnetsStatus, setMagnetsStatus] = useState<{ found: number; completed: number; total: number; done: boolean; cached?: boolean }>({
+    found: initialSources.length,
+    completed: 0,
+    total: 0,
+    done: initialSources.length > 0
+  })
+
+  useEffect(() => {
+    const sourcesToUse = currentVideo.fetchedSources || video.fetchedSources
+    if (Array.isArray(sourcesToUse) && sourcesToUse.length > 0) {
+      setMagnetsSources(sourcesToUse)
+      setMagnetsStatus(prev => ({ ...prev, found: sourcesToUse.length, done: true }))
+    }
+  }, [currentVideo.fetchedSources, video.fetchedSources])
   const [magnetsSeasonFilter, setMagnetsSeasonFilter] = useState('all')
   const [magnetsPackSeasonFilter, setMagnetsPackSeasonFilter] = useState('all')
   const [magnetsEpisodeFilter, setMagnetsEpisodeFilter] = useState('all')
@@ -974,19 +1006,36 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
     availableSubtitles.push({ idx: trackIdx++, id: `embedded-${sub.index}`, label: formatTrackLabel(sub, sub.index) })
   })
 
+  const isChromiumNativeAudioCodec = (codec?: string): boolean => {
+    if (!codec) return false
+    const c = codec.toLowerCase().trim()
+    return (
+      c.includes('aac') ||
+      c.includes('mp3') ||
+      c.includes('opus') ||
+      c.includes('vorbis') ||
+      c.includes('flac')
+    )
+  }
+
   const availableAudio = React.useMemo(() => {
     if (!hasVideoMetadata) return []
 
     const arr: any[] = []
     if (isTorrentStreamPath(currentVideo.file_path)) {
-      // Torrent audio (embedded video streams + separate audio files) is always
-      // routed through the ffmpeg audio:// pipeline — Chromium's audioTracks
-      // toggle is unreliable, so the native branch only survives as a fallback
-      // when the probe found nothing.
       if (embeddedAudio.length > 0) {
         embeddedAudio.forEach((t, i) => {
           if (t.embedded) {
-            arr.push({ id: `ext-emb-${t.index}`, index: t.index, native: false, embedded: true, label: formatTrackLabel(t, i + 1) })
+            // Only treat track 0 as native if Chromium natively decodes its codec (e.g. AAC/MP3).
+            // Non-native codecs (EAC3, AC3, DTS, TrueHD) MUST route through FFmpeg audio:// pipeline.
+            const isNative = i === 0 && isChromiumNativeAudioCodec(t.codec)
+            arr.push({
+              id: isNative ? `nat-${t.index}` : `ext-emb-${t.index}`,
+              index: t.index,
+              native: isNative,
+              embedded: true,
+              label: formatTrackLabel(t, i + 1)
+            })
           } else {
             arr.push({ id: `ext-${t.index}`, index: t.index, native: false, embedded: false, label: formatTrackLabel(t, i + 1) })
           }
@@ -995,7 +1044,8 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
       }
       if (audioTracks.length > 0) {
         audioTracks.forEach((t, i) => {
-          arr.push({ id: `nat-${i}`, index: i, native: true, label: formatTrackLabel(t, i + 1) })
+          const isNative = isChromiumNativeAudioCodec(t.codec || t.label)
+          arr.push({ id: isNative ? `nat-${i}` : `ext-emb-${i}`, index: i, native: isNative, embedded: true, label: formatTrackLabel(t, i + 1) })
         })
       }
       return arr
@@ -1003,15 +1053,18 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
 
     if (audioTracks.length > 0 && audioTracks.length === embeddedAudio.length) {
       audioTracks.forEach((t, i) => {
-        arr.push({ id: `nat-${i}`, index: i, native: true, label: formatTrackLabel(embeddedAudio[i] || t, i + 1) })
+        const isNative = isChromiumNativeAudioCodec(embeddedAudio[i]?.codec || t.codec)
+        arr.push({ id: isNative ? `nat-${i}` : `ext-emb-${embeddedAudio[i]?.index ?? i}`, index: i, native: isNative, embedded: true, label: formatTrackLabel(embeddedAudio[i] || t, i + 1) })
       })
     } else if (embeddedAudio.length > 0) {
       embeddedAudio.forEach((t, i) => {
-        arr.push({ id: `ext-${t.index}`, index: t.index, native: false, label: formatTrackLabel(t, i + 1) })
+        const isNative = isChromiumNativeAudioCodec(t.codec)
+        arr.push({ id: isNative ? `nat-${t.index}` : `ext-emb-${t.index}`, index: t.index, native: isNative, embedded: true, label: formatTrackLabel(t, i + 1) })
       })
     } else if (audioTracks.length > 0) {
       audioTracks.forEach((t, i) => {
-        arr.push({ id: `nat-${i}`, index: i, native: true, label: formatTrackLabel(t, i + 1) })
+        const isNative = isChromiumNativeAudioCodec(t.codec || t.label)
+        arr.push({ id: isNative ? `nat-${i}` : `ext-emb-${i}`, index: i, native: isNative, embedded: true, label: formatTrackLabel(t, i + 1) })
       })
     }
     return arr
@@ -1209,8 +1262,22 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
             audioTrackSwitchRetryRef.current = null
             onReady?.()
           })
-          .catch(() => {})
+          .catch((e) => {
+            // Autoplay rejection / broken stream: nothing is pending, so release
+            // the retry lock — otherwise onPlay/onPlaying and the watchdog are
+            // blocked forever and the audio stays silent until the user manually
+            // re-selects the track.
+            console.log('[Audio] play() rejected in startExternalAudioTrack:', e)
+            audioTrackSwitchRetryRef.current?.cleanup()
+            audioTrackSwitchRetryRef.current = null
+            onReady?.()
+          })
       } else {
+        // Deliberately not playing yet (video still paused) — the load is done,
+        // so release the retry lock. onPlay/onPlaying will start the audio once
+        // the video actually begins playing.
+        audioTrackSwitchRetryRef.current?.cleanup()
+        audioTrackSwitchRetryRef.current = null
         onReady?.()
       }
     }
@@ -2156,7 +2223,16 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
 
       const trackObj = availableAudio.find(a => a.id === selectedAudioId)
       if (!trackObj || trackObj.native) return
-      if (audioEl.readyState < 2) return
+
+      // CRITICAL: If the video is buffering or paused, audio MUST be paused and never drifting
+      if (videoEl.paused || videoEl.readyState < 3 || isBuffering || torrentBuffering || isTorrentLoading) {
+        if (!audioEl.paused) {
+          audioEl.pause()
+        }
+        return
+      }
+
+      if (audioEl.paused || audioEl.readyState < 2) return
 
       const expectedTime = videoEl.currentTime - lastSeekTimeRef.current
       if (expectedTime < 0) return
@@ -2174,7 +2250,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
       }
     }, 250)
     return () => clearInterval(driftInterval)
-  }, [isPlaying, lastSeekTime, isSeeking, selectedAudioId, availableAudio])
+  }, [isPlaying, lastSeekTime, isSeeking, selectedAudioId, availableAudio, isBuffering, torrentBuffering, isTorrentLoading])
 
   // Audio watchdog: if the external audio element dies (404 from a destroyed
   // torrent, a failed drift reload, a stalled ffmpeg stream, an autoplay
@@ -2192,13 +2268,16 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
       if (!isPlaying || !trackObj || trackObj.native || !videoEl || !audioEl || !audioEl.src || isSeeking) return
       if (externalAudioSeekBarrierRef.current || startupExternalAudioBarrierRef.current || audioTrackSwitchRetryRef.current) return
 
+      // Do NOT evaluate watchdog or mark audio as dead if video is buffering, paused, or loading
+      if (videoEl.paused || videoEl.readyState < 3 || isBuffering || torrentBuffering || isTorrentLoading) return
+
       const now = Date.now()
       let dead = false
       let reason = ''
       if (audioEl.error) {
         dead = true
         reason = `error=${audioEl.error.code}`
-      } else if (audioEl.paused && audioEl.readyState < 2) {
+      } else if (audioEl.paused) {
         dead = true
         reason = `paused with readyState=${audioEl.readyState}`
       } else if (audioEl.ended) {
@@ -3813,6 +3892,19 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
           if (audioRef.current && audioRef.current.src) audioRef.current.pause()
         }}
         onEnded={handleEnded}
+        onStalled={() => {
+          if (startupExternalAudioBarrierRef.current || externalAudioSeekBarrierRef.current) return
+          if (isTorrentStream) {
+            if (!isTorrentLoading) {
+              setTorrentBuffering(true)
+              setTorrentLoadProgress(0)
+              setTorrentLoadingFading(false)
+            }
+          } else {
+            showBufferingIndicatorSoon()
+          }
+          if (audioRef.current && audioRef.current.src) audioRef.current.pause()
+        }}
         onWaiting={() => {
           if (startupExternalAudioBarrierRef.current || externalAudioSeekBarrierRef.current) return
           if (isTorrentStream) {
@@ -3848,10 +3940,12 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
           }
           const trackObj = availableAudio.find(a => a.id === selectedAudioId);
           if (trackObj && !trackObj.native && audioRef.current && !startupExternalAudioBarrierRef.current && !externalAudioSeekBarrierRef.current && !audioTrackSwitchRetryRef.current) {
-            if (!audioRef.current.src || audioRef.current.error || audioRef.current.paused) {
-              startExternalAudioTrack(trackObj.index, videoRef.current?.currentTime || 0, true, undefined, trackObj.embedded)
-            } else {
-              audioRef.current.play().catch(e => console.log('Audio onPlaying failed:', e));
+            if (videoRef.current && !videoRef.current.paused) {
+              if (!audioRef.current.src || audioRef.current.error || audioRef.current.paused) {
+                startExternalAudioTrack(trackObj.index, videoRef.current.currentTime || 0, true, undefined, trackObj.embedded)
+              } else {
+                audioRef.current.play().catch(e => console.log('Audio onPlaying failed:', e));
+              }
             }
           }
         }}
@@ -4876,6 +4970,14 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
               </div>
             ) : filteredMagnets.length > 0 ? (
               <>
+                <div className="flex items-center gap-2.5 rounded-xl border border-purple-500/25 bg-gradient-to-r from-purple-950/40 via-indigo-950/30 to-purple-900/20 px-3.5 py-2 text-[11px] font-medium leading-relaxed text-purple-200/90 shadow-md">
+                  <div className="flex h-5 w-5 shrink-0 items-center justify-center rounded-lg bg-purple-500/20 text-purple-300 border border-purple-400/30">
+                    <Zap size={12} className="fill-purple-300/40 text-purple-300" />
+                  </div>
+                  <div>
+                    <span className="font-bold text-purple-100">Pro Tip:</span> Pick an <span className="font-bold text-purple-300 bg-purple-500/20 px-1.5 py-0.5 rounded border border-purple-400/30 text-[9px] uppercase">HEVC / x265</span> magnet for fast, high-quality streaming.
+                  </div>
+                </div>
                 {magnetsSearching && (
                   <div className="rounded-lg border border-primary/15 bg-primary/10 px-3 py-2 text-[10px] font-bold uppercase tracking-widest text-primary">
                     {filteredMagnets.length} sources found. Still checking {Math.max(0, magnetsStatus.total - magnetsStatus.completed)} providers...
@@ -4883,6 +4985,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
                 )}
                 {filteredMagnets.map((src, idx) => {
                   const speedLabel = getTorrentSourceSpeedLabel(src)
+                  const isHevc = isHevcSource(src)
                   const isCurrent = Boolean(currentMagnetHash && getMagnetInfoHash(src.magnet) === currentMagnetHash)
                   const isSwitching = switchingMagnet === src.magnet
                   return (
@@ -4909,6 +5012,15 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
                             <span className="rounded bg-primary/10 px-1.5 py-0.5 text-[10px] font-bold text-primary">
                               {src.quality || 'HD'}
                             </span>
+                            {isHevc && (
+                              <span
+                                className="inline-flex items-center gap-1 rounded border border-purple-400/40 bg-gradient-to-r from-purple-500/25 to-indigo-500/25 px-1.5 py-0.5 text-[10px] font-black text-purple-200 shadow-sm shadow-purple-900/30"
+                                title="HEVC / H.265: Recommended for smooth streaming"
+                              >
+                                <Zap size={10} className="text-purple-300 fill-purple-300/30" />
+                                HEVC
+                              </span>
+                            )}
                             {src.isHindi && (
                               <span className="rounded border border-[#FF9933]/20 bg-[#FF9933]/10 px-1.5 py-0.5 text-[10px] font-bold text-[#FF9933]">
                                 HINDI

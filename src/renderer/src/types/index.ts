@@ -33,6 +33,7 @@ export interface Video {
   keywords?: string[]
   streamSourceId?: string
   sourceMagnet?: string
+  fetchedSources?: any[]
 }
 
 export interface TmdbProvider {

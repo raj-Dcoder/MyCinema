@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from 'react'
 import { X, Play, Info, Calendar, Clock, Star, FolderOpen, Film, Music, Subtitles, HardDrive, ChevronDown, ChevronUp, Heart, Bookmark, Share2, Search, Zap, Users, Download, AlertTriangle, Clapperboard, Loader2, ExternalLink, Languages, CheckCircle2, Copy, MessageCircle, Send, Trash2 } from 'lucide-react'
 import { Video } from '../types'
 import { ShareHintGuide, DeleteHintGuide } from './FeatureGuides'
-import { getTorrentSourceHealthScore, getTorrentSourceSpeedLabel } from '../utils/torrentSources'
+import { getTorrentSourceHealthScore, getTorrentSourceSpeedLabel, isHevcSource } from '../utils/torrentSources'
 import { getMediaUnitIdentity, getVersionLabel, groupMediaVersions, pickPreferredVersion } from '../utils/mediaVersions'
 
 interface DetailScreenProps {
@@ -589,7 +589,8 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
         file_path: result.url,
         duration: 0,
         isExternal: false,
-        logo_path: video.logo_path || resolvedLogoPath || undefined
+        logo_path: video.logo_path || resolvedLogoPath || undefined,
+        fetchedSources: sources.length > 0 ? sources : undefined
       })
     } catch (err: any) {
       setTorrentStreamError(getTorrentStreamErrorMessage(err?.message))
@@ -654,7 +655,8 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
         isExternal: false,
         logo_path: video.logo_path || resolvedLogoPath || undefined,
         streamSourceId: result.streamId,
-        sourceMagnet: source.magnet
+        sourceMagnet: source.magnet,
+        fetchedSources: sources.length > 0 ? sources : undefined
       })
     } catch (err: any) {
       setTorrentStreamError(getTorrentStreamErrorMessage(err?.message))
@@ -2062,6 +2064,14 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
                 </div>
               ) : filteredSources.length > 0 ? (
                 <div className="space-y-2.5">
+                  <div className="flex items-center gap-2.5 rounded-xl border border-purple-500/25 bg-gradient-to-r from-purple-950/40 via-indigo-950/30 to-purple-900/20 px-3.5 py-2 text-[11px] font-medium leading-relaxed text-purple-200/90 shadow-md">
+                    <div className="flex h-5 w-5 shrink-0 items-center justify-center rounded-lg bg-purple-500/20 text-purple-300 border border-purple-400/30">
+                      <Zap size={12} className="fill-purple-300/40 text-purple-300" />
+                    </div>
+                    <div>
+                      <span className="font-bold text-purple-100">Pro Tip:</span> Pick an <span className="font-bold text-purple-300 bg-purple-500/20 px-1.5 py-0.5 rounded border border-purple-400/30 text-[9px] uppercase">HEVC / x265</span> magnet for fast, high-quality streaming.
+                    </div>
+                  </div>
                   {searching && (
                     <div className="rounded-lg border border-primary/15 bg-primary/10 px-3 py-2 text-[10px] font-bold uppercase tracking-widest text-primary">
                       {filteredSources.length} sources found. Still checking {Math.max(0, sourceSearchStatus.total - sourceSearchStatus.completed)} providers...
@@ -2069,6 +2079,7 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
                   )}
                   {filteredSources.map((src, idx) => {
                     const speedLabel = getTorrentSourceSpeedLabel(src)
+                    const isHevc = isHevcSource(src)
                     const isStarting = startingSourceMagnet === src.magnet
                     const isStarted = startedSourceMagnet === src.magnet || activeDownloads.some(download => (
                       download.status !== 'error' && (
@@ -2103,6 +2114,15 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
                               <span className="rounded bg-primary/10 px-1.5 py-0.5 text-[10px] font-bold text-primary">
                                 {src.quality || 'HD'}
                               </span>
+                              {isHevc && (
+                                <span
+                                  className="inline-flex items-center gap-1 rounded border border-purple-400/40 bg-gradient-to-r from-purple-500/25 to-indigo-500/25 px-1.5 py-0.5 text-[10px] font-black text-purple-200 shadow-sm shadow-purple-900/30"
+                                  title="HEVC / H.265: Recommended for smooth streaming"
+                                >
+                                  <Zap size={10} className="text-purple-300 fill-purple-300/30" />
+                                  HEVC
+                                </span>
+                              )}
                               {src.isHindi && (
                                 <span className="rounded border border-[#FF9933]/20 bg-[#FF9933]/10 px-1.5 py-0.5 text-[10px] font-bold text-[#FF9933]">
                                   HINDI

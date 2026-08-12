@@ -1279,6 +1279,8 @@ function registerAudioProtocol(): void {
         '-c:a libmp3lame',
         '-b:a 192k',
         '-ac 2',
+        '-preset ultrafast',
+        '-threads 2',
         '-f mp3'
       ])
         .on('error', (err) => {
@@ -1564,6 +1566,9 @@ function parseBackupFile(filePath: string): any {
 
 
 app.whenReady().then(() => {
+  // Purge any stale temporary stream folders left over from previous ungraceful exits
+  purgeStaleTempStreamFolder()
+
   // Register media protocol
   registerMediaProtocol()
   registerSubtitleProtocol()
@@ -2600,6 +2605,24 @@ function getTempStreamPath(): string {
   return path.join(app.getPath('temp'), 'MyCinemaStreams')
 }
 
+function purgeStaleTempStreamFolder(): void {
+  try {
+    const tempDir = getTempStreamPath()
+    if (fs.existsSync(tempDir)) {
+      const items = fs.readdirSync(tempDir)
+      for (const item of items) {
+        const itemPath = path.join(tempDir, item)
+        try {
+          fs.rmSync(itemPath, { recursive: true, force: true })
+          console.log(`[TempStream] Startup cleanup purged stale temp stream folder: ${item}`)
+        } catch {}
+      }
+    }
+  } catch (err) {
+    console.warn('[TempStream] Startup temp folder purge warning:', err)
+  }
+}
+
 function cleanupTempStream(id: string): void {
   const entry = tempStreams.get(id)
   if (!entry) return
@@ -2653,8 +2676,8 @@ async function getWebTorrentClient(): Promise<any> {
       dht: true,
       // Privacy: LSD disabled by default
       lsd: false,
-      // Keep enough peers for healthy swarms without pushing most home routers too hard.
-      maxConns: 350,
+      // Keep enough peers for healthy swarms without pushing home routers or CPU too hard.
+      maxConns: 120,
     })
     
     webtorrentClient.on('error', (err: Error) => {
@@ -5114,7 +5137,8 @@ ipcMain.handle('start-temp-stream', async (_, magnetUrl: string, title?: string,
     const client = await getWebTorrentClient()
     const torrent = client.add(enrichedMagnetUrl, {
       path: folder,
-      announce: EXTRA_TRACKERS
+      announce: EXTRA_TRACKERS,
+      maxConns: 55
     })
     tempStreams.set(streamId, { torrent, folder, magnetUrl: enrichedMagnetUrl })
 

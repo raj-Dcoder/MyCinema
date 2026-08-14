@@ -1609,6 +1609,9 @@ app.on('before-quit', () => {
   pausedTorrentIds.clear()
   cleanupAllTempStreams()
   if (webtorrentClient) { try { webtorrentClient.destroy() } catch {} }
+  // Last-resort synchronous sweep: async cleanup may not have finished by the
+  // time Node exits, so forcibly delete any surviving temp stream folders now.
+  forceSyncPurgeTempStreamFolder()
 })
 
 app.on('window-all-closed', () => {
@@ -2608,18 +2611,88 @@ function getTempStreamPath(): string {
 function purgeStaleTempStreamFolder(): void {
   try {
     const tempDir = getTempStreamPath()
-    if (fs.existsSync(tempDir)) {
-      const items = fs.readdirSync(tempDir)
-      for (const item of items) {
-        const itemPath = path.join(tempDir, item)
-        try {
-          fs.rmSync(itemPath, { recursive: true, force: true })
-          console.log(`[TempStream] Startup cleanup purged stale temp stream folder: ${item}`)
-        } catch {}
-      }
+    if (!fs.existsSync(tempDir)) return
+    const items = fs.readdirSync(tempDir)
+    for (const item of items) {
+      const itemPath = path.join(tempDir, item)
+      // Retry up to 3 times with short delays at startup — OS may still have
+      // the folder indexed/scanned after a crash.
+      ;(async () => {
+        const delays = [0, 500, 1500]
+        for (const delay of delays) {
+          if (delay > 0) await new Promise(r => setTimeout(r, delay))
+          try {
+            if (!fs.existsSync(itemPath)) break
+            fs.rmSync(itemPath, { recursive: true, force: true })
+            console.log(`[TempStream] Startup cleanup purged stale temp stream folder: ${item}`)
+            break
+          } catch (err: any) {
+            console.warn(`[TempStream] Startup purge attempt (delay=${delay}ms) failed for "${item}": ${err?.message}`)
+          }
+        }
+      })()
     }
   } catch (err) {
     console.warn('[TempStream] Startup temp folder purge warning:', err)
+  }
+}
+
+/**
+ * Destroys a WebTorrent torrent instance and waits for the internal 'close'
+ * event (or a timeout) before resolving. This ensures WebTorrent has released
+ * all file descriptors before we attempt to delete the folder on disk.
+ */
+function destroyTorrentAndWait(torrent: any, timeoutMs = 5000): Promise<void> {
+  if (!torrent || torrent.destroyed) return Promise.resolve()
+  return new Promise<void>(resolve => {
+    let settled = false
+    const done = () => {
+      if (settled) return
+      settled = true
+      clearTimeout(timer)
+      resolve()
+    }
+    const timer = setTimeout(done, timeoutMs)
+    try {
+      // WebTorrent v2 supports a callback on destroy()
+      torrent.destroy(done)
+      // Also listen for the 'close' event as a belt-and-suspenders measure
+      torrent.once?.('close', done)
+    } catch {
+      done()
+    }
+  })
+}
+
+/**
+ * Delete a folder with exponential-backoff retries.
+ * On Windows, antivirus / OS indexing can hold file handles for several
+ * seconds after a torrent is destroyed. We retry up to maxAttempts times
+ * before giving up, logging each failure.
+ */
+async function deleteWithRetry(folder: string, label: string, maxAttempts = 8): Promise<void> {
+  const baseDelayMs = 250
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      if (!fs.existsSync(folder)) return // already gone
+      fs.rmSync(folder, { recursive: true, force: true })
+      if (attempt > 1) {
+        console.log(`[TempStream] Deleted "${label}" on attempt ${attempt}`)
+      }
+      return
+    } catch (err: any) {
+      const delay = baseDelayMs * Math.pow(2, attempt - 1) // 250, 500, 1000, 2000, 4000, 8000 …
+      console.warn(
+        `[TempStream] Delete attempt ${attempt}/${maxAttempts} failed for "${label}" ` +
+        `(${err?.code || err?.message}). Retrying in ${delay}ms …`
+      )
+      if (attempt < maxAttempts) {
+        await new Promise(r => setTimeout(r, delay))
+      } else {
+        console.error(`[TempStream] Gave up deleting "${label}" after ${maxAttempts} attempts. ` +
+          'The folder may remain on disk until the next app restart.')
+      }
+    }
   }
 }
 
@@ -2628,27 +2701,46 @@ function cleanupTempStream(id: string): void {
   if (!entry) return
   console.log(`[TempStream] Cleaning up stream "${id}" (${entry.torrent ? entry.torrent.name || 'unnamed' : 'no torrent'})`)
   tempStreams.delete(id)
-  try {
-    if (entry.torrent && !entry.torrent.destroyed) entry.torrent.destroy()
-  } catch {}
-  try {
-    if (entry.folder && fs.existsSync(entry.folder)) {
-      fs.rmSync(entry.folder, { recursive: true, force: true })
+  // Destroy the torrent first and WAIT for its internal close event so that
+  // WebTorrent releases all file handles before we try to delete the folder.
+  // Then run the retry loop. All of this is fire-and-forget from the caller's
+  // perspective (cleanupTempStream stays synchronous for API compatibility).
+  ;(async () => {
+    try {
+      await destroyTorrentAndWait(entry.torrent)
+    } catch { /* ignore — we still try to delete */ }
+    if (entry.folder) {
+      await deleteWithRetry(entry.folder, id)
     }
-  } catch {
-    // File handle may still be open for a moment; retry shortly after
-    setTimeout(() => {
-      try {
-        if (entry.folder && fs.existsSync(entry.folder)) {
-          fs.rmSync(entry.folder, { recursive: true, force: true })
-        }
-      } catch {}
-    }, 2000)
-  }
+  })()
 }
 
 function cleanupAllTempStreams(): void {
   for (const id of Array.from(tempStreams.keys())) cleanupTempStream(id)
+}
+
+/**
+ * Synchronous last-resort sweep of any temp stream folders that survived the
+ * async cleanup (e.g. during app quit where we can't await async work).
+ * Uses rmSync with OS-level retries so it works within the before-quit window.
+ */
+function forceSyncPurgeTempStreamFolder(): void {
+  try {
+    const tempDir = getTempStreamPath()
+    if (!fs.existsSync(tempDir)) return
+    const items = fs.readdirSync(tempDir)
+    for (const item of items) {
+      const itemPath = path.join(tempDir, item)
+      try {
+        fs.rmSync(itemPath, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 })
+        console.log(`[TempStream] Force-sync purged: ${item}`)
+      } catch (err: any) {
+        console.warn(`[TempStream] Force-sync purge failed for "${item}": ${err?.message}`)
+      }
+    }
+  } catch (err) {
+    console.warn('[TempStream] Force-sync purge warning:', err)
+  }
 }
 
 function clearTorrentProgressInterval(id: string): void {

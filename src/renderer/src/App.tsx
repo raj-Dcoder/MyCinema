@@ -824,13 +824,13 @@ const App: React.FC = () => {
             activeTempStreamRef.current = null
             setPlayingVideo(null)
             if (id) {
-              // Give Chromium's media pipeline 2 seconds to fully release its
-              // read handles on the torrent files before we ask WebTorrent to
-              // destroy and delete them. 800ms was not enough on slower machines
-              // (confirmed by the Windows "Folder In Use" error during testing).
+              // Give Chromium's media pipeline 3.5 seconds as a head-start to
+              // release its read handles on the torrent files. The main process
+              // has a robust exponential-backoff retry loop (up to 8 attempts,
+              // ~30s total) so deletion succeeds even if handles are held longer.
               setTimeout(() => {
                 window.api.stopTempStream(id).catch(() => {})
-              }, 2000)
+              }, 3500)
             }
             setHomeRefreshKey(k => k + 1)
           }} 

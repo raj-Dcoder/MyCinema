@@ -1270,7 +1270,7 @@ function registerAudioProtocol(): void {
 
       const cmd = ffmpeg(sourcePath)
       if (Number.isFinite(start) && start > 0) {
-        cmd.setStartTime(start)
+        cmd.seekInput(start)
       }
       cmd.outputOptions([
         `-map ${mapArg}`,

@@ -182,6 +182,8 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
   const [logoLoadFailed, setLogoLoadFailed] = useState(false)
   const [isOverflowing, setIsOverflowing] = useState(false)
   const [releaseInfo, setReleaseInfo] = useState<import('../types').TmdbReleaseInfo | null>(null)
+  const [releaseInfoLoading, setReleaseInfoLoading] = useState(false)
+  const [keywordsLoading, setKeywordsLoading] = useState(false)
   const overviewRef = useRef<HTMLParagraphElement>(null)
   const [expandedOverview, setExpandedOverview] = useState(false)
   const [tmdbKeywords, setTmdbKeywords] = useState<string[]>([])
@@ -460,10 +462,17 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
     setLogoLoadFailed(false)
 
     if (!isTmdbBacked || !video.tmdb_id) {
+      setReleaseInfo(null)
+      setReleaseInfoLoading(false)
+      setTmdbKeywords([])
+      setKeywordsLoading(false)
       return () => {
         cancelled = true
       }
     }
+
+    setReleaseInfo(null)
+    setReleaseInfoLoading(true)
 
     if (!video.logo_path) {
       window.api.getTmdbTitleLogo(video.type === 'series' ? 'series' : 'movie', video.tmdb_id)
@@ -478,11 +487,17 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
 
     window.api.getTmdbReleaseInfo(video.tmdb_id, video.type === 'series' ? 'series' : 'movie')
       .then(info => {
-        if (!cancelled) setReleaseInfo(info)
+        if (!cancelled) {
+          setReleaseInfo(info)
+          setReleaseInfoLoading(false)
+        }
       })
       .catch(err => {
         console.error('[DetailScreen] Failed to fetch release info:', err)
-        if (!cancelled) setReleaseInfo(null)
+        if (!cancelled) {
+          setReleaseInfo(null)
+          setReleaseInfoLoading(false)
+        }
       })
 
     let existingKeywords = video.keywords as any
@@ -497,11 +512,15 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
 
     if (Array.isArray(existingKeywords)) {
       setTmdbKeywords(existingKeywords)
+      setKeywordsLoading(false)
     } else {
+      setTmdbKeywords([])
+      setKeywordsLoading(true)
       window.api.getTmdbKeywords(video.tmdb_id, video.type === 'series' ? 'series' : 'movie')
         .then(keywords => {
           if (!cancelled) {
             setTmdbKeywords(keywords || [])
+            setKeywordsLoading(false)
             video.keywords = keywords || []
             if (!video.isExternal && video.id) {
               window.api.saveVideoKeywords(video.id, keywords || [])
@@ -510,7 +529,10 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
         })
         .catch(err => {
           console.error('[DetailScreen] Failed to fetch tmdb keywords:', err)
-          if (!cancelled) setTmdbKeywords([])
+          if (!cancelled) {
+            setTmdbKeywords([])
+            setKeywordsLoading(false)
+          }
         })
     }
 
@@ -1220,6 +1242,11 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
                   <span>{video.release_year}</span>
                 </div>
               ) : null}
+              {releaseInfoLoading ? (
+                <div aria-hidden className="flex items-center gap-1.5 px-3 py-1.5 rounded-full border border-white/10 bg-white/[0.04] animate-pulse">
+                  <div className="h-3 w-20 rounded-full bg-white/10" />
+                </div>
+              ) : null}
               {releaseInfo ? (() => {
                 let isFuture = false
                 let formattedDate = ''
@@ -1278,17 +1305,25 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
               )}
             </div>
 
-            {/* Vibe Tags */}
-            {visibleVibes.length > 0 && (
-            <div className="flex flex-wrap gap-2">
-              {visibleVibes.map((vibe, idx) => (
-                <span 
-                  key={idx} 
-                  className={`px-4 py-1.5 text-[9px] font-black uppercase tracking-widest rounded-full border shadow-lg transition-all hover:scale-105 hover:shadow-xl cursor-default bg-gradient-to-br ${getVibeColor(vibe)}`}
-                >
-                  {vibe}
-                </span>
-              ))}
+            {/* Vibe Tags — space is reserved with skeletons while loading so content below never shifts */}
+            {(keywordsLoading || visibleVibes.length > 0) && (
+            <div className="flex flex-wrap gap-2 min-h-[28px]" aria-hidden={keywordsLoading}>
+              {keywordsLoading ? (
+                <>
+                  <span className="h-[26px] w-24 rounded-full border border-white/10 bg-white/[0.06] animate-pulse" />
+                  <span className="h-[26px] w-20 rounded-full border border-white/10 bg-white/[0.06] animate-pulse" />
+                  <span className="h-[26px] w-28 rounded-full border border-white/10 bg-white/[0.06] animate-pulse hidden sm:block" />
+                </>
+              ) : (
+                visibleVibes.map((vibe, idx) => (
+                  <span
+                    key={idx}
+                    className={`px-4 py-1.5 text-[9px] font-black uppercase tracking-widest rounded-full border shadow-lg transition-all hover:scale-105 hover:shadow-xl cursor-default bg-gradient-to-br ${getVibeColor(vibe)}`}
+                  >
+                    {vibe}
+                  </span>
+                ))
+              )}
             </div>
             )}
 

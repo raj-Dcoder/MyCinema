@@ -144,19 +144,6 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
 
   const [sleepTimerEnd, setSleepTimerEnd] = useState<number | null>(null)
   const [showStats, setShowStats] = useState(false)
-  const bookmarksStorageKey = `mycinema_bookmarks_${video.id}`
-  const [bookmarks, setBookmarks] = useState<{ time: number }[]>(() => {
-    try {
-      const stored = localStorage.getItem(bookmarksStorageKey)
-      return stored ? JSON.parse(stored) : []
-    } catch {
-      return []
-    }
-  })
-
-  useEffect(() => {
-    localStorage.setItem(bookmarksStorageKey, JSON.stringify(bookmarks))
-  }, [bookmarks, bookmarksStorageKey])
 
   useEffect(() => {
     if (sleepTimerEnd === null) return
@@ -170,22 +157,6 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
     }, 5000)
     return () => clearInterval(interval)
   }, [sleepTimerEnd])
-
-  const toggleBookmark = useCallback(() => {
-    if (!videoRef.current) return
-    const time = videoRef.current.currentTime
-    setBookmarks(prev => {
-      const existing = prev.find(b => Math.abs(b.time - time) < 1)
-      if (existing) {
-        return prev.filter(b => b !== existing)
-      }
-      return [...prev, { time }].sort((a, b) => a.time - b.time)
-    })
-  }, [])
-
-  const removeBookmark = useCallback((time: number) => {
-    setBookmarks(prev => prev.filter(b => b.time !== time))
-  }, [])
 
   const { isHost, roomId, participants, localPeerId, isConnecting, error, voiceError, voiceEnabled, isMicActive, remoteAudioStreams, startHosting, joinRoom, leaveRoom, broadcastState, startVoiceSession, setPushToTalkActive, onReceiveSyncObj, debugLogs, notifications } = useWatchTogether()
   const [showWatchTogetherState, setShowWatchTogetherState] = useState(false)
@@ -349,15 +320,14 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
 
   useEffect(() => {
     if (showTorrentOverlay && isTorrentStream) {
-      const interval = setInterval(() => {
-        setTorrentLoadProgress(prev => {
-          if (prev < 95) {
-            return prev + (95 - prev) * 0.1
-          }
-          return prev
-        })
-      }, 200)
-      return () => clearInterval(interval)
+      setTorrentLoadProgress(0)
+      // Small delay to ensure the DOM paints 0% (with transition: none) before
+      // we apply the 95% target and the long CSS transition. This makes the
+      // fill glide smoothly without stuttering or looping abruptly.
+      const timer = setTimeout(() => {
+        setTorrentLoadProgress(95)
+      }, 50)
+      return () => clearTimeout(timer)
     }
   }, [showTorrentOverlay, isTorrentStream])
 
@@ -1027,7 +997,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
         embeddedAudio.forEach((t, i) => {
           if (t.embedded) {
             // Only treat track 0 as native if Chromium natively decodes its codec (e.g. AAC/MP3).
-            // Non-native codecs (EAC3, AC3, DTS, TrueHD) MUST route through FFmpeg audio:// pipeline.
+            // Non-native codecs (EAC3, AC3, DTS, TrueHD) and secondary tracks MUST route through FFmpeg audio:// pipeline.
             const isNative = i === 0 && isChromiumNativeAudioCodec(t.codec)
             arr.push({
               id: isNative ? `nat-${t.index}` : `ext-emb-${t.index}`,
@@ -1044,7 +1014,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
       }
       if (audioTracks.length > 0) {
         audioTracks.forEach((t, i) => {
-          const isNative = isChromiumNativeAudioCodec(t.codec || t.label)
+          const isNative = i === 0 && isChromiumNativeAudioCodec(t.codec || t.label)
           arr.push({ id: isNative ? `nat-${i}` : `ext-emb-${i}`, index: i, native: isNative, embedded: true, label: formatTrackLabel(t, i + 1) })
         })
       }
@@ -1053,17 +1023,17 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
 
     if (audioTracks.length > 0 && audioTracks.length === embeddedAudio.length) {
       audioTracks.forEach((t, i) => {
-        const isNative = isChromiumNativeAudioCodec(embeddedAudio[i]?.codec || t.codec)
+        const isNative = i === 0 && isChromiumNativeAudioCodec(embeddedAudio[i]?.codec || t.codec)
         arr.push({ id: isNative ? `nat-${i}` : `ext-emb-${embeddedAudio[i]?.index ?? i}`, index: i, native: isNative, embedded: true, label: formatTrackLabel(embeddedAudio[i] || t, i + 1) })
       })
     } else if (embeddedAudio.length > 0) {
       embeddedAudio.forEach((t, i) => {
-        const isNative = isChromiumNativeAudioCodec(t.codec)
+        const isNative = i === 0 && isChromiumNativeAudioCodec(t.codec)
         arr.push({ id: isNative ? `nat-${t.index}` : `ext-emb-${t.index}`, index: t.index, native: isNative, embedded: true, label: formatTrackLabel(t, i + 1) })
       })
     } else if (audioTracks.length > 0) {
       audioTracks.forEach((t, i) => {
-        const isNative = isChromiumNativeAudioCodec(t.codec || t.label)
+        const isNative = i === 0 && isChromiumNativeAudioCodec(t.codec || t.label)
         arr.push({ id: isNative ? `nat-${i}` : `ext-emb-${i}`, index: i, native: isNative, embedded: true, label: formatTrackLabel(t, i + 1) })
       })
     }
@@ -1286,8 +1256,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
 
   const syncSelectedExternalAudio = async (
     time: number,
-    shouldPlay: boolean,
-    options: { keepVideoPlayingWhilePreparing?: boolean } = {}
+    shouldPlay: boolean
   ) => {
     const trackObj = availableAudio.find(a => a.id === selectedAudioId)
     const videoEl = videoRef.current
@@ -1299,44 +1268,43 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
     externalAudioSeekBarrierRef.current = true
     hideBufferingIndicator()
     audioEl.pause()
-    const keepVideoPlaying = shouldPlay && options.keepVideoPlayingWhilePreparing
-    if (keepVideoPlaying) {
-      videoEl.play().catch(e => console.log('Video resume while audio sync prepares failed:', e))
-      setIsPlaying(true)
-    } else {
-      videoEl.pause()
-    }
+    // Always pause video while preparing external audio stream to guarantee 0ms desync
+    videoEl.pause()
 
+    const safeTime = Math.max(0, time || 0)
     const ready = await prepareExternalAudioTrack(
       trackObj.index,
-      time,
+      safeTime,
       () => syncToken === externalAudioSeekTokenRef.current,
       trackObj.embedded
     )
-    if (!ready || syncToken !== externalAudioSeekTokenRef.current) {
-      externalAudioSeekBarrierRef.current = false
-      if (shouldPlay && syncToken === externalAudioSeekTokenRef.current) {
+
+    if (syncToken !== externalAudioSeekTokenRef.current) {
+      return
+    }
+
+    externalAudioSeekBarrierRef.current = false
+
+    if (!ready) {
+      if (shouldPlay) {
         videoEl.play().catch(e => console.log('Video resume after audio seek failed:', e))
       }
       return
     }
 
-    startupDriftCorrectionUntilRef.current = Date.now() + 3000
+    lastSeekTimeRef.current = safeTime
+    setLastSeekTime(safeTime)
+    videoEl.currentTime = safeTime
+
     if (!shouldPlay) {
-      externalAudioSeekBarrierRef.current = false
       return
     }
 
     try {
-      if (keepVideoPlaying) {
-        await audioEl.play()
-        audioEl.playbackRate = playbackRate
-      } else {
-        await Promise.allSettled([audioEl.play(), videoEl.play()])
-        audioEl.playbackRate = playbackRate
-      }
-    } finally {
-      externalAudioSeekBarrierRef.current = false
+      await Promise.allSettled([audioEl.play(), videoEl.play()])
+      audioEl.playbackRate = playbackRate
+    } catch (e) {
+      console.error('[Audio] Error resuming audio/video after seek:', e)
     }
   }
 
@@ -2219,7 +2187,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
       if (!isPlaying || !videoEl || !audioEl || !audioEl.src || isSeeking) return
       // Never touch the audio element while a track switch or seek sync is in
       // flight — the reload logic owns it during those windows.
-      if (externalAudioSeekBarrierRef.current || startupExternalAudioBarrierRef.current || audioTrackSwitchRetryRef.current) return
+      if (externalAudioSeekBarrierRef.current || startupExternalAudioBarrierRef.current || audioTrackSwitchRetryRef.current || audioTrackSwitching) return
 
       const trackObj = availableAudio.find(a => a.id === selectedAudioId)
       if (!trackObj || trackObj.native) return
@@ -2232,25 +2200,35 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
         return
       }
 
-      if (audioEl.paused || audioEl.readyState < 2) return
+      if (audioEl.paused || audioEl.readyState < 2) {
+        if (!audioEl.error && audioEl.paused && !videoEl.paused) {
+          audioEl.play().catch(() => {})
+        }
+        return
+      }
 
       const expectedTime = videoEl.currentTime - lastSeekTimeRef.current
       if (expectedTime < 0) return
       const drift = audioEl.currentTime - expectedTime
 
-      // CRITICAL: the audio:// stream is transcoded on the fly by ffmpeg and is
-      // NOT seekable. Setting audioEl.currentTime makes Chromium re-request the
-      // URL and ffmpeg restarts the stream — replaying the same audio over and
-      // over and desyncing it from the video. Only fix large drift by reloading
-      // the stream at the correct position instead of seeking it.
-      if (Math.abs(drift) > 1.5 && Date.now() - lastDriftReloadTime > 5000) {
+      // Continuous micro-drift correction (between 40ms and 500ms): smoothly adjust playbackRate
+      if (Math.abs(drift) >= 0.04 && Math.abs(drift) <= 0.5) {
+        // If drift > 0, audio is ahead of video -> slow down audio slightly
+        // If drift < 0, audio is behind video -> speed up audio slightly
+        const nudgeFactor = drift > 0 ? 0.95 : 1.05
+        audioEl.playbackRate = playbackRate * nudgeFactor
+      } else if (Math.abs(drift) < 0.03 && Math.abs(audioEl.playbackRate - playbackRate) > 0.001) {
+        // Back in sync -> restore target playback rate
+        audioEl.playbackRate = playbackRate
+      } else if (Math.abs(drift) > 1.2 && Date.now() - lastDriftReloadTime > 6000) {
+        // Severe drift (> 1.2s) -> do a clean resync
         lastDriftReloadTime = Date.now()
-        console.log('[Audio] Drift correction reload: video=', videoEl.currentTime.toFixed(2), 'audio=', audioEl.currentTime.toFixed(2), 'expected=', expectedTime.toFixed(2))
-        void syncSelectedExternalAudio(videoEl.currentTime, true, { keepVideoPlayingWhilePreparing: true })
+        console.log('[Audio] Drift correction reload: video=', videoEl.currentTime.toFixed(2), 'audio=', audioEl.currentTime.toFixed(2), 'expected=', expectedTime.toFixed(2), 'drift=', drift.toFixed(2))
+        void syncSelectedExternalAudio(videoEl.currentTime, true)
       }
-    }, 250)
+    }, 200)
     return () => clearInterval(driftInterval)
-  }, [isPlaying, lastSeekTime, isSeeking, selectedAudioId, availableAudio, isBuffering, torrentBuffering, isTorrentLoading])
+  }, [isPlaying, lastSeekTime, isSeeking, selectedAudioId, availableAudio, isBuffering, torrentBuffering, isTorrentLoading, playbackRate, audioTrackSwitching])
 
   // Audio watchdog: if the external audio element dies (404 from a destroyed
   // torrent, a failed drift reload, a stalled ffmpeg stream, an autoplay
@@ -3016,18 +2994,25 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
     }
   }
 
-  const selectAudioTrack = (trackId: string) => {
+  const selectAudioTrack = async (trackId: string) => {
     const trackObj = availableAudio.find(a => a.id === trackId)
     if (!trackObj) return
     console.log('[Audio] selectAudioTrack ->', trackId, JSON.stringify({ native: trackObj.native, embedded: trackObj.embedded, index: trackObj.index }))
 
     const seriesKey = getPreferenceSeriesKey(currentVideo)
     localStorage.setItem(`mycinema_audio_pref_${seriesKey}`, trackObj.label)
+    setSelectedAudioId(trackId)
+    setShowMediaMenu(false)
 
     if (trackObj.native) {
       setAudioTrackSwitching(false)
       audioTrackSwitchRetryRef.current?.cleanup()
       audioTrackSwitchRetryRef.current = null
+      if (audioRef.current) {
+        audioRef.current.pause()
+        audioRef.current.removeAttribute('src')
+        audioRef.current.load()
+      }
       if (videoRef.current) {
         // @ts-ignore
         const tracks = videoRef.current.audioTracks
@@ -3039,22 +3024,57 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
         videoRef.current.muted = volume === 0
         setTimeout(primeNativeAudioTrack, 60)
       }
-      if (audioRef.current) {
-        audioRef.current.pause()
-        audioRef.current.removeAttribute('src')
-        audioRef.current.load()
-      }
     } else {
-      if (videoRef.current) videoRef.current.muted = true
-      if (audioRef.current && videoRef.current) {
-        const time = videoRef.current.currentTime
-        setAudioTrackSwitching(true)
-        startExternalAudioTrack(trackObj.index, time, !videoRef.current.paused, () => setAudioTrackSwitching(false), trackObj.embedded)
+      if (!videoRef.current || !audioRef.current) return
+      const videoEl = videoRef.current
+      const audioEl = audioRef.current
+      const wasPlaying = !videoEl.paused
+      const safeTime = Math.max(0, videoEl.currentTime || 0)
+
+      setAudioTrackSwitching(true)
+      videoEl.muted = true
+      // Pause video temporarily while audio is preparing so video doesn't drift ahead
+      videoEl.pause()
+      audioEl.pause()
+
+      const switchToken = ++externalAudioSeekTokenRef.current
+      externalAudioSeekBarrierRef.current = true
+
+      const ready = await prepareExternalAudioTrack(
+        trackObj.index,
+        safeTime,
+        () => switchToken === externalAudioSeekTokenRef.current,
+        trackObj.embedded
+      )
+
+      if (switchToken !== externalAudioSeekTokenRef.current) {
+        return
+      }
+
+      setAudioTrackSwitching(false)
+      externalAudioSeekBarrierRef.current = false
+
+      if (!ready) {
+        console.warn('[Audio] Failed to prepare external audio track')
+        if (wasPlaying) {
+          videoEl.play().catch(() => {})
+        }
+        return
+      }
+
+      lastSeekTimeRef.current = safeTime
+      setLastSeekTime(safeTime)
+      videoEl.currentTime = safeTime
+
+      if (wasPlaying) {
+        try {
+          await Promise.allSettled([audioEl.play(), videoEl.play()])
+          audioEl.playbackRate = playbackRate
+        } catch (e) {
+          console.error('[Audio] Playback resume failed after track switch:', e)
+        }
       }
     }
-    
-    setSelectedAudioId(trackId)
-    setShowMediaMenu(false)
   }
 
   const changeSpeed = (rate: number) => {
@@ -3848,7 +3868,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
             pendingControlledSeekTimeRef.current = null
             pendingControlledSeekResumeRef.current = false
             resumeNativeVideoAfterSeek(shouldResume)
-            void syncSelectedExternalAudio(time, shouldResume, { keepVideoPlayingWhilePreparing: true })
+            void syncSelectedExternalAudio(time, shouldResume)
           } else if (suppressNextSeekSyncRef.current) {
             suppressNextSeekSyncRef.current = false
           } else {
@@ -3874,10 +3894,10 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
           allowGuestPlaybackEventRef.current = false
           setIsPlaying(true); 
           const trackObj = availableAudio.find(a => a.id === selectedAudioId);
-          if (trackObj && !trackObj.native && audioRef.current && !startupExternalAudioBarrierRef.current && !externalAudioSeekBarrierRef.current && !audioTrackSwitchRetryRef.current) {
-            if (!audioRef.current.src || audioRef.current.error || audioRef.current.paused) {
-              startExternalAudioTrack(trackObj.index, videoRef.current?.currentTime || 0, true, undefined, trackObj.embedded)
-            } else {
+          if (trackObj && !trackObj.native && audioRef.current && !startupExternalAudioBarrierRef.current && !externalAudioSeekBarrierRef.current && !audioTrackSwitchRetryRef.current && !audioTrackSwitching) {
+            if (!audioRef.current.src || audioRef.current.error) {
+              void syncSelectedExternalAudio(videoRef.current?.currentTime || 0, true)
+            } else if (audioRef.current.paused) {
               audioRef.current.play().catch(e => console.log('Audio onPlay failed:', e))
             }
           }
@@ -3926,24 +3946,24 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
             setTorrentLoadProgress(100)
             setTimeout(() => {
               setTorrentLoadingFading(true)
-            }, 300)
+            }, 400)
             setTimeout(() => {
               setIsTorrentLoading(false)
               setTorrentBuffering(false)
               setTorrentLoadingFading(false)
               setTorrentLoadProgress(0)
-            }, 1000)
+            }, 1100)
           }
           hideBufferingIndicator(); 
           if (isTorrentStreamPath(currentVideo.file_path) && !getSelectedExternalAudioTrack()) {
             forceTorrentNativeAudio()
           }
           const trackObj = availableAudio.find(a => a.id === selectedAudioId);
-          if (trackObj && !trackObj.native && audioRef.current && !startupExternalAudioBarrierRef.current && !externalAudioSeekBarrierRef.current && !audioTrackSwitchRetryRef.current) {
+          if (trackObj && !trackObj.native && audioRef.current && !startupExternalAudioBarrierRef.current && !externalAudioSeekBarrierRef.current && !audioTrackSwitchRetryRef.current && !audioTrackSwitching) {
             if (videoRef.current && !videoRef.current.paused) {
-              if (!audioRef.current.src || audioRef.current.error || audioRef.current.paused) {
-                startExternalAudioTrack(trackObj.index, videoRef.current.currentTime || 0, true, undefined, trackObj.embedded)
-              } else {
+              if (!audioRef.current.src || audioRef.current.error) {
+                void syncSelectedExternalAudio(videoRef.current.currentTime || 0, true)
+              } else if (audioRef.current.paused) {
                 audioRef.current.play().catch(e => console.log('Audio onPlaying failed:', e));
               }
             }
@@ -4208,19 +4228,25 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
                 <img 
                   src={getArtworkUrl(currentVideo.logo_path, 'original') || ''} 
                   alt="" 
-                  className="absolute inset-0 w-full max-h-[160px] object-contain transition-[clip-path] duration-300 ease-linear"
-                  style={{ 
-                    clipPath: `polygon(0 0, ${torrentLoadProgress}% 0, ${torrentLoadProgress}% 100%, 0 100%)`
+                  className="absolute inset-0 w-full max-h-[160px] object-contain"
+                  style={{
+                    clipPath: `polygon(0% 0%, ${torrentLoadProgress}% 0%, ${torrentLoadProgress}% 100%, 0% 100%)`,
+                    transition: torrentLoadProgress === 0
+                      ? 'none'
+                      : (torrentLoadProgress === 100 ? 'clip-path 0.4s ease-out' : 'clip-path 30s cubic-bezier(0.1, 0.8, 0.2, 1)')
                   }}
                 />
               </div>
             ) : (
               <div className="relative text-center w-full max-w-2xl px-8 flex justify-center">
                 <h1 className="text-4xl md:text-5xl font-black text-white/25 tracking-wider uppercase drop-shadow-xl m-0">{currentVideo.title || currentVideo.series_name}</h1>
-                <h1 
-                  className="absolute text-4xl md:text-5xl font-black text-white tracking-wider uppercase drop-shadow-xl transition-[clip-path] duration-300 ease-linear m-0"
+                <h1
+                  className="absolute text-4xl md:text-5xl font-black text-white tracking-wider uppercase drop-shadow-xl m-0"
                   style={{
-                    clipPath: `polygon(0 0, ${torrentLoadProgress}% 0, ${torrentLoadProgress}% 100%, 0 100%)`
+                    clipPath: `polygon(0% 0%, ${torrentLoadProgress}% 0%, ${torrentLoadProgress}% 100%, 0% 100%)`,
+                    transition: torrentLoadProgress === 0
+                      ? 'none'
+                      : (torrentLoadProgress === 100 ? 'clip-path 0.4s ease-out' : 'clip-path 30s cubic-bezier(0.1, 0.8, 0.2, 1)')
                   }}
                 >
                   {currentVideo.title || currentVideo.series_name}
@@ -4758,7 +4784,6 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
         highSpeedPerformanceRate={HIGH_SPEED_PERFORMANCE_RATE}
         sleepTimerEnd={sleepTimerEnd}
         showStats={showStats}
-        bookmarks={bookmarks}
 
         handleProgressMouseMove={handleProgressMouseMove}
         handleProgressMouseLeave={handleProgressMouseLeave}
@@ -4791,8 +4816,6 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
         toggleFullscreen={toggleFullscreen}
         setSleepTimerEnd={setSleepTimerEnd}
         setShowStats={setShowStats}
-        toggleBookmark={toggleBookmark}
-        removeBookmark={removeBookmark}
       />
       {/* Hidden Custom Audio Extraction Pipeliner */}
       <audio ref={audioRef} crossOrigin="anonymous" style={{ display: 'none' }} />

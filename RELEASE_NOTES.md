@@ -1,3 +1,36 @@
+# MyCinema v1.32.0
+
+Instant streaming — press play on any source and start watching in seconds, while downloads keep working quietly in the background.
+
+### Instant Streaming
+- **Play Magnets Instantly**: Any torrent source now starts a lightweight temp stream that plays in seconds — no waiting for the full download to finish.
+- **Episodes Play While Downloading**: Jump into any episode of an active download mid-way; playback starts from already-downloaded parts while the rest keeps fetching.
+- **Torrent Loading Screen**: A live progress overlay with logo reveal keeps you oriented while the stream buffers, then fades away cleanly.
+- **Magnets Panel In Player**: Browse and switch magnets without leaving the player, with season and episode filters for packs.
+
+### Smarter Sources
+- **HEVC-Aware Ranking**: Sources now rank by health, quality, and codec — efficient HEVC/x265 picks float to the top.
+
+### Audio That Stays In Sync
+- **Pause-Then-Sync Engine**: Track switches and seeks pause the picture, prepare the new audio, then resume both together for near-zero desync.
+- **Drift Correction**: Small drift is smoothed live; large drift triggers a clean resync automatically.
+- **Cleaner Audio Routing**: Native tracks play natively while external tracks route strictly through the enhancement pipeline — no more double audio.
+- **Faster Seeking**: Audio streams now seek from the nearest point instead of decoding from zero, so switches feel instant.
+
+### UI & UX Polish
+- **Steadier Detail Page**: Movie capsules and vibe tags now show shimmer placeholders while loading — the Choose Source button never jumps under your cursor again.
+- **Cleaner Player Controls**: Removed the rarely-used bookmark button and timeline dots for a calmer control bar.
+- **Smoother Subtitles**: The subtitle renderer now follows playback events instead of running constantly — subtitles stay glued to dialogue with less overhead.
+
+### Reliability
+- **Robust Temp Cleanup**: Switching streams or closing the player stops the old torrent and deletes temp files with automatic retries — no leftover files or piled-up torrents.
+
+### Security & Privacy
+- **No Lingering Torrents**: Temp streams are destroyed and their files removed when you switch or close — torrent handles are never left running in the background.
+- **Safe Local Playback**: Audio extraction blocks path traversal and only serves files that exist on disk.
+
+***
+
 # MyCinema v1.31.1
 
 JioHotstar sections now load.

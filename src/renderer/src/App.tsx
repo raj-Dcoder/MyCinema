@@ -82,6 +82,7 @@ const App: React.FC = () => {
   const windowControlsHideTimerRef = useRef<number | null>(null)
   const appFullscreenTapTimerRef = useRef<number | null>(null)
   const appFullscreenToggleInFlightRef = useRef(false)
+  const activeTempStreamRef = useRef<string | null>(null)
 
   const getScrollElement = (tab: AppTab) => {
     return tab === 'home' ? homeScrollRef.current : activePageScrollRef.current
@@ -288,6 +289,15 @@ const App: React.FC = () => {
   ]
 
   const handlePlayVideo = (video: Video) => {
+    if (video.streamSourceId) {
+      const previousStreamId = activeTempStreamRef.current
+      // Switching to a different temp stream (e.g. next episode's magnet):
+      // stop the previous one so torrents don't pile up.
+      if (previousStreamId && previousStreamId !== video.streamSourceId) {
+        window.api.stopTempStream(previousStreamId)
+      }
+      activeTempStreamRef.current = video.streamSourceId
+    }
     setPlayingVideo(video)
   }
 
@@ -810,10 +820,27 @@ const App: React.FC = () => {
         <VideoPlayer 
           video={playingVideo} 
           onClose={() => {
+            const id = activeTempStreamRef.current
+            activeTempStreamRef.current = null
             setPlayingVideo(null)
+            if (id) {
+              // Give Chromium's media pipeline 3.5 seconds as a head-start to
+              // release its read handles on the torrent files. The main process
+              // has a robust exponential-backoff retry loop (up to 8 attempts,
+              // ~30s total) so deletion succeeds even if handles are held longer.
+              setTimeout(() => {
+                window.api.stopTempStream(id).catch(() => {})
+              }, 3500)
+            }
             setHomeRefreshKey(k => k + 1)
           }} 
           onControlsVisibilityChange={setVideoControlsVisible}
+          onStreamChange={(streamId) => {
+            // Keep the tracked stream in sync with the one the player is really
+            // using (episode / magnet switches happen inside the player, so the
+            // value set in handlePlayVideo can go stale).
+            activeTempStreamRef.current = streamId
+          }}
         />
       )}
 

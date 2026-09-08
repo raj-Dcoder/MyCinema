@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from 'react'
 import { X, Play, Info, Calendar, Clock, Star, FolderOpen, Film, Music, Subtitles, HardDrive, ChevronDown, ChevronUp, Heart, Bookmark, Share2, Search, Zap, Users, Download, AlertTriangle, Clapperboard, Loader2, ExternalLink, Languages, CheckCircle2, Copy, MessageCircle, Send, Trash2 } from 'lucide-react'
 import { Video } from '../types'
 import { ShareHintGuide, DeleteHintGuide } from './FeatureGuides'
-import { getTorrentSourceHealthScore, getTorrentSourceSpeedLabel } from '../utils/torrentSources'
+import { getTorrentSourceHealthScore, getTorrentSourceSpeedLabel, isHevcSource } from '../utils/torrentSources'
 import { getMediaUnitIdentity, getVersionLabel, groupMediaVersions, pickPreferredVersion } from '../utils/mediaVersions'
 
 interface DetailScreenProps {
@@ -75,8 +75,8 @@ type ActiveDownload = {
 
 const getTorrentStreamErrorMessage = (error?: string | null) => {
   if (!error) return 'Stream is not ready yet.'
-  if (error.includes('No handler registered') || error.includes('prepare-torrent-stream')) {
-    return 'Play While Downloading needs the updated app process. Restart MyCinema and try again.'
+  if (error.includes('No handler registered') || error.includes('prepare-torrent-stream') || error.includes('start-temp-stream')) {
+    return 'Torrent playback needs the updated app process. Restart MyCinema and try again.'
   }
   return error
 }
@@ -139,6 +139,12 @@ const normalizeMatchText = (value?: string | null) => (
     .trim()
 )
 
+const getMagnetInfoHash = (magnet?: string | null) => {
+  if (!magnet) return null
+  const match = magnet.match(/btih:([a-zA-Z0-9]+)/i)
+  return match ? match[1].toLowerCase() : null
+}
+
 const MYCINEMA_SHARE_BASE_URL = (
   import.meta.env.VITE_MYCINEMA_SHARE_BASE_URL ||
   'https://mycinema-share.rajveersinghranaofficial.workers.dev'
@@ -176,6 +182,8 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
   const [logoLoadFailed, setLogoLoadFailed] = useState(false)
   const [isOverflowing, setIsOverflowing] = useState(false)
   const [releaseInfo, setReleaseInfo] = useState<import('../types').TmdbReleaseInfo | null>(null)
+  const [releaseInfoLoading, setReleaseInfoLoading] = useState(false)
+  const [keywordsLoading, setKeywordsLoading] = useState(false)
   const overviewRef = useRef<HTMLParagraphElement>(null)
   const [expandedOverview, setExpandedOverview] = useState(false)
   const [tmdbKeywords, setTmdbKeywords] = useState<string[]>([])
@@ -193,6 +201,7 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
   const [showDownloadOptions, setShowDownloadOptions] = useState(false)
   const [startingSourceMagnet, setStartingSourceMagnet] = useState<string | null>(null)
   const [startedSourceMagnet, setStartedSourceMagnet] = useState<string | null>(null)
+  const [startingStreamMagnet, setStartingStreamMagnet] = useState<string | null>(null)
   const [startingTorrentStream, setStartingTorrentStream] = useState(false)
   const [torrentStreamError, setTorrentStreamError] = useState<string | null>(null)
   const [activeDownloads, setActiveDownloads] = useState<ActiveDownload[]>([])
@@ -319,13 +328,6 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
     }
     setSearching(true)
     setHasSearched(true)
-    if (!initialSharedSource?.magnet) {
-      setHindiOnly(false)
-      setSourceSeasonFilter('all')
-      setSourcePackSeasonFilter('all')
-      setSourceEpisodeFilter('all')
-    }
-    setStartedSourceMagnet(null)
     setSourceSearchStatus(prev => ({ ...prev, completed: 0, total: 0, cached: false, done: false }))
     const requestId = `${video.tmdb_id}-${Date.now()}-${Math.random().toString(36).slice(2)}`
     sourceSearchRequestRef.current = requestId
@@ -369,6 +371,13 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
   }
 
   const handleOpenDownloadOptions = async () => {
+    setTorrentStreamError(null)
+    if (!initialSharedSource?.magnet) {
+      setHindiOnly(false)
+      setSourceSeasonFilter('all')
+      setSourcePackSeasonFilter('all')
+      setSourceEpisodeFilter('all')
+    }
     setShowDownloadOptions(true)
     await handleSearchSources(false)
   }
@@ -379,13 +388,11 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
     setSourceEpisodeFilter(String(episode))
     setShowDownloadOptions(true)
     await handleSearchSources(false)
-    setSourceSeasonFilter(String(season))
-    setSourcePackSeasonFilter('all')
-    setSourceEpisodeFilter(String(episode))
   }
 
   const handleCloseDownloadOptions = () => {
     setShowDownloadOptions(false)
+    setTorrentStreamError(null)
     cancelActiveSourceSearch(true)
   }
 
@@ -455,10 +462,17 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
     setLogoLoadFailed(false)
 
     if (!isTmdbBacked || !video.tmdb_id) {
+      setReleaseInfo(null)
+      setReleaseInfoLoading(false)
+      setTmdbKeywords([])
+      setKeywordsLoading(false)
       return () => {
         cancelled = true
       }
     }
+
+    setReleaseInfo(null)
+    setReleaseInfoLoading(true)
 
     if (!video.logo_path) {
       window.api.getTmdbTitleLogo(video.type === 'series' ? 'series' : 'movie', video.tmdb_id)
@@ -473,11 +487,17 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
 
     window.api.getTmdbReleaseInfo(video.tmdb_id, video.type === 'series' ? 'series' : 'movie')
       .then(info => {
-        if (!cancelled) setReleaseInfo(info)
+        if (!cancelled) {
+          setReleaseInfo(info)
+          setReleaseInfoLoading(false)
+        }
       })
       .catch(err => {
         console.error('[DetailScreen] Failed to fetch release info:', err)
-        if (!cancelled) setReleaseInfo(null)
+        if (!cancelled) {
+          setReleaseInfo(null)
+          setReleaseInfoLoading(false)
+        }
       })
 
     let existingKeywords = video.keywords as any
@@ -492,11 +512,15 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
 
     if (Array.isArray(existingKeywords)) {
       setTmdbKeywords(existingKeywords)
+      setKeywordsLoading(false)
     } else {
+      setTmdbKeywords([])
+      setKeywordsLoading(true)
       window.api.getTmdbKeywords(video.tmdb_id, video.type === 'series' ? 'series' : 'movie')
         .then(keywords => {
           if (!cancelled) {
             setTmdbKeywords(keywords || [])
+            setKeywordsLoading(false)
             video.keywords = keywords || []
             if (!video.isExternal && video.id) {
               window.api.saveVideoKeywords(video.id, keywords || [])
@@ -505,7 +529,10 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
         })
         .catch(err => {
           console.error('[DetailScreen] Failed to fetch tmdb keywords:', err)
-          if (!cancelled) setTmdbKeywords([])
+          if (!cancelled) {
+            setTmdbKeywords([])
+            setKeywordsLoading(false)
+          }
         })
     }
 
@@ -565,13 +592,11 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
     }
   }
 
-  const handlePlayTorrentStream = async () => {
-    if (!matchingDownload?.id || isDownloadPaused || isDownloadConnecting) return
-
+  const prepareAndPlayStream = async (downloadId: string, season?: number, episode?: number) => {
     setTorrentStreamError(null)
     setStartingTorrentStream(true)
     try {
-      const result = await window.api.prepareTorrentStream(matchingDownload.id)
+      const result = await window.api.prepareTorrentStream(downloadId)
       if (!result?.url) {
         setTorrentStreamError(getTorrentStreamErrorMessage(result?.error))
         return
@@ -581,14 +606,84 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
         ...video,
         id: -Math.abs(Date.now()),
         title: displayTitle,
+        season: season,
+        episode: episode,
         file_path: result.url,
         duration: 0,
-        isExternal: false
+        isExternal: false,
+        logo_path: video.logo_path || resolvedLogoPath || undefined,
+        fetchedSources: sources.length > 0 ? sources : undefined
       })
     } catch (err: any) {
       setTorrentStreamError(getTorrentStreamErrorMessage(err?.message))
     } finally {
       setStartingTorrentStream(false)
+    }
+  }
+
+  const handlePlayTorrentStream = async () => {
+    if (!matchingDownload?.id || isDownloadPaused || isDownloadConnecting) return
+    await prepareAndPlayStream(matchingDownload.id)
+  }
+
+  const handlePlayEpisodeStream = async (downloadId: string, season: number, episode: number) => {
+    await prepareAndPlayStream(downloadId, season, episode)
+  }
+
+  const handlePlaySource = async (source: any) => {
+    const sourceInfoHash = getMagnetInfoHash(source.magnet)
+    const existingDownload = activeDownloads.find(download => (
+      download.status !== 'error' && download.status !== 'completed' && download.status !== 'done'
+      && sourceInfoHash && getMagnetInfoHash(download.magnet) === sourceInfoHash
+    ))
+    if (existingDownload?.id) {
+      if (existingDownload.status === 'paused') {
+        try {
+          await window.api.pauseResumeTorrent(existingDownload.id)
+        } catch (err) {
+          console.error('[DetailScreen] Resume before play failed:', err)
+        }
+      }
+      await prepareAndPlayStream(
+        existingDownload.id,
+        source.parsedSeason ?? video.season,
+        source.parsedEpisode ?? video.episode
+      )
+      return
+    }
+
+    setTorrentStreamError(null)
+    setStartingStreamMagnet(source.magnet)
+    try {
+      // Season packs: hint which episode to start from so the whole season
+      // plays through in order (E01 → E02 → …) on the same torrent.
+      const episodeHint = (source.isSeasonPack || !source.parsedEpisode)
+        ? { season: source.parsedSeason ?? video.season, episode: source.parsedEpisode ?? video.episode }
+        : undefined
+      const result = await window.api.startTempStream(source.magnet, displayTitle, episodeHint)
+      if (!result?.url) {
+        setTorrentStreamError(getTorrentStreamErrorMessage(result?.error))
+        return
+      }
+
+      onPlay({
+        ...video,
+        id: -Math.abs(Date.now()),
+        title: displayTitle,
+        season: result.parsedSeason ?? source.parsedSeason ?? video.season,
+        episode: result.parsedEpisode ?? source.parsedEpisode ?? video.episode,
+        file_path: result.url,
+        duration: 0,
+        isExternal: false,
+        logo_path: video.logo_path || resolvedLogoPath || undefined,
+        streamSourceId: result.streamId,
+        sourceMagnet: source.magnet,
+        fetchedSources: sources.length > 0 ? sources : undefined
+      })
+    } catch (err: any) {
+      setTorrentStreamError(getTorrentStreamErrorMessage(err?.message))
+    } finally {
+      setStartingStreamMagnet(null)
     }
   }
 
@@ -1047,7 +1142,7 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
       ? `Resume ${roundedDownloadProgress}%`
       : isDownloadConnecting
         ? `Connecting ${roundedDownloadProgress}%`
-        : 'Play While Downloading'
+        : 'Play'
     : null
   const canUseDownloadPrimary = isDownloadActive && !isDownloadComplete && (isDownloadPaused || !isDownloadConnecting)
   const sourceActionLabel = video.type === 'series'
@@ -1147,6 +1242,11 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
                   <span>{video.release_year}</span>
                 </div>
               ) : null}
+              {releaseInfoLoading ? (
+                <div aria-hidden className="flex items-center gap-1.5 px-3 py-1.5 rounded-full border border-white/10 bg-white/[0.04] animate-pulse">
+                  <div className="h-3 w-20 rounded-full bg-white/10" />
+                </div>
+              ) : null}
               {releaseInfo ? (() => {
                 let isFuture = false
                 let formattedDate = ''
@@ -1205,17 +1305,25 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
               )}
             </div>
 
-            {/* Vibe Tags */}
-            {visibleVibes.length > 0 && (
-            <div className="flex flex-wrap gap-2">
-              {visibleVibes.map((vibe, idx) => (
-                <span 
-                  key={idx} 
-                  className={`px-4 py-1.5 text-[9px] font-black uppercase tracking-widest rounded-full border shadow-lg transition-all hover:scale-105 hover:shadow-xl cursor-default bg-gradient-to-br ${getVibeColor(vibe)}`}
-                >
-                  {vibe}
-                </span>
-              ))}
+            {/* Vibe Tags — space is reserved with skeletons while loading so content below never shifts */}
+            {(keywordsLoading || visibleVibes.length > 0) && (
+            <div className="flex flex-wrap gap-2 min-h-[28px]" aria-hidden={keywordsLoading}>
+              {keywordsLoading ? (
+                <>
+                  <span className="h-[26px] w-24 rounded-full border border-white/10 bg-white/[0.06] animate-pulse" />
+                  <span className="h-[26px] w-20 rounded-full border border-white/10 bg-white/[0.06] animate-pulse" />
+                  <span className="h-[26px] w-28 rounded-full border border-white/10 bg-white/[0.06] animate-pulse hidden sm:block" />
+                </>
+              ) : (
+                visibleVibes.map((vibe, idx) => (
+                  <span
+                    key={idx}
+                    className={`px-4 py-1.5 text-[9px] font-black uppercase tracking-widest rounded-full border shadow-lg transition-all hover:scale-105 hover:shadow-xl cursor-default bg-gradient-to-br ${getVibeColor(vibe)}`}
+                  >
+                    {vibe}
+                  </span>
+                ))
+              )}
             </div>
             )}
 
@@ -1715,13 +1823,24 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
                   ) : (
                     (episodesBySeason[selectedSeason || 1] || []).map((ep, idx) => {
                       const isCurrentEpisode = Boolean(ep.localVideo && getMediaUnitIdentity(ep.localVideo) === getMediaUnitIdentity(video))
-                      const isUpcoming = !ep.released && !ep.localVideo
-                      const isMissing = ep.released && !ep.localVideo
+                      const epDownload = activeDownloads.find(d => 
+                        (d.mediaType === 'series' || (video.type === 'series' && d.mediaType !== 'movie')) && 
+                        d.tmdbId === video.tmdb_id && 
+                        Number(d.season) === ep.season && 
+                        Number(d.episode) === ep.episode &&
+                        d.status !== 'completed' && d.status !== 'done' && d.status !== 'error'
+                      )
+                      const isDownloading = Boolean(epDownload)
+                      const epDownloadProgress = epDownload ? Math.max(0, Math.min(100, Number(epDownload.progress || 0))) : 0
+
+                      const isUpcoming = !ep.released && !ep.localVideo && !isDownloading
+                      const isMissing = ep.released && !ep.localVideo && !isDownloading
                       return (
                       <button
                         key={`${ep.season}:${ep.episode}`}
                         onClick={() => {
                           if (ep.localVideo) onPlay(ep.localVideo)
+                          else if (isDownloading && epDownload) handlePlayEpisodeStream(epDownload.id, ep.season, ep.episode)
                           else if (isMissing) void handleOpenEpisodeSources(ep.season, ep.episode)
                         }}
                         disabled={isUpcoming}
@@ -1733,8 +1852,14 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
                             : 'bg-white/[0.045] border-white/[0.07] hover:bg-white/[0.08] hover:border-white/15'
                         }`}
                       >
-                        <div className={`w-32 h-[72px] shrink-0 rounded-lg flex items-center justify-center mr-4 transition-all text-sm font-black italic relative overflow-hidden shadow-md ${
-                          isCurrentEpisode ? 'bg-red-600 text-white' : isMissing ? 'bg-primary/15 text-primary' : 'bg-black/40 text-muted group-hover:bg-red-600 group-hover:text-white'
+                        {isDownloading && (
+                          <div 
+                            className="absolute inset-y-0 left-0 bg-green-500/[0.08] z-0 transition-all duration-300"
+                            style={{ width: `${epDownloadProgress}%` }}
+                          />
+                        )}
+                        <div className={`w-32 h-[72px] shrink-0 rounded-lg flex items-center justify-center mr-4 transition-all text-sm font-black italic relative overflow-hidden shadow-md z-10 ${
+                          isCurrentEpisode ? 'bg-red-600 text-white' : isDownloading ? 'bg-green-500/20 text-green-400 border border-green-500/30' : isMissing ? 'bg-primary/15 text-primary' : 'bg-black/40 text-muted group-hover:bg-red-600 group-hover:text-white'
                         }`}>
                           {ep.stillPath ? (
                             <img src={getArtworkUrl(ep.stillPath, 'w342') || undefined} alt="" className="absolute inset-0 w-full h-full object-cover opacity-80 group-hover:opacity-100 transition-opacity" />
@@ -1744,7 +1869,7 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
                             </span>
                           )}
                         </div>
-                        <div className="flex-1 truncate">
+                        <div className="flex-1 truncate z-10">
                           <div className="text-sm font-bold text-white truncate mb-0.5">
                             S{ep.season.toString().padStart(2, '0')} E{ep.episode.toString().padStart(2, '0')}
                           </div>
@@ -1752,13 +1877,13 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
                             {ep.title}{ep.versionCount > 1 ? ` • ${ep.versionCount} versions` : ''}
                           </div>
                           <div className={`mt-1 text-[8px] font-black uppercase tracking-widest ${
-                            ep.localVideo ? 'text-emerald-300/70' : isMissing ? 'text-primary/80' : 'text-white/30'
+                            ep.localVideo ? 'text-emerald-300/70' : isDownloading ? 'text-green-400' : isMissing ? 'text-primary/80' : 'text-white/30'
                           }`}>
-                            {ep.localVideo ? 'In library' : isMissing ? 'Released • choose source' : ep.airDate ? `Upcoming • ${ep.airDate}` : 'Upcoming'}
+                            {ep.localVideo ? 'In library' : isDownloading ? `Downloading • ${Math.round(epDownloadProgress)}%` : isMissing ? 'Released • choose source' : ep.airDate ? `Upcoming • ${ep.airDate}` : 'Upcoming'}
                           </div>
                         </div>
-                        <div className={`ml-4 transition-opacity ${isUpcoming ? 'opacity-40' : 'opacity-0 group-hover:opacity-100'}`}>
-                          {ep.localVideo ? <Play size={16} className="text-red-600" fill="currentColor" /> : isMissing ? <Download size={16} className="text-primary" /> : <Calendar size={16} className="text-white/40" />}
+                        <div className={`ml-4 transition-opacity z-10 ${isUpcoming ? 'opacity-40' : 'opacity-0 group-hover:opacity-100'}`}>
+                          {ep.localVideo ? <Play size={16} className="text-red-600" fill="currentColor" /> : isDownloading ? <Play size={16} className="text-green-400 animate-pulse" fill="currentColor" /> : isMissing ? <Download size={16} className="text-primary" /> : <Calendar size={16} className="text-white/40" />}
                         </div>
                       </button>
                       )
@@ -1790,7 +1915,12 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
                   <h3 className="truncate text-lg font-black text-white">
                     {video.type === 'series' && video.series_name ? video.series_name : video.title}
                   </h3>
-                  <p className="mt-1 text-[10px] font-semibold text-white/35">Select a specific source to start a download.</p>
+                  <p className="mt-1 text-[10px] font-semibold text-white/35">
+                    <Play size={10} className="mr-1 inline -translate-y-px text-emerald-300" fill="currentColor" />
+                    Streams instantly without saving · 
+                    <Download size={10} className="mx-1 inline -translate-y-px text-primary" />
+                    saves the file to your device
+                  </p>
                   <div className="mt-3 flex flex-wrap items-center gap-2">
                     <span className="rounded-md border border-white/10 bg-white/[0.04] px-2.5 py-1 text-[10px] font-bold text-white/65">
                       {filteredSources.length} shown
@@ -1907,6 +2037,12 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
             </div>
 
             <div className="flex-1 overflow-y-auto bg-[#080B10] px-4 py-4 scrollbar-thin">
+              {torrentStreamError && (
+                <div className="mb-3 flex items-start gap-2 rounded-xl border border-red-500/25 bg-red-500/10 px-3.5 py-2.5 text-[10px] font-bold leading-relaxed text-red-300">
+                  <AlertTriangle size={14} className="mt-px shrink-0" />
+                  <span>{torrentStreamError}</span>
+                </div>
+              )}
               {localVersions.length > 0 && (
                 <div className="mb-4 rounded-2xl border border-emerald-400/15 bg-emerald-400/[0.06] p-3.5">
                   <div className="mb-3 flex items-center justify-between gap-3">
@@ -1963,6 +2099,14 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
                 </div>
               ) : filteredSources.length > 0 ? (
                 <div className="space-y-2.5">
+                  <div className="flex items-center gap-2.5 rounded-xl border border-purple-500/25 bg-gradient-to-r from-purple-950/40 via-indigo-950/30 to-purple-900/20 px-3.5 py-2 text-[11px] font-medium leading-relaxed text-purple-200/90 shadow-md">
+                    <div className="flex h-5 w-5 shrink-0 items-center justify-center rounded-lg bg-purple-500/20 text-purple-300 border border-purple-400/30">
+                      <Zap size={12} className="fill-purple-300/40 text-purple-300" />
+                    </div>
+                    <div>
+                      <span className="font-bold text-purple-100">Pro Tip:</span> Pick an <span className="font-bold text-purple-300 bg-purple-500/20 px-1.5 py-0.5 rounded border border-purple-400/30 text-[9px] uppercase">HEVC / x265</span> magnet for fast, high-quality streaming.
+                    </div>
+                  </div>
                   {searching && (
                     <div className="rounded-lg border border-primary/15 bg-primary/10 px-3 py-2 text-[10px] font-bold uppercase tracking-widest text-primary">
                       {filteredSources.length} sources found. Still checking {Math.max(0, sourceSearchStatus.total - sourceSearchStatus.completed)} providers...
@@ -1970,8 +2114,14 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
                   )}
                   {filteredSources.map((src, idx) => {
                     const speedLabel = getTorrentSourceSpeedLabel(src)
+                    const isHevc = isHevcSource(src)
                     const isStarting = startingSourceMagnet === src.magnet
-                    const isStarted = startedSourceMagnet === src.magnet || activeDownloads.some(download => download.magnet === src.magnet && download.status !== 'error')
+                    const isStarted = startedSourceMagnet === src.magnet || activeDownloads.some(download => (
+                      download.status !== 'error' && (
+                        download.magnet === src.magnet ||
+                        getMagnetInfoHash(download.magnet) === getMagnetInfoHash(src.magnet)
+                      )
+                    ))
                     const isSharedSource = initialSharedSource?.magnet && src.magnet === initialSharedSource.magnet
                     const sharedSourceHasLiveStats = isSharedSource && ((Number(src.seeds) || 0) > 0 || (Number(src.peers) || 0) > 0)
 
@@ -1999,6 +2149,15 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
                               <span className="rounded bg-primary/10 px-1.5 py-0.5 text-[10px] font-bold text-primary">
                                 {src.quality || 'HD'}
                               </span>
+                              {isHevc && (
+                                <span
+                                  className="inline-flex items-center gap-1 rounded border border-purple-400/40 bg-gradient-to-r from-purple-500/25 to-indigo-500/25 px-1.5 py-0.5 text-[10px] font-black text-purple-200 shadow-sm shadow-purple-900/30"
+                                  title="HEVC / H.265: Recommended for smooth streaming"
+                                >
+                                  <Zap size={10} className="text-purple-300 fill-purple-300/30" />
+                                  HEVC
+                                </span>
+                              )}
                               {src.isHindi && (
                                 <span className="rounded border border-[#FF9933]/20 bg-[#FF9933]/10 px-1.5 py-0.5 text-[10px] font-bold text-[#FF9933]">
                                   HINDI
@@ -2024,24 +2183,42 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
                             </div>
                           </div>
 
-                          <button
-                            onClick={() => handleDownloadSource(src)}
-                            disabled={isStarting || isStarted}
-                            className={`shrink-0 rounded-lg p-2 transition-all ${
-                              isStarted
-                                ? 'bg-green-500/15 text-green-300'
-                                : 'bg-primary/10 text-primary hover:bg-primary hover:text-white'
-                            } disabled:opacity-60`}
-                            title={isStarted ? 'Download started' : 'Start download'}
-                          >
-                            {isStarting ? (
-                              <Loader2 size={15} className="animate-spin" />
-                            ) : isStarted ? (
-                              <CheckCircle2 size={15} />
-                            ) : (
-                              <Download size={15} />
-                            )}
-                          </button>
+                          <div className="flex shrink-0 items-center gap-1.5">
+                            <button
+                              onClick={() => handlePlaySource(src)}
+                              disabled={startingStreamMagnet === src.magnet}
+                              className={`shrink-0 rounded-lg p-2 transition-all ${
+                                startingStreamMagnet === src.magnet
+                                  ? 'bg-emerald-500/20 text-emerald-300'
+                                  : 'bg-emerald-500/15 text-emerald-300 hover:bg-emerald-500 hover:text-white'
+                              } disabled:opacity-60`}
+                              title="Stream now (not saved to device)"
+                            >
+                              {startingStreamMagnet === src.magnet ? (
+                                <Loader2 size={15} className="animate-spin" />
+                              ) : (
+                                <Play size={15} fill="currentColor" />
+                              )}
+                            </button>
+                            <button
+                              onClick={() => handleDownloadSource(src)}
+                              disabled={isStarting || isStarted}
+                              className={`shrink-0 rounded-lg p-2 transition-all ${
+                                isStarted
+                                  ? 'bg-green-500/15 text-green-300'
+                                  : 'bg-primary/10 text-primary hover:bg-primary hover:text-white'
+                              } disabled:opacity-60`}
+                              title={isStarted ? 'Download started' : 'Start download'}
+                            >
+                              {isStarting ? (
+                                <Loader2 size={15} className="animate-spin" />
+                              ) : isStarted ? (
+                                <CheckCircle2 size={15} />
+                              ) : (
+                                <Download size={15} />
+                              )}
+                            </button>
+                          </div>
                         </div>
                       </div>
                     )

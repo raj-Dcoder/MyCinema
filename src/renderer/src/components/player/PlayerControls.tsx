@@ -5,7 +5,7 @@ import { AudioBoostProfile, AudioBoostIntensity, AUDIO_BOOST_PROFILES, AUDIO_BOO
 import {
   SkipForward as SkipNext, Loader2, Rewind, Pause, Play, FastForward, Volume2, ListVideo, FolderOpen,
   Users, Info, Crop, RectangleHorizontal, Monitor, Sparkles, Zap, Wand2, PictureInPicture2,
-  Minimize, Maximize, Bookmark, Clock, Activity
+  Minimize, Maximize, Clock, Activity, Magnet
 } from 'lucide-react'
 
 export interface PlayerControlsProps {
@@ -25,6 +25,7 @@ export interface PlayerControlsProps {
   currentVideo: Video
   canControlPlayback: boolean
   showEpisodesPanel: boolean
+  showMagnetsPanel: boolean
   showInfoPanel: boolean
   isTorrentStream: boolean
   aspectMode: 'cover' | 'fill' | 'contain'
@@ -47,7 +48,6 @@ export interface PlayerControlsProps {
   sleepTimerEnd: number | null
   showSleepMenu: boolean
   showStats: boolean
-  bookmarks: { time: number }[]
 
   handleProgressMouseMove: (e: React.MouseEvent<HTMLDivElement>) => void
   handleProgressMouseLeave: () => void
@@ -59,6 +59,7 @@ export interface PlayerControlsProps {
   togglePlay: (e: React.MouseEvent) => void
   handleVolumeChange: (e: React.ChangeEvent<HTMLInputElement>) => void
   setShowEpisodesPanel: (show: boolean) => void
+  setShowMagnetsPanel: (show: boolean) => void
   handleOpenFolder: () => void
   setShowWatchTogetherState: (show: boolean) => void
   handleToggleInfoPanel: () => void
@@ -80,8 +81,6 @@ export interface PlayerControlsProps {
 
   setSleepTimerEnd: (time: number | null) => void
   setShowStats: (show: boolean) => void
-  toggleBookmark: () => void
-  removeBookmark: (time: number) => void
 }
 
 const formatTime = (seconds: number) => {
@@ -112,6 +111,7 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
   currentVideo,
   canControlPlayback,
   showEpisodesPanel,
+  showMagnetsPanel,
   showInfoPanel,
   isTorrentStream,
   aspectMode,
@@ -133,18 +133,16 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
   sleepTimerEnd,
   showSleepMenu,
   showStats,
-  bookmarks,
-
   handleProgressMouseMove,
   handleProgressMouseLeave,
   handleSeekChange,
   handleSeekMouseDown,
   handleSeekMouseUp,
   seek,
-  seekToTime,
   togglePlay,
   handleVolumeChange,
   setShowEpisodesPanel,
+  setShowMagnetsPanel,
   handleOpenFolder,
   setShowWatchTogetherState,
   handleToggleInfoPanel,
@@ -164,9 +162,7 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
   togglePictureInPicture,
   toggleFullscreen,
   setSleepTimerEnd,
-  setShowStats,
-  toggleBookmark,
-  removeBookmark
+  setShowStats
 }) => {
   const [, setTick] = useState(0)
   
@@ -181,7 +177,7 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
   useEffect(() => {
     const hasSeenTour = localStorage.getItem('hasSeenPlayerFeaturesTour_v1')
     if (!hasSeenTour) {
-      setTourStep(1)
+      setTourStep(2)
     }
   }, [])
 
@@ -281,31 +277,6 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
           </>
         )}
         
-        {/* Bookmarks */}
-        {duration > 0 && bookmarks.map((bookmark) => {
-          const leftPercent = (bookmark.time / duration) * 100
-          return (
-            <div
-              key={bookmark.time}
-              className="absolute top-1/2 -translate-y-1/2 w-2 h-2 rounded-full bg-amber-400 cursor-pointer shadow-lg z-30 transition-transform hover:scale-150"
-              style={{ left: `calc(${leftPercent}% - 4px)` }}
-              title={`Bookmark at ${formatTime(bookmark.time)} (Click to remove)`}
-              onClick={(e) => {
-                e.stopPropagation();
-                if (e.altKey || e.shiftKey) {
-                  removeBookmark(bookmark.time)
-                } else {
-                  seekToTime(bookmark.time)
-                }
-              }}
-              onContextMenu={(e) => {
-                e.preventDefault()
-                removeBookmark(bookmark.time)
-              }}
-            />
-          )
-        })}
-
         <div 
           className="absolute w-3 h-3 bg-primary rounded-full shadow-lg opacity-0 group-hover/progress:opacity-100 transition-opacity top-1/2 -translate-y-1/2 z-10 group-hover/progress:scale-125"
           style={{ left: `calc(${(currentTime / duration) * 100}% - 6px)` }}
@@ -348,30 +319,6 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
           <div className="text-sm font-medium text-gray-300">
             {formatTime(currentTime)} / {formatTime(duration)}
           </div>
-          
-          {/* Toggle Bookmark */}
-          {(() => {
-            const hasBookmark = bookmarks.some(b => Math.abs(b.time - currentTime) < 1)
-            return (
-              <div className="relative flex items-center">
-                <button 
-                  onClick={(e) => { e.stopPropagation(); toggleBookmark(); }}
-                  className={`transition-colors ml-4 ${hasBookmark ? 'text-amber-400 hover:text-white' : 'text-white hover:text-amber-400'}`}
-                  title={hasBookmark ? "Remove Bookmark" : "Add Bookmark"}
-                >
-                  <Bookmark size={20} className="opacity-90 hover:opacity-100" fill={hasBookmark ? "currentColor" : "none"} />
-                </button>
-                {tourStep === 1 && (
-                  <div className="absolute bottom-full mb-4 left-1/2 -translate-x-1/2 w-64 bg-primary text-black p-4 rounded-xl shadow-2xl z-50 animate-in fade-in zoom-in-95">
-                    <h4 className="font-black text-[15px] mb-1 leading-tight tracking-tight">New: Bookmarks! 🔖</h4>
-                    <p className="text-[12px] font-medium mb-3 text-black/80">Click here to save any moment. Dots will appear on the timeline to let you jump back anytime.</p>
-                    <button onClick={(e) => { e.stopPropagation(); nextTourStep(); }} className="w-full bg-black text-white rounded-md py-2 text-[11px] uppercase tracking-wider font-bold hover:bg-black/80 transition-colors">Got it</button>
-                    <div className="absolute top-full left-1/2 -translate-x-1/2 border-8 border-transparent border-t-primary" />
-                  </div>
-                )}
-              </div>
-            )
-          })()}
         </div>
 
         <div className="flex items-center gap-5">
@@ -383,6 +330,17 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
               title="Episodes"
             >
               <ListVideo size={22} className="opacity-90 hover:opacity-100" />
+            </button>
+          )}
+
+          {/* Magnets */}
+          {(currentVideo.type === 'series' || isTorrentStream) && (
+            <button
+              onClick={(e) => { e.stopPropagation(); setShowMagnetsPanel(!showMagnetsPanel); }}
+              className={`transition-colors flex items-center ${showMagnetsPanel ? 'text-primary' : 'text-white hover:text-primary'}`}
+              title="Magnets"
+            >
+              <Magnet size={22} className="opacity-90 hover:opacity-100" />
             </button>
           )}
 

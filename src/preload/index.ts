@@ -97,6 +97,12 @@ const api = {
     ipcRenderer.invoke('get-active-downloads'),
   prepareTorrentStream: (id: string) =>
     ipcRenderer.invoke('prepare-torrent-stream', id),
+  startTempStream: (magnetUrl: string, title?: string, options?: { fileIndex?: number; season?: number; episode?: number }) =>
+    ipcRenderer.invoke('start-temp-stream', magnetUrl, title, options),
+  stopTempStream: (id: string) =>
+    ipcRenderer.invoke('stop-temp-stream', id),
+  getTempStreamEpisodes: (streamId: string) =>
+    ipcRenderer.invoke('get-temp-stream-episodes', streamId),
   onDownloadsChanged: (callback: () => void) => {
     ipcRenderer.on('downloads-changed', callback)
     return () => ipcRenderer.removeListener('downloads-changed', callback)

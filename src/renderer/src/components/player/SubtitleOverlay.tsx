@@ -53,7 +53,7 @@ export const SubtitleOverlay: React.FC<SubtitleOverlayProps> = ({
     }
   }
 
-  // Handle RAF loop
+  // Handle RAF loop & media events
   useEffect(() => {
     if (activeSubKey === null) {
       if (subtitleDivRef.current) {
@@ -63,18 +63,40 @@ export const SubtitleOverlay: React.FC<SubtitleOverlayProps> = ({
       return
     }
 
+    const videoEl = videoRef.current
+
     const renderLoop = () => {
-      if (videoRef.current) {
-        renderSubtitleAtTime(videoRef.current.currentTime)
+      if (videoEl) {
+        renderSubtitleAtTime(videoEl.currentTime)
+        if (!videoEl.paused) {
+          rafRef.current = requestAnimationFrame(renderLoop)
+        }
       }
+    }
+
+    const startLoop = () => {
+      if (rafRef.current) cancelAnimationFrame(rafRef.current)
       rafRef.current = requestAnimationFrame(renderLoop)
     }
-    
-    rafRef.current = requestAnimationFrame(renderLoop)
-    
+
+    const handleTimeUpdate = () => {
+      if (videoEl) renderSubtitleAtTime(videoEl.currentTime)
+    }
+
+    if (videoEl) {
+      videoEl.addEventListener('play', startLoop)
+      videoEl.addEventListener('timeupdate', handleTimeUpdate)
+      videoEl.addEventListener('seeked', handleTimeUpdate)
+      if (!videoEl.paused) startLoop()
+      else renderSubtitleAtTime(videoEl.currentTime)
+    }
+
     return () => {
-      if (rafRef.current) {
-        cancelAnimationFrame(rafRef.current)
+      if (rafRef.current) cancelAnimationFrame(rafRef.current)
+      if (videoEl) {
+        videoEl.removeEventListener('play', startLoop)
+        videoEl.removeEventListener('timeupdate', handleTimeUpdate)
+        videoEl.removeEventListener('seeked', handleTimeUpdate)
       }
     }
   }, [activeSubKey, subtitleOffsetMs])

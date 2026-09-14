@@ -549,11 +549,11 @@ const App: React.FC = () => {
 
         <div className={`overflow-hidden px-4 transition-all duration-300 ${!isSidebarExpanded && updateState.status !== 'idle' ? 'max-h-16 pb-3 opacity-100' : 'max-h-0 pb-0 opacity-0'}`}>
           <button
-            className={`relative mx-auto flex items-center gap-1.5 h-9 rounded-lg border px-3 transition-all ${
+            className={`relative mx-auto flex h-10 w-10 items-center justify-center rounded-full border transition-all ${
               updateState.status === 'ready'
                 ? 'border-emerald-500/25 bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20'
                 : updateState.status === 'downloading'
-                  ? 'border-primary/25 bg-primary/10 text-primary hover:bg-primary/20'
+                  ? 'border-white/10 text-primary'
                   : 'border-primary/25 bg-primary/10 text-primary hover:bg-primary/20'
             }`}
             title={
@@ -569,22 +569,32 @@ const App: React.FC = () => {
             }}
           >
             {updateState.status === 'downloading' ? (
-              <RefreshCw size={14} className="animate-spin shrink-0" />
-            ) : updateState.status === 'ready' ? (
-              <DownloadIcon size={14} className="shrink-0" />
+              <span className="relative flex h-9 w-9 items-center justify-center">
+                <svg viewBox="0 0 36 36" className="absolute inset-0 h-9 w-9 -rotate-90">
+                  <circle cx="18" cy="18" r="15.5" fill="none" stroke="rgba(255,255,255,0.08)" strokeWidth="2.5" />
+                  <circle
+                    cx="18"
+                    cy="18"
+                    r="15.5"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2.5"
+                    strokeLinecap="round"
+                    strokeDasharray={2 * Math.PI * 15.5}
+                    strokeDashoffset={2 * Math.PI * 15.5 * (1 - (updateState.percent ?? 0) / 100)}
+                    className="transition-all duration-300"
+                  />
+                </svg>
+                <RefreshCw size={14} className="animate-spin shrink-0" />
+              </span>
             ) : (
-              <DownloadIcon size={14} className="shrink-0" />
+              <DownloadIcon size={15} className="shrink-0" />
             )}
-            <span className="text-xs font-semibold">
-              {updateState.status === 'available' && 'Update'}
-              {updateState.status === 'downloading' && `${updateState.percent ?? 0}%`}
-              {updateState.status === 'ready' && 'Install'}
-            </span>
             {updateState.status === 'available' && (
-              <span className="h-1.5 w-1.5 rounded-full bg-primary shadow-[0_0_8px_rgba(229,9,20,0.7)]" />
+              <span className="absolute -right-0.5 -top-0.5 h-2.5 w-2.5 rounded-full bg-primary shadow-[0_0_8px_rgba(229,9,20,0.7)] ring-2 ring-black/60" />
             )}
             {updateState.status === 'ready' && (
-              <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.7)]" />
+              <span className="absolute -right-0.5 -top-0.5 h-2.5 w-2.5 rounded-full bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.7)] ring-2 ring-black/60" />
             )}
           </button>
         </div>

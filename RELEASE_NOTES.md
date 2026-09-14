@@ -1,3 +1,16 @@
+# MyCinema v1.33.1
+
+Correct audio language on every track switch, plus a cleaner update badge in the collapsed sidebar.
+
+### Bug Fixes
+- **Right Language, Every Track**: Switching audio tracks (e.g. English to Korean) now actually plays the selected language. Track positions and ffmpeg mapping were using two different numbering systems, so the wrong stream could play while the UI showed the right one — both now use one consistent system.
+- **Collapsed Sidebar Update Badge**: The update indicator above the profile in the collapsed sidebar is now a compact icon button — a dot badge for new updates, a progress ring while downloading, and a green badge when ready — instead of cramped text that wrapped and clipped.
+
+### Security & Privacy
+- **Same Safe Audio Pipeline**: External audio still extracts through the sandboxed audio protocol with path-traversal checks — only the stream addressing changed, not what files can be served.
+
+***
+
 # MyCinema v1.33.0
 
 Subtitles you can style mid-movie, search that starts fresh, and an end to the play-buffer-repeat loop on second audio tracks.

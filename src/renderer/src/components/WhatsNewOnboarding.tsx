@@ -1,43 +1,23 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { ChevronRight, Search, ShieldCheck, Subtitles, Zap } from 'lucide-react'
+import { Bell, ChevronRight, Languages, ShieldCheck } from 'lucide-react'
 
 export const LATEST_RELEASE = {
-  version: '1.33.0',
+  version: '1.33.1',
   eyebrow: "What's New",
   slides: [
     {
-      id: 'subtitle-style',
-      layout: 'discovery',
-      icon: Subtitles,
-      kicker: 'Subtitles',
-      headline: 'Style subtitles without pausing.',
-      highlight: 'subtitles',
-      support: 'Pick Default, Clean, or OTT plus size and position — live, right inside the player.',
-      signal: 'Live preview',
-      cta: 'Try it',
-      mood: {
-        name: 'subtitles',
-        gradient: 'from-fuchsia-400 via-purple-500 to-violet-800',
-        text: 'text-fuchsia-200',
-        border: 'border-fuchsia-300/20',
-        shadow: 'shadow-[0_0_80px_rgba(232,121,249,0.25)]',
-        backdrop: 'radial-gradient(ellipse at 50% 0%, rgba(232,121,249,0.14), transparent 60%)',
-        cursor: 'rgba(232,121,249,0.2)',
-      },
-    },
-    {
-      id: 'no-more-stutter',
+      id: 'true-audio',
       layout: 'reveal',
-      icon: Zap,
+      icon: Languages,
       kicker: 'Fixes',
-      headline: 'Second audio tracks play smoothly.',
-      highlight: 'smoothly',
-      support: 'The play-buffer-repeat stutter on alternate audio is gone for streams and downloads.',
+      headline: 'Your audio plays correctly.',
+      highlight: 'correctly',
+      support: 'Switching tracks now plays the language you picked — English stays English, Korean plays Korean.',
       signal: 'Fixed',
       cta: 'Nice',
       mood: {
-        name: 'fixed',
+        name: 'audio',
         gradient: 'from-emerald-400 via-teal-500 to-cyan-800',
         text: 'text-teal-200',
         border: 'border-teal-300/20',
@@ -47,17 +27,17 @@ export const LATEST_RELEASE = {
       },
     },
     {
-      id: 'fresh-search',
-      layout: 'share',
-      icon: Search,
-      kicker: 'Search',
-      headline: 'Every search starts fresh.',
-      highlight: 'fresh',
-      support: 'Opening a result clears the box, so your next search begins clean every time.',
-      signal: 'Clean slate',
-      cta: "Let's go",
+      id: 'sidebar-badge',
+      layout: 'discovery',
+      icon: Bell,
+      kicker: 'Polish',
+      headline: 'A tidier update badge.',
+      highlight: 'tidier',
+      support: 'The collapsed sidebar now shows a neat icon with a progress ring while updates download.',
+      signal: 'Clean',
+      cta: 'Cool',
       mood: {
-        name: 'search',
+        name: 'badge',
         gradient: 'from-sky-400 via-blue-500 to-indigo-800',
         text: 'text-sky-200',
         border: 'border-sky-300/20',
@@ -75,7 +55,7 @@ export const LATEST_RELEASE = {
       highlight: 'locked',
       support: 'External audio still runs sandboxed — only your files play, nothing escapes.',
       signal: 'Sandboxed',
-      cta: 'Cool',
+      cta: 'Got it',
       mood: {
         name: 'safety',
         gradient: 'from-slate-400 via-slate-500 to-zinc-800',

@@ -1024,10 +1024,12 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
           if (t.embedded) {
             // Only treat track 0 as native if Chromium natively decodes its codec (e.g. AAC/MP3).
             // Non-native codecs (EAC3, AC3, DTS, TrueHD) and secondary tracks MUST route through FFmpeg audio:// pipeline.
+            // NOTE: index is always the 0-based position among AUDIO streams (not the absolute
+            // ffprobe stream index) — the audio:// handler maps it with ffmpeg `0:a:<index>`.
             const isNative = i === 0 && isChromiumNativeAudioCodec(t.codec)
             arr.push({
               id: isNative ? `nat-${t.index}` : `ext-emb-${t.index}`,
-              index: t.index,
+              index: i,
               native: isNative,
               embedded: true,
               label: formatTrackLabel(t, i + 1)
@@ -1055,7 +1057,8 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
     } else if (embeddedAudio.length > 0) {
       embeddedAudio.forEach((t, i) => {
         const isNative = i === 0 && isChromiumNativeAudioCodec(t.codec)
-        arr.push({ id: isNative ? `nat-${t.index}` : `ext-emb-${t.index}`, index: t.index, native: isNative, embedded: true, label: formatTrackLabel(t, i + 1) })
+        // Same audio-relative index convention as above (see torrent branch).
+        arr.push({ id: isNative ? `nat-${t.index}` : `ext-emb-${t.index}`, index: i, native: isNative, embedded: true, label: formatTrackLabel(t, i + 1) })
       })
     } else if (audioTracks.length > 0) {
       audioTracks.forEach((t, i) => {

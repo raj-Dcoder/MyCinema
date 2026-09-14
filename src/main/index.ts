@@ -1244,7 +1244,9 @@ function registerAudioProtocol(): void {
           const resolved = await resolveTorrentEmbeddedAudioSource(normalizedPath, streamIndex)
           if (!resolved) return new Response('Audio track unavailable', { status: 404 })
           sourcePath = resolved.localPath
-          mapArg = `0:${resolved.streamIndex}`
+          // streamIndex is the 0-based position among AUDIO streams (see
+          // availableAudio in VideoPlayer) — map with the audio selector.
+          mapArg = `0:a:${resolved.streamIndex}`
         } else {
           // Separate audio file inside a temp stream / active download torrent
           const resolved = await resolveTorrentAudioSource(normalizedPath, trackIndex)
@@ -1263,7 +1265,9 @@ function registerAudioProtocol(): void {
           return new Response('Not Found', { status: 404 })
         }
         sourcePath = normalizedPath
-        mapArg = streamIndex != null && streamIndex !== '' ? `0:${streamIndex}` : `0:${trackIndex}`
+        // Both params are 0-based positions among AUDIO streams — map with
+        // the audio selector so video/subtitle streams never shift the pick.
+        mapArg = streamIndex != null && streamIndex !== '' ? `0:a:${streamIndex}` : `0:a:${trackIndex}`
       }
 
       const pass = new PassThrough()

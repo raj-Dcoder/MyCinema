@@ -3,6 +3,31 @@
 @tailwind utilities;
 
 @layer base {
+  :root {
+    color-scheme: dark;
+    /* Dark (default, preserves current look) */
+    --c-bg: 5 8 13;
+    --c-surface: 24 24 24;
+    --c-secondary: 47 47 47;
+    --c-text: 255 255 255;
+    --c-muted: 179 179 179;
+    --c-card: 17 24 39;
+    --c-line: 255 255 255;
+  }
+
+  :root.light,
+  .light {
+    color-scheme: light;
+    /* Polite warm-paper light theme — cinematic, soft, not mechanical */
+    --c-bg: 246 244 239;
+    --c-surface: 255 255 255;
+    --c-secondary: 232 227 217;
+    --c-text: 26 22 17;
+    --c-muted: 107 100 89;
+    --c-card: 255 255 255;
+    --c-line: 26 22 17;
+  }
+
   html {
     @apply font-sans;
   }
@@ -278,3 +303,450 @@
 .whats-new-orbit-reverse {
   animation: whats-new-orbit 13s linear infinite reverse;
 }
+
+/* ------------------------------------------------------------------ */
+/* Light theme — polite warm-paper adaptation                           */
+/* The app is dark-first with lots of white/* + black/* + [#...]       */
+/* utilities. These overrides remap them to warm ink in .light mode    */
+/* without a full 500-file refactor. Token-based classes               */
+/* (bg-background, text-text, etc.) switch automatically via vars.      */
+/* ------------------------------------------------------------------ */
+
+.light body {
+  background:
+    radial-gradient(1200px 500px at 85% -10%, rgba(229, 9, 20, 0.06), transparent 60%),
+    radial-gradient(900px 480px at -10% 0%, rgba(180, 140, 60, 0.1), transparent 55%),
+    rgb(var(--c-bg));
+}
+
+/* Surfaces: white glass -> warm paper cards */
+.light .bg-white\/5,
+.light .bg-white\/\[0\.02\],
+.light .bg-white\/\[0\.03\],
+.light .bg-white\/\[0\.04\] {
+  background-color: rgba(255, 255, 255, 0.72) !important;
+}
+.light .bg-white\/10 {
+  background-color: rgba(26, 22, 17, 0.06) !important;
+}
+.light .hover\:bg-white\/5:hover,
+.light .hover\:bg-white\/10:hover {
+  background-color: rgba(26, 22, 17, 0.08) !important;
+}
+
+/* Text: white opacity -> warm ink opacity */
+.light .text-white {
+  color: rgb(26 22 17) !important;
+}
+.light .text-white\/20 { color: rgba(26, 22, 17, 0.38) !important; }
+.light .text-white\/35 { color: rgba(26, 22, 17, 0.55) !important; }
+.light .text-white\/40 { color: rgba(26, 22, 17, 0.6) !important; }
+.light .text-white\/50 { color: rgba(26, 22, 17, 0.66) !important; }
+.light .text-white\/55 { color: rgba(26, 22, 17, 0.72) !important; }
+.light .text-white\/60 { color: rgba(26, 22, 17, 0.75) !important; }
+.light .text-white\/70 { color: rgba(26, 22, 17, 0.82) !important; }
+.light .hover\:text-white:hover { color: rgb(26 22 17) !important; }
+.light .hover\:text-white\/95:hover { color: rgb(26 22 17) !important; }
+
+/* Borders + rings: white lines -> warm ink lines */
+.light .border-white\/5 { border-color: rgba(26, 22, 17, 0.08) !important; }
+.light .border-white\/8,
+.light .border-white\/10 { border-color: rgba(26, 22, 17, 0.12) !important; }
+.light .border-white\/12,
+.light .border-white\/15,
+.light .border-white\/20 { border-color: rgba(26, 22, 17, 0.16) !important; }
+.light .ring-white\/5 { --tw-ring-color: rgba(26, 22, 17, 0.1) !important; }
+.light .ring-white\/10,
+.light .ring-white\/20 { --tw-ring-color: rgba(26, 22, 17, 0.14) !important; }
+.light .hover\:border-white\/20:hover { border-color: rgba(26, 22, 17, 0.24) !important; }
+.light .divide-white\/5 > :not([hidden]) ~ :not([hidden]) { border-color: rgba(26,22,17,0.08) !important; }
+
+/* Hardcoded dark surfaces -> paper */
+.light .bg-\[\#05080d\],
+.light .bg-\[\#0b1018\],
+.light .bg-\[\#0a0f18\],
+.light .bg-\[\#080c12\],
+.light .bg-\[\#080d16\],
+.light .bg-\[\#0c121b\],
+.light .bg-\[\#070a0f\],
+.light .bg-\[\#080B10\],
+.light .bg-\[\#0B0F16\],
+.light .bg-\[\#0f141d\],
+.light .bg-\[\#0f0f0f\],
+.light .bg-\[\#111111\],
+.light .bg-\[\#121212\],
+.light .bg-\[\#141414\],
+.light .bg-\[\#10141d\],
+.light .bg-\[\#111826\],
+.light .bg-\[\#151B25\] {
+  background-color: rgb(var(--c-card)) !important;
+}
+.light .bg-\[\#0b1018\]\/95,
+.light .bg-\[\#0b1018\]\/98,
+.light .bg-\[\#080c12\]\/92,
+.light .bg-\[\#0c121b\]\/95,
+.light .bg-\[\#0f0f0f\]\/70,
+.light .bg-\[\#0f141d\]\/70,
+.light .bg-\[\#0B0F16\]\/70,
+.light .bg-\[\#111111\]\/90 {
+  background-color: rgba(255, 255, 255, 0.92) !important;
+}
+.light .hover\:bg-\[\#253040\]:hover,
+.light .hover\:bg-\[\#1A2230\]:hover,
+.light .hover\:bg-\[\#101722\]:hover {
+  background-color: rgba(26, 22, 17, 0.06) !important;
+}
+.light .bg-\[\#1a2230\] { background-color: rgb(255 255 255) !important; }
+.light .from-\[\#05080d\] { --tw-gradient-from: rgb(var(--c-bg)) !important; }
+.light .via-\[\#0a0f18\]\/50 { --tw-gradient-to: transparent !important; }
+
+/* Hero / card gradients keep cinematic feel but lighter */
+.light .from-black\/88,
+.light .from-black\/55,
+.light .via-black\/42,
+.light .to-black\/5 {
+  --tw-gradient-from: rgba(26, 22, 17, 0.55) !important;
+}
+.light .bg-black\/20,
+.light .bg-black\/25,
+.light .bg-black\/30,
+.light .bg-black\/40,
+.light .bg-black\/50,
+.light .bg-black\/55,
+.light .bg-black\/60,
+.light .bg-black\/70,
+.light .bg-black\/80,
+.light .bg-black\/85 {
+  background-color: rgba(26, 22, 17, 0.35) !important;
+}
+/* Video stage must stay truly black */
+.light .video-stage,
+.light video {
+  background-color: #000 !important;
+}
+
+/* Skeleton + shimmer */
+.light .skeleton { background-color: rgba(26, 22, 17, 0.06) !important; }
+.light .skeleton::after {
+  background-image: linear-gradient(
+    90deg,
+    rgba(26, 22, 17, 0) 0,
+    rgba(26, 22, 17, 0.06) 20%,
+    rgba(26, 22, 17, 0.12) 60%,
+    rgba(26, 22, 17, 0) 100%
+  );
+}
+
+/* Scrollbar + scroll nav */
+.light ::-webkit-scrollbar-track { background: rgb(var(--c-bg)); }
+.light ::-webkit-scrollbar-thumb { background: rgba(26,22,17,0.22); }
+.light ::-webkit-scrollbar-thumb:hover { background: rgba(26,22,17,0.34); }
+.light .scroll-nav-btn--left .scroll-nav-btn__track {
+  background: linear-gradient(to right, rgba(246,244,239,0.94) 55%, transparent);
+}
+.light .scroll-nav-btn--right .scroll-nav-btn__track {
+  background: linear-gradient(to left, rgba(246,244,239,0.94) 55%, transparent);
+}
+.light .scroll-nav-btn__icon {
+  color: rgb(26 22 17);
+  background: rgba(255,255,255,0.85);
+  border-color: rgba(26,22,17,0.12);
+  box-shadow: 0 4px 16px rgba(16,18,30,0.14);
+}
+
+/* Cards / panels / inputs get soft warm shadow instead of neon glow */
+.light .shadow-xl,
+.light .shadow-2xl {
+  box-shadow: 0 1px 2px rgba(16, 18, 30, 0.05), 0 12px 32px -16px rgba(16, 18, 30, 0.22) !important;
+}
+.light select option { background-color: #fff; color: rgb(26 22 17); }
+.light input::placeholder,
+.light textarea::placeholder { color: rgba(26,22,17,0.4) !important; }
+
+/* ------------------------------------------------------------------ */
+/* Depth pass (light only) — lifted cards, gradient panels, screen glow */
+/* Poster/thumbs use clip-path which clips box-shadow, so lift comes   */
+/* from drop-shadow filters on the parent .group instead.              */
+/* ------------------------------------------------------------------ */
+.light body {
+  background:
+    radial-gradient(1000px 420px at 80% -8%, rgba(229, 9, 20, 0.08), transparent 60%),
+    radial-gradient(800px 420px at -8% 4%, rgba(180, 140, 60, 0.14), transparent 55%),
+    radial-gradient(700px 500px at 50% 110%, rgba(120, 90, 40, 0.08), transparent 60%),
+    rgb(var(--c-bg));
+  background-attachment: fixed;
+}
+
+/* Sidebar — soft gradient sheet with a lit edge */
+.light .group\/sidebar {
+  background-image: linear-gradient(180deg, rgba(255,255,255,0.85), rgba(255,255,255,0.6));
+  box-shadow: 1px 0 0 rgba(26,22,17,0.06), 12px 0 32px -16px rgba(16,18,30,0.18);
+}
+
+/* Poster cards (aspect 2/3) — layered lift, deeper on hover */
+.light .group:has(> div.aspect-\[2\/3\]) {
+  filter: drop-shadow(0 1px 2px rgba(16,18,30,0.14)) drop-shadow(0 14px 26px rgba(16,18,30,0.2));
+  transition: filter 0.3s ease;
+}
+.light .group:hover:has(> div.aspect-\[2\/3\]),
+.light .group:focus-visible:has(> div.aspect-\[2\/3\]) {
+  filter: drop-shadow(0 2px 4px rgba(16,18,30,0.16)) drop-shadow(0 24px 44px rgba(16,18,30,0.3));
+}
+
+/* Landscape thumbs (continue watching / grids) */
+.light .group:has(> div.aspect-video) {
+  filter: drop-shadow(0 1px 2px rgba(16,18,30,0.12)) drop-shadow(0 10px 22px rgba(16,18,30,0.18));
+  transition: filter 0.3s ease;
+}
+.light .group:hover:has(> div.aspect-video) {
+  filter: drop-shadow(0 2px 4px rgba(16,18,30,0.14)) drop-shadow(0 18px 36px rgba(16,18,30,0.26));
+}
+.light div.aspect-video {
+  border: 1px solid rgba(26,22,17,0.1);
+}
+
+/* Panels / modals / dropdown sheets — gradient face + deep soft shadow */
+.light div[class*="rounded-2xl"][class*="backdrop-blur"],
+.light div[class*="rounded-3xl"][class*="backdrop-blur"] {
+  background-image: linear-gradient(180deg, rgba(255,255,255,0.9), rgba(250,247,240,0.84));
+  border-color: rgba(26,22,17,0.1);
+  box-shadow: 0 1px 2px rgba(16,18,30,0.06), 0 16px 40px -20px rgba(16,18,30,0.3);
+}
+
+/* Primary actions — glossy red with glow */
+.light .bg-primary,
+.light .bg-red-600 {
+  background-image: linear-gradient(180deg, #f3121f, #c40812);
+  box-shadow: 0 8px 20px -8px rgba(229,9,20,0.55), inset 0 1px 0 rgba(255,255,255,0.25);
+}
+.light .bg-primary:hover,
+.light .bg-red-600:hover {
+  filter: brightness(1.05);
+}
+
+/* ------------------------------------------------------------------ */
+/* keep-dark — player + details stay exactly as dark theme              */
+/* Higher specificity (.light .keep-dark ...) wins over .light rules.   */
+/* ------------------------------------------------------------------ */
+.light .keep-dark {
+  color-scheme: dark;
+  --c-bg: 5 8 13;
+  --c-surface: 24 24 24;
+  --c-secondary: 47 47 47;
+  --c-text: 255 255 255;
+  --c-muted: 179 179 179;
+  --c-card: 17 24 39;
+  --c-line: 255 255 255;
+  color: #fff;
+}
+.light .keep-dark .bg-white\/5,
+.light .keep-dark .bg-white\/\[0\.02\],
+.light .keep-dark .bg-white\/\[0\.03\],
+.light .keep-dark .bg-white\/\[0\.04\] { background-color: rgba(255,255,255,0.05) !important; }
+.light .keep-dark .bg-white\/10 { background-color: rgba(255,255,255,0.1) !important; }
+.light .keep-dark .hover\:bg-white\/5:hover { background-color: rgba(255,255,255,0.05) !important; }
+.light .keep-dark .hover\:bg-white\/10:hover { background-color: rgba(255,255,255,0.1) !important; }
+.light .keep-dark .text-white { color: #fff !important; }
+.light .keep-dark .text-white\/20 { color: rgba(255,255,255,0.2) !important; }
+.light .keep-dark .text-white\/35 { color: rgba(255,255,255,0.35) !important; }
+.light .keep-dark .text-white\/40 { color: rgba(255,255,255,0.4) !important; }
+.light .keep-dark .text-white\/50 { color: rgba(255,255,255,0.5) !important; }
+.light .keep-dark .text-white\/55 { color: rgba(255,255,255,0.55) !important; }
+.light .keep-dark .text-white\/60 { color: rgba(255,255,255,0.6) !important; }
+.light .keep-dark .text-white\/70 { color: rgba(255,255,255,0.7) !important; }
+.light .keep-dark .hover\:text-white:hover { color: #fff !important; }
+.light .keep-dark .hover\:text-white\/95:hover { color: rgba(255,255,255,0.95) !important; }
+.light .keep-dark .border-white\/5 { border-color: rgba(255,255,255,0.05) !important; }
+.light .keep-dark .border-white\/8,
+.light .keep-dark .border-white\/10 { border-color: rgba(255,255,255,0.1) !important; }
+.light .keep-dark .border-white\/12,
+.light .keep-dark .border-white\/15,
+.light .keep-dark .border-white\/20 { border-color: rgba(255,255,255,0.2) !important; }
+.light .keep-dark .ring-white\/5 { --tw-ring-color: rgba(255,255,255,0.05) !important; }
+.light .keep-dark .ring-white\/10,
+.light .keep-dark .ring-white\/20 { --tw-ring-color: rgba(255,255,255,0.15) !important; }
+.light .keep-dark .hover\:border-white\/20:hover { border-color: rgba(255,255,255,0.2) !important; }
+.light .keep-dark .bg-\[\#05080d\],
+.light .keep-dark .bg-\[\#0b1018\],
+.light .keep-dark .bg-\[\#0a0f18\],
+.light .keep-dark .bg-\[\#080c12\],
+.light .keep-dark .bg-\[\#080d16\],
+.light .keep-dark .bg-\[\#0c121b\],
+.light .keep-dark .bg-\[\#070a0f\],
+.light .keep-dark .bg-\[\#080B10\],
+.light .keep-dark .bg-\[\#0B0F16\],
+.light .keep-dark .bg-\[\#0f141d\],
+.light .keep-dark .bg-\[\#0f0f0f\],
+.light .keep-dark .bg-\[\#111111\],
+.light .keep-dark .bg-\[\#121212\],
+.light .keep-dark .bg-\[\#141414\],
+.light .keep-dark .bg-\[\#10141d\],
+.light .keep-dark .bg-\[\#111826\],
+.light .keep-dark .bg-\[\#151B25\],
+.light .keep-dark .bg-\[\#1a2230\] { background-color: revert !important; }
+.light .keep-dark .bg-\[\#05080d\] { background-color: #05080d !important; }
+.light .keep-dark .bg-\[\#080d16\] { background-color: #080d16 !important; }
+.light .keep-dark .bg-\[\#0b1018\] { background-color: #0b1018 !important; }
+.light .keep-dark .bg-\[\#1a2230\] { background-color: #1a2230 !important; }
+.light .keep-dark .bg-\[\#0b1018\]\/95,
+.light .keep-dark .bg-\[\#0b1018\]\/98,
+.light .keep-dark .bg-\[\#080c12\]\/92,
+.light .keep-dark .bg-\[\#0c121b\]\/95,
+.light .keep-dark .bg-\[\#0f0f0f\]\/70,
+.light .keep-dark .bg-\[\#0f141d\]\/70,
+.light .keep-dark .bg-\[\#0B0F16\]\/70,
+.light .keep-dark .bg-\[\#111111\]\/90 { background-color: revert !important; }
+.light .keep-dark .hover\:bg-\[\#253040\]:hover { background-color: #253040 !important; }
+.light .keep-dark .hover\:bg-\[\#1A2230\]:hover { background-color: #1A2230 !important; }
+.light .keep-dark .hover\:bg-\[\#101722\]:hover { background-color: #101722 !important; }
+.light .keep-dark .bg-black\/20 { background-color: rgba(0,0,0,0.2) !important; }
+.light .keep-dark .bg-black\/25 { background-color: rgba(0,0,0,0.25) !important; }
+.light .keep-dark .bg-black\/30 { background-color: rgba(0,0,0,0.3) !important; }
+.light .keep-dark .bg-black\/40 { background-color: rgba(0,0,0,0.4) !important; }
+.light .keep-dark .bg-black\/50 { background-color: rgba(0,0,0,0.5) !important; }
+.light .keep-dark .bg-black\/55 { background-color: rgba(0,0,0,0.55) !important; }
+.light .keep-dark .bg-black\/60 { background-color: rgba(0,0,0,0.6) !important; }
+.light .keep-dark .bg-black\/70 { background-color: rgba(0,0,0,0.7) !important; }
+.light .keep-dark .bg-black\/80 { background-color: rgba(0,0,0,0.8) !important; }
+.light .keep-dark .bg-black\/85 { background-color: rgba(0,0,0,0.85) !important; }
+.light .keep-dark .from-black\/88,
+.light .keep-dark .from-black\/55,
+.light .keep-dark .via-black\/42,
+.light .keep-dark .to-black\/5 { --tw-gradient-from: revert !important; }
+.light .keep-dark .skeleton { background-color: rgba(255,255,255,0.05) !important; }
+.light .keep-dark .skeleton::after {
+  background-image: linear-gradient(
+    90deg,
+    rgba(255, 255, 255, 0) 0,
+    rgba(255, 255, 255, 0.05) 20%,
+    rgba(255, 255, 255, 0.1) 60%,
+    rgba(255, 255, 255, 0) 100%
+  );
+}
+.light .keep-dark .scroll-nav-btn--left .scroll-nav-btn__track {
+  background: linear-gradient(to right, rgba(10,10,16,0.92) 55%, transparent);
+}
+.light .keep-dark .scroll-nav-btn--right .scroll-nav-btn__track {
+  background: linear-gradient(to left, rgba(10,10,16,0.92) 55%, transparent);
+}
+.light .keep-dark .scroll-nav-btn__icon {
+  color: #fff;
+  background: rgba(255,255,255,0.12);
+  border-color: rgba(255,255,255,0.18);
+  box-shadow: 0 4px 16px rgba(0,0,0,0.5);
+}
+.light .keep-dark .shadow-xl,
+.light .keep-dark .shadow-2xl { box-shadow: revert !important; }
+.light .keep-dark select option { background-color: #141414; color: #fff; }
+.light .keep-dark input::placeholder,
+.light .keep-dark textarea::placeholder { color: revert !important; }
+/* Depth-pass resets — player/details keep flat dark look + fonts */
+.light .keep-dark .group,
+.light .keep-dark .group:hover { filter: none !important; }
+.light .keep-dark div[class*="backdrop-blur"] { background-image: none !important; box-shadow: revert !important; border-color: revert !important; }
+.light .keep-dark div.aspect-video { border: revert !important; }
+.light .keep-dark .bg-primary,
+.light .keep-dark .bg-red-600 { background-image: none !important; box-shadow: revert !important; }
+.light .keep-dark .bg-primary:hover,
+.light .keep-dark .bg-red-600:hover { filter: none !important; }
+
+/* ------------------------------------------------------------------ */
+/* Theme segmented control — explicit colors, immune to white/* remaps */
+/* ------------------------------------------------------------------ */
+.theme-seg {
+  position: relative;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px;
+  flex-shrink: 0;
+  padding: 6px;
+  border-radius: 18px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.05);
+}
+.theme-seg-thumb {
+  position: absolute;
+  top: 6px;
+  bottom: 6px;
+  left: 6px;
+  width: calc(50% - 8px);
+  border-radius: 12px;
+  background: #ffffff;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.6);
+  transition: left 0.28s cubic-bezier(0.32, 0.72, 0.35, 1), background 0.28s ease;
+}
+.theme-seg-thumb[data-side="light"] {
+  left: calc(50% + 2px);
+  background: #000000;
+}
+.theme-seg button {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 9px 20px;
+  border: 0;
+  border-radius: 12px;
+  background: transparent;
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 900;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  color: rgba(255, 255, 255, 0.45);
+  transition: color 0.2s ease;
+}
+.theme-seg button[data-kind="dark"][data-active="true"] { color: #0a0a0a; }
+.theme-seg button[data-kind="light"][data-active="true"] { color: #ffffff; }
+.theme-seg button[data-active="false"]:hover { color: #ffffff; }
+.theme-seg button:focus-visible {
+  outline: 2px solid #e50914;
+  outline-offset: 2px;
+}
+
+/* Light theme — warm track, ink thumb for Light, paper thumb for Dark */
+.light .theme-seg {
+  background: #ece7db;
+  border-color: rgba(26, 22, 17, 0.12);
+  box-shadow: inset 0 1px 3px rgba(16, 18, 30, 0.1);
+}
+.light .theme-seg-thumb[data-side="dark"] {
+  background: #ffffff;
+  box-shadow: 0 4px 14px rgba(16, 18, 30, 0.22), inset 0 1px 0 rgba(255, 255, 255, 0.8);
+}
+.light .theme-seg-thumb[data-side="light"] {
+  background: #1a1611;
+  box-shadow: 0 4px 14px rgba(16, 18, 30, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.15);
+}
+.light .theme-seg button { color: rgba(26, 22, 17, 0.5); }
+.light .theme-seg button[data-kind="dark"][data-active="true"] { color: #1a1611; }
+.light .theme-seg button[data-kind="light"][data-active="true"] { color: #ffffff; }
+.light .theme-seg button[data-active="false"]:hover { color: #1a1611; }
+
+/* ------------------------------------------------------------------ */
+/* Image overlays stay cinematic — white text on dark photo gradients  */
+/* (poster cards + hero). Exempt from the light ink remap.             */
+/* ------------------------------------------------------------------ */
+.light .poster-overlay .text-white,
+.light .hero-overlay .text-white { color: #fff !important; }
+.light .hero-overlay .text-white\/60,
+.light .poster-overlay .text-white\/65 { color: rgba(255, 255, 255, 0.65) !important; }
+.light .poster-overlay .text-white\/75 { color: rgba(255, 255, 255, 0.75) !important; }
+.light .hero-overlay .text-white\/45 { color: rgba(255, 255, 255, 0.45) !important; }
+.light .hero-overlay .text-white\/40 { color: rgba(255, 255, 255, 0.4) !important; }
+.light .hero-overlay .hover\:text-white:hover,
+.light .poster-overlay .hover\:text-white:hover { color: #fff !important; }
+.light .poster-overlay .bg-white\/35,
+.light .hero-overlay .bg-white\/20 { background-color: rgba(255, 255, 255, 0.35) !important; }
+.light .hero-overlay .bg-white\/5 { background-color: rgba(255, 255, 255, 0.05) !important; }
+.light .hero-overlay .hover\:bg-white\/10:hover { background-color: rgba(255, 255, 255, 0.1) !important; }
+.light .hero-overlay .border-white\/5 { border-color: rgba(255, 255, 255, 0.05) !important; }
+.light .poster-overlay .bg-black\/55 { background-color: rgba(0, 0, 0, 0.55) !important; }
+.light .poster-overlay .border-white\/10 { border-color: rgba(255, 255, 255, 0.1) !important; }
+.light .poster-overlay .bg-red-600,
+.light .hero-overlay .bg-red-600 { background-image: none !important; }
+.light .poster-overlay button.bg-red-600,
+.light .hero-overlay button.bg-red-600 { color: #fff !important; }
+.light .hero-overlay .bg-red-600:hover { filter: none !important; }

@@ -1,9 +1,11 @@
 import React, { useEffect, useState } from 'react'
-import { FolderOpen, Trash2, Plus, HardDrive, AlertTriangle, Check, X as CloseIcon, Maximize2, Download, Upload, Image as ImageIcon, Subtitles } from 'lucide-react'
+import { FolderOpen, Trash2, Plus, HardDrive, AlertTriangle, Check, X as CloseIcon, Maximize2, Download, Upload, Image as ImageIcon, Subtitles, Sun, Moon } from 'lucide-react'
 import ProfilePictureModal from '../components/ProfilePictureModal'
 import { SUBTITLE_STYLE_KEY, SUBTITLE_FONT_SIZE_KEY, SUBTITLE_POSITION_KEY, type SubtitleStyle } from '../components/player/SubtitleOverlay'
+import { useTheme } from '../theme/ThemeContext'
 
 const Settings: React.FC = () => {
+  const { theme, setTheme } = useTheme()
   const [folders, setFolders] = useState<any[]>([])
   const [scanning, setScanning] = useState<string | null>(null)
   const [userName, setUserName] = useState(() => localStorage.getItem('mycinema_user_name') || 'User')
@@ -238,6 +240,48 @@ const Settings: React.FC = () => {
                 }`}
               />
             </button>
+          </div>
+        </section>
+
+        <section>
+          <h3 className={sectionTitleClass}>Appearance</h3>
+          <div className={`${panelClass} flex items-center justify-between gap-6 p-6`}>
+            <div className="flex items-center gap-4 min-w-0">
+              <div className={iconBoxClass}>
+                {theme === 'light' ? <Sun size={17} /> : <Moon size={17} />}
+              </div>
+              <div className="min-w-0">
+                <h4 className="text-xs font-black text-white uppercase tracking-tight">Theme</h4>
+                <p className="mt-0.5 text-[11px] font-medium leading-4 text-white/35">
+                  {theme === 'light'
+                    ? 'Warm paper light theme — soft, calm and easy on the eyes.'
+                    : 'Deep cinematic dark theme — the classic MyCinema look.'}
+                </p>
+              </div>
+            </div>
+            <div className="theme-seg" data-theme={theme} role="group" aria-label="Theme">
+              <span className="theme-seg-thumb" data-side={theme} aria-hidden="true" />
+              <button
+                type="button"
+                data-kind="dark"
+                data-active={theme === 'dark'}
+                onClick={() => setTheme('dark')}
+                aria-pressed={theme === 'dark'}
+              >
+                <Moon size={14} />
+                Dark
+              </button>
+              <button
+                type="button"
+                data-kind="light"
+                data-active={theme === 'light'}
+                onClick={() => setTheme('light')}
+                aria-pressed={theme === 'light'}
+              >
+                <Sun size={14} />
+                Light
+              </button>
+            </div>
           </div>
         </section>
 

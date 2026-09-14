@@ -15,6 +15,7 @@ import WhatsNewOnboarding, { LATEST_RELEASE } from './components/WhatsNewOnboard
 import { WindowControlsGuide } from './components/FeatureGuides'
 import Download from './pages/Download'
 import appLogo from './assets/mycinema-logo.png'
+import { useTheme } from './theme/ThemeContext'
 
 const getWhatsNewStorageKey = (version: string) => `mycinema_whats_new_seen_${version}`
 const SIDEBAR_EXPANDED_STORAGE_KEY = 'mycinema_sidebar_expanded'
@@ -53,6 +54,7 @@ const sortDownloadsForTray = (items: ActiveDownload[]) => (
 )
 
 const App: React.FC = () => {
+  const { theme } = useTheme()
   const [activeTab, setActiveTab] = useState<AppTab>('home')
   const [isSidebarExpanded, setIsSidebarExpanded] = useState(() => {
     return localStorage.getItem(SIDEBAR_EXPANDED_STORAGE_KEY) !== 'false'
@@ -462,7 +464,7 @@ const App: React.FC = () => {
 
   return (
     <div
-      className="flex h-screen bg-[#05080d] text-text font-sans overflow-hidden"
+      className={`flex h-screen bg-background text-text font-sans overflow-hidden ${theme === 'light' ? 'light' : 'dark'}`}
       onClick={handleAppSurfaceClick}
     >
       <WindowControls />

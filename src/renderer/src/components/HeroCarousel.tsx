@@ -228,7 +228,7 @@ const HeroCarousel: React.FC<HeroCarouselProps> = ({ items, onPlay, onShowDetail
       })}
 
       {/* Content */}
-      <div className="absolute inset-0 flex flex-col justify-end px-8 pb-16 pt-24 md:px-16 md:pb-20 md:pt-20 space-y-3">
+      <div className="hero-overlay absolute inset-0 flex flex-col justify-end px-8 pb-16 pt-24 md:px-16 md:pb-20 md:pt-20 space-y-3">
         {visibleLogoPath ? (
           <img
             src={getHeroLogoUrl(visibleLogoPath)}
@@ -286,7 +286,7 @@ const HeroCarousel: React.FC<HeroCarouselProps> = ({ items, onPlay, onShowDetail
       </div>
 
       {/* Navigation Controls */}
-      <div className="absolute bottom-8 right-8 md:right-12 flex items-center gap-4">
+      <div className="hero-overlay absolute bottom-8 right-8 md:right-12 flex items-center gap-4">
         <button
           onClick={(e) => {
             e.stopPropagation()

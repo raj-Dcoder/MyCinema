@@ -1151,7 +1151,7 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
       ? 'Versions & Sources'
       : 'Choose Source'
   return (
-    <div className="fixed inset-0 z-50 animate-in fade-in duration-300">
+    <div className="fixed inset-0 z-50 animate-in fade-in duration-300 keep-dark dark">
       <div className="relative w-full h-full bg-[#080d16] overflow-hidden flex flex-col">
         {/* Close Button */}
         <button 

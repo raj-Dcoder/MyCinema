@@ -150,7 +150,7 @@ const VideoCard: React.FC<VideoCardProps> = ({ video, onPlay, onShowDetail, isCo
           </div>
         )}
 
-        <div className="absolute inset-0 flex flex-col justify-end bg-gradient-to-t from-black via-black/75 to-black/10 p-3 opacity-0 transition-opacity duration-300 group-hover:opacity-100 group-focus-visible:opacity-100">
+        <div className="poster-overlay absolute inset-0 flex flex-col justify-end bg-gradient-to-t from-black via-black/75 to-black/10 p-3 opacity-0 transition-opacity duration-300 group-hover:opacity-100 group-focus-visible:opacity-100">
           <div className="mb-auto flex items-start justify-between gap-2">
             {(() => {
               if ((video.version_count || 1) > 1) {

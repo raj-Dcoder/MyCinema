@@ -1,3 +1,23 @@
+# MyCinema v1.33.0
+
+Subtitles you can style mid-movie, search that starts fresh, and an end to the play-buffer-repeat loop on second audio tracks.
+
+### Subtitle Appearance In Player
+- **Style Without Leaving**: Change subtitle style (Default, Clean, OTT), size, and position from the new Appearance section inside Audio & Subtitles — every tap previews live on the video, no trip to Settings.
+- **Matching Sync Panel**: The subtitle Sync controls (offset, ±0.25s nudge, custom ms) now share the same clean pill-and-stepper look as Appearance.
+
+### Buffering Loop Fixed
+- **Second Audio Tracks Play Smoothly**: Switching to a non-native audio track (or starting a movie whose saved track routes through the audio pipeline) no longer falls into a 1-second-play / 1-second-buffer loop on streams and downloaded files alike.
+- **No More Nested Resyncs**: Programmatic seeks from track switches no longer re-trigger the external-audio sync — the player syncs once and plays.
+
+### Search That Starts Fresh
+- **Clean Search Every Time**: Opening a result from Home search clears the query, so coming back and tapping search always gives a fresh box instead of the old results.
+
+### Security & Privacy
+- **Same Safe Audio Pipeline**: External audio still extracts through the sandboxed audio protocol with path-traversal checks — only the sync triggering changed, not what files can be served.
+
+***
+
 # MyCinema v1.32.0
 
 Instant streaming — press play on any source and start watching in seconds, while downloads keep working quietly in the background.

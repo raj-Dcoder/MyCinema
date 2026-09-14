@@ -9,6 +9,7 @@ import AIEnhancementRenderer from './AIEnhancementRenderer'
 import { PlayerControls } from './player/PlayerControls'
 import { SubtitleOverlay, SUBTITLE_STYLE_KEY, SUBTITLE_FONT_SIZE_KEY, SUBTITLE_POSITION_KEY, type SubtitleStyle } from './player/SubtitleOverlay'
 import { VideoStatsOverlay } from './player/VideoStatsOverlay'
+import { SubtitleAppearanceGuide } from './FeatureGuides'
 import { useAudioBoost, AudioBoostProfile, AudioBoostIntensity, AUDIO_BOOST_PROFILES, AUDIO_BOOST_INTENSITIES } from '../hooks/useAudioBoost'
 import { useIntroSkip, IntroDbSegment, getIntroDbSegmentKey, getIntroDbSegmentLabel, getIntroDbSegmentAccentClass, INTRODB_SKIP_END_PADDING_SECONDS, INTRODB_AUTO_SKIP_CONFIRMATION_MS } from '../hooks/useIntroSkip'
 import {
@@ -514,6 +515,31 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
   const [showAllAudioInfo, setShowAllAudioInfo] = useState(false)
   const [showSubtitleSyncPanel, setShowSubtitleSyncPanel] = useState(false)
   const [subtitleSyncInput, setSubtitleSyncInput] = useState('')
+  const [showSubtitleAppearancePanel, setShowSubtitleAppearancePanel] = useState(false)
+  const [subtitleStyle, setSubtitleStyle] = useState<SubtitleStyle>(() => {
+    return (localStorage.getItem(SUBTITLE_STYLE_KEY) as SubtitleStyle) || 'default'
+  })
+  const [subtitleFontSize, setSubtitleFontSize] = useState(() => {
+    return parseInt(localStorage.getItem(SUBTITLE_FONT_SIZE_KEY) || '24', 10)
+  })
+  const [subtitlePositionOffset, setSubtitlePositionOffset] = useState(() => {
+    return parseInt(localStorage.getItem(SUBTITLE_POSITION_KEY) || '0', 10)
+  })
+
+  const updateSubtitleStyle = (style: SubtitleStyle) => {
+    setSubtitleStyle(style)
+    localStorage.setItem(SUBTITLE_STYLE_KEY, style)
+  }
+  const updateSubtitleFontSize = (size: number) => {
+    const clamped = Math.max(14, Math.min(48, size))
+    setSubtitleFontSize(clamped)
+    localStorage.setItem(SUBTITLE_FONT_SIZE_KEY, clamped.toString())
+  }
+  const updateSubtitlePositionOffset = (offset: number) => {
+    const clamped = Math.max(-40, Math.min(40, offset))
+    setSubtitlePositionOffset(clamped)
+    localStorage.setItem(SUBTITLE_POSITION_KEY, clamped.toString())
+  }
   
   // Online subtitle search state
   const [onlineSubResults, setOnlineSubResults] = useState<any[]>([])
@@ -1294,7 +1320,17 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
 
     lastSeekTimeRef.current = safeTime
     setLastSeekTime(safeTime)
+    // The assignment below fires a 'seeked' event. Without this flag the
+    // onSeeked handler would call syncSelectedExternalAudio again, which
+    // re-pauses the video, rebuilds the ffmpeg audio stream and re-seeks —
+    // the 1s play / 1s buffer loop seen on track switches and slow swarms.
+    suppressNextSeekSyncRef.current = true
     videoEl.currentTime = safeTime
+    // If Chromium coalesces this seek (same-time assignment) no 'seeked'
+    // fires — clear the stale flag so the next genuine seek still syncs.
+    setTimeout(() => {
+      if (suppressNextSeekSyncRef.current) suppressNextSeekSyncRef.current = false
+    }, 1500)
 
     if (!shouldPlay) {
       return
@@ -3064,7 +3100,15 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
 
       lastSeekTimeRef.current = safeTime
       setLastSeekTime(safeTime)
+      // Same seek-echo guard as syncSelectedExternalAudio: this programmatic
+      // seek must not re-enter the external-audio sync (see onSeeked).
+      suppressNextSeekSyncRef.current = true
       videoEl.currentTime = safeTime
+      // Same staleness guard as above — a coalesced same-time seek fires no
+      // 'seeked', so don't let the flag swallow the next genuine user seek.
+      setTimeout(() => {
+        if (suppressNextSeekSyncRef.current) suppressNextSeekSyncRef.current = false
+      }, 1500)
 
       if (wasPlaying) {
         try {
@@ -3871,6 +3915,10 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
             void syncSelectedExternalAudio(time, shouldResume)
           } else if (suppressNextSeekSyncRef.current) {
             suppressNextSeekSyncRef.current = false
+          } else if (externalAudioSeekBarrierRef.current || startupExternalAudioBarrierRef.current || audioTrackSwitchRetryRef.current || audioTrackSwitching) {
+            // A track switch or seek-sync is in flight and owns the audio
+            // element — ignore this echo so we don't start a nested sync.
+            return
           } else {
             void syncSelectedExternalAudio(time, !videoRef.current.paused)
           }
@@ -4491,6 +4539,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
                 <MessageSquareText size={20} className={showMediaMenu ? "text-primary" : ""} />
                 <span className="text-sm font-bold tracking-wide">Audio & Subtitles</span>
               </button>
+              <SubtitleAppearanceGuide />
               
               {/* The Unified Popup Menu */}
               {showMediaMenu && (
@@ -4615,31 +4664,35 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
                         /* Local Tracks View */
                         <div className="px-1.5 pb-2 space-y-2">
                           {showSubtitleSyncPanel && (
-                            <div className={`mx-1.5 mb-2 rounded-xl border transition-all ${
+                            <div className={`mx-1.5 mb-2 overflow-hidden rounded-xl border transition-all ${
                               subtitleSyncDisabled
                                 ? 'border-white/5 bg-white/[0.01] opacity-40 grayscale pointer-events-none'
-                                : 'border-white/10 bg-white/[0.02]'
+                                : 'border-white/5 bg-white/[0.02]'
                             }`}>
-                              <div className="flex flex-col items-stretch gap-1.5 px-2.5 py-2">
-                                <div className="flex items-center gap-2">
-                                  <span className={`text-[11px] font-bold tabular-nums min-w-[3.5rem] text-center ${
-                                    subtitleOffsetIsZero ? 'text-white/30' : 'text-primary'
-                                  }`}>{subtitleSyncValue}</span>
-                                  {!subtitleOffsetIsZero && (
-                                    <button
-                                      onClick={(e) => { e.stopPropagation(); resetSubtitleOffset(); }}
-                                      className="w-6 h-6 flex items-center justify-center rounded-lg text-white/30 hover:text-white hover:bg-white/10 transition-all"
-                                    ><RotateCcw size={10} /></button>
-                                  )}
+                              <div className="px-3 py-2.5 flex flex-col gap-2.5">
+                                <div className="flex items-center justify-between">
+                                  <span className="text-[10px] font-bold uppercase tracking-wider text-white/40">Offset</span>
+                                  <div className="flex items-center gap-2">
+                                    <span className={`text-[12px] font-bold tabular-nums min-w-[3.5rem] text-center ${
+                                      subtitleOffsetIsZero ? 'text-white/30' : 'text-white/80'
+                                    }`}>{subtitleSyncValue}</span>
+                                    {!subtitleOffsetIsZero && (
+                                      <button
+                                        onClick={(e) => { e.stopPropagation(); resetSubtitleOffset(); }}
+                                        className="w-6 h-6 rounded-full bg-white/[0.06] text-white/60 hover:bg-white/[0.12] hover:text-white transition-all active:scale-90 flex items-center justify-center"
+                                        title="Reset offset"
+                                      ><RotateCcw size={10} /></button>
+                                    )}
+                                  </div>
                                 </div>
-                                <div className="flex items-center gap-1.5">
+                                <div className="flex rounded-full border border-white/5 bg-black/30 p-1 gap-1">
                                   <button
                                     onClick={(e) => { e.stopPropagation(); nudgeSubtitleOffset(-250); }}
-                                    className="flex-1 h-8 rounded-lg border border-white/8 bg-white/[0.03] text-[10px] font-bold text-white/50 hover:text-white hover:border-white/20 transition-all active:scale-90"
+                                    className="flex-1 rounded-full py-1.5 text-[10px] font-black uppercase tracking-wider text-white/40 hover:text-white/80 transition-all active:scale-95"
                                   >−0.25s</button>
                                   <button
                                     onClick={(e) => { e.stopPropagation(); nudgeSubtitleOffset(250); }}
-                                    className="flex-1 h-8 rounded-lg border border-white/8 bg-white/[0.03] text-[10px] font-bold text-white/50 hover:text-white hover:border-white/20 transition-all active:scale-90"
+                                    className="flex-1 rounded-full py-1.5 text-[10px] font-black uppercase tracking-wider text-white/40 hover:text-white/80 transition-all active:scale-95"
                                   >+0.25s</button>
                                 </div>
                                 <input
@@ -4655,8 +4708,8 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
                                       }
                                     }
                                   }}
-                                  placeholder="ms (e.g. 1500)"
-                                  className="h-8 rounded-lg border border-white/8 bg-white/[0.03] px-2.5 text-[10px] font-mono text-white/60 placeholder:text-white/15 outline-none transition-all focus:border-primary/40"
+                                  placeholder="Custom ms — e.g. 1500, Enter to apply"
+                                  className="h-8 rounded-full border border-white/5 bg-black/30 px-3.5 text-[11px] font-mono text-white/70 placeholder:text-white/20 outline-none transition-all focus:border-white/20"
                                 />
                               </div>
                             </div>
@@ -4699,6 +4752,79 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
                           </div>
                         </div>
                       )}
+
+                      {/* Subtitle Appearance — live style/size/position without leaving the player */}
+                      <div className="mx-1.5 mt-2 overflow-hidden rounded-xl border border-white/5 bg-white/[0.02]">
+                        <button
+                          onClick={(e) => { e.stopPropagation(); setShowSubtitleAppearancePanel(prev => !prev); }}
+                          className="w-full flex items-center justify-between px-3 py-2 text-left"
+                          title={showSubtitleAppearancePanel ? 'Hide subtitle appearance controls' : 'Show subtitle appearance controls'}
+                        >
+                          <span className="text-[10px] font-black uppercase tracking-[0.15em] text-white/40">Appearance</span>
+                          <span className="flex items-center gap-1 text-white/35">
+                            <span className="text-[9px] font-bold uppercase tracking-wider">
+                              {subtitleStyle === 'default' ? 'Default' : subtitleStyle === 'clean' ? 'Clean' : 'OTT'}
+                            </span>
+                            {showSubtitleAppearancePanel ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
+                          </span>
+                        </button>
+                        {showSubtitleAppearancePanel && (
+                          <div
+                            className="border-t border-white/5 px-3 py-2.5 flex flex-col gap-2.5"
+                            onClick={(e) => e.stopPropagation()}
+                          >
+                            <div className="flex rounded-full border border-white/5 bg-black/30 p-1 gap-1">
+                              {([
+                                { id: 'default' as SubtitleStyle, label: 'Default' },
+                                { id: 'clean' as SubtitleStyle, label: 'Clean' },
+                                { id: 'ott' as SubtitleStyle, label: 'OTT' }
+                              ]).map((style) => (
+                                <button
+                                  key={style.id}
+                                  onClick={(e) => { e.stopPropagation(); updateSubtitleStyle(style.id); }}
+                                  className={`flex-1 rounded-full py-1.5 text-[10px] font-black uppercase tracking-wider transition-all ${
+                                    subtitleStyle === style.id
+                                      ? 'bg-white/10 text-white shadow-sm'
+                                      : 'text-white/40 hover:text-white/80'
+                                  }`}
+                                >
+                                  {style.label}
+                                </button>
+                              ))}
+                            </div>
+                            <div className="flex items-center justify-between">
+                              <span className="text-[10px] font-bold uppercase tracking-wider text-white/40">Size</span>
+                              <div className="flex items-center gap-2">
+                                <button
+                                  onClick={(e) => { e.stopPropagation(); updateSubtitleFontSize(subtitleFontSize - 2); }}
+                                  className="w-6 h-6 rounded-full bg-white/[0.06] text-white/60 hover:bg-white/[0.12] hover:text-white transition-all active:scale-90 flex items-center justify-center text-[14px] leading-none"
+                                >−</button>
+                                <span className="text-[12px] font-bold tabular-nums text-white/80 min-w-[2.75rem] text-center">{subtitleFontSize}px</span>
+                                <button
+                                  onClick={(e) => { e.stopPropagation(); updateSubtitleFontSize(subtitleFontSize + 2); }}
+                                  className="w-6 h-6 rounded-full bg-white/[0.06] text-white/60 hover:bg-white/[0.12] hover:text-white transition-all active:scale-90 flex items-center justify-center text-[14px] leading-none"
+                                >+</button>
+                              </div>
+                            </div>
+                            <div className="flex items-center justify-between">
+                              <span className="text-[10px] font-bold uppercase tracking-wider text-white/40">Position</span>
+                              <div className="flex items-center gap-2">
+                                <button
+                                  onClick={(e) => { e.stopPropagation(); updateSubtitlePositionOffset(subtitlePositionOffset - 4); }}
+                                  className="w-6 h-6 rounded-full bg-white/[0.06] text-white/60 hover:bg-white/[0.12] hover:text-white transition-all active:scale-90 flex items-center justify-center text-[14px] leading-none"
+                                >−</button>
+                                <span className="text-[12px] font-bold tabular-nums text-white/80 min-w-[2.75rem] text-center">
+                                  {subtitlePositionOffset === 0 ? 'Default' : subtitlePositionOffset > 0 ? `+${subtitlePositionOffset}` : `${subtitlePositionOffset}`}
+                                </span>
+                                <button
+                                  onClick={(e) => { e.stopPropagation(); updateSubtitlePositionOffset(subtitlePositionOffset + 4); }}
+                                  className="w-6 h-6 rounded-full bg-white/[0.06] text-white/60 hover:bg-white/[0.12] hover:text-white transition-all active:scale-90 flex items-center justify-center text-[14px] leading-none"
+                                >+</button>
+                              </div>
+                            </div>
+                          </div>
+                        )}
+                      </div>
                     </div>
                   </div>
                   
@@ -4738,9 +4864,9 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
         subtitleOffsetMs={subtitleOffsetMs}
         subtitleBottom={showControls ? '136px' : '48px'}
         subtitleLoading={subtitleLoading}
-        subtitleStyle={(localStorage.getItem(SUBTITLE_STYLE_KEY) as SubtitleStyle) || 'default'}
-        subtitleFontSize={parseInt(localStorage.getItem(SUBTITLE_FONT_SIZE_KEY) || '24', 10)}
-        subtitlePositionOffset={parseInt(localStorage.getItem(SUBTITLE_POSITION_KEY) || '0', 10)}
+        subtitleStyle={subtitleStyle}
+        subtitleFontSize={subtitleFontSize}
+        subtitlePositionOffset={subtitlePositionOffset}
       />
 
       {showStats && <VideoStatsOverlay videoRef={videoRef} />}

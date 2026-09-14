@@ -924,6 +924,12 @@ const Home: React.FC<HomeProps> = ({ onPlay, onShowDetail, onNavigate, refreshKe
   const openSearchResult = (video: SearchResultVideo) => {
     warmSearchResult(video)
     setIsSearchOpen(false)
+    // Reset search so returning from the detail screen starts fresh
+    // instead of showing the previous query's results.
+    setSearchQuery('')
+    setSearchResults([])
+    setIsSearching(false)
+    setSearchError(null)
     onShowDetail(video)
   }
 

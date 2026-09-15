@@ -1,3 +1,29 @@
+# MyCinema v1.34.0
+
+Collections arrive: hand-built lists with file-only sharing, and a watchlist that is finally just one inbox.
+
+### Collections
+- **Hand-Built Lists**: New Collections tab — create a list, pin titles from your library, and add any movie or show online via TMDB search. Hold a card to pick it up and drag it anywhere to reorder.
+- **Online Titles Stay Complete**: Titles you don't own arrive as online entries that stay playable via source search, with ratings, posters, and one-tap remove.
+- **Old Lists Preserved**: Existing custom watchlist categories migrate into Collections automatically, and leftover smart collections convert to manual ones — nothing you saved is lost.
+
+### File-Only Sharing
+- **Save, Then Send**: Sharing is a guided 2-step flow — save the collection as a `.json` file (Downloads preselected), then send it from step 2. No links, ever.
+- **WhatsApp Opens Directly**: With WhatsApp installed, the chat picker opens straight in the app with your message pre-written — no browser detour. Otherwise it falls back to WhatsApp Web.
+- **Telegram Via Web**: Telegram opens Telegram Web with one tap from the dialog, plus a copy-message button for pasting into any chat.
+- **Receiver Imports In One Tap**: Shared files open through IMPORT in Collections — library matches pin automatically, unknown titles arrive as online entries.
+
+### Simpler Watchlist
+- **One Inbox Everywhere**: Removed the category picker from Home search, title pages, the Watchlist page, and Downloads — saving is now one tap into a single Watchlist.
+- **Dialogs Stay Visible**: File dialogs are now parented to the app window, so save/open popups can no longer hide behind MyCinema on Windows.
+
+### Security & Privacy
+- **Validated Imports**: Shared collection files are validated (app, type, and name) before anything touches your library — invalid files are rejected with an error, never half-imported.
+- **No Surprise Downloads**: Importing never downloads files; unmatched titles become online-only entries you explicitly choose to play.
+- **Constrained App Opening**: The renderer can only open `https` links externally; launching the WhatsApp app goes through a dedicated main-process channel that first verifies the OS protocol registration.
+
+***
+
 # MyCinema v1.33.1
 
 Correct audio language on every track switch, plus a cleaner update badge in the collapsed sidebar.

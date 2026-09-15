@@ -2,6 +2,7 @@ import { app, shell, BrowserWindow, ipcMain, dialog, protocol, net, session } fr
 import { join } from 'path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import * as db from './db'
+import * as collections from './collections'
 import { scanFolder, getEmbeddedSubtitles, getEmbeddedAudio } from './scanner'
 import * as tmdb from './tmdb'
 import fs from 'fs'
@@ -15,6 +16,7 @@ import { pathToFileURL } from 'url'
 import https from 'https'
 import dns from 'dns'
 import { AsyncLocalStorage } from 'async_hooks'
+import { execFileSync } from 'child_process'
 
 function isExpectedCloseAbort(error: unknown): boolean {
   const message = error instanceof Error
@@ -1418,12 +1420,45 @@ function dispatchSharedMediaTarget(target: SharedMediaTarget, mainWindow: Browse
   }
 }
 
+let pendingSharedCollectionTarget: any | null = null
+
+function parseSharedCollectionUrl(rawUrl: string): any | null {
+  try {
+    const parsed = new URL(rawUrl)
+    if (parsed.protocol !== `${APP_PROTOCOL}:`) return null
+    if (parsed.hostname.toLowerCase() !== 'collection') return null
+    const encoded = parsed.searchParams.get('data')
+    if (!encoded) return null
+    const normalized = encoded.replace(/-/g, '+').replace(/_/g, '/')
+    const padded = normalized.padEnd(Math.ceil(normalized.length / 4) * 4, '=')
+    const payload = JSON.parse(Buffer.from(padded, 'base64').toString('utf8'))
+    if (!payload || payload.app !== 'MyCinema' || payload.kind !== 'collection') return null
+    if (!payload.collection || typeof payload.collection.name !== 'string') return null
+    if (!Array.isArray(payload.snapshot)) return null
+    return payload
+  } catch {
+    return null
+  }
+}
+
+function dispatchSharedCollectionTarget(payload: any, mainWindow: BrowserWindow | null) {
+  pendingSharedCollectionTarget = payload
+  if (mainWindow && mainWindow.webContents && !mainWindow.webContents.isLoading()) {
+    mainWindow.webContents.send('open-shared-collection', payload)
+  }
+}
+
 function handleCommandLine(argv: string[], mainWindow: BrowserWindow | null) {
   const sharedUrl = argv.find(arg => arg.startsWith(`${APP_PROTOCOL}://`))
   if (sharedUrl) {
     const target = parseSharedMediaUrl(sharedUrl)
     if (target) {
       dispatchSharedMediaTarget(target, mainWindow)
+      return
+    }
+    const collectionPayload = parseSharedCollectionUrl(sharedUrl)
+    if (collectionPayload) {
+      dispatchSharedCollectionTarget(collectionPayload, mainWindow)
       return
     }
   }
@@ -1446,10 +1481,15 @@ function handleCommandLine(argv: string[], mainWindow: BrowserWindow | null) {
 
 app.on('open-url', (event, url) => {
   event.preventDefault()
-  const target = parseSharedMediaUrl(url)
-  if (!target) return
   const mainWindow = BrowserWindow.getAllWindows()[0] || null
-  dispatchSharedMediaTarget(target, mainWindow)
+  const target = parseSharedMediaUrl(url)
+  if (target) {
+    dispatchSharedMediaTarget(target, mainWindow)
+  } else {
+    const collectionPayload = parseSharedCollectionUrl(url)
+    if (!collectionPayload) return
+    dispatchSharedCollectionTarget(collectionPayload, mainWindow)
+  }
   if (mainWindow) {
     if (mainWindow.isMinimized()) mainWindow.restore()
     mainWindow.focus()
@@ -1569,6 +1609,21 @@ function parseBackupFile(filePath: string): any {
 
 
 
+// File dialogs MUST be parented to the app window. An ownerless dialog on
+// Windows opens behind the app, forcing users to hunt it via the taskbar.
+const getDialogParentWindow = (): BrowserWindow | undefined =>
+  BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0]
+
+const showAppOpenDialog = (options: any) => {
+  const parent = getDialogParentWindow()
+  return parent ? dialog.showOpenDialog(parent, options) : dialog.showOpenDialog(options)
+}
+
+const showAppSaveDialog = (options: any) => {
+  const parent = getDialogParentWindow()
+  return parent ? dialog.showSaveDialog(parent, options) : dialog.showSaveDialog(options)
+}
+
 app.whenReady().then(() => {
   // Purge any stale temporary stream folders left over from previous ungraceful exits
   purgeStaleTempStreamFolder()
@@ -1579,6 +1634,17 @@ app.whenReady().then(() => {
   registerAudioProtocol()
   setupYoutubeEmbedHeaders()
   db.initDb()
+  collections.initCollections()
+  try {
+    const { migrated } = collections.migrateWatchlistCategoriesToCollections()
+    if (migrated.length > 0) console.log(`[Collections] Migrated watchlist lists to collections: ${migrated.join(', ')}`)
+    const retired = collections.retireSmartCollections()
+    if (retired.converted.length > 0 || retired.deleted.length > 0) {
+      console.log(`[Collections] Retired smart collections — kept: ${retired.converted.join(', ') || 'none'}, removed empty: ${retired.deleted.join(', ') || 'none'}`)
+    }
+  } catch (err) {
+    console.error('[Collections] Watchlist migration failed:', err)
+  }
   electronApp.setAppUserModelId('com.electron')
 
   if (process.defaultApp && process.argv.length >= 2) {
@@ -1770,7 +1836,7 @@ ipcMain.handle('set-launch-fullscreen', (event, launchFullscreen: boolean) => {
 })
 
 ipcMain.handle('select-folder', async () => {
-  const result = await dialog.showOpenDialog({
+  const result = await showAppOpenDialog({
     properties: ['openDirectory']
   })
   if (result.canceled) return null
@@ -1815,7 +1881,7 @@ ipcMain.handle('get-folders', () => {
 
 ipcMain.handle('export-user-backup', async () => {
   try {
-    const result = await dialog.showSaveDialog({
+    const result = await showAppSaveDialog({
       title: 'Export MyCinema Backup',
       defaultPath: getBackupDefaultPath(),
       filters: [
@@ -1856,7 +1922,7 @@ ipcMain.handle('export-user-backup', async () => {
 
 ipcMain.handle('import-user-backup', async (): Promise<BackupImportSummary | { imported: false; canceled?: boolean; error?: string }> => {
   try {
-    const result = await dialog.showOpenDialog({
+    const result = await showAppOpenDialog({
       title: 'Import MyCinema Backup',
       properties: ['openFile'],
       filters: [
@@ -1922,6 +1988,15 @@ ipcMain.handle('import-user-backup', async (): Promise<BackupImportSummary | { i
       if (!item || !['movie', 'series', 'video'].includes(item.type)) continue
       const restoreResult = db.restoreFavoriteItem(item)
       summary.favoritesRestored += restoreResult.changes > 0 ? 1 : 0
+    }
+
+    // Legacy backups may carry watchlist categories — absorb them into
+    // collections the same way the startup migration does.
+    try {
+      const { migrated } = collections.migrateWatchlistCategoriesToCollections()
+      if (migrated.length > 0) console.log(`[Collections] Absorbed restored watchlist lists: ${migrated.join(', ')}`)
+    } catch (err) {
+      console.error('[Collections] Post-restore migration failed:', err)
     }
 
     BrowserWindow.getAllWindows().forEach(w => w.webContents.send('library-updated'))
@@ -2314,6 +2389,7 @@ ipcMain.handle('open-folder', (_event, filePath: string) => {
     return false
   }
   if (!fs.existsSync(filePath)) {
+    console.warn(`[IPC] open-folder missing file: ${filePath}`)
     return false
   }
   shell.showItemInFolder(filePath)
@@ -3051,6 +3127,41 @@ ipcMain.handle('get-pending-shared-media-target', () => {
   return target
 })
 
+ipcMain.handle('get-pending-shared-collection-target', () => {
+  const target = pendingSharedCollectionTarget
+  pendingSharedCollectionTarget = null
+  return target
+})
+
+ipcMain.handle('get-collection-share-data', (_, collectionId: number) => {
+  return collections.buildShareData(Number(collectionId))
+})
+
+ipcMain.handle('get-collection-share-file', (_, collectionId: number) => {
+  try {
+    const payload = collections.buildSharePayload(Number(collectionId))
+    const safeName = String(payload.collection.name || 'collection')
+      .toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'collection'
+    return {
+      filename: `mycinema-collection-${safeName}.json`,
+      json: JSON.stringify(payload, null, 2),
+      items: payload.snapshot.length,
+    }
+  } catch (err: any) {
+    return { error: err?.message || String(err) }
+  }
+})
+
+ipcMain.handle('import-shared-collection', (_, payload: any) => {
+  try {
+    const result = collections.importSharePayload(payload)
+    broadcastLibraryUpdated()
+    return { imported: true, ...result }
+  } catch (err: any) {
+    return { imported: false, error: err?.message || String(err) }
+  }
+})
+
 ipcMain.handle('get-shared-media-by-tmdb-id', async (_, type: 'movie' | 'series', tmdbId: number) => {
   try {
     return await fetchSharedMediaByTmdbId(type, tmdbId)
@@ -3086,6 +3197,141 @@ ipcMain.handle('get-watchlist', () => {
 
 ipcMain.handle('get-favorites', () => {
   return db.getFavorites()
+})
+
+// ─── Collections Auto-Curator ───────────────────────────────────────────────
+const broadcastLibraryUpdated = () => {
+  BrowserWindow.getAllWindows().forEach(w => w.webContents.send('library-updated'))
+}
+
+ipcMain.handle('get-collections', () => {
+  return collections.getCollections()
+})
+
+ipcMain.handle('get-collection-members', (_, collectionId: number) => {
+  return collections.getCollectionMembers(Number(collectionId))
+})
+
+ipcMain.handle('create-collection', (_, input: any) => {
+  const created = collections.createCollection(input || {})
+  broadcastLibraryUpdated()
+  return created
+})
+
+ipcMain.handle('update-collection', (_, collectionId: number, patch: any) => {
+  const updated = collections.updateCollection(Number(collectionId), patch || {})
+  broadcastLibraryUpdated()
+  return updated
+})
+
+ipcMain.handle('delete-collection', (_, collectionId: number) => {
+  const deleted = collections.deleteCollection(Number(collectionId))
+  broadcastLibraryUpdated()
+  return deleted
+})
+
+ipcMain.handle('reorder-collections', (_, ids: number[]) => {
+  const reordered = collections.reorderCollections(ids || [])
+  broadcastLibraryUpdated()
+  return reordered
+})
+
+ipcMain.handle('pin-collection-video', (_, collectionId: number, videoId: number) => {
+  const pinned = collections.pinVideoToCollection(Number(collectionId), Number(videoId))
+  broadcastLibraryUpdated()
+  return pinned
+})
+
+ipcMain.handle('unpin-collection-video', (_, collectionId: number, videoId: number) => {
+  const unpinned = collections.unpinVideoFromCollection(Number(collectionId), Number(videoId))
+  broadcastLibraryUpdated()
+  return unpinned
+})
+
+ipcMain.handle('add-collection-external', (_, collectionId: number, item: any) => {
+  const added = collections.addExternalToCollection(Number(collectionId), item || {})
+  broadcastLibraryUpdated()
+  return added
+})
+
+ipcMain.handle('remove-collection-external', (_, externalId: number) => {
+  const removed = collections.removeExternalFromCollection(Number(externalId))
+  broadcastLibraryUpdated()
+  return removed
+})
+
+ipcMain.handle('export-collection', async (_, collectionId: number) => {
+  try {
+    const payload = collections.buildSharePayload(Number(collectionId))
+    const safeName = String(payload.collection.name || 'collection')
+      .toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'collection'
+    const result = await showAppSaveDialog({
+      title: 'Save Collection File',
+      defaultPath: path.join(app.getPath('downloads'), `mycinema-collection-${safeName}.json`),
+      filters: [{ name: 'MyCinema Collection', extensions: ['json'] }]
+    })
+    if (result.canceled || !result.filePath) return { exported: false, canceled: true }
+    fs.writeFileSync(result.filePath, JSON.stringify(payload, null, 2))
+    // The user explicitly chose this location in the save dialog, so it is
+    // trusted for reveal-in-folder afterwards (same principle as opening a
+    // file from the shell).
+    try {
+      allowedExternalDirs.add(path.normalize(path.dirname(result.filePath)))
+    } catch { /* reveal is best-effort */ }
+    return { exported: true, filePath: result.filePath, items: payload.snapshot.length }
+  } catch (err: any) {
+    return { exported: false, error: err?.message || String(err) }
+  }
+})
+
+// Open WhatsApp directly for sharing (no browser in the middle when the
+// native app is installed). WhatsApp registers the whatsapp:// scheme, so it
+// can be launched straight into the chat picker with pre-filled text,
+// falling back to WhatsApp Web otherwise.
+// (Telegram has no text-only share route — its share page requires a URL and
+// we never share links — so Telegram always opens in the browser and the
+// user hands off to the app from there.)
+function isWindowsProtocolRegistered(scheme: string): boolean {
+  if (process.platform !== 'win32') return false
+  try {
+    execFileSync('reg', ['query', `HKCR\\${scheme}`], { stdio: ['ignore', 'pipe', 'ignore'] })
+    return true
+  } catch {
+    return false
+  }
+}
+
+ipcMain.handle('open-chat-share', async (_, target: 'whatsapp', text: string) => {
+  const encoded = encodeURIComponent(String(text || ''))
+  const candidates: string[] = isWindowsProtocolRegistered('whatsapp')
+    ? [`whatsapp://send?text=${encoded}`, `https://wa.me/?text=${encoded}`]
+    : [`https://wa.me/?text=${encoded}`]
+  for (const url of candidates) {
+    try {
+      await shell.openExternal(url)
+      return { opened: true, via: url.startsWith('https://') ? 'browser' : 'app' }
+    } catch (err: any) {
+      console.warn(`[Share] openExternal failed for ${url.slice(0, 40)}:`, err?.message || String(err))
+    }
+  }
+  return { opened: false, error: 'Could not open the chat app' }
+})
+
+ipcMain.handle('import-collection', async () => {
+  try {
+    const result = await showAppOpenDialog({
+      title: 'Import Shared Collection',
+      filters: [{ name: 'MyCinema Collection', extensions: ['json'] }],
+      properties: ['openFile']
+    })
+    if (result.canceled || result.filePaths.length === 0) return { imported: false, canceled: true }
+    const raw = fs.readFileSync(result.filePaths[0], 'utf-8')
+    const imported = collections.importSharePayload(JSON.parse(raw))
+    broadcastLibraryUpdated()
+    return { imported: true, filePath: result.filePaths[0], ...imported }
+  } catch (err: any) {
+    return { imported: false, error: err?.message || String(err) }
+  }
 })
 
 ipcMain.handle('find-video-by-tmdb-id', (_, tmdbId: number) => {

@@ -85,6 +85,12 @@ interface Api {
     error?: string
   }>
   getPendingSharedMediaTarget: () => Promise<{ type: 'movie' | 'series'; tmdbId: number; source?: any } | null>
+  getPendingSharedCollectionTarget: () => Promise<any | null>
+  getCollectionShareData: (collectionId: number) => Promise<{ encoded: string; items: number }>
+  getCollectionShareFile: (collectionId: number) => Promise<{ filename?: string; json?: string; items?: number; error?: string }>
+  openChatShare: (target: 'whatsapp', text: string) => Promise<{ opened: boolean; via?: string; error?: string }>
+  importSharedCollection: (payload: any) => Promise<{ imported: boolean; id?: number; matched?: number; addedOnline?: number; total?: number; error?: string }>
+  onOpenSharedCollection: (callback: (payload: any) => void) => () => void
   getSharedMediaByTmdbId: (type: 'movie' | 'series', tmdbId: number) => Promise<any | null>
   onOpenSharedMedia: (callback: (target: { type: 'movie' | 'series'; tmdbId: number; source?: any }) => void) => () => void
   toggleFavorite: (id: number) => Promise<number | null>
@@ -94,6 +100,18 @@ interface Api {
   removeFromWatchlistExternal: (tmdbId: number) => Promise<any>
   getWatchlist: () => Promise<any[]>
   getFavorites: () => Promise<any[]>
+  getCollections: () => Promise<any[]>
+  getCollectionMembers: (collectionId: number) => Promise<any[]>
+  createCollection: (input: any) => Promise<any>
+  updateCollection: (collectionId: number, patch: any) => Promise<any>
+  deleteCollection: (collectionId: number) => Promise<boolean>
+  reorderCollections: (ids: number[]) => Promise<boolean>
+  pinCollectionVideo: (collectionId: number, videoId: number) => Promise<boolean>
+  unpinCollectionVideo: (collectionId: number, videoId: number) => Promise<boolean>
+  addCollectionExternal: (collectionId: number, item: any) => Promise<any>
+  removeCollectionExternal: (externalId: number) => Promise<boolean>
+  exportCollection: (collectionId: number) => Promise<{ exported: boolean; canceled?: boolean; filePath?: string; items?: number; error?: string }>
+  importCollection: () => Promise<{ imported: boolean; canceled?: boolean; filePath?: string; id?: number; matched?: number; addedOnline?: number; total?: number; error?: string }>
   onUpdateAvailable: (callback: (info: { version: string }) => void) => void
   onUpdateProgress: (callback: (info: { percent: number }) => void) => void
   onUpdateDownloaded: (callback: () => void) => void
@@ -117,7 +135,7 @@ interface Api {
   onDownloadsChanged: (callback: () => void) => () => void
   onTorrentProgress: (callback: (data: any) => void) => () => void
   // File utilities
-  openFolder: (filePath: string) => Promise<void>
+  openFolder: (filePath: string) => Promise<boolean>
   getMediaInfo: (filePath: string) => Promise<any>
   getSeekPreviewThumbnail: (filePath: string, time: number) => Promise<string | null>
   openDownloadsFolder: () => Promise<void>

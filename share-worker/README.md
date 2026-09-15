@@ -5,6 +5,7 @@ This Cloudflare Worker powers public links like:
 ```text
 https://your-share-domain.com/movie/1226863
 https://your-share-domain.com/series/1399
+https://your-share-domain.com/collection?data={base64urlCollection}
 ```
 
 The worker renders a small share page with Open Graph metadata so WhatsApp,
@@ -14,7 +15,29 @@ primary button opens the installed desktop app with:
 ```text
 mycinema://movie/1226863
 mycinema://series/1399
+mycinema://collection?data={base64urlCollection}
 ```
+
+## Collections
+
+`GET /collection?data=...` renders a shared-collection landing page (name,
+title count, poster fan, title list) with `og:` tags for chat unfurls. The
+`data` param is base64url JSON shaped like:
+
+```json
+{
+  "app": "MyCinema",
+  "kind": "collection",
+  "version": 1,
+  "collection": { "name": "...", "description": "..." },
+  "snapshot": [
+    { "tmdb_id": 157336, "title": "Interstellar", "type": "movie", "poster_path": "https://...", "vote_average": 8.4, "release_year": 2014 }
+  ]
+}
+```
+
+The desktop app builds this payload itself (`Collections → SHARE`), so the
+worker needs no TMDB key for collections — it only validates and renders.
 
 ## Deploy
 

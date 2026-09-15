@@ -1,5 +1,5 @@
 import React from 'react'
-import { Layers3, Play, Star } from 'lucide-react'
+import { Layers3, Play, Star, X } from 'lucide-react'
 import { Video } from '../types'
 import { groupSeriesCards } from '../utils/seriesCards'
 
@@ -8,6 +8,12 @@ interface VideoCardProps {
   onPlay: (video: Video) => void
   onShowDetail?: (video: Video) => void
   isContinueWatching?: boolean
+  // Compact top bar for collection cards: hides the Trending/Released status
+  // badge and left-aligns the rating so a remove (×) button can sit top-right.
+  compactTopBar?: boolean
+  // When provided (with compactTopBar), renders a remove button in line with
+  // the rating — it fades and travels with the card hover as one unit.
+  onRemove?: () => void
 }
 
 const getHighQualityTmdbImageUrl = (url: string) => {
@@ -16,7 +22,7 @@ const getHighQualityTmdbImageUrl = (url: string) => {
     : url
 }
 
-const VideoCard: React.FC<VideoCardProps> = ({ video, onPlay, onShowDetail, isContinueWatching }) => {
+const VideoCard: React.FC<VideoCardProps> = ({ video, onPlay, onShowDetail, isContinueWatching, compactTopBar, onRemove }) => {
   const posterUrl = video.poster_path 
     ? (video.poster_path.startsWith('http') 
         ? getHighQualityTmdbImageUrl(video.poster_path)
@@ -152,6 +158,29 @@ const VideoCard: React.FC<VideoCardProps> = ({ video, onPlay, onShowDetail, isCo
 
         <div className="absolute inset-0 flex flex-col justify-end bg-gradient-to-t from-black via-black/75 to-black/10 p-3 opacity-0 transition-opacity duration-300 group-hover:opacity-100 group-focus-visible:opacity-100">
           <div className="mb-auto flex items-start justify-between gap-2">
+            {compactTopBar && video.isExternal ? (
+              <>
+                {video.vote_average && video.vote_average > 0 ? (
+                  <span className="inline-flex items-center gap-1 rounded-md border border-white/10 bg-black/55 px-2 py-1 text-[10px] font-black text-white backdrop-blur-md">
+                    <Star size={11} fill="#facc15" className="text-yellow-400" />
+                    {video.vote_average.toFixed(1)}
+                  </span>
+                ) : <span />}
+                {onRemove ? (
+                  <button
+                    onClick={(event) => {
+                      event.stopPropagation()
+                      onRemove()
+                    }}
+                    title="Remove from collection"
+                    className="flex h-7 w-7 items-center justify-center rounded-full bg-black/60 text-white/60 backdrop-blur transition-colors hover:bg-red-500/80 hover:text-white"
+                  >
+                    <X size={13} />
+                  </button>
+                ) : null}
+              </>
+            ) : (
+              <>
             {(() => {
               if ((video.version_count || 1) > 1) {
                 return (
@@ -161,7 +190,7 @@ const VideoCard: React.FC<VideoCardProps> = ({ video, onPlay, onShowDetail, isCo
                   </span>
                 )
               }
-              if (video.isExternal && !video.is_watchlist) {
+              if (!compactTopBar && video.isExternal && !video.is_watchlist) {
                 if (!video.release_date) {
                   return (
                     <span className="rounded-md border border-red-500/30 bg-red-600/25 px-2 py-1 text-[8px] font-black uppercase tracking-widest text-white backdrop-blur-md">
@@ -189,11 +218,13 @@ const VideoCard: React.FC<VideoCardProps> = ({ video, onPlay, onShowDetail, isCo
               }
               return <span />
             })()}
-            {video.vote_average && video.vote_average > 0 && (
+            {!compactTopBar && video.vote_average && video.vote_average > 0 && (
               <span className="inline-flex items-center gap-1 rounded-md border border-white/10 bg-black/55 px-2 py-1 text-[10px] font-black text-white backdrop-blur-md">
                 <Star size={11} fill="#facc15" className="text-yellow-400" />
                 {video.vote_average.toFixed(1)}
               </span>
+            )}
+              </>
             )}
           </div>
 

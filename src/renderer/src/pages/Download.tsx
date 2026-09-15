@@ -190,21 +190,9 @@ const Download: React.FC<DownloadProps> = ({ onShowDetail }) => {
   // ─── Unified Watchlist State ─────────────────────────────────────────────
   const [watchlist, setWatchlist] = useState<Video[]>([])
 
-  const [categorizingItem, setCategorizingItem] = useState<TMDBResult | null>(null)
-  const [newCategoryName, setNewCategoryName] = useState('')
-  const [isCreatingCategory, setIsCreatingCategory] = useState(false)
-
   const fetchWatchlist = () => {
     window.api.getWatchlist().then(setWatchlist).catch(console.error)
   }
-
-  const categories = React.useMemo(() => {
-    return Array.from(new Set(watchlist.map(w => w.category || 'Watchlist'))).sort((a, b) => {
-      if (a === 'Watchlist') return -1
-      if (b === 'Watchlist') return 1
-      return a.localeCompare(b)
-    })
-  }, [watchlist])
 
   const toExternalVideo = (item: TMDBResult, category: string = 'Watchlist'): Video => {
     const title = item.title || item.name || 'Untitled'
@@ -272,16 +260,13 @@ const Download: React.FC<DownloadProps> = ({ onShowDetail }) => {
       return
     }
 
-    setCategorizingItem(item)
-    setIsCreatingCategory(false)
-    setNewCategoryName('')
+    addToWatchlist(item)
   }
 
-  const addToWatchlist = async (item: TMDBResult, category: string = 'Watchlist') => {
+  const addToWatchlist = async (item: TMDBResult) => {
     try {
-      await window.api.addToWatchlistExternal(toExternalVideo(item, category))
+      await window.api.addToWatchlistExternal(toExternalVideo(item, 'Watchlist'))
       await fetchWatchlist()
-      setCategorizingItem(null)
     } catch (err) {
       console.error('[Download] Watchlist add error:', err)
     }
@@ -308,7 +293,7 @@ const Download: React.FC<DownloadProps> = ({ onShowDetail }) => {
       const legacyItems = stored ? JSON.parse(stored) : []
       if (Array.isArray(legacyItems) && legacyItems.length > 0) {
         Promise.all(
-          legacyItems.map((item: TMDBResult) => window.api.addToWatchlistExternal(toExternalVideo(item, item.category || 'Watchlist')))
+          legacyItems.map((item: TMDBResult) => window.api.addToWatchlistExternal(toExternalVideo(item, 'Watchlist')))
         )
           .then(() => {
             localStorage.removeItem(WATCHLIST_KEY)
@@ -1365,99 +1350,6 @@ const Download: React.FC<DownloadProps> = ({ onShowDetail }) => {
         )}
       </div>
 
-      {/* ─── Category Selector Modal ───────────────────────────────────────── */}
-      {categorizingItem && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-200">
-          <div className="w-full max-w-sm bg-surface border border-secondary rounded-2xl shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200">
-            <div className="px-6 py-5 border-b border-secondary flex items-center justify-between">
-              <div>
-                <h3 className="text-base font-bold text-text">Save to...</h3>
-                <p className="text-[11px] text-muted mt-0.5 truncate max-w-[200px]">
-                  {categorizingItem.title || categorizingItem.name}
-                </p>
-              </div>
-              <button
-                onClick={() => setCategorizingItem(null)}
-                className="p-2 rounded-xl hover:bg-white/5 text-muted hover:text-text transition-colors"
-              >
-                <X size={18} />
-              </button>
-            </div>
-
-            <div className="p-4 space-y-1.5 max-h-[300px] overflow-y-auto">
-              {/* Default Option */}
-              <button
-                onClick={() => addToWatchlist(categorizingItem, 'Watchlist')}
-                className="w-full flex items-center gap-3 p-3 rounded-xl transition-all group hover:bg-amber-500/10 text-muted hover:text-amber-400"
-              >
-                <div className="w-8 h-8 rounded-lg bg-secondary/50 flex items-center justify-center transition-colors group-hover:bg-amber-500/20">
-                  <Bookmark size={14} />
-                </div>
-                <span className="text-sm font-medium">Watchlist</span>
-                <span className="ml-auto text-[10px] opacity-0 group-hover:opacity-100 uppercase tracking-widest font-bold">Default</span>
-              </button>
-
-              {/* Existing Categories */}
-              {categories.filter(cat => cat !== 'Watchlist').map(category => (
-                <button
-                  key={category}
-                  onClick={() => addToWatchlist(categorizingItem, category)}
-                  className="w-full flex items-center gap-3 p-3 rounded-xl transition-all group hover:bg-primary/10 text-muted hover:text-primary"
-                >
-                  <div className="w-8 h-8 rounded-lg bg-secondary/50 flex items-center justify-center transition-colors group-hover:bg-primary/20">
-                    <Bookmark size={14} />
-                  </div>
-                  <span className="text-sm font-medium">{category}</span>
-                </button>
-              ))}
-            </div>
-
-            <div className="p-4 bg-secondary/20 border-t border-secondary">
-              {!isCreatingCategory ? (
-                <button
-                  onClick={() => setIsCreatingCategory(true)}
-                  className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl border border-dashed border-muted/30 text-muted hover:text-text hover:border-primary/50 transition-all text-sm font-medium"
-                >
-                  <Bookmark size={14} className="opacity-50" />
-                  Create New Category
-                </button>
-              ) : (
-                <div className="space-y-3 animate-in slide-in-from-bottom-2 duration-200">
-                  <input
-                    autoFocus
-                    type="text"
-                    value={newCategoryName}
-                    onChange={(e) => setNewCategoryName(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter' && newCategoryName.trim()) {
-                        addToWatchlist(categorizingItem, newCategoryName.trim())
-                      }
-                      if (e.key === 'Escape') setIsCreatingCategory(false)
-                    }}
-                    placeholder="Category name (e.g. Business Movies)"
-                    className="w-full px-4 py-2.5 bg-surface border border-primary/30 rounded-xl text-sm outline-none focus:ring-2 focus:ring-primary/20 placeholder:text-muted/40"
-                  />
-                  <div className="flex gap-2">
-                    <button
-                      onClick={() => setIsCreatingCategory(false)}
-                      className="flex-1 py-2 text-xs font-medium text-muted hover:text-text transition-colors"
-                    >
-                      Cancel
-                    </button>
-                    <button
-                      disabled={!newCategoryName.trim()}
-                      onClick={() => addToWatchlist(categorizingItem, newCategoryName.trim())}
-                      className="flex-[2] py-2 bg-primary text-black font-bold text-xs rounded-lg disabled:opacity-50 transition-all"
-                    >
-                      Create & Save
-                    </button>
-                  </div>
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   )
 }

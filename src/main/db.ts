@@ -45,6 +45,11 @@ function ensureTypeAllowsVideo(tableName: 'videos' | 'watchlist') {
   }
 }
 
+// Raw handle for feature modules (e.g. collections) that own their own tables.
+export function getRawDb() {
+  return db
+}
+
 // Initialize database
 export function initDb() {
   db.pragma('journal_mode = WAL') // Write-Ahead Logging for better concurrency
@@ -441,13 +446,16 @@ export function toggleWatchlist(id: number) {
   return newValue
 }
 
-export function addLocalVideoToWatchlist(id: number, category: string = 'Watchlist') {
+// The watchlist is exactly one inbox. The category parameter is kept for
+// backwards compatibility but always normalizes to 'Watchlist' — curated
+// lists live in Collections now.
+export function addLocalVideoToWatchlist(id: number, _category: string = 'Watchlist') {
   return db.prepare(`
     UPDATE videos
     SET is_watchlist = 1,
-        watchlist_category = ?
+        watchlist_category = 'Watchlist'
     WHERE id = ?
-  `).run(category || 'Watchlist', id)
+  `).run(id)
 }
 
 export function addToWatchlistExternal(item: any) {
@@ -473,7 +481,7 @@ export function addToWatchlistExternal(item: any) {
     item.overview,
     item.vote_average,
     item.release_year,
-    item.category || 'Watchlist'
+    'Watchlist'
   )
 }
 

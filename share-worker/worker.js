@@ -321,8 +321,251 @@ function renderSharePage(request, target, media) {
 </html>`
 }
 
+function decodeCollectionData(encoded) {
+  if (!encoded) return null
+  try {
+    const normalized = encoded.replace(/-/g, '+').replace(/_/g, '/')
+    const padded = normalized.padEnd(Math.ceil(normalized.length / 4) * 4, '=')
+    const json = decodeURIComponent(escape(atob(padded)))
+    const payload = JSON.parse(json)
+    if (!payload || payload.app !== 'MyCinema' || payload.kind !== 'collection') return null
+    if (!payload.collection || typeof payload.collection.name !== 'string') return null
+    const snapshot = (Array.isArray(payload.snapshot) ? payload.snapshot : []).slice(0, 200).map((item) => {
+      const tmdbId = Number(item?.tmdb_id)
+      const year = Number(item?.release_year)
+      const rating = Number(item?.vote_average)
+      const poster = typeof item?.poster_path === 'string' && item.poster_path.startsWith('https://')
+        ? item.poster_path
+        : ''
+      return {
+        tmdb_id: Number.isFinite(tmdbId) ? tmdbId : null,
+        title: String(item?.title || 'Untitled').slice(0, 200),
+        type: item?.type === 'series' || item?.type === 'tv' ? 'series' : 'movie',
+        poster_path: poster,
+        vote_average: Number.isFinite(rating) ? rating : null,
+        release_year: Number.isFinite(year) ? year : null
+      }
+    })
+    return {
+      name: String(payload.collection.name).slice(0, 200),
+      description: typeof payload.collection.description === 'string'
+        ? String(payload.collection.description).slice(0, 500)
+        : '',
+      snapshot
+    }
+  } catch {
+    return null
+  }
+}
+
+function renderCollectionPage(request, collection, encodedData) {
+  const titles = collection.snapshot.map((item) => item.title).filter(Boolean)
+  const posters = collection.snapshot.map((item) => item.poster_path).filter(Boolean).slice(0, 4)
+  const heroPoster = posters[0] || ''
+  const count = collection.snapshot.length
+  const pageTitle = `${collection.name} - Shared collection on MyCinema`
+  const blurb = collection.description ||
+    (titles.length > 0 ? `Including ${titles.slice(0, 6).join(', ')}${titles.length > 6 ? ' and more' : ''}.` : 'Open this collection in MyCinema.')
+  const appUrl = `mycinema://collection?data=${encodeURIComponent(encodedData)}`
+  const canonicalUrl = new URL(request.url)
+  canonicalUrl.search = ''
+
+  const safeName = escapeHtml(collection.name)
+  const safePageTitle = escapeHtml(pageTitle)
+  const safeBlurb = escapeHtml(blurb)
+  const safeHeroPoster = escapeHtml(heroPoster)
+  const safeCanonicalUrl = escapeHtml(canonicalUrl.toString())
+  const safeAppUrl = escapeHtml(appUrl)
+
+  return `<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>${safePageTitle}</title>
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <link rel="shortcut icon" href="/favicon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="/favicon.svg">
+  <meta name="theme-color" content="#05080d">
+  <meta name="description" content="${safeBlurb}">
+  <link rel="canonical" href="${safeCanonicalUrl}">
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="MyCinema">
+  <meta property="og:title" content="${safePageTitle}">
+  <meta property="og:description" content="${safeBlurb}">
+  <meta property="og:url" content="${safeCanonicalUrl}">
+  ${heroPoster ? `<meta property="og:image" content="${safeHeroPoster}">` : ''}
+  ${heroPoster ? `<meta property="og:image:secure_url" content="${safeHeroPoster}">` : ''}
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="${safePageTitle}">
+  <meta name="twitter:description" content="${safeBlurb}">
+  ${heroPoster ? `<meta name="twitter:image" content="${safeHeroPoster}">` : ''}
+  <style>
+    :root {
+      color-scheme: dark;
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: #05080d;
+      color: #f8fafc;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      min-height: 100vh;
+      margin: 0;
+      background: #05080d;
+    }
+
+    main {
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 18px;
+      width: min(680px, calc(100% - 40px));
+      margin: 0 auto;
+      padding: 48px 0;
+      text-align: center;
+    }
+
+    .eyebrow {
+      margin: 0;
+      color: #ef4444;
+      font-size: 12px;
+      font-weight: 900;
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+    }
+
+    h1 {
+      margin: 0;
+      font-size: clamp(34px, 7vw, 64px);
+      line-height: 1;
+      letter-spacing: 0;
+      text-transform: uppercase;
+      font-style: italic;
+    }
+
+    .sub {
+      margin: 0;
+      color: rgba(248, 250, 252, 0.72);
+      font-size: 16px;
+      line-height: 1.6;
+      font-weight: 500;
+    }
+
+    .fan {
+      display: flex;
+      align-items: flex-end;
+      justify-content: center;
+      margin: 14px 0 6px;
+    }
+
+    .fan img, .fan .tile {
+      width: 120px;
+      aspect-ratio: 2 / 3;
+      border-radius: 10px;
+      object-fit: cover;
+      border: 1px solid rgba(255, 255, 255, 0.22);
+      box-shadow: 0 18px 50px rgba(0, 0, 0, 0.6);
+      background: rgba(255, 255, 255, 0.08);
+    }
+
+    .fan img + img, .fan img + .tile, .fan .tile + img, .fan .tile + .tile { margin-left: -34px; }
+    .fan > :nth-child(1) { transform: rotate(-8deg) translateY(5px); }
+    .fan > :nth-child(2) { z-index: 1; }
+    .fan > :nth-child(3) { transform: rotate(8deg) translateY(5px); }
+    .fan > :nth-child(4) { transform: rotate(14deg) translateY(10px); z-index: 0; }
+    .fan .tile {
+      display: grid;
+      place-items: center;
+      color: rgba(255, 255, 255, 0.6);
+      font-size: 11px;
+      font-weight: 900;
+      letter-spacing: 0.14em;
+    }
+
+    .actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+      justify-content: center;
+      margin-top: 12px;
+    }
+
+    a {
+      color: inherit;
+      text-decoration: none;
+    }
+
+    .button {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 48px;
+      border-radius: 8px;
+      padding: 0 18px;
+      font-size: 13px;
+      font-weight: 900;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      transition: transform 160ms ease, background 160ms ease, border-color 160ms ease;
+    }
+
+    .button:hover { transform: translateY(-1px); }
+    .primary { background: #dc2626; color: white; }
+    .secondary { border: 1px solid rgba(255, 255, 255, 0.18); background: rgba(255, 255, 255, 0.08); color: rgba(255, 255, 255, 0.82); }
+
+    .hint {
+      margin: 4px 0 0;
+      color: rgba(255, 255, 255, 0.48);
+      font-size: 13px;
+      line-height: 1.5;
+    }
+
+    .titles {
+      margin: 0;
+      color: rgba(255, 255, 255, 0.55);
+      font-size: 13px;
+      line-height: 1.7;
+    }
+
+    @media (max-width: 560px) {
+      .fan img, .fan .tile { width: 96px; }
+      .button { width: 100%; }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <p class="eyebrow">Shared collection / ${count} title${count === 1 ? '' : 's'}</p>
+    <h1>${safeName}</h1>
+    <div class="fan">
+      ${posters.length > 0
+        ? posters.map((poster) => `<img src="${escapeHtml(poster)}" alt="" loading="lazy">`).join('')
+        : '<div class="tile">MyCinema</div>'}
+    </div>
+    <p class="sub">${safeBlurb}</p>
+    ${titles.length > 0 ? `<p class="titles">${titles.slice(0, 12).map((t) => escapeHtml(t)).join(' &nbsp;·&nbsp; ')}${titles.length > 12 ? ' &nbsp;·&nbsp;…' : ''}</p>` : ''}
+    <div class="actions">
+      <a class="button primary" href="${safeAppUrl}" id="open-app">Open in MyCinema</a>
+      <a class="button secondary" href="${GITHUB_RELEASES_URL}">Get MyCinema</a>
+    </div>
+    <p class="hint">If the app does not open, install MyCinema first and then press Open in MyCinema again.</p>
+  </main>
+  <script>
+    const appUrl = ${JSON.stringify(appUrl)};
+    document.getElementById('open-app').addEventListener('click', () => {
+      window.location.href = appUrl;
+    });
+  </script>
+</body>
+</html>`
+}
+
 function renderNotFound() {
-  return new Response('Not found. Use /movie/{tmdbId} or /series/{tmdbId}.', {
+  return new Response('Not found. Use /movie/{tmdbId}, /series/{tmdbId} or /collection?data={sharedCollection}.', {
     status: 404,
     headers: { 'content-type': 'text/plain; charset=utf-8' }
   })
@@ -343,7 +586,21 @@ export default {
 
     const target = parsePath(url.pathname)
 
-    if (!target) return renderNotFound()
+    if (!target) {
+      if (url.pathname === '/collection') {
+        const encodedData = url.searchParams.get('data') || ''
+        const collection = decodeCollectionData(encodedData)
+        if (!collection) return renderNotFound()
+        const html = renderCollectionPage(request, collection, encodedData)
+        return new Response(html, {
+          headers: {
+            'content-type': 'text/html; charset=utf-8',
+            'cache-control': 'public, max-age=300, s-maxage=86400'
+          }
+        })
+      }
+      return renderNotFound()
+    }
 
     const media = await fetchTmdbMedia(env, target.type, target.tmdbId).catch(() => null)
     const html = renderSharePage(request, target, media)

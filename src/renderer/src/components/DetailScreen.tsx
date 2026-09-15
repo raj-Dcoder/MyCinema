@@ -170,10 +170,6 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
   const [selectedSeason, setSelectedSeason] = useState<number | null>(null)
   const [isFavorite, setIsFavorite] = useState(video.is_favorite)
   const [isWatchlist, setIsWatchlist] = useState(video.is_watchlist)
-  const [showWatchlistCategoryPicker, setShowWatchlistCategoryPicker] = useState(false)
-  const [watchlistCategories, setWatchlistCategories] = useState<string[]>(['Watchlist'])
-  const [newWatchlistCategory, setNewWatchlistCategory] = useState('')
-  const [isCreatingWatchlistCategory, setIsCreatingWatchlistCategory] = useState(false)
   const [watchlistBusy, setWatchlistBusy] = useState(false)
   const [shareCopied, setShareCopied] = useState(false)
   const [showShareModal, setShowShareModal] = useState(false)
@@ -246,48 +242,18 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
     video.is_favorite = !!newValue // Sync local object
   }
 
-  const loadWatchlistCategories = async () => {
-    try {
-      const data = await window.api.getWatchlist()
-      const categories = Array.from(new Set(
-        (data || []).map((item: Video) => item.category || 'Watchlist')
-      )).sort((a, b) => {
-        if (a === 'Watchlist') return -1
-        if (b === 'Watchlist') return 1
-        return a.localeCompare(b)
-      })
-      setWatchlistCategories(categories.length > 0 ? categories : ['Watchlist'])
-    } catch (err) {
-      console.error('[DetailScreen] Failed to load watchlist categories:', err)
-      setWatchlistCategories(['Watchlist'])
-    }
-  }
-
-  const handleOpenWatchlistPicker = async () => {
-    setWatchlistBusy(true)
-    await loadWatchlistCategories()
-    setIsCreatingWatchlistCategory(false)
-    setNewWatchlistCategory('')
-    setShowWatchlistCategoryPicker(true)
-    setWatchlistBusy(false)
-  }
-
-  const handleAddToWatchlistCategory = async (category: string = 'Watchlist') => {
-    const safeCategory = category.trim() || 'Watchlist'
+  const handleAddToWatchlist = async () => {
     setWatchlistBusy(true)
     try {
       if (video.isExternal) {
-        await window.api.addToWatchlistExternal({ ...video, category: safeCategory, is_watchlist: true })
+        await window.api.addToWatchlistExternal({ ...video, category: 'Watchlist', is_watchlist: true })
       } else {
-        await window.api.addLocalToWatchlist(video.id, safeCategory)
+        await window.api.addLocalToWatchlist(video.id, 'Watchlist')
       }
 
       setIsWatchlist(true)
       video.is_watchlist = true
-      video.category = safeCategory
-      setShowWatchlistCategoryPicker(false)
-      setIsCreatingWatchlistCategory(false)
-      setNewWatchlistCategory('')
+      video.category = 'Watchlist'
       onWatchlistChange?.()
     } catch (err) {
       console.error('[DetailScreen] Watchlist add error:', err)
@@ -304,7 +270,7 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
         video.is_watchlist = false
         onWatchlistChange?.()
       } else {
-        await handleOpenWatchlistPicker()
+        await handleAddToWatchlist()
       }
     } else {
       if (isWatchlist) {
@@ -313,7 +279,7 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
         video.is_watchlist = !!newValue // Sync local object
         onWatchlistChange?.()
       } else {
-        await handleOpenWatchlistPicker()
+        await handleAddToWatchlist()
       }
     }
   }
@@ -2235,91 +2201,6 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
             </div>
           </aside>
         </>
-      )}
-
-      {showWatchlistCategoryPicker && (
-        <div className="fixed inset-0 z-[120] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm">
-          <div className="w-full max-w-sm bg-surface border border-secondary rounded-2xl shadow-2xl overflow-hidden">
-            <div className="px-6 py-5 border-b border-secondary flex items-center justify-between">
-              <div>
-                <h3 className="text-base font-bold text-text">Save to...</h3>
-                <p className="text-[11px] text-muted mt-0.5 truncate max-w-[220px]">{video.title}</p>
-              </div>
-              <button
-                onClick={() => setShowWatchlistCategoryPicker(false)}
-                disabled={watchlistBusy}
-                className="p-2 rounded-xl hover:bg-white/5 text-muted hover:text-text transition-colors disabled:opacity-50"
-              >
-                <X size={18} />
-              </button>
-            </div>
-
-            <div className="p-4 space-y-1.5 max-h-[300px] overflow-y-auto">
-              {watchlistCategories.map(category => (
-                <button
-                  key={category}
-                  onClick={() => handleAddToWatchlistCategory(category)}
-                  disabled={watchlistBusy}
-                  className="w-full flex items-center gap-3 p-3 rounded-xl hover:bg-primary/10 text-muted hover:text-primary group transition-all disabled:opacity-50"
-                >
-                  <div className="w-8 h-8 rounded-lg bg-secondary/50 flex items-center justify-center group-hover:bg-primary/20">
-                    <Bookmark size={14} />
-                  </div>
-                  <span className="text-sm font-medium">{category}</span>
-                  {category === 'Watchlist' && (
-                    <span className="ml-auto text-[10px] opacity-60 uppercase tracking-widest font-bold">Default</span>
-                  )}
-                </button>
-              ))}
-            </div>
-
-            <div className="p-4 bg-secondary/20 border-t border-secondary">
-              {!isCreatingWatchlistCategory ? (
-                <button
-                  onClick={() => setIsCreatingWatchlistCategory(true)}
-                  disabled={watchlistBusy}
-                  className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl border border-dashed border-muted/30 text-muted hover:text-text hover:border-primary/50 transition-all text-sm font-medium disabled:opacity-50"
-                >
-                  <Bookmark size={14} className="opacity-50" />
-                  Create New Category
-                </button>
-              ) : (
-                <div className="space-y-3">
-                  <input
-                    autoFocus
-                    type="text"
-                    value={newWatchlistCategory}
-                    onChange={(e) => setNewWatchlistCategory(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter' && newWatchlistCategory.trim()) {
-                        handleAddToWatchlistCategory(newWatchlistCategory)
-                      }
-                      if (e.key === 'Escape') setIsCreatingWatchlistCategory(false)
-                    }}
-                    placeholder="Category name"
-                    className="w-full px-4 py-2.5 bg-surface border border-primary/30 rounded-xl text-sm outline-none focus:ring-2 focus:ring-primary/20 placeholder:text-muted/40"
-                  />
-                  <div className="flex gap-2">
-                    <button
-                      onClick={() => setIsCreatingWatchlistCategory(false)}
-                      disabled={watchlistBusy}
-                      className="flex-1 py-2 text-xs font-medium text-muted hover:text-text transition-colors disabled:opacity-50"
-                    >
-                      Cancel
-                    </button>
-                    <button
-                      disabled={!newWatchlistCategory.trim() || watchlistBusy}
-                      onClick={() => handleAddToWatchlistCategory(newWatchlistCategory)}
-                      className="flex-[2] py-2 bg-primary text-black font-bold text-xs rounded-lg disabled:opacity-50 transition-all"
-                    >
-                      {watchlistBusy ? <Loader2 size={14} className="mx-auto animate-spin" /> : 'Create & Save'}
-                    </button>
-                  </div>
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
       )}
 
       <style dangerouslySetInnerHTML={{ __html: `

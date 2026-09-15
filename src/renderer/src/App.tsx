@@ -1,10 +1,11 @@
 import React, { useState, useEffect, useLayoutEffect, useRef } from 'react'
-import { Home as HomeIcon, Film, Tv, Settings as SettingsIcon, Video as VideoIcon, Download as DownloadIcon, Menu, Bookmark, Clock, Heart, Settings, RefreshCw, Maximize2, Minimize2, Loader2, PauseCircle, AlertCircle, X, Minus, ArrowUpRight, Image as ImageIcon, ChevronLeft, ChevronRight } from 'lucide-react'
+import { Home as HomeIcon, Film, Tv, Settings as SettingsIcon, Video as VideoIcon, Download as DownloadIcon, Menu, Bookmark, Clock, Heart, Settings, RefreshCw, Maximize2, Minimize2, Loader2, PauseCircle, AlertCircle, X, Minus, ArrowUpRight, Image as ImageIcon, ChevronLeft, ChevronRight, Layers } from 'lucide-react'
 import { Video } from './types'
 import Home from './pages/Home'
 import Videos from './pages/Videos'
 import Movies from './pages/Movies'
 import Series from './pages/Series'
+import Collections from './pages/Collections'
 import Watchlist from './pages/Watchlist'
 import Favorites from './pages/Favorites'
 import History from './pages/History'
@@ -19,7 +20,7 @@ import appLogo from './assets/mycinema-logo.png'
 const getWhatsNewStorageKey = (version: string) => `mycinema_whats_new_seen_${version}`
 const SIDEBAR_EXPANDED_STORAGE_KEY = 'mycinema_sidebar_expanded'
 const DOUBLE_TAP_WINDOW_MS = 300
-type AppTab = 'home' | 'videos' | 'movies' | 'series' | 'download' | 'settings' | 'watchlist' | 'history' | 'favorites'
+type AppTab = 'home' | 'videos' | 'movies' | 'series' | 'collections' | 'download' | 'settings' | 'watchlist' | 'history' | 'favorites'
 
 type ActiveDownload = {
   id: string
@@ -232,6 +233,39 @@ const App: React.FC = () => {
     }
   }, [])
 
+  const [sharedCollectionFocus, setSharedCollectionFocus] = useState<{ id: number; nonce: number } | null>(null)
+
+  useEffect(() => {
+    let cancelled = false
+
+    const openSharedCollection = async (payload: any) => {
+      try {
+        const result = await window.api.importSharedCollection(payload)
+        if (cancelled || !result?.imported) return
+
+        setPlayingVideo(null)
+        setSelectedVideo(null)
+        setActiveTab('collections')
+        setSharedCollectionFocus({ id: result.id, nonce: Date.now() })
+      } catch (err) {
+        console.error('[DeepLink] Failed to open shared collection:', err)
+      }
+    }
+
+    window.api.getPendingSharedCollectionTarget()
+      .then(target => {
+        if (target) openSharedCollection(target)
+      })
+      .catch(err => console.error('[DeepLink] Pending shared collection lookup failed:', err))
+
+    const cleanup = window.api.onOpenSharedCollection(openSharedCollection)
+
+    return () => {
+      cancelled = true
+      cleanup()
+    }
+  }, [])
+
   const [updateState, setUpdateState] = useState<{
     status: 'idle' | 'available' | 'downloading' | 'ready'
     version?: string
@@ -279,6 +313,7 @@ const App: React.FC = () => {
     { id: 'movies' as const,   label: 'Movies',       icon: <Film size={20} /> },
     { id: 'series' as const,   label: 'Web Series',   icon: <Tv size={20} /> },
     { id: 'videos' as const,   label: 'Videos',       icon: <VideoIcon size={20} /> },
+    { id: 'collections' as const, label: 'Collections', icon: <Layers size={20} /> },
     { id: 'watchlist' as const, label: 'Watchlist',    icon: <Bookmark size={20} /> },
     { id: 'download' as const,  label: 'Downloads',    icon: <DownloadIcon size={20} /> },
   ]
@@ -718,6 +753,7 @@ const App: React.FC = () => {
               {activeTab === 'videos'  && <Videos onPlay={handlePlayVideo} />}
               {activeTab === 'movies'  && <Movies onPlay={handlePlayVideo} onShowDetail={setSelectedVideo} />}
               {activeTab === 'series'  && <Series onPlay={handlePlayVideo} onShowDetail={setSelectedVideo} />}
+              {activeTab === 'collections' && <Collections onPlay={handlePlayVideo} onShowDetail={setSelectedVideo} focusCollectionId={sharedCollectionFocus?.id ?? null} focusNonce={sharedCollectionFocus?.nonce ?? 0} />}
               {activeTab === 'watchlist' && <Watchlist onPlay={handlePlayVideo} onShowDetail={setSelectedVideo} refreshKey={watchlistRefreshKey} />}
               {activeTab === 'history' && <History onPlay={handlePlayVideo} onShowDetail={setSelectedVideo} />}
               {activeTab === 'favorites' && <Favorites onPlay={handlePlayVideo} onShowDetail={setSelectedVideo} />}

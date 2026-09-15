@@ -53,6 +53,16 @@ const api = {
   getIntroDbSegments: (params: { imdbId?: string | null; tmdbId?: number | null; season?: number | null; episode?: number | null; filePath?: string | null; duration?: number | null }) =>
     ipcRenderer.invoke('get-introdb-segments', params),
   getPendingSharedMediaTarget: () => ipcRenderer.invoke('get-pending-shared-media-target'),
+  getPendingSharedCollectionTarget: () => ipcRenderer.invoke('get-pending-shared-collection-target'),
+  getCollectionShareData: (collectionId: number) => ipcRenderer.invoke('get-collection-share-data', collectionId),
+  getCollectionShareFile: (collectionId: number) => ipcRenderer.invoke('get-collection-share-file', collectionId),
+  openChatShare: (target: 'whatsapp', text: string) => ipcRenderer.invoke('open-chat-share', target, text),
+  importSharedCollection: (payload: any) => ipcRenderer.invoke('import-shared-collection', payload),
+  onOpenSharedCollection: (callback: (payload: any) => void) => {
+    const handler = (_event: any, payload: any) => callback(payload)
+    ipcRenderer.on('open-shared-collection', handler)
+    return () => ipcRenderer.removeListener('open-shared-collection', handler)
+  },
   getSharedMediaByTmdbId: (type: 'movie' | 'series', tmdbId: number) => ipcRenderer.invoke('get-shared-media-by-tmdb-id', type, tmdbId),
   onOpenSharedMedia: (callback: (target: { type: 'movie' | 'series'; tmdbId: number; source?: any }) => void) => {
     const handler = (_event: any, target: { type: 'movie' | 'series'; tmdbId: number; source?: any }) => callback(target)
@@ -66,6 +76,19 @@ const api = {
   removeFromWatchlistExternal: (tmdbId: number) => ipcRenderer.invoke('remove-from-watchlist-external', tmdbId),
   getWatchlist: () => ipcRenderer.invoke('get-watchlist'),
   getFavorites: () => ipcRenderer.invoke('get-favorites'),
+  // Collections Auto-Curator
+  getCollections: () => ipcRenderer.invoke('get-collections'),
+  getCollectionMembers: (collectionId: number) => ipcRenderer.invoke('get-collection-members', collectionId),
+  createCollection: (input: any) => ipcRenderer.invoke('create-collection', input),
+  updateCollection: (collectionId: number, patch: any) => ipcRenderer.invoke('update-collection', collectionId, patch),
+  deleteCollection: (collectionId: number) => ipcRenderer.invoke('delete-collection', collectionId),
+  reorderCollections: (ids: number[]) => ipcRenderer.invoke('reorder-collections', ids),
+  pinCollectionVideo: (collectionId: number, videoId: number) => ipcRenderer.invoke('pin-collection-video', collectionId, videoId),
+  unpinCollectionVideo: (collectionId: number, videoId: number) => ipcRenderer.invoke('unpin-collection-video', collectionId, videoId),
+  addCollectionExternal: (collectionId: number, item: any) => ipcRenderer.invoke('add-collection-external', collectionId, item),
+  removeCollectionExternal: (externalId: number) => ipcRenderer.invoke('remove-collection-external', externalId),
+  exportCollection: (collectionId: number) => ipcRenderer.invoke('export-collection', collectionId),
+  importCollection: () => ipcRenderer.invoke('import-collection'),
   // Auto-update
   onUpdateAvailable: (callback: (info: { version: string }) => void) => ipcRenderer.on('update-available', (_e, info) => callback(info)),
   onUpdateProgress: (callback: (info: { percent: number }) => void) => ipcRenderer.on('update-progress', (_e, info) => callback(info)),

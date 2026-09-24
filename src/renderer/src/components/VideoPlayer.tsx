@@ -312,6 +312,78 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
   const [isWindowFullscreen, setIsWindowFullscreen] = useState(false)
   const [isPiPActive, setIsPiPActive] = useState(false)
   const [isPiPSupported, setIsPiPSupported] = useState(false)
+  // Tracks the "PiP + minimized app" flow: set when we minimize the app for
+  // PiP, cleared when PiP closes (back-to-tab / close / toggle-off) so the
+  // app is restored exactly once per PiP session.
+  const pipMinimizedRef = useRef(false)
+  // Watchdog: if the overlay PiP window dies without firing
+  // leavepictureinpicture (e.g. its close button), this still brings the
+  // app back instead of stranding it minimized.
+  const pipWatchdogRef = useRef<number | null>(null)
+  // Cached taskbar-button icons (canvas-drawn dataURLs) for PiP mode.
+  const pipThumbarIconsRef = useRef<{ play: string; pause: string; back: string; fwd: string } | null>(null)
+
+  const stopPipWatchdog = () => {
+    if (pipWatchdogRef.current !== null) {
+      window.clearInterval(pipWatchdogRef.current)
+      pipWatchdogRef.current = null
+    }
+  }
+
+  // Restores the app after PiP ends — always back to fullscreen.
+  // Runs at most once per PiP session: safe to call from the leave-event,
+  // the watchdog, and effect cleanup.
+  const restoreFromPip = (reason: string) => {
+    if (!pipMinimizedRef.current) return
+    pipMinimizedRef.current = false
+    stopPipWatchdog()
+    console.log(`[PiP] PiP ended (${reason}) — restoring app fullscreen`)
+    window.api.restoreWindow({ enterFullscreen: true }).catch(() => {})
+    window.api.clearPipThumbar().catch(() => {})
+  }
+
+  const startPipWatchdog = () => {
+    stopPipWatchdog()
+    // Safety net: if the overlay window is dismissed without firing
+    // leavepictureinpicture, this still brings the app back promptly.
+    pipWatchdogRef.current = window.setInterval(() => {
+      const doc = document as Document & { pictureInPictureElement?: Element | null }
+      if (pipMinimizedRef.current && doc.pictureInPictureElement !== videoRef.current) {
+        restoreFromPip('watchdog')
+      }
+    }, 500)
+  }
+
+  const getPipThumbarIcons = () => {
+    if (pipThumbarIconsRef.current) return pipThumbarIconsRef.current
+    const draw = (glyph: string, fontPx: number) => {
+      try {
+        const canvas = document.createElement('canvas')
+        canvas.width = 32
+        canvas.height = 32
+        const ctx = canvas.getContext('2d')
+        if (!ctx) return ''
+        ctx.clearRect(0, 0, 32, 32)
+        ctx.fillStyle = '#ffffff'
+        ctx.font = `700 ${fontPx}px system-ui, sans-serif`
+        ctx.textAlign = 'center'
+        ctx.textBaseline = 'middle'
+        ctx.fillText(glyph, 16, 17)
+        return canvas.toDataURL('image/png')
+      } catch (err) {
+        return ''
+      }
+    }
+    const icons = { play: draw('▶', 14), pause: draw('❚❚', 13), back: draw('-10s', 10), fwd: draw('+10s', 10) }
+    pipThumbarIconsRef.current = icons
+    return icons
+  }
+
+  const pushPipThumbar = (playing: boolean) => {
+    try {
+      window.api.setPipThumbar({ isPlaying: playing, icons: getPipThumbarIcons() }).catch(() => {})
+    } catch (err) { /* ignore */ }
+  }
   const [isBuffering, setIsBuffering] = useState(false)
   const [isTorrentLoading, setIsTorrentLoading] = useState(isTorrentStream)
   const [torrentBuffering, setTorrentBuffering] = useState(false)
@@ -1670,7 +1742,13 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
     if (!videoEl || !canUsePiP) return
 
     const handleEnterPiP = () => setIsPiPActive(true)
-    const handleLeavePiP = () => setIsPiPActive(false)
+    const handleLeavePiP = () => {
+      setIsPiPActive(false)
+      // PiP window gone (back-to-tab button, PiP close, or toggle-off):
+      // bring the app back. The same video element never stopped playing,
+      // so it simply resumes visibly in the original player.
+      restoreFromPip('leave-event')
+    }
 
     videoEl.addEventListener('enterpictureinpicture', handleEnterPiP)
     videoEl.addEventListener('leavepictureinpicture', handleLeavePiP)
@@ -1678,6 +1756,10 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
     return () => {
       videoEl.removeEventListener('enterpictureinpicture', handleEnterPiP)
       videoEl.removeEventListener('leavepictureinpicture', handleLeavePiP)
+      // Listeners above are already detached, so the leave-handler can't
+      // fire from the exit below — restore explicitly so the app is never
+      // left stranded minimized with no PiP window.
+      restoreFromPip('cleanup')
       if (doc.pictureInPictureElement === videoEl && doc.exitPictureInPicture) {
         doc.exitPictureInPicture().catch(() => {})
       }
@@ -2165,33 +2247,154 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
   }, [currentVideo, hasNextEpisode, availableSubtitles, playbackRate, isHolding2x, isHoldingRev2x, volume, seekPreview, roomId, voiceEnabled, localPeerId, isHost, isWindowFullscreen])
 
   useEffect(() => {
-    if ('mediaSession' in navigator) {
-      navigator.mediaSession.setActionHandler('play', () => {
-        if (!isHost && roomId !== null) return
+    if (!('mediaSession' in navigator)) return
+    const ms = navigator.mediaSession
+    const canControl = isHost || roomId === null
+    // Shared ±10s step used by the PiP window buttons.
+    const seekBy = (seconds: number) => {
+      if (!canControl || !videoRef.current) return
+      const duration = Number.isFinite(videoRef.current.duration) ? videoRef.current.duration : 0
+      const target = duration > 0
+        ? Math.max(0, Math.min(duration, videoRef.current.currentTime + seconds))
+        : Math.max(0, videoRef.current.currentTime + seconds)
+      seekToTimeRef.current(target)
+      setSeekPopup(prev => ({ show: true, text: seconds > 0 ? `+${seconds}s` : `${seconds}s`, id: prev.id + 1 }))
+    }
+    try {
+      ms.setActionHandler('play', () => {
+        if (!canControl) return
         if (videoRef.current && videoRef.current.paused) {
           videoRef.current.play()
           setIsPlaying(true)
         }
       })
-      navigator.mediaSession.setActionHandler('pause', () => {
-        if (!isHost && roomId !== null) return
+      ms.setActionHandler('pause', () => {
+        if (!canControl) return
         if (videoRef.current && !videoRef.current.paused) {
           videoRef.current.pause()
           setIsPlaying(false)
         }
       })
+      // PiP window −10s / +10s buttons.
+      ms.setActionHandler('seekbackward', () => seekBy(-10))
+      ms.setActionHandler('seekforward', () => seekBy(10))
+      // PiP scrub bar (only appears when this handler is set).
+      ms.setActionHandler('seekto', (details) => {
+        if (!canControl || !videoRef.current) return
+        const seekTime = (details as MediaSessionActionDetails)?.seekTime
+        if (typeof seekTime === 'number' && Number.isFinite(seekTime)) {
+          seekToTimeRef.current(seekTime)
+        }
+      })
+      // PiP "next" button — series with a following episode only.
+      if (currentVideo.type === 'series' && hasNextEpisode) {
+        ms.setActionHandler('nexttrack', () => {
+          if (canControl) playNextEpisodeRef.current()
+        })
+      } else {
+        ms.setActionHandler('nexttrack', null)
+      }
+    } catch (e) {
+      // Unsupported action on this platform — ignore.
     }
     return () => {
-      if ('mediaSession' in navigator) {
-        try {
-          navigator.mediaSession.setActionHandler('play', null)
-          navigator.mediaSession.setActionHandler('pause', null)
-        } catch (e) {
-          // ignore
-        }
+      try {
+        ms.setActionHandler('play', null)
+        ms.setActionHandler('pause', null)
+        ms.setActionHandler('seekbackward', null)
+        ms.setActionHandler('seekforward', null)
+        ms.setActionHandler('seekto', null)
+        ms.setActionHandler('nexttrack', null)
+      } catch (e) {
+        // ignore
       }
     }
+  }, [isHost, roomId, currentVideo, hasNextEpisode])
+
+  // PiP window title / thumbnail.
+  useEffect(() => {
+    if (!('mediaSession' in navigator)) return
+    try {
+      const isSeries = currentVideo.type === 'series'
+      const title = isSeries && currentVideo.series_name ? currentVideo.series_name : currentVideo.title
+      const episodeLabel = isSeries && currentVideo.season != null && currentVideo.episode != null
+        ? `S${currentVideo.season} E${currentVideo.episode}`
+        : currentVideo.release_year ? String(currentVideo.release_year) : 'MyCinema'
+      const artworkUrl = getArtworkUrl(currentVideo.poster_path, 'w342')
+      navigator.mediaSession.metadata = new MediaMetadata({
+        title,
+        artist: episodeLabel,
+        album: 'MyCinema',
+        artwork: artworkUrl && artworkUrl.startsWith('http')
+          ? [{ src: artworkUrl, sizes: '342x513', type: 'image/jpeg' }]
+          : []
+      })
+    } catch (e) {
+      // ignore
+    }
+  }, [currentVideo])
+
+  // PiP play/pause icon state.
+  useEffect(() => {
+    try {
+      if ('mediaSession' in navigator) {
+        navigator.mediaSession.playbackState = isPlaying ? 'playing' : 'paused'
+      }
+    } catch (e) {
+      // ignore
+    }
+  }, [isPlaying])
+
+  // PiP scrub-bar position (Chromium extrapolates between updates).
+  useEffect(() => {
+    if (!isPiPActive || !('mediaSession' in navigator)) return
+    const updatePosition = () => {
+      try {
+        const el = videoRef.current
+        if (el && Number.isFinite(el.duration) && el.duration > 0) {
+          navigator.mediaSession.setPositionState({
+            duration: el.duration,
+            playbackRate: el.playbackRate || 1,
+            position: Math.max(0, Math.min(el.currentTime, el.duration))
+          })
+        }
+      } catch (e) {
+        // ignore
+      }
+    }
+    updatePosition()
+    const timer = window.setInterval(updatePosition, 2000)
+    return () => window.clearInterval(timer)
+  }, [isPiPActive])
+
+  // Taskbar thumbnail buttons (-10s / play-pause / +10s) while PiP floats.
+  useEffect(() => {
+    const cleanup = window.api.onThumbarCommand((command: string) => {
+      const videoEl = videoRef.current
+      if (!videoEl) return
+      if (isHost || roomId !== null) return
+      if (command === 'seek-back') {
+        seekToTimeRef.current(Math.max(0, videoEl.currentTime - 10))
+      } else if (command === 'seek-forward') {
+        const dur = Number.isFinite(videoEl.duration) ? videoEl.duration : Infinity
+        seekToTimeRef.current(Math.min(dur, videoEl.currentTime + 10))
+      } else if (command === 'toggle-play') {
+        if (videoEl.paused) {
+          videoEl.play().catch(() => {})
+          setIsPlaying(true)
+        } else {
+          videoEl.pause()
+          setIsPlaying(false)
+        }
+      }
+    })
+    return cleanup
   }, [isHost, roomId])
+
+  // Keep the taskbar play/pause glyph in sync while PiP is active.
+  useEffect(() => {
+    if (isPiPActive) pushPipThumbar(isPlaying)
+  }, [isPiPActive, isPlaying])
 
   useEffect(() => {
     if (isTorrentStreamPath(currentVideo.file_path) || currentVideo.id < 0) return
@@ -3773,6 +3976,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
   }
 
   const togglePictureInPicture = async () => {
+    console.log('[PiP] Toggle clicked')
     const videoEl = videoRef.current as (HTMLVideoElement & { requestPictureInPicture?: () => Promise<PictureInPictureWindow> }) | null
     const doc = document as Document & {
       pictureInPictureEnabled?: boolean
@@ -3786,6 +3990,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
     }
 
     try {
+      // Toggle off: exit the overlay (leave-handler + watchdog restore the app).
       if (doc.pictureInPictureElement === videoEl) {
         await doc.exitPictureInPicture?.()
         return
@@ -3800,12 +4005,22 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
       }
 
       await videoEl.requestPictureInPicture()
+      // PiP is live in its own OS window — get the app out of the way.
+      // Playback continues on the same video element underneath.
+      console.log('[PiP] Overlay PiP open, minimizing app')
+      pipMinimizedRef.current = true
+      pushPipThumbar(!videoEl.paused)
+      startPipWatchdog()
+      window.api.minimizeWindow().catch(() => {})
       setShowControls(true)
       clearTimeout(window.controlsTimeout)
       window.controlsTimeout = setTimeout(() => setShowControls(false), 3000)
     } catch (err) {
-      console.error('Picture-in-Picture failed:', err)
+      console.error('[PiP] Picture-in-Picture failed:', (err as any)?.message || err)
       setIsPiPActive(false)
+      stopPipWatchdog()
+      pipMinimizedRef.current = false
+      window.api.clearPipThumbar().catch(() => {})
     }
   }
 

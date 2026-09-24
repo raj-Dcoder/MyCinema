@@ -151,6 +151,10 @@ interface Api {
   searchOnlineSubtitles: (params: { query?: string; tmdbId?: number; season?: number; episode?: number; languages?: string; mediaType?: string; videoFilePath?: string }) => Promise<any>
   downloadOnlineSubtitle: (params: { fileId: number; videoFilePath: string; fileName?: string }) => Promise<any>
   minimizeWindow: () => Promise<void>
+  restoreWindow: (opts?: { enterFullscreen?: boolean }) => Promise<void>
+  setPipThumbar: (payload: { isPlaying: boolean; icons: { play: string; pause: string; back: string; fwd: string } }) => Promise<void>
+  clearPipThumbar: () => Promise<void>
+  onThumbarCommand: (callback: (command: string) => void) => () => void
   openWebPopup: (url: string, title?: string) => Promise<boolean>
   toggleFullscreen: () => Promise<boolean>
   isFullscreen: () => Promise<boolean>

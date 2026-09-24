@@ -1,9 +1,9 @@
 import React, { useState, useEffect, useRef } from 'react'
-import { Search, Download as DownloadIcon, Film, Tv, X, Loader2, HardDrive, CheckCircle2, AlertCircle, Pause, Play, FolderOpen, Bookmark, BookmarkCheck, ArrowLeft, Languages, RotateCcw, Share2, Copy, MessageCircle, Send, MoreVertical, Trash, ListMinus } from 'lucide-react'
+import { Search, Download as DownloadIcon, Film, Tv, X, Loader2, HardDrive, CheckCircle2, AlertCircle, Pause, Play, FolderOpen, Bookmark, BookmarkCheck, ArrowLeft, Languages, RotateCcw, Share2, Copy, MessageCircle, Send, MoreVertical, Trash, ListMinus, Star, Users, Zap } from 'lucide-react'
 
 import { Video } from '../types'
 import { DownloadOptionsGuide } from '../components/FeatureGuides'
-import { getTorrentSourceHealthScore, getTorrentSourceSpeedLabel } from '../utils/torrentSources'
+import { getTorrentSourceHealthScore, getTorrentSourceSpeedLabel, isHevcSource } from '../utils/torrentSources'
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 interface TMDBResult {
@@ -60,6 +60,14 @@ const hasEpisodeMarker = (source: TorrentSource) => (
 )
 
 const isSeasonPackSource = (source: TorrentSource) => Boolean(source.isSeasonPack) && !hasEpisodeMarker(source)
+
+const normalizeSourceQualityKey = (source: TorrentSource): '2160p' | '1080p' | '720p' | '480p' => {
+  const text = `${source?.quality || ''} ${source?.title || ''}`.toLowerCase()
+  if (/\b(2160p|4k|uhd)\b/.test(text)) return '2160p'
+  if (/\b1080p?\b/.test(text)) return '1080p'
+  if (/\b720p?\b/.test(text)) return '720p'
+  return '480p'
+}
 
 const MYCINEMA_SHARE_BASE_URL = (
   import.meta.env.VITE_MYCINEMA_SHARE_BASE_URL ||
@@ -170,7 +178,8 @@ const Download: React.FC<DownloadProps> = ({ onShowDetail }) => {
   const [selectedSeason, setSelectedSeason] = useState<string>('all')
   const [selectedPackSeason, setSelectedPackSeason] = useState<string>('all')
   const [selectedEpisode, setSelectedEpisode] = useState<string>('all')
-  const [hindiOnly, setHindiOnly] = useState<boolean>(false)
+  const [sourceLanguageFilter, setSourceLanguageFilter] = useState<'all' | 'hindi'>('all')
+  const [sourceQualityFilter, setSourceQualityFilter] = useState<'all' | '2160p' | '1080p' | '720p' | '480p'>('all')
 
   useEffect(() => {
     return () => {
@@ -495,6 +504,8 @@ const Download: React.FC<DownloadProps> = ({ onShowDetail }) => {
     setSelectedSeason('all')
     setSelectedPackSeason('all')
     setSelectedEpisode('all')
+    setSourceLanguageFilter('all')
+    setSourceQualityFilter('all')
     const requestId = `${item.id}-${Date.now()}-${Math.random().toString(36).slice(2)}`
     sourceSearchRequestRef.current = requestId
 
@@ -634,6 +645,8 @@ const Download: React.FC<DownloadProps> = ({ onShowDetail }) => {
       ? `${downloads.length} saved download${downloads.length === 1 ? '' : 's'}`
       : 'Queue is empty'
   const panelOpen = selectedItem !== null
+  const selectedYear = (selectedItem?.release_date || selectedItem?.first_air_date || '').slice(0, 4)
+  const selectedPosterUrl = selectedItem?.poster_path ? `${TMDB_IMG}/w342${selectedItem.poster_path}` : null
   const storageUsedPercent = Math.round(downloadsStorage?.percentUsed || 0)
   const deferredSources = React.useDeferredValue(sources)
   const sourceView = loadingSources ? deferredSources : sources
@@ -665,13 +678,33 @@ const Download: React.FC<DownloadProps> = ({ onShowDetail }) => {
     return Array.from(eps).sort((a, b) => a - b)
   }, [sourceView, selectedSeason])
 
+  const sourceQualityCounts = React.useMemo(() => {
+    const counts: Record<'2160p' | '1080p' | '720p' | '480p', number> = { '2160p': 0, '1080p': 0, '720p': 0, '480p': 0 }
+    sourceView.forEach(source => {
+      counts[normalizeSourceQualityKey(source)] += 1
+    })
+    return counts
+  }, [sourceView])
+
+  const sourceHindiCount = React.useMemo(() => sourceView.filter(s => s.isHindi).length, [sourceView])
+
+  const hasActiveSourceFilters = sourceLanguageFilter !== 'all' || sourceQualityFilter !== 'all' || selectedSeason !== 'all' || selectedPackSeason !== 'all' || selectedEpisode !== 'all'
+
+  const clearSourceFilters = () => {
+    setSourceLanguageFilter('all')
+    setSourceQualityFilter('all')
+    setSelectedSeason('all')
+    setSelectedPackSeason('all')
+    setSelectedEpisode('all')
+  }
+
   const filteredSources = React.useMemo(() => {
     return sourceView
       .filter(s => {
-        // 1. Apply Hindi Only filter if active
-        if (hindiOnly && !s.isHindi) return false
+        if (sourceLanguageFilter === 'hindi' && !s.isHindi) return false
+        if (sourceQualityFilter !== 'all' && normalizeSourceQualityKey(s) !== sourceQualityFilter) return false
 
-        // 2. TV Series specific filtering
+        // TV Series specific filtering
         if (selectedItem?.media_type !== 'tv') return true
         if (selectedSeason === 'packs') {
           if (!isSeasonPackSource(s)) return false
@@ -687,7 +720,7 @@ const Download: React.FC<DownloadProps> = ({ onShowDetail }) => {
         return true
       })
       .sort((a, b) => getTorrentSourceHealthScore(b) - getTorrentSourceHealthScore(a))
-  }, [sourceView, selectedSeason, selectedPackSeason, selectedEpisode, selectedItem, hindiOnly])
+  }, [sourceView, selectedSeason, selectedPackSeason, selectedEpisode, selectedItem, sourceLanguageFilter, sourceQualityFilter])
 
   // Optimization: Memoize a video map for O(1) lookup during render
   const videoMap = React.useMemo(() => {
@@ -846,7 +879,7 @@ const Download: React.FC<DownloadProps> = ({ onShowDetail }) => {
       })()}
 
       {/* Main Content Area */}
-      <div className={`transition-all duration-300 ${panelOpen ? 'mr-[500px]' : ''}`}>
+      <div className={`transition-all duration-300 ${panelOpen ? 'mr-[580px]' : ''}`}>
         {/* Unified Header */}
         <div className="mb-8 flex flex-col md:flex-row md:items-center justify-between gap-6">
           <div className="flex flex-1 items-center gap-6">
@@ -1139,210 +1172,422 @@ const Download: React.FC<DownloadProps> = ({ onShowDetail }) => {
 
       {/* ─── Right Side Panel ───────────────────────────────────────────────── */}
       <div
-        className={`fixed top-0 right-0 z-50 flex h-full w-full max-w-[560px] flex-col border-l border-white/10 bg-[#0B0F16] shadow-2xl transform transition-transform duration-300 ease-out ${
+        className={`fixed inset-y-0 right-0 z-50 flex w-full max-w-[580px] flex-col border-l border-white/10 bg-[#0C1017] shadow-[-32px_0_80px_rgba(0,0,0,0.65)] transform transition-transform duration-300 ease-out ${
           panelOpen ? 'translate-x-0' : 'translate-x-full'
         }`}
       >
         {selectedItem && (
           <div className="flex flex-col h-full">
-            <div className="border-b border-white/10 bg-[#0F141D]">
-              <div className="flex items-start justify-between gap-4 px-5 py-5">
-                <div className="min-w-0">
-                  <div className="mb-2 flex items-center gap-2 text-[10px] font-black uppercase tracking-[0.18em] text-primary">
-                    <DownloadIcon size={14} />
-                    Download Sources
+            <div className="relative border-b border-white/10 bg-[#0C1017]">
+              {/* scan progress */}
+              <div className="absolute inset-x-0 top-0 h-[2px] bg-white/5">
+                {loadingSources && sourceSearchStatus.total > 0 ? (
+                  <div
+                    className="h-full bg-primary transition-all duration-300"
+                    style={{ width: `${Math.min(100, (sourceSearchStatus.completed / Math.max(1, sourceSearchStatus.total)) * 100)}%` }}
+                  />
+                ) : loadingSources ? (
+                  <div className="h-full w-1/3 animate-pulse bg-primary/70" />
+                ) : null}
+              </div>
+              <div className="flex items-start gap-4 px-5 pt-5 pb-4">
+                {selectedPosterUrl ? (
+                  <img
+                    src={selectedPosterUrl}
+                    alt=""
+                    loading="lazy"
+                    decoding="async"
+                    className="h-[68px] w-[48px] shrink-0 rounded-lg object-cover ring-1 ring-white/15"
+                  />
+                ) : (
+                  <div className="flex h-[68px] w-[48px] shrink-0 items-center justify-center rounded-lg bg-white/5 ring-1 ring-white/10">
+                    <Film size={18} className="text-white/30" />
                   </div>
-                  <h2 className="truncate text-lg font-black text-white">
-                    {selectedItem.title || selectedItem.name}
-                  </h2>
-                  <div className="mt-3 flex flex-wrap items-center gap-2">
-                    <span className="rounded-md border border-white/10 bg-white/[0.04] px-2.5 py-1 text-[10px] font-bold text-white/65">
-                      {selectedItem.media_type === 'movie' ? 'Movie' : 'TV Series'}
+                )}
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-2 text-[10px] font-black uppercase tracking-[0.2em] text-white/40">
+                    <span className="inline-flex h-5 w-5 items-center justify-center rounded-md bg-primary/15 text-primary">
+                      <DownloadIcon size={12} />
                     </span>
-                    {selectedItem.vote_average > 0 && (
-                      <span className="rounded-md border border-yellow-400/20 bg-yellow-400/10 px-2.5 py-1 text-[10px] font-bold text-yellow-300">
-                        ★ {selectedItem.vote_average.toFixed(1)}
-                      </span>
-                    )}
-                    <span className="rounded-md border border-white/10 bg-white/[0.04] px-2.5 py-1 text-[10px] font-bold text-white/65">
-                      {filteredSources.length} shown
-                    </span>
-                    <span className="rounded-md border border-white/10 bg-white/[0.04] px-2.5 py-1 text-[10px] font-bold text-white/65">
-                      {sources.length} total
-                    </span>
-                    {filteredSources[0] && (
-                      <span className="rounded-md border border-emerald-400/20 bg-emerald-400/10 px-2.5 py-1 text-[10px] font-bold text-emerald-300">
-                        Best: {getTorrentSourceSpeedLabel(filteredSources[0])}
-                      </span>
-                    )}
-                    {loadingSources && sourceSearchStatus.total > 0 && (
-                      <span className="rounded-md border border-primary/20 bg-primary/10 px-2.5 py-1 text-[10px] font-bold text-primary">
-                        Checking {sourceSearchStatus.completed}/{sourceSearchStatus.total}
-                      </span>
-                    )}
+                    Download Sources
                     {sourceSearchStatus.cached && (
-                      <span className="rounded-md border border-white/10 bg-white/[0.04] px-2.5 py-1 text-[10px] font-bold text-white/45">
-                        Cached first
+                      <span className="rounded-full bg-white/5 px-2 py-0.5 text-[9px] font-bold tracking-widest text-white/40">
+                        Cached
                       </span>
                     )}
-                    {(() => {
-                      const hindiCount = sources.filter(s => s.isHindi).length
-                      return hindiCount > 0 ? (
-                        <span className="rounded-md border border-[#FF9933]/25 bg-[#FF9933]/10 px-2.5 py-1 text-[10px] font-bold text-[#FFB76B]">
-                          🇮🇳 {hindiCount} Hindi
-                        </span>
-                      ) : null
-                    })()}
+                  </div>
+                  <h3 className="mt-1.5 truncate text-[17px] font-extrabold tracking-tight text-white">
+                    {selectedItem.title || selectedItem.name}
+                  </h3>
+                  <p className="mt-1 text-[11px] font-medium text-white/40">
+                    {selectedYear ? `${selectedYear} · ` : ''}{filteredSources.length} of {sourceView.length} sources
+                    {loadingSources && sourceSearchStatus.total > 0
+                      ? ` · scanning ${sourceSearchStatus.completed}/${sourceSearchStatus.total}`
+                      : loadingSources ? ' · scanning…' : ''}
+                  </p>
+                  <div className="mt-2.5 flex items-center gap-2 text-[11px]">
+                    <span className="inline-flex items-center gap-1.5 rounded-full bg-white/5 px-2.5 py-1 font-semibold text-white/60 ring-1 ring-white/10">
+                      <DownloadIcon size={11} />
+                      Save — download
+                    </span>
+                    {sourceHindiCount > 0 && (
+                      <span className="inline-flex items-center gap-1 rounded-full bg-[#FF9933]/10 px-2.5 py-1 font-bold text-[#FFB76B] ring-1 ring-[#FF9933]/25">
+                        {sourceHindiCount} Hindi
+                      </span>
+                    )}
                   </div>
                 </div>
                 <button
                   onClick={() => { setSelectedItem(null); setSources([]) }}
-                  className="shrink-0 rounded-lg border border-white/10 bg-white/[0.04] p-2 text-white/55 transition-colors hover:bg-white/[0.08] hover:text-white"
+                  className="shrink-0 rounded-full bg-white/5 p-2.5 text-white/60 ring-1 ring-white/10 transition-colors hover:bg-white/10 hover:text-white"
                   title="Close download sources"
                 >
-                  <X size={18} />
+                  <X size={16} />
                 </button>
               </div>
 
-              <div className="flex items-center gap-2 border-t border-white/10 px-4 py-3">
-                <div className="flex min-w-0 flex-1 items-center gap-2 overflow-hidden">
-                  <button
-                    onClick={() => setHindiOnly(!hindiOnly)}
-                    className={`flex min-h-8 shrink-0 items-center gap-1.5 rounded-lg border px-2.5 text-[9px] font-black uppercase tracking-widest transition-all ${
-                      hindiOnly
-                        ? 'border-[#FF9933]/40 bg-[#FF9933]/16 text-[#FFB76B]'
-                        : 'border-white/10 bg-[#151B25] text-white/55 hover:bg-[#1A2230] hover:text-white/80'
-                    }`}
-                  >
-                    <Languages size={11} />
-                    {hindiOnly ? 'Hindi Only' : 'All Audio'}
-                  </button>
-
-                  {selectedItem?.media_type === 'tv' && (
-                    <>
-                      <select
-                        value={selectedSeason}
-                        onChange={(e) => { setSelectedSeason(e.target.value); setSelectedPackSeason('all'); setSelectedEpisode('all'); }}
-                        className="min-h-8 w-[122px] shrink-0 rounded-lg border border-white/10 bg-[#151B25] px-2 text-[9px] font-black uppercase tracking-widest text-white/70 outline-none transition-colors hover:bg-[#1A2230]"
+              <div className="space-y-2 border-t border-white/[0.07] bg-white/[0.015] px-4 py-2.5">
+                <div className="flex items-center gap-2">
+                  <div className="flex min-w-0 flex-1 items-center gap-2 overflow-x-auto py-0.5 scrollbar-hide">
+                    {/* Language: fixed two-option segmented control — labels never change, only the active state does */}
+                    <div className="flex h-7 shrink-0 items-center gap-0.5 rounded-full bg-white/5 p-0.5 ring-1 ring-white/10" role="group" aria-label="Language filter">
+                      <button
+                        onClick={() => setSourceLanguageFilter('all')}
+                        title={`Show all languages (${sourceView.length})`}
+                        className={`flex h-6 items-center gap-1 rounded-full px-2.5 text-[10px] font-bold tracking-wide transition-all ${
+                          sourceLanguageFilter === 'all'
+                            ? 'bg-white text-black'
+                            : 'text-white/55 hover:text-white'
+                        }`}
                       >
-                        <option className="bg-[#10141d] text-white" value="all">All Seasons</option>
-                        <option className="bg-[#10141d] text-white" value="packs">Season Packs</option>
-                        {availableSeasons.map(s => (
-                          <option className="bg-[#10141d] text-white" key={`season-${s}`} value={s.toString()}>
-                            Season {s}
-                          </option>
-                        ))}
-                      </select>
+                        All
+                        <span className={`rounded-full px-1.5 py-px text-[9px] font-black ${sourceLanguageFilter === 'all' ? 'bg-black/10 text-black/70' : 'bg-white/10 text-white/45'}`}>
+                          {sourceView.length}
+                        </span>
+                      </button>
+                      <button
+                        onClick={() => setSourceLanguageFilter('hindi')}
+                        title="Show Hindi / dual-audio only"
+                        className={`flex h-6 items-center gap-1 rounded-full px-2.5 text-[10px] font-bold tracking-wide transition-all ${
+                          sourceLanguageFilter === 'hindi'
+                            ? 'bg-[#FF9933] text-black'
+                            : 'text-white/55 hover:text-white'
+                        }`}
+                      >
+                        <Languages size={12} />
+                        Hindi
+                        <span className={`rounded-full px-1.5 py-px text-[9px] font-black ${sourceLanguageFilter === 'hindi' ? 'bg-black/10 text-black/70' : 'bg-[#FF9933]/15 text-[#FFB76B]'}`}>
+                          {sourceHindiCount}
+                        </span>
+                      </button>
+                    </div>
+                  </div>
 
-                      {selectedSeason === 'packs' && availablePackSeasons.length > 0 && (
-                        <select
-                          value={selectedPackSeason}
-                          onChange={(e) => setSelectedPackSeason(e.target.value)}
-                          className="min-h-8 w-[96px] shrink-0 rounded-lg border border-white/10 bg-[#151B25] px-2 text-[9px] font-black uppercase tracking-widest text-white/70 outline-none transition-colors hover:bg-[#1A2230]"
-                        >
-                          <option className="bg-[#10141d] text-white" value="all">Any</option>
-                          {availablePackSeasons.map(s => (
-                            <option className="bg-[#10141d] text-white" key={`pack-season-${s}`} value={s.toString()}>
-                              Season {s}
-                            </option>
-                          ))}
-                        </select>
-                      )}
-
-                      {selectedSeason !== 'all' && selectedSeason !== 'packs' && availableEpisodes.length > 0 && (
-                        <select
-                          value={selectedEpisode}
-                          onChange={(e) => setSelectedEpisode(e.target.value)}
-                          className="min-h-8 w-[112px] shrink-0 rounded-lg border border-white/10 bg-[#151B25] px-2 text-[9px] font-black uppercase tracking-widest text-white/70 outline-none transition-colors hover:bg-[#1A2230]"
-                        >
-                          <option className="bg-[#10141d] text-white" value="all">Any Episode</option>
-                          {availableEpisodes.map(ep => (
-                            <option className="bg-[#10141d] text-white" key={`ep-${ep}`} value={ep.toString()}>
-                              Episode {ep}
-                            </option>
-                          ))}
-                        </select>
-                      )}
-                    </>
+                  {hasActiveSourceFilters && (
+                    <button
+                      onClick={clearSourceFilters}
+                      className="flex h-7 shrink-0 items-center gap-1 rounded-full px-2.5 text-[10px] font-bold tracking-wide text-white/45 transition-colors hover:bg-white/5 hover:text-white"
+                      title="Clear all filters"
+                    >
+                      <X size={12} />
+                      Clear
+                    </button>
                   )}
+                  <button
+                    onClick={() => handleSelectResult(selectedItem)}
+                    disabled={loadingSources}
+                    className="flex h-7 shrink-0 items-center gap-1.5 rounded-full bg-white/5 px-3 text-[10px] font-bold tracking-wide text-white/60 ring-1 ring-white/10 transition-all hover:bg-white/10 hover:text-white disabled:opacity-50"
+                    title="Refresh sources"
+                  >
+                    {loadingSources ? <Loader2 size={12} className="animate-spin" /> : <Search size={12} />}
+                    Refresh
+                  </button>
                 </div>
 
-                <button
-                  onClick={() => handleSelectResult(selectedItem)}
-                  disabled={loadingSources}
-                  className="flex min-h-8 shrink-0 items-center gap-1.5 rounded-lg border border-white/10 bg-[#151B25] px-2.5 text-[9px] font-black uppercase tracking-widest text-white/55 transition-all hover:bg-[#1A2230] hover:text-white/80 disabled:opacity-50"
-                  title="Refresh sources"
-                >
-                  {loadingSources ? <Loader2 size={11} className="animate-spin" /> : <Search size={11} />}
-                  Refresh
-                </button>
+                {/* Resolution: desired quality filter with live counts */}
+                <div className="flex items-center gap-1.5 overflow-x-auto py-0.5 scrollbar-hide">
+                  <span className="shrink-0 text-[9px] font-black uppercase tracking-[0.16em] text-white/35">Quality</span>
+                  {(['all', '2160p', '1080p', '720p'] as const).map(quality => {
+                    const isActive = sourceQualityFilter === quality
+                    const count = quality === 'all' ? sourceView.length : sourceQualityCounts[quality]
+                    const label = quality === 'all' ? 'All' : quality === '2160p' ? '4K' : quality
+                    return (
+                      <button
+                        key={quality}
+                        onClick={() => setSourceQualityFilter(quality)}
+                        title={quality === 'all' ? `All qualities (${sourceView.length})` : `${quality === '2160p' ? '2160p / 4K' : quality} (${count})`}
+                        className={`flex h-6 shrink-0 items-center gap-1 rounded-full px-2 text-[10px] font-bold tracking-wide ring-1 transition-all ${
+                          isActive
+                            ? 'bg-white text-black ring-white'
+                            : count === 0 && sourceView.length > 0
+                              ? 'bg-transparent text-white/25 ring-white/[0.07]'
+                              : 'bg-white/5 text-white/55 ring-white/10 hover:bg-white/10 hover:text-white'
+                        }`}
+                      >
+                        {label}
+                        <span className={`rounded-full px-1 py-px text-[9px] font-black ${isActive ? 'bg-black/10 text-black/70' : 'bg-white/10 text-white/40'}`}>
+                          {count}
+                        </span>
+                      </button>
+                    )
+                  })}
+                </div>
+
+                {selectedItem?.media_type === 'tv' && (
+                  <div className="flex items-center gap-1.5 overflow-x-auto py-0.5 scrollbar-hide">
+                    <span className="shrink-0 text-[9px] font-black uppercase tracking-[0.16em] text-white/35">Season</span>
+                    {(() => {
+                      const packCount = sourceView.filter(s => isSeasonPackSource(s)).length
+                      const seasonOptions: { value: string; label: string; count: number }[] = [
+                        { value: 'all', label: 'All', count: sourceView.length },
+                        { value: 'packs', label: 'Packs', count: packCount },
+                        ...availableSeasons.map(season => ({
+                          value: season.toString(),
+                          label: `S${season}`,
+                          count: sourceView.filter(s => !isSeasonPackSource(s) && s.parsedSeason === season).length
+                        }))
+                      ]
+                      return seasonOptions.map(option => {
+                        const isActive = selectedSeason === option.value
+                        return (
+                          <button
+                            key={option.value}
+                            onClick={() => {
+                              setSelectedSeason(option.value)
+                              setSelectedPackSeason('all')
+                              setSelectedEpisode('all')
+                            }}
+                            title={option.value === 'all' ? `All seasons (${option.count})` : option.value === 'packs' ? `Season packs (${option.count})` : `Season ${option.value} (${option.count})`}
+                            className={`flex h-6 shrink-0 items-center gap-1 rounded-full px-2 text-[10px] font-bold tracking-wide ring-1 transition-all ${
+                              isActive
+                                ? 'bg-white text-black ring-white'
+                                : option.count === 0 && sourceView.length > 0
+                                  ? 'bg-transparent text-white/25 ring-white/[0.07]'
+                                  : 'bg-white/5 text-white/55 ring-white/10 hover:bg-white/10 hover:text-white'
+                            }`}
+                          >
+                            {option.label}
+                            <span className={`rounded-full px-1 py-px text-[9px] font-black ${isActive ? 'bg-black/10 text-black/70' : 'bg-white/10 text-white/40'}`}>
+                              {option.count}
+                            </span>
+                          </button>
+                        )
+                      })
+                    })()}
+                  </div>
+                )}
+
+                {selectedItem?.media_type === 'tv' && selectedSeason === 'packs' && availablePackSeasons.length > 0 && (
+                  <div className="flex items-center gap-1.5 overflow-x-auto py-0.5 scrollbar-hide">
+                    <span className="shrink-0 text-[9px] font-black uppercase tracking-[0.16em] text-white/35">Pack</span>
+                    {['all', ...availablePackSeasons.map(String)].map(value => {
+                      const isActive = selectedPackSeason === value
+                      const count = value === 'all'
+                        ? sourceView.filter(s => isSeasonPackSource(s)).length
+                        : sourceView.filter(s => isSeasonPackSource(s) && s.parsedSeason === Number(value)).length
+                      return (
+                        <button
+                          key={value}
+                          onClick={() => setSelectedPackSeason(value)}
+                          title={value === 'all' ? `Any pack (${count})` : `Season ${value} pack (${count})`}
+                          className={`flex h-6 shrink-0 items-center gap-1 rounded-full px-2 text-[10px] font-bold tracking-wide ring-1 transition-all ${
+                            isActive
+                              ? 'bg-white text-black ring-white'
+                              : 'bg-white/5 text-white/55 ring-white/10 hover:bg-white/10 hover:text-white'
+                          }`}
+                        >
+                          {value === 'all' ? 'Any' : `S${value}`}
+                          <span className={`rounded-full px-1 py-px text-[9px] font-black ${isActive ? 'bg-black/10 text-black/70' : 'bg-white/10 text-white/40'}`}>
+                            {count}
+                          </span>
+                        </button>
+                      )
+                    })}
+                  </div>
+                )}
+
+                {selectedItem?.media_type === 'tv' && selectedSeason !== 'all' && selectedSeason !== 'packs' && availableEpisodes.length > 0 && (
+                  <div className="flex items-center gap-1.5 overflow-x-auto py-0.5 scrollbar-hide">
+                    <span className="shrink-0 text-[9px] font-black uppercase tracking-[0.16em] text-white/35">Episode</span>
+                    {['all', ...availableEpisodes.map(String)].map(value => {
+                      const isActive = selectedEpisode === value
+                      const count = value === 'all'
+                        ? sourceView.filter(s => !isSeasonPackSource(s) && s.parsedSeason === Number(selectedSeason)).length
+                        : sourceView.filter(s => !isSeasonPackSource(s) && s.parsedSeason === Number(selectedSeason) && s.parsedEpisode === Number(value)).length
+                      return (
+                        <button
+                          key={value}
+                          onClick={() => setSelectedEpisode(value)}
+                          title={value === 'all' ? `All episodes (${count})` : `Episode ${value} (${count})`}
+                          className={`flex h-6 shrink-0 items-center gap-1 rounded-full px-2 text-[10px] font-bold tracking-wide ring-1 transition-all ${
+                            isActive
+                              ? 'bg-white text-black ring-white'
+                              : 'bg-white/5 text-white/55 ring-white/10 hover:bg-white/10 hover:text-white'
+                          }`}
+                        >
+                          {value === 'all' ? 'All' : `E${value}`}
+                          <span className={`rounded-full px-1 py-px text-[9px] font-black ${isActive ? 'bg-black/10 text-black/70' : 'bg-white/10 text-white/40'}`}>
+                            {count}
+                          </span>
+                        </button>
+                      )
+                    })}
+                  </div>
+                )}
               </div>
             </div>
 
             {/* Sources List */}
-            <div className="flex-1 overflow-y-auto bg-[#080B10] px-4 py-4 flex flex-col w-full scrollbar-thin">
+            <div className="flex-1 overflow-y-auto bg-[#080B10] px-4 py-4 scrollbar-thin">
               {(loadingSources || !sourceSearchStatus.done) && filteredSources.length === 0 ? (
-                <div className="flex h-full min-h-[340px] flex-col items-center justify-center gap-4 text-center">
-                  <div className="h-12 w-12 rounded-full border-4 border-primary/20 border-t-primary animate-spin" />
-                  <p className="text-xs font-black uppercase tracking-widest text-muted">
-                    {sourceSearchStatus.total > 0
-                      ? `Checking ${sourceSearchStatus.completed}/${sourceSearchStatus.total} providers...`
-                      : 'Scanning sources...'}
-                  </p>
-                </div>
-              ) : filteredSources.length > 0 ? (
-                <div className="space-y-3 flex-1 flex flex-col w-full">
-                  <div className="space-y-2 pb-4 overflow-x-hidden">
-                  {loadingSources && (
-                    <div className="rounded-lg border border-primary/15 bg-primary/10 px-3 py-2 text-[10px] font-bold uppercase tracking-widest text-primary">
-                      {filteredSources.length} sources found. Still checking {Math.max(0, sourceSearchStatus.total - sourceSearchStatus.completed)} providers...
+                <div className="flex flex-col gap-3">
+                  <div className="flex items-center gap-3 rounded-2xl bg-white/[0.03] px-4 py-3.5 ring-1 ring-white/[0.07]">
+                    <div className="h-8 w-8 shrink-0 animate-spin rounded-full border-2 border-white/10 border-t-primary" />
+                    <div className="min-w-0">
+                      <p className="text-[13px] font-semibold text-white">
+                        {sourceSearchStatus.total > 0
+                          ? `Checking ${sourceSearchStatus.completed} of ${sourceSearchStatus.total} providers`
+                          : 'Finding the best sources'}
+                      </p>
+                      <p className="text-[11px] text-white/40">High-seed results appear first — you can start before it finishes.</p>
                     </div>
-                  )}
-                  {filteredSources.map((source, idx) => (
-                    <div
-                      key={idx}
-                      className="flex flex-col gap-2 px-3.5 py-3 rounded-xl border border-white/10 bg-white/[0.035] transition-colors hover:border-white/15 hover:bg-white/[0.065] group"
-                    >
-                      <div className="flex items-start justify-between gap-2">
-                        <div className="flex-1 min-w-0">
-                          <p className="text-xs text-text truncate leading-relaxed" title={source.title}>{source.title}</p>
-                          <div className="flex items-center gap-2 mt-1">
-                            <span className="text-[10px] font-bold text-primary bg-primary/10 px-1.5 py-0.5 rounded">{source.quality}</span>
-                            {source.isHindi && (
-                              <span className="text-[10px] font-bold text-[#FF9933] bg-[#FF9933]/10 px-1.5 py-0.5 rounded border border-[#FF9933]/20">HINDI</span>
-                            )}
-                            <span className="text-[10px] text-muted">{source.size}</span>
-                            <span className={`text-[10px] font-bold ${
-                              getTorrentSourceSpeedLabel(source) === 'FAST' ? 'text-emerald-300' :
-                              getTorrentSourceSpeedLabel(source) === 'GOOD' ? 'text-green-400' :
-                              getTorrentSourceSpeedLabel(source) === 'OK' ? 'text-yellow-300' :
-                              'text-red-300'
-                            }`}>{getTorrentSourceSpeedLabel(source)}</span>
-                            <span className="text-[10px] text-green-400/70">{source.seeds}↑</span>
-                            <span className="text-[10px] text-muted/50">{source.peers}↓</span>
+                  </div>
+                  {[0, 1, 2, 3].map(i => (
+                    <div key={i} className="animate-pulse rounded-xl bg-white/[0.03] px-3 py-2.5 ring-1 ring-white/[0.06]">
+                      <div className="flex items-center gap-2.5">
+                        <div className="h-11 w-[54px] shrink-0 rounded-lg bg-white/[0.06]" />
+                        <div className="flex-1 space-y-1.5 py-0.5">
+                          <div className="h-3 w-11/12 rounded bg-white/[0.07]" />
+                          <div className="flex gap-1.5">
+                            <div className="h-4 w-12 rounded-full bg-white/[0.06]" />
+                            <div className="h-4 w-14 rounded-full bg-white/[0.06]" />
+                            <div className="h-4 w-10 rounded-full bg-white/[0.06]" />
                           </div>
                         </div>
-                        <button
-                          onClick={() => handleStartDownload(source)}
-                          className="flex-shrink-0 p-2 rounded-lg bg-primary/10 hover:bg-primary text-primary hover:text-white transition-all duration-200"
-                          title={source.title}
-                        >
-                          <DownloadIcon size={14} />
-                        </button>
+                        <div className="h-8 w-[76px] shrink-0 rounded-lg bg-white/[0.06]" />
                       </div>
                     </div>
                   ))}
-                  </div>
+                </div>
+              ) : filteredSources.length > 0 ? (
+                <div className="space-y-2">
+                  {filteredSources.map((source, idx) => {
+                    const speedLabel = getTorrentSourceSpeedLabel(source)
+                    const isHevc = isHevcSource(source)
+                    const quality = String(source.quality || 'HD').toUpperCase()
+                    const qualityStyle = quality.includes('2160') || quality.includes('4K') || quality.includes('UHD')
+                      ? 'bg-amber-400/12 text-amber-300 ring-amber-400/30'
+                      : quality.includes('1080')
+                        ? 'bg-sky-400/12 text-sky-300 ring-sky-400/30'
+                        : quality.includes('720')
+                          ? 'bg-emerald-400/12 text-emerald-300 ring-emerald-400/30'
+                          : 'bg-white/[0.05] text-white/70 ring-white/15'
+                    const seedCount = Number(source.seeds) || 0
+                    const seedDot = seedCount >= 100 ? 'bg-emerald-400' : seedCount >= 25 ? 'bg-green-400' : seedCount >= 5 ? 'bg-amber-400' : 'bg-red-400'
+                    const speedStyle = speedLabel === 'FAST' ? 'text-emerald-300' : speedLabel === 'GOOD' ? 'text-green-300' : speedLabel === 'OK' ? 'text-amber-300' : 'text-red-300'
+                    const episodeBadge = selectedItem?.media_type === 'tv' && (typeof source.parsedSeason === 'number' || typeof source.parsedEpisode === 'number')
+                      ? isSeasonPackSource(source)
+                        ? `S${source.parsedSeason} Pack`
+                        : `S${source.parsedSeason ?? '?'} E${source.parsedEpisode ?? '?'}`
+                      : null
+
+                    return (
+                      <div
+                        key={idx}
+                        className={`rounded-xl px-3 py-2.5 ring-1 transition-colors ${
+                          idx === 0
+                            ? 'bg-[#131A26] ring-white/15'
+                            : 'bg-[#111823] ring-white/[0.07] hover:bg-[#141C2A] hover:ring-white/15'
+                        }`}
+                      >
+                        <div className="flex items-center gap-2.5">
+                          <div className={`flex h-11 w-[54px] shrink-0 flex-col items-center justify-center gap-px rounded-lg ring-1 ${qualityStyle}`}>
+                            <span className="text-[12px] font-black leading-none">{quality}</span>
+                            {source.size && <span className="max-w-[48px] truncate text-[8px] font-bold opacity-70" title={source.size}>{source.size}</span>}
+                          </div>
+                          <div className="min-w-0 flex-1">
+                            <div className="flex items-center gap-1.5">
+                              {idx === 0 && (
+                                <Star size={11} className="shrink-0 text-amber-300" fill="currentColor" />
+                              )}
+                              <p className="truncate text-[12px] font-semibold text-white/90" title={source.title}>
+                                {source.title}
+                              </p>
+                            </div>
+                            <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-[10px] font-medium text-white/45">
+                              <span className="inline-flex items-center gap-1">
+                                <span className={`h-1.5 w-1.5 rounded-full ${seedDot}`} />
+                                {source.seeds}
+                              </span>
+                              <span className="inline-flex items-center gap-1">
+                                <Users size={10} />
+                                {source.peers}
+                              </span>
+                              <span className={`font-black tracking-wide ${speedStyle}`}>
+                                {speedLabel}
+                              </span>
+                              {episodeBadge && (
+                                <span className="font-bold text-white/50">{episodeBadge}</span>
+                              )}
+                              {isHevc && (
+                                <span
+                                  className="inline-flex items-center gap-0.5 rounded-full bg-violet-400/15 px-1.5 py-px text-[9px] font-bold text-violet-200 ring-1 ring-violet-400/30"
+                                  title="HEVC / H.265 — recommended for smooth streaming"
+                                >
+                                  <Zap size={8} fill="currentColor" />
+                                  HEVC
+                                </span>
+                              )}
+                              {source.isHindi && (
+                                <span className="rounded-full bg-[#FF9933]/12 px-1.5 py-px text-[9px] font-bold text-[#FFB76B] ring-1 ring-[#FF9933]/30">
+                                  Hindi
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+
+                        <button
+                          onClick={() => handleStartDownload(source)}
+                          className="mt-2.5 flex h-8 w-full items-center justify-center gap-1.5 rounded-lg bg-emerald-500 text-[12px] font-bold text-white transition-all hover:bg-emerald-400 active:scale-[0.99]"
+                          title={source.title}
+                        >
+                          <DownloadIcon size={13} />
+                          Download
+                        </button>
+                      </div>
+                    )
+                  })}
                 </div>
               ) : (
-                <div className="flex h-full min-h-[340px] flex-col items-center justify-center gap-3 rounded-2xl border border-dashed border-white/10 px-8 text-center">
-                  <HardDrive size={34} className="text-muted/40" />
-                  <p className="text-xs font-black uppercase tracking-widest text-muted">
+                <div className="flex min-h-[340px] flex-col items-center justify-center gap-3 rounded-2xl bg-white/[0.02] px-8 text-center ring-1 ring-dashed ring-white/10">
+                  <span className="flex h-12 w-12 items-center justify-center rounded-full bg-amber-400/10 text-amber-300 ring-1 ring-amber-400/25">
+                    <HardDrive size={20} />
+                  </span>
+                  <p className="text-[13px] font-bold text-white">
                     {sources.length > 0 ? 'No sources match these filters.' : 'No sources found.'}
                   </p>
-                  <p className="text-[11px] text-muted/50">
-                    {sources.length > 0 ? 'Try All Audio or adjust the season filters.' : 'Try a different title or check back later.'}
+                  <p className="max-w-[280px] text-[11px] leading-relaxed text-white/40">
+                    {sources.length > 0
+                      ? 'Try clearing the quality, language, season or episode filters to see more results.'
+                      : 'Try a different title or check back later.'}
                   </p>
+                  {sources.length > 0 ? (
+                    <button
+                      onClick={clearSourceFilters}
+                      className="mt-1 h-9 rounded-full bg-white/5 px-4 text-[11px] font-bold text-white/70 ring-1 ring-white/10 transition-colors hover:bg-white/10 hover:text-white"
+                    >
+                      Clear filters
+                    </button>
+                  ) : (
+                    <button
+                      onClick={() => selectedItem && handleSelectResult(selectedItem)}
+                      className="mt-1 flex h-9 items-center gap-2 rounded-full bg-white/5 px-4 text-[11px] font-bold text-white/70 ring-1 ring-white/10 transition-colors hover:bg-white/10 hover:text-white"
+                    >
+                      <Search size={12} />
+                      Try again
+                    </button>
+                  )}
                 </div>
               )}
             </div>

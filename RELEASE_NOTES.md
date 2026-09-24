@@ -1,3 +1,30 @@
+# MyCinema v1.35.0
+
+Sources got a full makeover, PiP finally gets out of your way, and scrolling feels silkier.
+
+### Sources, Redesigned
+- **Same Panel Everywhere**: The Download tab sources panel now looks and works exactly like the title-page one — same header, same filters, same cards.
+- **Filters With Counts**: Language (All/Hindi), Quality (4K/1080p/720p), Season, Pack, and Episode filters are pills with live counts — no more blind dropdowns.
+- **Compact Cards**: Best-match star, quality badge, seed health, HEVC/Hindi tags, and one-tap Stream or Download in half the space, with shimmer skeletons while scanning.
+
+### Picture-in-Picture That Respects You
+- **Minimizes With You**: Hitting PiP opens the floating window and minimizes MyCinema; Back to tab (or closing PiP) restores the app straight into fullscreen.
+- **Skip From The Taskbar**: While PiP floats, hovering the taskbar icon gives −10s, play/pause, and +10s buttons.
+- **Media Keys Too**: Play/pause, ±10s, next episode, and scrubbing work through OS media controls.
+
+### Calmer Window Controls
+- **Hidden Until Needed**: The top-right minimize/fullscreen/close capsule only appears when your cursor lingers in the corner — smaller, tighter, and never covering panel buttons.
+
+### Smoother Scrolling
+- **Only The Active Page Renders**: Background tabs no longer keep timers, images, and scroll listeners alive behind your current view.
+- **Lighter Cards**: Heavy blurs, clip-paths, and oversized shadows were removed from cards and collections — same look, far less GPU work.
+
+### Security & Privacy
+- **PiP-Only Popups**: The popup guard now allows only the video PiP window; every other popup type stays denied, and external links remain https-only.
+- **Same Safe Pipelines**: Downloads, shares, and media serving are unchanged — only how windows restore changed, not what files can be served.
+
+***
+
 # MyCinema v1.34.0
 
 Collections arrive: hand-built lists with file-only sharing, and a watchlist that is finally just one inbox.

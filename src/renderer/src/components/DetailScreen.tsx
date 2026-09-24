@@ -122,6 +122,14 @@ const hasSourceEpisodeMarker = (source: any) => (
 
 const isSourceSeasonPack = (source: any) => Boolean(source.isSeasonPack) && !hasSourceEpisodeMarker(source)
 
+const normalizeSourceQualityKey = (source: any): '2160p' | '1080p' | '720p' | '480p' => {
+  const text = `${source?.quality || ''} ${source?.title || ''}`.toLowerCase()
+  if (/\b(2160p|4k|uhd)\b/.test(text)) return '2160p'
+  if (/\b1080p?\b/.test(text)) return '1080p'
+  if (/\b720p?\b/.test(text)) return '720p'
+  return '480p'
+}
+
 const getMoctaleUrl = (video: Video) => {
   const title = video.type === 'series' && video.series_name ? video.series_name : video.title
   const slug = title
@@ -193,7 +201,8 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
   const [sourceSeasonFilter, setSourceSeasonFilter] = useState('all')
   const [sourcePackSeasonFilter, setSourcePackSeasonFilter] = useState('all')
   const [sourceEpisodeFilter, setSourceEpisodeFilter] = useState('all')
-  const [hindiOnly, setHindiOnly] = useState(false)
+  const [sourceLanguageFilter, setSourceLanguageFilter] = useState<'all' | 'hindi'>('all')
+  const [sourceQualityFilter, setSourceQualityFilter] = useState<'all' | '2160p' | '1080p' | '720p' | '480p'>('all')
   const [showDownloadOptions, setShowDownloadOptions] = useState(false)
   const [startingSourceMagnet, setStartingSourceMagnet] = useState<string | null>(null)
   const [startedSourceMagnet, setStartedSourceMagnet] = useState<string | null>(null)
@@ -339,7 +348,8 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
   const handleOpenDownloadOptions = async () => {
     setTorrentStreamError(null)
     if (!initialSharedSource?.magnet) {
-      setHindiOnly(false)
+      setSourceLanguageFilter('all')
+      setSourceQualityFilter('all')
       setSourceSeasonFilter('all')
       setSourcePackSeasonFilter('all')
       setSourceEpisodeFilter('all')
@@ -824,7 +834,8 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
     setSourceSeasonFilter('all')
     setSourcePackSeasonFilter('all')
     setSourceEpisodeFilter('all')
-    setHindiOnly(false)
+    setSourceLanguageFilter('all')
+    setSourceQualityFilter('all')
     setShowDownloadOptions(false)
     setStartingSourceMagnet(null)
     setStartedSourceMagnet(null)
@@ -1034,10 +1045,31 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
     return Array.from(values).sort((a, b) => a - b)
   }, [sources, sourceSeasonFilter])
 
+  const sourceQualityCounts = React.useMemo(() => {
+    const counts: Record<'2160p' | '1080p' | '720p' | '480p', number> = { '2160p': 0, '1080p': 0, '720p': 0, '480p': 0 }
+    sources.forEach(source => {
+      counts[normalizeSourceQualityKey(source)] += 1
+    })
+    return counts
+  }, [sources])
+
+  const sourceHindiCount = React.useMemo(() => sources.filter(s => s.isHindi).length, [sources])
+
+  const hasActiveSourceFilters = sourceLanguageFilter !== 'all' || sourceQualityFilter !== 'all' || sourceSeasonFilter !== 'all' || sourcePackSeasonFilter !== 'all' || sourceEpisodeFilter !== 'all'
+
+  const clearSourceFilters = () => {
+    setSourceLanguageFilter('all')
+    setSourceQualityFilter('all')
+    setSourceSeasonFilter('all')
+    setSourcePackSeasonFilter('all')
+    setSourceEpisodeFilter('all')
+  }
+
   const filteredSources = React.useMemo(() => {
     return sources
       .filter(source => {
-        if (hindiOnly && !source.isHindi) return false
+        if (sourceLanguageFilter === 'hindi' && !source.isHindi) return false
+        if (sourceQualityFilter !== 'all' && normalizeSourceQualityKey(source) !== sourceQualityFilter) return false
 
         if (video.type === 'series') {
           if (sourceSeasonFilter === 'packs') {
@@ -1054,7 +1086,7 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
         return true
       })
       .sort((a, b) => getTorrentSourceHealthScore(b) - getTorrentSourceHealthScore(a))
-  }, [sources, hindiOnly, sourceSeasonFilter, sourcePackSeasonFilter, sourceEpisodeFilter, video.type])
+  }, [sources, sourceLanguageFilter, sourceQualityFilter, sourceSeasonFilter, sourcePackSeasonFilter, sourceEpisodeFilter, video.type])
 
   const trailerSeasonOptions = video.type === 'series'
     ? [...new Set([...seasons, ...trailerSeasons])].sort((a, b) => a - b)
@@ -1867,48 +1899,71 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
       {showDownloadOptions && (
         <>
           <div
-            className="fixed inset-0 z-[70] bg-black/25 animate-in fade-in duration-150"
+            className="fixed inset-0 z-[70] bg-black/60 animate-in fade-in duration-150"
             onClick={handleCloseDownloadOptions}
           />
-          <aside className="fixed inset-y-0 right-0 z-[80] flex w-full max-w-[560px] flex-col border-l border-white/10 bg-[#0B0F16]/70 backdrop-blur-3xl shadow-2xl animate-in slide-in-from-right duration-300">
-            <div className="border-b border-white/10 bg-white/[0.02]">
-              <div className="flex items-start justify-between gap-4 px-5 py-5">
-                <div className="min-w-0">
-                  <div className="mb-2 flex items-center gap-2 text-[10px] font-black uppercase tracking-[0.18em] text-primary">
-                    <Download size={14} />
-                    {sourceActionLabel}
+          <aside className="fixed inset-y-0 right-0 z-[80] flex w-full max-w-[580px] flex-col border-l border-white/10 bg-[#0C1017] shadow-[-32px_0_80px_rgba(0,0,0,0.65)] animate-in slide-in-from-right duration-300">
+            <div className="relative border-b border-white/10 bg-[#0C1017]">
+              {/* scan progress */}
+              <div className="absolute inset-x-0 top-0 h-[2px] bg-white/5">
+                {searching && sourceSearchStatus.total > 0 ? (
+                  <div
+                    className="h-full bg-primary transition-all duration-300"
+                    style={{ width: `${Math.min(100, (sourceSearchStatus.completed / Math.max(1, sourceSearchStatus.total)) * 100)}%` }}
+                  />
+                ) : searching ? (
+                  <div className="h-full w-1/3 animate-pulse bg-primary/70" />
+                ) : null}
+              </div>
+              <div className="flex items-start gap-4 px-5 pt-5 pb-4">
+                {posterUrl ? (
+                  <img
+                    src={posterUrl}
+                    alt=""
+                    loading="lazy"
+                    decoding="async"
+                    className="h-[68px] w-[48px] shrink-0 rounded-lg object-cover ring-1 ring-white/15"
+                  />
+                ) : (
+                  <div className="flex h-[68px] w-[48px] shrink-0 items-center justify-center rounded-lg bg-white/5 ring-1 ring-white/10">
+                    <Film size={18} className="text-white/30" />
                   </div>
-                  <h3 className="truncate text-lg font-black text-white">
+                )}
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-2 text-[10px] font-black uppercase tracking-[0.2em] text-white/40">
+                    <span className="inline-flex h-5 w-5 items-center justify-center rounded-md bg-primary/15 text-primary">
+                      <Download size={12} />
+                    </span>
+                    {sourceActionLabel}
+                    {sourceSearchStatus.cached && (
+                      <span className="rounded-full bg-white/5 px-2 py-0.5 text-[9px] font-bold tracking-widest text-white/40">
+                        Cached
+                      </span>
+                    )}
+                  </div>
+                  <h3 className="mt-1.5 truncate text-[17px] font-extrabold tracking-tight text-white">
                     {video.type === 'series' && video.series_name ? video.series_name : video.title}
                   </h3>
-                  <p className="mt-1 text-[10px] font-semibold text-white/35">
-                    <Play size={10} className="mr-1 inline -translate-y-px text-emerald-300" fill="currentColor" />
-                    Streams instantly without saving · 
-                    <Download size={10} className="mx-1 inline -translate-y-px text-primary" />
-                    saves the file to your device
+                  <p className="mt-1 text-[11px] font-medium text-white/40">
+                    {video.release_year ? `${video.release_year} · ` : ''}{filteredSources.length} of {sources.length} sources
+                    {searching && sourceSearchStatus.total > 0
+                      ? ` · scanning ${sourceSearchStatus.completed}/${sourceSearchStatus.total}`
+                      : searching ? ' · scanning…' : ''}
                   </p>
-                  <div className="mt-3 flex flex-wrap items-center gap-2">
-                    <span className="rounded-md border border-white/10 bg-white/[0.04] px-2.5 py-1 text-[10px] font-bold text-white/65">
-                      {filteredSources.length} shown
+                  <div className="mt-2.5 flex items-center gap-2 text-[11px]">
+                    <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-500/10 px-2.5 py-1 font-semibold text-emerald-300 ring-1 ring-emerald-500/20">
+                      <Play size={11} fill="currentColor" />
+                      Stream — instant
                     </span>
-                    <span className="rounded-md border border-white/10 bg-white/[0.04] px-2.5 py-1 text-[10px] font-bold text-white/65">
-                      {sources.length} total
+                    <span className="inline-flex items-center gap-1.5 rounded-full bg-white/5 px-2.5 py-1 font-semibold text-white/60 ring-1 ring-white/10">
+                      <Download size={11} />
+                      Save — download
                     </span>
-                    {searching && sourceSearchStatus.total > 0 && (
-                      <span className="rounded-md border border-primary/20 bg-primary/10 px-2.5 py-1 text-[10px] font-bold text-primary">
-                        Checking {sourceSearchStatus.completed}/{sourceSearchStatus.total}
-                      </span>
-                    )}
-                    {sourceSearchStatus.cached && (
-                      <span className="rounded-md border border-white/10 bg-white/[0.04] px-2.5 py-1 text-[10px] font-bold text-white/45">
-                        Cached first
-                      </span>
-                    )}
                     {(() => {
                       const hindiCount = sources.filter(s => s.isHindi).length
                       return hindiCount > 0 ? (
-                        <span className="rounded-md border border-[#FF9933]/25 bg-[#FF9933]/10 px-2.5 py-1 text-[10px] font-bold text-[#FFB76B]">
-                          🇮🇳 {hindiCount} Hindi
+                        <span className="inline-flex items-center gap-1 rounded-full bg-[#FF9933]/10 px-2.5 py-1 font-bold text-[#FFB76B] ring-1 ring-[#FF9933]/25">
+                          {hindiCount} Hindi
                         </span>
                       ) : null
                     })()}
@@ -1916,89 +1971,201 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
                 </div>
                 <button
                   onClick={handleCloseDownloadOptions}
-                  className="shrink-0 rounded-lg border border-white/10 bg-white/[0.04] p-2 text-white/55 transition-colors hover:bg-white/[0.08] hover:text-white"
-                  title="Close download options"
+                  className="shrink-0 rounded-full bg-white/5 p-2.5 text-white/60 ring-1 ring-white/10 transition-colors hover:bg-white/10 hover:text-white"
+                  title="Close sources"
                 >
-                  <X size={18} />
+                  <X size={16} />
                 </button>
               </div>
 
-              <div className="flex items-center gap-2 border-t border-white/10 px-4 py-3">
-                <div className="flex min-w-0 flex-1 items-center gap-2 overflow-hidden">
-                  <button
-                    onClick={() => setHindiOnly(value => !value)}
-                    className={`flex min-h-8 shrink-0 items-center gap-1.5 rounded-lg border px-2.5 text-[9px] font-black uppercase tracking-widest transition-all ${
-                      hindiOnly
-                        ? 'border-[#FF9933]/40 bg-[#FF9933]/16 text-[#FFB76B]'
-                        : 'border-white/10 bg-[#151B25] text-white/55 hover:bg-[#1A2230] hover:text-white/80'
-                    }`}
-                  >
-                    <Languages size={11} />
-                    {hindiOnly ? 'Hindi Only' : 'All Audio'}
-                  </button>
-
-                  {video.type === 'series' && (
-                    <>
-                      <select
-                        value={sourceSeasonFilter}
-                        onChange={(event) => {
-                          setSourceSeasonFilter(event.target.value)
-                          setSourcePackSeasonFilter('all')
-                          setSourceEpisodeFilter('all')
-                        }}
-                        className="min-h-8 w-[122px] shrink-0 rounded-lg border border-white/10 bg-[#151B25] px-2 text-[9px] font-black uppercase tracking-widest text-white/70 outline-none transition-colors hover:bg-[#1A2230]"
+              <div className="space-y-2 border-t border-white/[0.07] bg-white/[0.015] px-4 py-2.5">
+                <div className="flex items-center gap-2">
+                  <div className="flex min-w-0 flex-1 items-center gap-2 overflow-x-auto py-0.5 scrollbar-hide">
+                    {/* Language: fixed two-option segmented control — labels never change, only the active state does */}
+                    <div className="flex h-7 shrink-0 items-center gap-0.5 rounded-full bg-white/5 p-0.5 ring-1 ring-white/10" role="group" aria-label="Language filter">
+                      <button
+                        onClick={() => setSourceLanguageFilter('all')}
+                        title={`Show all languages (${sources.length})`}
+                        className={`flex h-6 items-center gap-1 rounded-full px-2.5 text-[10px] font-bold tracking-wide transition-all ${
+                          sourceLanguageFilter === 'all'
+                            ? 'bg-white text-black'
+                            : 'text-white/55 hover:text-white'
+                        }`}
                       >
-                        <option className="bg-[#10141d] text-white" value="all">All Seasons</option>
-                        <option className="bg-[#10141d] text-white" value="packs">Season Packs</option>
-                        {sourceSeasons.map(season => (
-                          <option className="bg-[#10141d] text-white" key={season} value={season.toString()}>
-                            Season {season}
-                          </option>
-                        ))}
-                      </select>
+                        All
+                        <span className={`rounded-full px-1.5 py-px text-[9px] font-black ${sourceLanguageFilter === 'all' ? 'bg-black/10 text-black/70' : 'bg-white/10 text-white/45'}`}>
+                          {sources.length}
+                        </span>
+                      </button>
+                      <button
+                        onClick={() => setSourceLanguageFilter('hindi')}
+                        title="Show Hindi / dual-audio only"
+                        className={`flex h-6 items-center gap-1 rounded-full px-2.5 text-[10px] font-bold tracking-wide transition-all ${
+                          sourceLanguageFilter === 'hindi'
+                            ? 'bg-[#FF9933] text-black'
+                            : 'text-white/55 hover:text-white'
+                        }`}
+                      >
+                        <Languages size={12} />
+                        Hindi
+                        <span className={`rounded-full px-1.5 py-px text-[9px] font-black ${sourceLanguageFilter === 'hindi' ? 'bg-black/10 text-black/70' : 'bg-[#FF9933]/15 text-[#FFB76B]'}`}>
+                          {sourceHindiCount}
+                        </span>
+                      </button>
+                    </div>
+                  </div>
 
-                      {sourceSeasonFilter === 'packs' && sourcePackSeasons.length > 0 && (
-                        <select
-                          value={sourcePackSeasonFilter}
-                          onChange={(event) => setSourcePackSeasonFilter(event.target.value)}
-                          className="min-h-8 w-[96px] shrink-0 rounded-lg border border-white/10 bg-[#151B25] px-2 text-[9px] font-black uppercase tracking-widest text-white/70 outline-none transition-colors hover:bg-[#1A2230]"
-                        >
-                          <option className="bg-[#10141d] text-white" value="all">Any</option>
-                          {sourcePackSeasons.map(season => (
-                            <option className="bg-[#10141d] text-white" key={`pack-season-${season}`} value={season.toString()}>
-                              Season {season}
-                            </option>
-                          ))}
-                        </select>
-                      )}
-
-                      {sourceSeasonFilter !== 'all' && sourceSeasonFilter !== 'packs' && sourceEpisodes.length > 0 && (
-                        <select
-                          value={sourceEpisodeFilter}
-                          onChange={(event) => setSourceEpisodeFilter(event.target.value)}
-                          className="min-h-8 w-[112px] shrink-0 rounded-lg border border-white/10 bg-[#151B25] px-2 text-[9px] font-black uppercase tracking-widest text-white/70 outline-none transition-colors hover:bg-[#1A2230]"
-                        >
-                          <option className="bg-[#10141d] text-white" value="all">Any Episode</option>
-                          {sourceEpisodes.map(episode => (
-                            <option className="bg-[#10141d] text-white" key={episode} value={episode.toString()}>
-                              Episode {episode}
-                            </option>
-                          ))}
-                        </select>
-                      )}
-                    </>
+                  {hasActiveSourceFilters && (
+                    <button
+                      onClick={clearSourceFilters}
+                      className="flex h-7 shrink-0 items-center gap-1 rounded-full px-2.5 text-[10px] font-bold tracking-wide text-white/45 transition-colors hover:bg-white/5 hover:text-white"
+                      title="Clear all filters"
+                    >
+                      <X size={12} />
+                      Clear
+                    </button>
                   )}
+                  <button
+                    onClick={() => handleSearchSources(true)}
+                    disabled={searching || !video.tmdb_id}
+                    className="flex h-7 shrink-0 items-center gap-1.5 rounded-full bg-white/5 px-3 text-[10px] font-bold tracking-wide text-white/60 ring-1 ring-white/10 transition-all hover:bg-white/10 hover:text-white disabled:opacity-50"
+                    title="Refresh sources"
+                  >
+                    {searching ? <Loader2 size={12} className="animate-spin" /> : <Search size={12} />}
+                    Refresh
+                  </button>
                 </div>
 
-                <button
-                  onClick={() => handleSearchSources(true)}
-                  disabled={searching || !video.tmdb_id}
-                  className="flex min-h-8 shrink-0 items-center gap-1.5 rounded-lg border border-white/10 bg-[#151B25] px-2.5 text-[9px] font-black uppercase tracking-widest text-white/55 transition-all hover:bg-[#1A2230] hover:text-white/80 disabled:opacity-50"
-                  title="Refresh sources"
-                >
-                  {searching ? <Loader2 size={11} className="animate-spin" /> : <Search size={11} />}
-                  Refresh
-                </button>
+                {/* Resolution: desired quality filter with live counts */}
+                <div className="flex items-center gap-1.5 overflow-x-auto py-0.5 scrollbar-hide">
+                  <span className="shrink-0 text-[9px] font-black uppercase tracking-[0.16em] text-white/35">Quality</span>
+                  {(['all', '2160p', '1080p', '720p'] as const).map(quality => {
+                    const isActive = sourceQualityFilter === quality
+                    const count = quality === 'all' ? sources.length : sourceQualityCounts[quality]
+                    const label = quality === 'all' ? 'All' : quality === '2160p' ? '4K' : quality
+                    return (
+                      <button
+                        key={quality}
+                        onClick={() => setSourceQualityFilter(quality)}
+                        title={quality === 'all' ? `All qualities (${sources.length})` : `${quality === '2160p' ? '2160p / 4K' : quality} (${count})`}
+                        className={`flex h-6 shrink-0 items-center gap-1 rounded-full px-2 text-[10px] font-bold tracking-wide ring-1 transition-all ${
+                          isActive
+                            ? 'bg-white text-black ring-white'
+                            : count === 0 && sources.length > 0
+                              ? 'bg-transparent text-white/25 ring-white/[0.07]'
+                              : 'bg-white/5 text-white/55 ring-white/10 hover:bg-white/10 hover:text-white'
+                        }`}
+                      >
+                        {label}
+                        <span className={`rounded-full px-1 py-px text-[9px] font-black ${isActive ? 'bg-black/10 text-black/70' : 'bg-white/10 text-white/40'}`}>
+                          {count}
+                        </span>
+                      </button>
+                    )
+                  })}
+                </div>
+
+                {video.type === 'series' && (
+                  <div className="flex items-center gap-1.5 overflow-x-auto py-0.5 scrollbar-hide">
+                    <span className="shrink-0 text-[9px] font-black uppercase tracking-[0.16em] text-white/35">Season</span>
+                    {(() => {
+                      const packCount = sources.filter(s => isSourceSeasonPack(s)).length
+                      const seasonOptions: { value: string; label: string; count: number }[] = [
+                        { value: 'all', label: 'All', count: sources.length },
+                        { value: 'packs', label: 'Packs', count: packCount },
+                        ...sourceSeasons.map(season => ({
+                          value: season.toString(),
+                          label: `S${season}`,
+                          count: sources.filter(s => !isSourceSeasonPack(s) && s.parsedSeason === season).length
+                        }))
+                      ]
+                      return seasonOptions.map(option => {
+                        const isActive = sourceSeasonFilter === option.value
+                        return (
+                          <button
+                            key={option.value}
+                            onClick={() => {
+                              setSourceSeasonFilter(option.value)
+                              setSourcePackSeasonFilter('all')
+                              setSourceEpisodeFilter('all')
+                            }}
+                            title={option.value === 'all' ? `All seasons (${option.count})` : option.value === 'packs' ? `Season packs (${option.count})` : `Season ${option.value} (${option.count})`}
+                            className={`flex h-6 shrink-0 items-center gap-1 rounded-full px-2 text-[10px] font-bold tracking-wide ring-1 transition-all ${
+                              isActive
+                                ? 'bg-white text-black ring-white'
+                                : option.count === 0 && sources.length > 0
+                                  ? 'bg-transparent text-white/25 ring-white/[0.07]'
+                                  : 'bg-white/5 text-white/55 ring-white/10 hover:bg-white/10 hover:text-white'
+                            }`}
+                          >
+                            {option.label}
+                            <span className={`rounded-full px-1 py-px text-[9px] font-black ${isActive ? 'bg-black/10 text-black/70' : 'bg-white/10 text-white/40'}`}>
+                              {option.count}
+                            </span>
+                          </button>
+                        )
+                      })
+                    })()}
+                  </div>
+                )}
+
+                {video.type === 'series' && sourceSeasonFilter === 'packs' && sourcePackSeasons.length > 0 && (
+                  <div className="flex items-center gap-1.5 overflow-x-auto py-0.5 scrollbar-hide">
+                    <span className="shrink-0 text-[9px] font-black uppercase tracking-[0.16em] text-white/35">Pack</span>
+                    {['all', ...sourcePackSeasons.map(String)].map(value => {
+                      const isActive = sourcePackSeasonFilter === value
+                      const count = value === 'all'
+                        ? sources.filter(s => isSourceSeasonPack(s)).length
+                        : sources.filter(s => isSourceSeasonPack(s) && s.parsedSeason === Number(value)).length
+                      return (
+                        <button
+                          key={value}
+                          onClick={() => setSourcePackSeasonFilter(value)}
+                          title={value === 'all' ? `Any pack (${count})` : `Season ${value} pack (${count})`}
+                          className={`flex h-6 shrink-0 items-center gap-1 rounded-full px-2 text-[10px] font-bold tracking-wide ring-1 transition-all ${
+                            isActive
+                              ? 'bg-white text-black ring-white'
+                              : 'bg-white/5 text-white/55 ring-white/10 hover:bg-white/10 hover:text-white'
+                          }`}
+                        >
+                          {value === 'all' ? 'Any' : `S${value}`}
+                          <span className={`rounded-full px-1 py-px text-[9px] font-black ${isActive ? 'bg-black/10 text-black/70' : 'bg-white/10 text-white/40'}`}>
+                            {count}
+                          </span>
+                        </button>
+                      )
+                    })}
+                  </div>
+                )}
+
+                {video.type === 'series' && sourceSeasonFilter !== 'all' && sourceSeasonFilter !== 'packs' && sourceEpisodes.length > 0 && (
+                  <div className="flex items-center gap-1.5 overflow-x-auto py-0.5 scrollbar-hide">
+                    <span className="shrink-0 text-[9px] font-black uppercase tracking-[0.16em] text-white/35">Episode</span>
+                    {['all', ...sourceEpisodes.map(String)].map(value => {
+                      const isActive = sourceEpisodeFilter === value
+                      const count = value === 'all'
+                        ? sources.filter(s => !isSourceSeasonPack(s) && s.parsedSeason === Number(sourceSeasonFilter)).length
+                        : sources.filter(s => !isSourceSeasonPack(s) && s.parsedSeason === Number(sourceSeasonFilter) && s.parsedEpisode === Number(value)).length
+                      return (
+                        <button
+                          key={value}
+                          onClick={() => setSourceEpisodeFilter(value)}
+                          title={value === 'all' ? `All episodes (${count})` : `Episode ${value} (${count})`}
+                          className={`flex h-6 shrink-0 items-center gap-1 rounded-full px-2 text-[10px] font-bold tracking-wide ring-1 transition-all ${
+                            isActive
+                              ? 'bg-white text-black ring-white'
+                              : 'bg-white/5 text-white/55 ring-white/10 hover:bg-white/10 hover:text-white'
+                          }`}
+                        >
+                          {value === 'all' ? 'All' : `E${value}`}
+                          <span className={`rounded-full px-1 py-px text-[9px] font-black ${isActive ? 'bg-black/10 text-black/70' : 'bg-white/10 text-white/40'}`}>
+                            {count}
+                          </span>
+                        </button>
+                      )
+                    })}
+                  </div>
+                )}
               </div>
             </div>
 
@@ -2010,42 +2177,44 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
                 </div>
               )}
               {localVersions.length > 0 && (
-                <div className="mb-4 rounded-2xl border border-emerald-400/15 bg-emerald-400/[0.06] p-3.5">
-                  <div className="mb-3 flex items-center justify-between gap-3">
-                    <div>
-                      <p className="text-[9px] font-black uppercase tracking-[0.18em] text-emerald-300">In your library</p>
-                      <p className="mt-1 text-xs font-semibold text-white/60">
-                        {localVersions.length} {localVersions.length === 1 ? 'version' : 'versions'} • new downloads are kept separately
+                <div className="mb-4 overflow-hidden rounded-2xl bg-emerald-400/[0.05] ring-1 ring-emerald-400/15">
+                  <div className="flex items-center gap-3 px-4 py-3">
+                    <span className="flex h-8 w-8 items-center justify-center rounded-full bg-emerald-400/15 text-emerald-300 ring-1 ring-emerald-400/25">
+                      <HardDrive size={15} />
+                    </span>
+                    <div className="flex-1">
+                      <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-emerald-200">On this device</p>
+                      <p className="text-[11px] font-medium text-white/45">
+                        {localVersions.length} {localVersions.length === 1 ? 'file' : 'files'} ready to play
                       </p>
                     </div>
-                    <HardDrive size={18} className="text-emerald-300/70" />
                   </div>
-                  <div className="space-y-2">
+                  <div className="space-y-2 px-3 pb-3">
                     {localVersions.map(version => (
-                      <div key={version.id} className="flex items-center gap-3 rounded-xl border border-white/8 bg-black/20 px-3 py-2.5">
+                      <div key={version.id} className="flex items-center gap-3 rounded-xl bg-black/30 px-3 py-2.5 ring-1 ring-white/[0.06]">
                         <button
                           onClick={() => onPlay(version)}
-                          className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-red-600 text-white transition-transform hover:scale-105"
+                          className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-white text-black transition-transform hover:scale-105"
                           title="Play this version"
                         >
-                          <Play size={13} fill="currentColor" />
+                          <Play size={14} fill="currentColor" />
                         </button>
                         <div className="min-w-0 flex-1">
-                          <p className="text-xs font-bold text-white">{getVersionLabel(version)}</p>
-                          <p className="truncate text-[9px] font-semibold text-white/35" title={version.file_path}>
+                          <p className="truncate text-[13px] font-semibold text-white">{getVersionLabel(version)}</p>
+                          <p className="truncate text-[10px] font-medium text-white/35" title={version.file_path}>
                             {version.file_path.split(/[\\/]/).pop()}
                           </p>
                         </div>
                         {version.is_preferred || (localVersions.length === 1 && version.id === localVersions[0].id) ? (
-                          <span className="rounded-md border border-emerald-300/20 bg-emerald-300/10 px-2 py-1 text-[8px] font-black uppercase tracking-widest text-emerald-200">
-                            Preferred
+                          <span className="shrink-0 rounded-full bg-emerald-400/15 px-2.5 py-1 text-[9px] font-bold uppercase tracking-widest text-emerald-200 ring-1 ring-emerald-400/25">
+                            Default
                           </span>
                         ) : (
                           <button
                             onClick={() => handleSetPreferredVersion(version)}
-                            className="rounded-md border border-white/10 px-2 py-1 text-[8px] font-black uppercase tracking-widest text-white/45 transition-colors hover:border-emerald-300/25 hover:text-emerald-200"
+                            className="shrink-0 rounded-full px-2.5 py-1 text-[9px] font-bold uppercase tracking-widest text-white/40 ring-1 ring-white/10 transition-colors hover:text-emerald-200 hover:ring-emerald-400/30"
                           >
-                            Make preferred
+                            Set default
                           </button>
                         )}
                       </div>
@@ -2055,33 +2224,42 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
               )}
 
               {(searching || !sourceSearchStatus.done) && filteredSources.length === 0 ? (
-                <div className="flex h-full min-h-[340px] flex-col items-center justify-center gap-4 text-center">
-                  <div className="h-12 w-12 rounded-full border-4 border-primary/20 border-t-primary animate-spin" />
-                  <p className="text-xs font-black uppercase tracking-widest text-muted">
-                    {sourceSearchStatus.total > 0
-                      ? `Checking ${sourceSearchStatus.completed}/${sourceSearchStatus.total} providers...`
-                      : 'Scanning sources...'}
-                  </p>
-                </div>
-              ) : filteredSources.length > 0 ? (
-                <div className="space-y-2.5">
-                  <div className="flex items-center gap-2.5 rounded-xl border border-purple-500/25 bg-gradient-to-r from-purple-950/40 via-indigo-950/30 to-purple-900/20 px-3.5 py-2 text-[11px] font-medium leading-relaxed text-purple-200/90 shadow-md">
-                    <div className="flex h-5 w-5 shrink-0 items-center justify-center rounded-lg bg-purple-500/20 text-purple-300 border border-purple-400/30">
-                      <Zap size={12} className="fill-purple-300/40 text-purple-300" />
-                    </div>
-                    <div>
-                      <span className="font-bold text-purple-100">Pro Tip:</span> Pick an <span className="font-bold text-purple-300 bg-purple-500/20 px-1.5 py-0.5 rounded border border-purple-400/30 text-[9px] uppercase">HEVC / x265</span> magnet for fast, high-quality streaming.
+                <div className="flex flex-col gap-3">
+                  <div className="flex items-center gap-3 rounded-2xl bg-white/[0.03] px-4 py-3.5 ring-1 ring-white/[0.07]">
+                    <div className="h-8 w-8 shrink-0 animate-spin rounded-full border-2 border-white/10 border-t-primary" />
+                    <div className="min-w-0">
+                      <p className="text-[13px] font-semibold text-white">
+                        {sourceSearchStatus.total > 0
+                          ? `Checking ${sourceSearchStatus.completed} of ${sourceSearchStatus.total} providers`
+                          : 'Finding the best sources'}
+                      </p>
+                      <p className="text-[11px] text-white/40">High-seed results appear first — you can start before it finishes.</p>
                     </div>
                   </div>
-                  {searching && (
-                    <div className="rounded-lg border border-primary/15 bg-primary/10 px-3 py-2 text-[10px] font-bold uppercase tracking-widest text-primary">
-                      {filteredSources.length} sources found. Still checking {Math.max(0, sourceSearchStatus.total - sourceSearchStatus.completed)} providers...
+                  {[0, 1, 2, 3].map(i => (
+                    <div key={i} className="animate-pulse rounded-xl bg-white/[0.03] px-3 py-2.5 ring-1 ring-white/[0.06]">
+                      <div className="flex items-center gap-2.5">
+                        <div className="h-11 w-[54px] shrink-0 rounded-lg bg-white/[0.06]" />
+                        <div className="flex-1 space-y-1.5 py-0.5">
+                          <div className="h-3 w-11/12 rounded bg-white/[0.07]" />
+                          <div className="flex gap-1.5">
+                            <div className="h-4 w-12 rounded-full bg-white/[0.06]" />
+                            <div className="h-4 w-14 rounded-full bg-white/[0.06]" />
+                            <div className="h-4 w-10 rounded-full bg-white/[0.06]" />
+                          </div>
+                        </div>
+                        <div className="h-8 w-[76px] shrink-0 rounded-lg bg-white/[0.06]" />
+                      </div>
                     </div>
-                  )}
+                  ))}
+                </div>
+              ) : filteredSources.length > 0 ? (
+                <div className="space-y-2">
                   {filteredSources.map((src, idx) => {
                     const speedLabel = getTorrentSourceSpeedLabel(src)
                     const isHevc = isHevcSource(src)
                     const isStarting = startingSourceMagnet === src.magnet
+                    const isBusyStream = startingStreamMagnet === src.magnet
                     const isStarted = startedSourceMagnet === src.magnet || activeDownloads.some(download => (
                       download.status !== 'error' && (
                         download.magnet === src.magnet ||
@@ -2090,98 +2268,113 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
                     ))
                     const isSharedSource = initialSharedSource?.magnet && src.magnet === initialSharedSource.magnet
                     const sharedSourceHasLiveStats = isSharedSource && ((Number(src.seeds) || 0) > 0 || (Number(src.peers) || 0) > 0)
+                    const quality = String(src.quality || 'HD').toUpperCase()
+                    const qualityStyle = quality.includes('2160') || quality.includes('4K') || quality.includes('UHD')
+                      ? 'bg-amber-400/12 text-amber-300 ring-amber-400/30'
+                      : quality.includes('1080')
+                        ? 'bg-sky-400/12 text-sky-300 ring-sky-400/30'
+                        : quality.includes('720')
+                          ? 'bg-emerald-400/12 text-emerald-300 ring-emerald-400/30'
+                          : 'bg-white/[0.05] text-white/70 ring-white/15'
+                    const seedCount = Number(src.seeds) || 0
+                    const seedDot = seedCount >= 100 ? 'bg-emerald-400' : seedCount >= 25 ? 'bg-green-400' : seedCount >= 5 ? 'bg-amber-400' : 'bg-red-400'
+                    const speedStyle = speedLabel === 'FAST' ? 'text-emerald-300' : speedLabel === 'GOOD' ? 'text-green-300' : speedLabel === 'OK' ? 'text-amber-300' : 'text-red-300'
+                    const episodeBadge = video.type === 'series' && (typeof src.parsedSeason === 'number' || typeof src.parsedEpisode === 'number')
+                      ? src.isSeasonPack
+                        ? `S${src.parsedSeason} Pack`
+                        : `S${src.parsedSeason ?? '?'} E${src.parsedEpisode ?? '?'}`
+                      : null
 
                     return (
                       <div
                         key={`${src.magnet || src.title}-${idx}`}
-                        className={`group rounded-xl border px-3.5 py-3 transition-colors ${
+                        className={`rounded-xl px-3 py-2.5 ring-1 transition-colors ${
                           isSharedSource
-                            ? 'border-cyan-400/35 bg-cyan-400/10 shadow-[0_0_28px_rgba(34,211,238,0.08)]'
-                            : 'border-white/10 bg-white/[0.035] hover:border-white/15 hover:bg-white/[0.065]'
+                            ? 'bg-cyan-400/[0.06] ring-cyan-400/30'
+                            : idx === 0
+                              ? 'bg-[#131A26] ring-white/15'
+                              : 'bg-[#111823] ring-white/[0.07] hover:bg-[#141C2A] hover:ring-white/15'
                         }`}
                       >
-                        <div className="flex items-start justify-between gap-3">
+                        <div className="flex items-center gap-2.5">
+                          <div className={`flex h-11 w-[54px] shrink-0 flex-col items-center justify-center gap-px rounded-lg ring-1 ${qualityStyle}`}>
+                            <span className="text-[12px] font-black leading-none">{quality}</span>
+                            {src.size && <span className="max-w-[48px] truncate text-[8px] font-bold opacity-70" title={src.size}>{src.size}</span>}
+                          </div>
                           <div className="min-w-0 flex-1">
-                            {isSharedSource && (
-                              <div className="mb-2 inline-flex items-center gap-1.5 rounded-md border border-cyan-300/25 bg-cyan-300/10 px-2 py-1 text-[9px] font-black uppercase tracking-widest text-cyan-200">
-                                <Share2 size={11} />
-                                {sharedSourceHasLiveStats ? 'Shared source matched' : searching ? 'Shared source, checking stats' : 'Shared source'}
-                              </div>
-                            )}
-                            <p className="truncate text-xs font-semibold leading-relaxed text-white" title={src.title}>
-                              {src.title}
-                            </p>
-                            <div className="mt-2 flex flex-wrap items-center gap-2">
-                              <span className="rounded bg-primary/10 px-1.5 py-0.5 text-[10px] font-bold text-primary">
-                                {src.quality || 'HD'}
+                            <div className="flex items-center gap-1.5">
+                              {idx === 0 && !isSharedSource && (
+                                <Star size={11} className="shrink-0 text-amber-300" fill="currentColor" />
+                              )}
+                              {isSharedSource && (
+                                <Share2 size={11} className="shrink-0 text-cyan-300" />
+                              )}
+                              <p className="truncate text-[12px] font-semibold text-white/90" title={src.title}>
+                                {src.title}
+                              </p>
+                            </div>
+                            <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-[10px] font-medium text-white/45">
+                              <span className="inline-flex items-center gap-1">
+                                <span className={`h-1.5 w-1.5 rounded-full ${seedDot}`} />
+                                {src.seeds}
                               </span>
+                              <span className="inline-flex items-center gap-1">
+                                <Users size={10} />
+                                {src.peers}
+                              </span>
+                              <span className={`font-black tracking-wide ${speedStyle}`}>
+                                {speedLabel}
+                              </span>
+                              {episodeBadge && (
+                                <span className="font-bold text-white/50">{episodeBadge}</span>
+                              )}
                               {isHevc && (
                                 <span
-                                  className="inline-flex items-center gap-1 rounded border border-purple-400/40 bg-gradient-to-r from-purple-500/25 to-indigo-500/25 px-1.5 py-0.5 text-[10px] font-black text-purple-200 shadow-sm shadow-purple-900/30"
-                                  title="HEVC / H.265: Recommended for smooth streaming"
+                                  className="inline-flex items-center gap-0.5 rounded-full bg-violet-400/15 px-1.5 py-px text-[9px] font-bold text-violet-200 ring-1 ring-violet-400/30"
+                                  title="HEVC / H.265 — recommended for smooth streaming"
                                 >
-                                  <Zap size={10} className="text-purple-300 fill-purple-300/30" />
+                                  <Zap size={8} fill="currentColor" />
                                   HEVC
                                 </span>
                               )}
                               {src.isHindi && (
-                                <span className="rounded border border-[#FF9933]/20 bg-[#FF9933]/10 px-1.5 py-0.5 text-[10px] font-bold text-[#FF9933]">
-                                  HINDI
+                                <span className="rounded-full bg-[#FF9933]/12 px-1.5 py-px text-[9px] font-bold text-[#FFB76B] ring-1 ring-[#FF9933]/30">
+                                  Hindi
                                 </span>
                               )}
-                              <span className="text-[10px] text-muted">{src.size}</span>
-                              <span className={`text-[10px] font-bold ${
-                                speedLabel === 'FAST' ? 'text-emerald-300' :
-                                speedLabel === 'GOOD' ? 'text-green-400' :
-                                speedLabel === 'OK' ? 'text-yellow-300' :
-                                'text-red-300'
-                              }`}>
-                                {speedLabel}
-                              </span>
-                              <span className="flex items-center gap-1 text-[10px] text-green-400/75">
-                                <Zap size={10} fill="currentColor" />
-                                {src.seeds} seeds
-                              </span>
-                              <span className="flex items-center gap-1 text-[10px] text-white/35">
-                                <Users size={10} />
-                                {src.peers} peers
-                              </span>
                             </div>
                           </div>
 
                           <div className="flex shrink-0 items-center gap-1.5">
                             <button
                               onClick={() => handlePlaySource(src)}
-                              disabled={startingStreamMagnet === src.magnet}
-                              className={`shrink-0 rounded-lg p-2 transition-all ${
-                                startingStreamMagnet === src.magnet
-                                  ? 'bg-emerald-500/20 text-emerald-300'
-                                  : 'bg-emerald-500/15 text-emerald-300 hover:bg-emerald-500 hover:text-white'
-                              } disabled:opacity-60`}
-                              title="Stream now (not saved to device)"
+                              disabled={isBusyStream}
+                              className="flex h-8 items-center gap-1.5 rounded-lg bg-emerald-500 px-3 text-[12px] font-bold text-white transition-all hover:bg-emerald-400 active:scale-[0.98] disabled:opacity-60"
+                              title={isSharedSource ? (sharedSourceHasLiveStats ? 'Stream shared source' : 'Stream shared source') : 'Stream now without saving'}
                             >
-                              {startingStreamMagnet === src.magnet ? (
-                                <Loader2 size={15} className="animate-spin" />
+                              {isBusyStream ? (
+                                <Loader2 size={13} className="animate-spin" />
                               ) : (
-                                <Play size={15} fill="currentColor" />
+                                <Play size={13} fill="currentColor" />
                               )}
+                              {isBusyStream ? '…' : 'Stream'}
                             </button>
                             <button
                               onClick={() => handleDownloadSource(src)}
                               disabled={isStarting || isStarted}
-                              className={`shrink-0 rounded-lg p-2 transition-all ${
+                              className={`flex h-8 w-8 items-center justify-center rounded-lg ring-1 transition-all active:scale-[0.98] disabled:opacity-60 ${
                                 isStarted
-                                  ? 'bg-green-500/15 text-green-300'
-                                  : 'bg-primary/10 text-primary hover:bg-primary hover:text-white'
-                              } disabled:opacity-60`}
-                              title={isStarted ? 'Download started' : 'Start download'}
+                                  ? 'bg-green-500/10 text-green-300 ring-green-500/25'
+                                  : 'bg-white/5 text-white/70 ring-white/10 hover:bg-white/10 hover:text-white'
+                              }`}
+                              title={isStarted ? 'Download started' : 'Save to device'}
                             >
                               {isStarting ? (
-                                <Loader2 size={15} className="animate-spin" />
+                                <Loader2 size={13} className="animate-spin" />
                               ) : isStarted ? (
-                                <CheckCircle2 size={15} />
+                                <CheckCircle2 size={13} />
                               ) : (
-                                <Download size={15} />
+                                <Download size={13} />
                               )}
                             </button>
                           </div>
@@ -2191,11 +2384,34 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
                   })}
                 </div>
               ) : (
-                <div className="flex h-full min-h-[340px] flex-col items-center justify-center gap-3 rounded-2xl border border-dashed border-white/10 px-8 text-center">
-                  <AlertTriangle className="text-amber-500/60" size={34} />
-                  <p className="text-xs font-black uppercase tracking-widest text-muted">
+                <div className="flex min-h-[340px] flex-col items-center justify-center gap-3 rounded-2xl bg-white/[0.02] px-8 text-center ring-1 ring-dashed ring-white/10">
+                  <span className="flex h-12 w-12 items-center justify-center rounded-full bg-amber-400/10 text-amber-300 ring-1 ring-amber-400/25">
+                    <AlertTriangle size={20} />
+                  </span>
+                  <p className="text-[13px] font-bold text-white">
                     {sources.length > 0 ? 'No sources match these filters.' : 'No sources found for this title.'}
                   </p>
+                  <p className="max-w-[280px] text-[11px] leading-relaxed text-white/40">
+                    {sources.length > 0
+                      ? 'Try clearing the quality, language, season or episode filters to see more results.'
+                      : 'Try refreshing, or check back later — new providers are checked each time.'}
+                  </p>
+                  {sources.length > 0 ? (
+                    <button
+                      onClick={clearSourceFilters}
+                      className="mt-1 h-9 rounded-full bg-white/5 px-4 text-[11px] font-bold text-white/70 ring-1 ring-white/10 transition-colors hover:bg-white/10 hover:text-white"
+                    >
+                      Clear filters
+                    </button>
+                  ) : (
+                    <button
+                      onClick={() => handleSearchSources(true)}
+                      className="mt-1 flex h-9 items-center gap-2 rounded-full bg-white/5 px-4 text-[11px] font-bold text-white/70 ring-1 ring-white/10 transition-colors hover:bg-white/10 hover:text-white"
+                    >
+                      <Search size={12} />
+                      Try again
+                    </button>
+                  )}
                 </div>
               )}
             </div>

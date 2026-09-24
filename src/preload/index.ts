@@ -147,6 +147,15 @@ const api = {
   downloadOnlineSubtitle: (params: { fileId: number; videoFilePath: string; fileName?: string }) =>
     ipcRenderer.invoke('download-opensubtitle', params),
   minimizeWindow: () => ipcRenderer.invoke('window-minimize'),
+  restoreWindow: (opts?: { enterFullscreen?: boolean }) => ipcRenderer.invoke('window-restore', opts),
+  setPipThumbar: (payload: { isPlaying: boolean; icons: { play: string; pause: string; back: string; fwd: string } }) =>
+    ipcRenderer.invoke('pip-thumbar-update', payload),
+  clearPipThumbar: () => ipcRenderer.invoke('pip-thumbar-clear'),
+  onThumbarCommand: (callback: (command: string) => void) => {
+    const handler = (_event: any, command: string) => callback(command)
+    ipcRenderer.on('thumbar-command', handler)
+    return () => ipcRenderer.removeListener('thumbar-command', handler)
+  },
   openWebPopup: (url: string, title?: string) => ipcRenderer.invoke('open-web-popup', url, title),
   toggleFullscreen: () => ipcRenderer.invoke('window-toggle-fullscreen'),
   isFullscreen: () => ipcRenderer.invoke('window-is-fullscreen'),

@@ -81,6 +81,7 @@ const App: React.FC = () => {
   const activeTabRef = useRef<AppTab>('home')
   const tabScrollPositionsRef = useRef<Partial<Record<AppTab, number>>>({})
   const windowControlsHideTimerRef = useRef<number | null>(null)
+  const windowControlsShowTimerRef = useRef<number | null>(null)
   const appFullscreenTapTimerRef = useRef<number | null>(null)
   const appFullscreenToggleInFlightRef = useRef(false)
   const activeTempStreamRef = useRef<string | null>(null)
@@ -196,6 +197,7 @@ const App: React.FC = () => {
   useEffect(() => {
     return () => {
       clearWindowControlsHideTimer()
+      clearWindowControlsShowTimer()
       if (appFullscreenTapTimerRef.current) {
         window.clearTimeout(appFullscreenTapTimerRef.current)
       }
@@ -353,18 +355,49 @@ const App: React.FC = () => {
     }
   }
 
+  const clearWindowControlsShowTimer = () => {
+    if (windowControlsShowTimerRef.current) {
+      window.clearTimeout(windowControlsShowTimerRef.current)
+      windowControlsShowTimerRef.current = null
+    }
+  }
+
   const revealWindowControls = () => {
+    clearWindowControlsShowTimer()
     clearWindowControlsHideTimer()
     setShowWindowControls(true)
   }
 
+  // Hover-intent reveal: only pop the capsule after the cursor lingers in
+  // the corner (~250ms), so brush-by mouse passes — e.g. reaching for a
+  // panel close button just below — never flash it. A deliberate move to
+  // the corner always lands it.
+  const scheduleWindowControlsReveal = () => {
+    clearWindowControlsHideTimer()
+    if (windowControlsShowTimerRef.current) return
+    windowControlsShowTimerRef.current = window.setTimeout(() => {
+      windowControlsShowTimerRef.current = null
+      setShowWindowControls(true)
+    }, 250)
+  }
+
   const hideWindowControlsSoon = () => {
+    clearWindowControlsShowTimer()
     clearWindowControlsHideTimer()
     windowControlsHideTimerRef.current = window.setTimeout(() => {
       setShowWindowControls(false)
       windowControlsHideTimerRef.current = null
-    }, 700)
+    }, 800)
   }
+
+  // Briefly flash the auto-hide window capsule on launch / fullscreen change
+  // so users discover it, then let it melt away until they hover top-right.
+  useEffect(() => {
+    if (!launchFullscreen) return
+    revealWindowControls()
+    const timer = window.setTimeout(() => setShowWindowControls(false), 3500)
+    return () => window.clearTimeout(timer)
+  }, [launchFullscreen, isFullscreen])
 
   const handleToggleFullscreen = async () => {
     if (appFullscreenToggleInFlightRef.current) return
@@ -405,48 +438,50 @@ const App: React.FC = () => {
     if (!launchFullscreen) return null
 
     const controlsVisible = showWindowControls || (!!playingVideo && videoControlsVisible)
-    const controlButtonClass = 'flex h-6 w-7 items-center justify-center text-white/60 transition-[color,opacity,transform] duration-150 hover:text-white/95 active:scale-90 focus:outline-none focus:text-white focus:ring-1 focus:ring-white/35'
+    const capsuleClass = `pointer-events-auto flex items-center gap-px rounded-full bg-black/50 py-0.5 pl-1 pr-0.5 shadow-[0_12px_40px_rgba(0,0,0,0.55)] ring-1 ring-white/10 backdrop-blur-2xl transition-all duration-300 ease-[cubic-bezier(0.16,1,0.3,1)] ${
+      controlsVisible ? 'translate-y-0 scale-100 opacity-100' : 'pointer-events-none -translate-y-2 scale-95 opacity-0'
+    }`
+    const controlButtonClass = 'flex h-6 w-7 items-center justify-center rounded-full text-white/65 transition-all duration-150 hover:bg-white/10 hover:text-white active:scale-90 focus:outline-none focus-visible:ring-1 focus-visible:ring-white/40'
 
     if (isFullscreen) {
       return (
         <div
-          className="fixed right-2 top-0 z-[260] flex h-6 w-24 items-center justify-end"
-          onMouseEnter={revealWindowControls}
+          className="fixed right-0 top-0 z-[260] flex h-8 w-28 items-start justify-end pr-1.5 pt-1"
+          onMouseEnter={scheduleWindowControlsReveal}
           onMouseLeave={hideWindowControlsSoon}
           onFocus={revealWindowControls}
           onBlur={hideWindowControlsSoon}
         >
-          <div
-            className={`flex items-center gap-1 transition-opacity duration-200 ${
-              controlsVisible ? 'opacity-100' : 'opacity-55'
-            }`}
-          >
+          <div className={capsuleClass} aria-hidden={!controlsVisible}>
             <button
               type="button"
               title="Minimize"
               aria-label="Minimize"
+              tabIndex={controlsVisible ? 0 : -1}
               onClick={() => window.api.minimizeWindow()}
               className={controlButtonClass}
             >
-              <Minus size={17} strokeWidth={2.5} />
+              <Minus size={12} strokeWidth={2.4} />
             </button>
             <button
               type="button"
               title="Exit fullscreen"
               aria-label="Exit fullscreen"
+              tabIndex={controlsVisible ? 0 : -1}
               onClick={handleToggleFullscreen}
               className={controlButtonClass}
             >
-              <Minimize2 size={15} strokeWidth={2.2} />
+              <Minimize2 size={11} strokeWidth={2.2} />
             </button>
             <button
               type="button"
               title="Close"
               aria-label="Close"
+              tabIndex={controlsVisible ? 0 : -1}
               onClick={() => window.api.closeWindow()}
-              className={`${controlButtonClass} hover:text-red-300 focus:ring-red-300/50 focus:text-red-200`}
+              className={`${controlButtonClass} hover:bg-red-500 hover:text-white focus-visible:ring-red-300/60`}
             >
-              <X size={17} strokeWidth={2.3} />
+              <X size={12} strokeWidth={2.4} />
             </button>
           </div>
         </div>
@@ -455,30 +490,24 @@ const App: React.FC = () => {
 
     return (
       <div
-        className="fixed right-3 top-0 z-[260] flex h-6 w-28 items-center justify-end gap-1"
-        onMouseEnter={revealWindowControls}
+        className="fixed right-0 top-0 z-[260] flex h-8 w-16 items-start justify-end pr-1.5 pt-1"
+        onMouseEnter={scheduleWindowControlsReveal}
         onMouseLeave={hideWindowControlsSoon}
         onFocus={revealWindowControls}
         onBlur={hideWindowControlsSoon}
       >
-        <span
-          className={`pointer-events-none text-[9px] font-bold uppercase tracking-[0.14em] text-white/50 transition-opacity duration-150 ${
-            controlsVisible ? 'opacity-100' : 'opacity-0'
-          }`}
-        >
-          Fullscreen
-        </span>
-        <button
-          type="button"
-          title="Enter fullscreen"
-          aria-label="Enter fullscreen"
-          onClick={handleToggleFullscreen}
-          className={`flex h-6 w-7 items-center justify-center text-white/60 transition-[color,opacity,transform] duration-150 hover:text-white/95 active:scale-90 focus:outline-none focus:text-white focus:ring-1 focus:ring-white/35 ${
-            controlsVisible ? 'opacity-100' : 'opacity-55'
-          }`}
-        >
-          <Maximize2 size={15} strokeWidth={2.2} />
-        </button>
+        <div className={capsuleClass} aria-hidden={!controlsVisible}>
+          <button
+            type="button"
+            title="Enter fullscreen"
+            aria-label="Enter fullscreen"
+            tabIndex={controlsVisible ? 0 : -1}
+            onClick={handleToggleFullscreen}
+            className={controlButtonClass}
+          >
+            <Maximize2 size={11} strokeWidth={2.2} />
+          </button>
+        </div>
       </div>
     )
   }

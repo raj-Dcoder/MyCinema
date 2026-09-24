@@ -558,19 +558,19 @@ const Collections: React.FC<CollectionsProps> = ({ onPlay, onShowDetail, focusCo
                 onContextMenu={(e) => { if (pressRef.current) e.preventDefault() }}
                 className={`group relative select-none touch-pan-y ${dragId === collection.id ? 'invisible' : 'cursor-grab transition-transform duration-300 hover:-translate-y-1'}`}
               >
-                <div className="relative isolate overflow-hidden rounded-[1.75rem] bg-[#0b0e14] ring-1 ring-white/10 transition-shadow duration-300 hover:shadow-[0_28px_70px_-24px_rgba(0,0,0,0.9)] hover:ring-white/25">
+                <div className="relative isolate overflow-hidden rounded-[1.75rem] bg-[#0b0e14] ring-1 ring-white/10 transition-shadow duration-300 hover:shadow-xl hover:ring-white/25">
                 <div className="absolute right-3 top-3 z-20 flex gap-1.5 opacity-0 transition-opacity duration-200 group-hover:opacity-100">
                   <button
                     onClick={(e) => { e.stopPropagation(); openEdit(collection) }}
                     title={`Edit "${collection.name}"`}
-                    className="flex h-8 w-8 items-center justify-center rounded-full bg-black/55 text-white/70 ring-1 ring-white/15 backdrop-blur transition-colors hover:bg-primary hover:text-white"
+                    className="flex h-8 w-8 items-center justify-center rounded-full bg-black/70 text-white/70 ring-1 ring-white/15 transition-colors hover:bg-primary hover:text-white"
                   >
                     <Pencil size={13} />
                   </button>
                   <button
                     onClick={(e) => { e.stopPropagation(); handleDelete(collection) }}
                     title={`Delete "${collection.name}"`}
-                    className="flex h-8 w-8 items-center justify-center rounded-full bg-black/55 text-white/70 ring-1 ring-white/15 backdrop-blur transition-colors hover:bg-red-500/80 hover:text-white"
+                    className="flex h-8 w-8 items-center justify-center rounded-full bg-black/70 text-white/70 ring-1 ring-white/15 transition-colors hover:bg-red-500/80 hover:text-white"
                   >
                     <Trash2 size={13} />
                   </button>
@@ -590,7 +590,8 @@ const Collections: React.FC<CollectionsProps> = ({ onPlay, onShowDetail, focusCo
                       src={resolvePoster(posters[0]) || ''}
                       alt=""
                       loading="lazy"
-                      className="absolute inset-0 h-full w-full scale-125 object-cover opacity-45 blur-2xl saturate-150 transition-transform duration-700 group-hover:scale-[1.32]"
+                      decoding="async"
+                      className="absolute inset-0 h-full w-full object-cover opacity-40 saturate-150"
                     />
                   ) : (
                     <div className={`absolute inset-0 bg-gradient-to-br ${gradient}`} />
@@ -604,8 +605,9 @@ const Collections: React.FC<CollectionsProps> = ({ onPlay, onShowDetail, focusCo
                           src={resolvePoster(poster) || ''}
                           alt=""
                           loading="lazy"
+                          decoding="async"
                           style={fanStyle(i)}
-                          className="aspect-[2/3] w-[76px] rounded-xl object-cover shadow-[0_18px_40px_-12px_rgba(0,0,0,0.9)] ring-1 ring-white/25"
+                          className="aspect-[2/3] w-[76px] rounded-xl object-cover shadow-lg ring-1 ring-white/25"
                         />
                       ))}
                     </div>
@@ -619,7 +621,6 @@ const Collections: React.FC<CollectionsProps> = ({ onPlay, onShowDetail, focusCo
 
                   <div className="absolute inset-0 bg-gradient-to-b from-[#07090d]/95 via-[#07090d]/30 to-[#07090d]/85" />
                   <div className="absolute inset-0 bg-gradient-to-r from-[#07090d]/85 via-[#07090d]/25 to-transparent" />
-                  <div className="pointer-events-none absolute inset-y-0 -left-1/3 w-1/4 -skew-x-12 bg-white/[0.08] blur-lg transition-transform delay-100 duration-700 group-hover:translate-x-[550%]" />
 
                   <div className="absolute inset-x-0 top-0 max-w-[68%] p-5">
                     <p className="mb-1 text-[10px] font-black uppercase tracking-[0.28em] text-white/45">

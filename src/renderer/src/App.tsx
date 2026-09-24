@@ -738,17 +738,19 @@ const App: React.FC = () => {
       </div>
 
       {/* Main Content */}
+      {/* NOTE: only the active page is mounted. Home used to stay mounted with
+          opacity-0 (HeroCarousel timers, decoded images, scroll listeners all
+          kept running behind Collections/Movies/etc. and caused scroll jank). */}
       <main className="relative flex-1 overflow-hidden">
-        <div
-          ref={homeScrollRef}
-          className={activeTab === 'home' ? 'absolute inset-0 overflow-y-auto scrollbar-hide pt-6 pb-14 opacity-100 transition-opacity duration-300' : 'pointer-events-none absolute inset-0 overflow-y-auto scrollbar-hide pt-6 pb-14 opacity-0 transition-opacity duration-300'}
-          aria-hidden={activeTab !== 'home'}
-        >
-          <Home onPlay={handlePlayVideo} onShowDetail={setSelectedVideo} onNavigate={navigateToTab} refreshKey={homeRefreshKey} />
-        </div>
-
-        {activeTab !== 'home' && (
-          <div ref={activePageScrollRef} className="absolute inset-0 overflow-y-auto scrollbar-hide animate-in fade-in duration-300">
+        {activeTab === 'home' ? (
+          <div
+            ref={homeScrollRef}
+            className="absolute inset-0 overflow-y-auto scrollbar-hide pt-6 pb-14"
+          >
+            <Home onPlay={handlePlayVideo} onShowDetail={setSelectedVideo} onNavigate={navigateToTab} refreshKey={homeRefreshKey} />
+          </div>
+        ) : (
+          <div ref={activePageScrollRef} className="absolute inset-0 overflow-y-auto scrollbar-hide">
             <div className="px-8 pt-6 pb-14 max-w-[1600px] mx-auto">
               {activeTab === 'videos'  && <Videos onPlay={handlePlayVideo} />}
               {activeTab === 'movies'  && <Movies onPlay={handlePlayVideo} onShowDetail={setSelectedVideo} />}

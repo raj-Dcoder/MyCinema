@@ -94,7 +94,7 @@ const VideoCard: React.FC<VideoCardProps> = ({ video, onPlay, onShowDetail, isCo
         className="group flex items-center gap-4 p-2 rounded-2xl hover:bg-white/5 transition-all cursor-pointer"
         onClick={() => onPlay(video)}
       >
-        <div className="relative w-24 aspect-video rounded-xl overflow-hidden bg-secondary flex-shrink-0 isolate transform-gpu [clip-path:inset(0_round_0.75rem)]">
+        <div className="relative w-24 aspect-video rounded-xl overflow-hidden bg-secondary flex-shrink-0 isolate transform-gpu">
           {backdropUrl || posterUrl ? (
             <img
               src={backdropUrl || posterUrl || ''}
@@ -141,12 +141,12 @@ const VideoCard: React.FC<VideoCardProps> = ({ video, onPlay, onShowDetail, isCo
         }
       }}
     >
-      <div className="relative aspect-[2/3] w-full overflow-hidden rounded-2xl bg-secondary shadow-lg ring-1 ring-white/5 isolate transform-gpu transition-[transform,box-shadow] duration-300 will-change-transform [backface-visibility:hidden] [clip-path:inset(0_round_1rem)] group-hover:-translate-y-2 group-hover:scale-[1.04] group-hover:shadow-2xl group-hover:shadow-red-950/40 group-hover:ring-red-600/70 group-focus-visible:-translate-y-2 group-focus-visible:scale-[1.04] group-focus-visible:outline-none group-focus-visible:ring-2 group-focus-visible:ring-red-600/80">
+      <div className="relative aspect-[2/3] w-full overflow-hidden rounded-2xl bg-secondary shadow-lg ring-1 ring-white/5 isolate transform-gpu transition-[transform,box-shadow] duration-300 [backface-visibility:hidden] group-hover:-translate-y-2 group-hover:scale-[1.04] group-hover:shadow-2xl group-hover:shadow-red-950/40 group-hover:ring-red-600/70 group-focus-visible:-translate-y-2 group-focus-visible:scale-[1.04] group-focus-visible:outline-none group-focus-visible:ring-2 group-focus-visible:ring-red-600/80">
         {posterUrl ? (
-          <img 
-            src={posterUrl} 
+          <img
+            src={posterUrl}
             alt={title}
-            className="block h-full w-full object-cover transform-gpu transition-transform duration-500 [backface-visibility:hidden] group-hover:scale-110"
+            className="block h-full w-full object-cover transform-gpu transition-transform duration-300 [backface-visibility:hidden] group-hover:scale-105"
             loading="lazy"
             decoding="async"
           />
@@ -161,7 +161,7 @@ const VideoCard: React.FC<VideoCardProps> = ({ video, onPlay, onShowDetail, isCo
             {compactTopBar && video.isExternal ? (
               <>
                 {video.vote_average && video.vote_average > 0 ? (
-                  <span className="inline-flex items-center gap-1 rounded-md border border-white/10 bg-black/55 px-2 py-1 text-[10px] font-black text-white backdrop-blur-md">
+                  <span className="inline-flex items-center gap-1 rounded-md border border-white/10 bg-black/70 px-2 py-1 text-[10px] font-black text-white">
                     <Star size={11} fill="#facc15" className="text-yellow-400" />
                     {video.vote_average.toFixed(1)}
                   </span>
@@ -184,7 +184,7 @@ const VideoCard: React.FC<VideoCardProps> = ({ video, onPlay, onShowDetail, isCo
             {(() => {
               if ((video.version_count || 1) > 1) {
                 return (
-                  <span className="inline-flex items-center gap-1 rounded-md border border-emerald-400/25 bg-emerald-400/15 px-2 py-1 text-[8px] font-black uppercase tracking-widest text-emerald-200 backdrop-blur-md">
+                  <span className="inline-flex items-center gap-1 rounded-md border border-emerald-400/25 bg-emerald-400/15 px-2 py-1 text-[8px] font-black uppercase tracking-widest text-emerald-200">
                     <Layers3 size={10} />
                     {video.version_count} versions
                   </span>
@@ -193,7 +193,7 @@ const VideoCard: React.FC<VideoCardProps> = ({ video, onPlay, onShowDetail, isCo
               if (!compactTopBar && video.isExternal && !video.is_watchlist) {
                 if (!video.release_date) {
                   return (
-                    <span className="rounded-md border border-red-500/30 bg-red-600/25 px-2 py-1 text-[8px] font-black uppercase tracking-widest text-white backdrop-blur-md">
+                    <span className="rounded-md border border-red-500/30 bg-red-600/25 px-2 py-1 text-[8px] font-black uppercase tracking-widest text-white">
                       Trending
                     </span>
                   )
@@ -204,13 +204,13 @@ const VideoCard: React.FC<VideoCardProps> = ({ video, onPlay, onShowDetail, isCo
                 
                 if (isReleased) {
                   return (
-                    <span className="rounded-md border border-emerald-500/30 bg-emerald-600/25 px-2 py-1 text-[8px] font-black uppercase tracking-widest text-emerald-200 backdrop-blur-md">
+                    <span className="rounded-md border border-emerald-500/30 bg-emerald-600/25 px-2 py-1 text-[8px] font-black uppercase tracking-widest text-emerald-200">
                       Released
                     </span>
                   )
                 } else {
                   return (
-                    <span className="rounded-md border border-amber-500/30 bg-amber-600/25 px-2 py-1 text-[8px] font-black uppercase tracking-widest text-amber-200 backdrop-blur-md">
+                    <span className="rounded-md border border-amber-500/30 bg-amber-600/25 px-2 py-1 text-[8px] font-black uppercase tracking-widest text-amber-200">
                       Coming Soon
                     </span>
                   )
@@ -219,7 +219,7 @@ const VideoCard: React.FC<VideoCardProps> = ({ video, onPlay, onShowDetail, isCo
               return <span />
             })()}
             {!compactTopBar && video.vote_average && video.vote_average > 0 && (
-              <span className="inline-flex items-center gap-1 rounded-md border border-white/10 bg-black/55 px-2 py-1 text-[10px] font-black text-white backdrop-blur-md">
+              <span className="inline-flex items-center gap-1 rounded-md border border-white/10 bg-black/70 px-2 py-1 text-[10px] font-black text-white">
                 <Star size={11} fill="#facc15" className="text-yellow-400" />
                 {video.vote_average.toFixed(1)}
               </span>

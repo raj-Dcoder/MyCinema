@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react'
 import { Search, Download as DownloadIcon, Film, Tv, X, Loader2, HardDrive, CheckCircle2, AlertCircle, Pause, Play, FolderOpen, Bookmark, BookmarkCheck, ArrowLeft, Languages, RotateCcw, Share2, Copy, MessageCircle, Send, MoreVertical, Trash, ListMinus, Star, Users, Zap } from 'lucide-react'
 
 import { Video } from '../types'
-import { DownloadOptionsGuide } from '../components/FeatureGuides'
+import { DownloadOptionsGuide, ConcurrentDownloadsGuide } from '../components/FeatureGuides'
 import { getTorrentSourceHealthScore, getTorrentSourceSpeedLabel, isHevcSource } from '../utils/torrentSources'
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -44,13 +44,18 @@ interface ActiveDownload {
   progress: number
   downloadSpeed: string
   timeRemaining: string
-  status: 'downloading' | 'done' | 'error' | 'paused' | 'connecting' | 'pending'
+  status: 'downloading' | 'done' | 'error' | 'paused' | 'connecting' | 'pending' | 'queued'
   size: string
   downloaded: string
   tmdbId?: number
   errorMessage?: string
   addedAt?: string
+  // Monotonic FIFO position from the main process (queue ordering).
+  queueOrder?: number | null
 }
+
+// Simultaneous-download options shown in the queue header. 0 = Unlimited.
+const CONCURRENT_OPTIONS = [1, 2, 3, 5, 0]
 
 const hasEpisodeMarker = (source: TorrentSource) => (
   typeof source.parsedEpisode === 'number' ||
@@ -104,8 +109,9 @@ const formatBytes = (bytes: number) => {
 
 const getDownloadStatusRank = (status: ActiveDownload['status'] | 'pending') => {
   if (status === 'downloading' || status === 'connecting') return 0
-  if (status === 'done') return 2
-  return 1
+  if (status === 'queued') return 1
+  if (status === 'done') return 3
+  return 2
 }
 
 const getDownloadSortTitle = (download: ActiveDownload) => (download.name || download.title || '').trim().toLowerCase()
@@ -115,13 +121,34 @@ const getDownloadTime = (download: ActiveDownload) => {
   return Number.isFinite(time) ? time : 0
 }
 
+// Monotonic FIFO position assigned by the main process. Falls back to the
+// timestamp for legacy rows.
+const getQueueOrder = (download: ActiveDownload) => {
+  const order = Number(download.queueOrder)
+  return Number.isFinite(order) && order > 0 ? order : Number.MAX_SAFE_INTEGER
+}
+
+// Chronological, oldest first — a real queue, not a stack.
+const compareQueueOrder = (a: ActiveDownload, b: ActiveDownload) => {
+  const orderDiff = getQueueOrder(a) - getQueueOrder(b)
+  if (orderDiff !== 0) return orderDiff
+  return getDownloadTime(a) - getDownloadTime(b)
+}
+
 const sortDownloads = (items: ActiveDownload[]) => {
   return [...items].sort((a, b) => {
     const statusDiff = getDownloadStatusRank(a.status) - getDownloadStatusRank(b.status)
     if (statusDiff !== 0) return statusDiff
 
-    const timeDiff = getDownloadTime(b) - getDownloadTime(a)
-    if (timeDiff !== 0) return timeDiff
+    // Waiting items run oldest-first (FIFO). Everything else keeps the
+    // existing newest-first recency order.
+    if (a.status === 'queued' && b.status === 'queued') {
+      const queueDiff = compareQueueOrder(a, b)
+      if (queueDiff !== 0) return queueDiff
+    } else {
+      const timeDiff = getDownloadTime(b) - getDownloadTime(a)
+      if (timeDiff !== 0) return timeDiff
+    }
 
     return getDownloadSortTitle(a).localeCompare(getDownloadSortTitle(b), undefined, {
       numeric: true,
@@ -149,6 +176,8 @@ const Download: React.FC<DownloadProps> = ({ onShowDetail }) => {
   const [shareFeedback, setShareFeedback] = useState<string | null>(null)
   const [loadingDetailId, setLoadingDetailId] = useState<string | null>(null)
   const [downloadsStorage, setDownloadsStorage] = useState<DownloadsStorage | null>(null)
+  // Max simultaneous downloads (0 = Unlimited). Extras queue and auto-start.
+  const [maxConcurrent, setMaxConcurrent] = useState<number>(0)
   const removedIdsRef = useRef<Set<string>>(new Set())
   const pauseResumePendingRef = useRef<Map<string, { status: ActiveDownload['status']; expiresAt: number }>>(new Map())
   const searchCacheRef = useRef<Map<string, TMDBResult[]>>(new Map())
@@ -325,6 +354,9 @@ const Download: React.FC<DownloadProps> = ({ onShowDetail }) => {
 
   // Listen for torrent progress from main process
   useEffect(() => {
+    window.api.getMaxConcurrentDownloads().then((v: number) => {
+      if (Number.isFinite(Number(v))) setMaxConcurrent(Number(v))
+    }).catch(() => {})
     // Reconnect to existing downloads on mount
     window.api.getActiveDownloads().then((active: ActiveDownload[]) => {
       if (active && active.length > 0) {
@@ -363,7 +395,37 @@ const Download: React.FC<DownloadProps> = ({ onShowDetail }) => {
         return [...prev, data]
       })
     })
-    return cleanup
+
+    // Authoritative reconcile: the DB is the source of truth for status, so a
+    // row can never be left displaying "downloading" (0 B/s • —) while main
+    // actually has it queued. Also picks up rows whose event was missed.
+    const reconcile = () => {
+      window.api.getActiveDownloads().then((active: ActiveDownload[]) => {
+        if (!Array.isArray(active)) return
+        setDownloads(prev => {
+          const next = [...prev]
+          let changed = false
+          active.forEach(a => {
+            if (removedIdsRef.current.has(a.id)) return
+            const index = next.findIndex(d => d.id === a.id)
+            if (index === -1) {
+              next.push(a)
+              changed = true
+            } else if (next[index].status !== a.status) {
+              next[index] = { ...next[index], ...a }
+              changed = true
+            }
+          })
+          return changed ? next : prev
+        })
+      }).catch(() => {})
+    }
+    const reconcileInterval = setInterval(reconcile, 2000)
+
+    return () => {
+      clearInterval(reconcileInterval)
+      cleanup()
+    }
   }, [])
 
   // ─── Search TMDB ─────────────────────────────────────────────────────────
@@ -561,15 +623,17 @@ const Download: React.FC<DownloadProps> = ({ onShowDetail }) => {
     const dl = downloads.find(d => d.id === id)
     if (!dl) return
 
-    // Optimistic status update for speed
+    // Optimistic status update for speed (queued + button = dequeue to paused)
     const newStatus = dl.status === 'paused' ? 'downloading' : 'paused'
     pauseResumePendingRef.current.set(id, { status: newStatus as ActiveDownload['status'], expiresAt: Date.now() + 5000 })
     setDownloads(prev => prev.map(d => d.id === id ? { ...d, status: newStatus as any } : d))
     
     try {
       const success = await window.api.pauseResumeTorrent(id)
+      // Let the authoritative main-process event win immediately (it may have
+      // queued instead of started when slots are full).
+      pauseResumePendingRef.current.delete(id)
       if (!success) {
-        pauseResumePendingRef.current.delete(id)
         setDownloads(prev => prev.map(d => d.id === id ? { ...d, status: dl.status } : d))
         return
       }
@@ -577,6 +641,34 @@ const Download: React.FC<DownloadProps> = ({ onShowDetail }) => {
       console.error('[Download] Pause/Resume error:', err)
       pauseResumePendingRef.current.delete(id)
       setDownloads(prev => prev.map(d => d.id === id ? { ...d, status: dl.status } : d))
+    }
+  }
+
+  const handleMaxConcurrentChange = async (value: number) => {
+    const prev = maxConcurrent
+    setMaxConcurrent(value)
+    try {
+      const saved = await window.api.setMaxConcurrentDownloads(value)
+      setMaxConcurrent(Number(saved) || 0)
+      // Queue states may have changed — pull the authoritative list.
+      const active = await window.api.getActiveDownloads().catch(() => null)
+      if (Array.isArray(active)) {
+        setDownloads(prevDownloads => {
+          const next = [...prevDownloads]
+          active.forEach((a: ActiveDownload) => {
+            const index = next.findIndex(d => d.id === a.id)
+            if (index === -1) {
+              if (!removedIdsRef.current.has(a.id)) next.push(a)
+            } else {
+              next[index] = { ...next[index], ...a }
+            }
+          })
+          return next
+        })
+      }
+    } catch (err) {
+      console.error('[Download] Set max concurrent error:', err)
+      setMaxConcurrent(prev)
     }
   }
 
@@ -639,11 +731,23 @@ const Download: React.FC<DownloadProps> = ({ onShowDetail }) => {
   const completedCount = downloads.filter(d => d.status === 'done').length
   const pausedCount = downloads.filter(d => d.status === 'paused').length
   const failedCount = downloads.filter(d => d.status === 'error').length
+  const queuedCount = downloads.filter(d => d.status === 'queued').length
+  // Queue position (#1 starts next) — chronological FIFO, matching main.
+  const queuePositions = React.useMemo(() => {
+    const ordered = downloads
+      .filter(d => d.status === 'queued')
+      .sort(compareQueueOrder)
+    const map = new Map<string, number>()
+    ordered.forEach((d, i) => map.set(d.id, i + 1))
+    return map
+  }, [downloads])
   const queueStatusText = activeCount > 0
-    ? `${activeCount} active download${activeCount === 1 ? '' : 's'}`
-    : downloads.length > 0
-      ? `${downloads.length} saved download${downloads.length === 1 ? '' : 's'}`
-      : 'Queue is empty'
+    ? `${activeCount} active download${activeCount === 1 ? '' : 's'}${queuedCount > 0 ? ` · ${queuedCount} queued` : ''}${maxConcurrent > 0 ? ` · ${maxConcurrent} at once` : ''}`
+    : queuedCount > 0
+      ? `${queuedCount} queued download${queuedCount === 1 ? '' : 's'}`
+      : downloads.length > 0
+        ? `${downloads.length} saved download${downloads.length === 1 ? '' : 's'}`
+        : 'Queue is empty'
   const panelOpen = selectedItem !== null
   const selectedYear = (selectedItem?.release_date || selectedItem?.first_air_date || '').slice(0, 4)
   const selectedPosterUrl = selectedItem?.poster_path ? `${TMDB_IMG}/w342${selectedItem.poster_path}` : null
@@ -957,6 +1061,21 @@ const Download: React.FC<DownloadProps> = ({ onShowDetail }) => {
                 {completedCount > 0 && <span className="text-emerald-400">{completedCount} complete</span>}
                 {pausedCount > 0 && <span className="text-amber-400">{pausedCount} paused</span>}
                 {failedCount > 0 && <span className="text-red-400">{failedCount} failed</span>}
+                {queuedCount > 0 && <span className="text-sky-300">{queuedCount} queued</span>}
+                <label className="relative flex items-center gap-1.5 normal-case tracking-normal">
+                  <span className="text-white/40">At once</span>
+                  <select
+                    value={maxConcurrent}
+                    onChange={(e) => void handleMaxConcurrentChange(Number(e.target.value))}
+                    className="rounded-lg border border-white/10 bg-black/40 px-1.5 py-1 text-[10px] font-bold text-white outline-none hover:border-white/25 focus:border-primary"
+                    aria-label="Maximum simultaneous downloads"
+                  >
+                    {CONCURRENT_OPTIONS.map(n => (
+                      <option key={n} value={n}>{n === 0 ? 'Unlimited' : n}</option>
+                    ))}
+                  </select>
+                  <ConcurrentDownloadsGuide />
+                </label>
               </div>
             </div>
           <div className="divide-y divide-secondary/50">
@@ -1023,6 +1142,11 @@ const Download: React.FC<DownloadProps> = ({ onShowDetail }) => {
                           <Pause size={14} /> Paused
                         </span>
                       )}
+                      {dl.status === 'queued' && (
+                        <span className="flex items-center gap-1 text-xs text-sky-300" title="Waiting for a free download slot — starts oldest-first">
+                          <Loader2 size={12} className="animate-spin" /> Queued{queuePositions.get(dl.id) ? ` #${queuePositions.get(dl.id)}` : ''}
+                        </span>
+                      )}
                       {dl.status === 'pending' && (
                         <span className="flex items-center gap-1 text-xs text-amber-400">
                           <AlertCircle size={14} /> Pending
@@ -1047,19 +1171,20 @@ const Download: React.FC<DownloadProps> = ({ onShowDetail }) => {
                           dl.status === 'done' ? 'bg-green-400' :
                           dl.status === 'error' ? 'bg-red-400' :
                           dl.status === 'connecting' ? 'bg-amber-400' :
+                          dl.status === 'queued' ? 'bg-sky-300/60' :
                           'bg-primary'
                         }`}
                         style={{ width: `${Math.max(0, Math.min(100, dl.progress || 0))}%` }}
                       />
                     </div>
                     <span className="text-xs text-muted w-10 text-right">{Math.round(dl.progress)}%</span>
-                    {(dl.status === 'downloading' || dl.status === 'paused' || dl.status === 'connecting') && (
+                    {(dl.status === 'downloading' || dl.status === 'paused' || dl.status === 'connecting' || dl.status === 'queued') && (
                       <div className="flex items-center gap-1">
                         <button
                           onClick={() => handlePauseResume(dl.id)}
                           disabled={pauseResumePendingRef.current.has(dl.id)}
                           className="p-1 rounded-lg text-muted hover:text-primary hover:bg-primary/10 transition-colors disabled:cursor-wait disabled:opacity-50"
-                          title={dl.status === 'paused' ? 'Resume' : 'Pause'}
+                          title={dl.status === 'paused' ? 'Resume' : dl.status === 'queued' ? 'Remove from queue (pause)' : 'Pause'}
                         >
                           {dl.status === 'paused' ? <Play size={14} /> : <Pause size={14} />}
                         </button>

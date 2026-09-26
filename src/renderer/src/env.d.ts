@@ -131,6 +131,8 @@ interface Api {
   removeDownload: (id: string, deleteFile?: boolean) => Promise<boolean>
   pauseResumeTorrent: (id: string) => Promise<boolean>
   retryTorrentDownload: (id: string) => Promise<boolean>
+  getMaxConcurrentDownloads: () => Promise<number>
+  setMaxConcurrentDownloads: (value: number) => Promise<number>
   getActiveDownloads: () => Promise<any[]>
   prepareTorrentStream: (id: string) => Promise<{ url?: string; fileName?: string; size?: number; error?: string }>
   startTempStream: (magnetUrl: string, title?: string, options?: { fileIndex?: number; season?: number; episode?: number }) => Promise<{ url?: string; fileName?: string; size?: number; streamId?: string; parsedSeason?: number | null; parsedEpisode?: number | null; error?: string }>

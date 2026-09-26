@@ -116,6 +116,10 @@ const api = {
     ipcRenderer.invoke('pause-resume-torrent', id),
   retryTorrentDownload: (id: string) =>
     ipcRenderer.invoke('retry-torrent-download', id),
+  getMaxConcurrentDownloads: () =>
+    ipcRenderer.invoke('get-max-concurrent-downloads'),
+  setMaxConcurrentDownloads: (value: number) =>
+    ipcRenderer.invoke('set-max-concurrent-downloads', value),
   getActiveDownloads: () => 
     ipcRenderer.invoke('get-active-downloads'),
   prepareTorrentStream: (id: string) =>

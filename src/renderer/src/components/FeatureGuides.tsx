@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react'
-import { ArrowUpRight, Subtitles, X, Trash2, BellRing } from 'lucide-react'
+import { ArrowUpRight, Subtitles, X, Trash2, BellRing, ListOrdered } from 'lucide-react'
 import { LATEST_RELEASE } from './WhatsNewOnboarding'
 
 interface InlineFeatureGuideProps {
@@ -230,8 +230,40 @@ export const FollowGuide: React.FC = () => {
   )
 }
 
-export const SubtitleAppearanceGuide: React.FC = () => {
+export const ConcurrentDownloadsGuide: React.FC = () => {
   return (
+    <InlineFeatureGuide
+      featureId="download-concurrent-limit"
+      targetVersion="1.37.0"
+      render={(dismiss) => (
+        <div className="absolute right-0 top-full z-40 mt-3 w-[255px] rounded-xl border border-cyan-300/20 bg-[#04121a] p-3 text-left shadow-2xl shadow-black/45 ring-1 ring-white/5 animate-in fade-in slide-in-from-top-1 duration-200">
+          <div className="absolute right-3 top-0 h-3 w-3 -translate-y-1/2 rotate-45 border-l border-t border-cyan-300/20 bg-[#04121a]" />
+          <div className="flex items-start gap-3">
+            <div className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-cyan-300/12 text-cyan-200">
+              <ListOrdered size={14} />
+            </div>
+            <div className="min-w-0 flex-1">
+              <p className="text-[10px] font-black uppercase tracking-[0.18em] text-cyan-100">New</p>
+              <p className="mt-1 text-[11px] font-semibold leading-relaxed text-white/60">
+                Cap how many download at once — the rest wait in order and start themselves.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={dismiss}
+              className="rounded-md p-1 text-white/35 transition-colors hover:bg-white/10 hover:text-white"
+              title="Dismiss hint"
+            >
+              <X size={13} />
+            </button>
+          </div>
+        </div>
+      )}
+    />
+  )
+}
+
+export const SubtitleAppearanceGuide: React.FC = () => {  return (
     <InlineFeatureGuide
       featureId="subtitle-appearance"
       targetVersion="1.33.0"

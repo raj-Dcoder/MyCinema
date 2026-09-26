@@ -453,6 +453,10 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
   const [fullscreenPopup, setFullscreenPopup] = useState<{ show: boolean, isFullscreen: boolean, id: number }>({ show: false, isFullscreen: false, id: 0 })
   const [performanceNotice, setPerformanceNotice] = useState<{ show: boolean, text: string, id: number }>({ show: false, text: '', id: 0 })
   const [highSpeedPerformanceMode, setHighSpeedPerformanceMode] = useState(false)
+  // Audio-strain mode: transcoded audio is falling behind (drift <= -1s across
+  // consecutive rebuilds). Eases the heaviest WebGL work (FPS Boost frame
+  // blending) until audio locks back in. Same pattern as the high-speed ease.
+  const [audioStrainMode, setAudioStrainMode] = useState(false)
   const ASPECT_MODES: ('contain' | 'cover' | 'fill')[] = ['contain', 'cover', 'fill'];
   const [aspectMode, setAspectMode] = useState<('contain' | 'cover' | 'fill')>('contain');
   const [trackPopup, setTrackPopup] = useState<{ show: boolean, type: 'audio' | 'subtitle' | 'subtitleSync' | 'aspect' | 'skip', text: string, id: number }>({ show: false, type: 'subtitle', text: '', id: 0 })
@@ -727,6 +731,18 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
   const startupResumeTimeRef = useRef(0)
   const startupExternalAudioBarrierRef = useRef(false)
   const startupDriftCorrectionUntilRef = useRef(0)
+  // Throttle for drift-correction rebuilds. A ref (not an effect-local) so it
+  // survives the effect re-subscribing on every seek — otherwise each rebuild
+  // resets the throttle and the corrector fires in a tight loop.
+  const driftReloadThrottleRef = useRef(0)
+  // Consecutive rebuilds triggered while audio starves (drift <= -1s).
+  const starvingReloadStreakRef = useRef(0)
+  const strainHealthyChecksRef = useRef(0)
+  const audioStrainNoticeShownRef = useRef(false)
+  // Timestamp of when the video first looked stalled; audio rides through
+  // sub-second stalls instead of pausing instantly (see pause helper).
+  const videoNotReadySinceRef = useRef(0)
+  const audioStallPauseTimerRef = useRef<NodeJS.Timeout | null>(null)
   const lastRelaxedAudioSyncCheckRef = useRef(0)
   const externalAudioSeekBarrierRef = useRef(false)
   const externalAudioSeekTokenRef = useRef(0)
@@ -742,7 +758,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
   const highSpeedPlaybackActive = playbackRate >= HIGH_SPEED_PERFORMANCE_RATE || isHolding2x
   const highSpeedDisplayRate = isHolding2x ? 2 : playbackRate
   const highSpeedMotionPaused = fpsBoostEnabled && highSpeedPlaybackActive && highSpeedPerformanceMode
-  const effectiveFpsBoostEnabled = fpsBoostEnabled && !highSpeedMotionPaused
+  const effectiveFpsBoostEnabled = fpsBoostEnabled && !highSpeedMotionPaused && !audioStrainMode
   const effectiveSharpnessEnabled = qualitySharpnessEnabled
   const effectiveVibranceEnabled = qualityVibranceEnabled
 
@@ -776,6 +792,32 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
     }
     setIsBuffering(false)
   }, [])
+
+  const cancelDelayedAudioPause = () => {
+    if (audioStallPauseTimerRef.current) {
+      clearTimeout(audioStallPauseTimerRef.current)
+      audioStallPauseTimerRef.current = null
+    }
+  }
+
+  // Transient video stalls (<1s — constant micro-buffering on torrents) are
+  // better ridden through than reacted to: pausing audio on every blip and
+  // then racing play() against the next stall leaves play() rejected
+  // (AbortError, the "Audio onPlaying failed" spam) and audio losing ground
+  // until a full rebuild. Only pause when the stall persists; the drift
+  // nudge absorbs the sub-second gap.
+  const pauseAudioOnStallGracefully = () => {
+    const audioEl = audioRef.current
+    if (!audioEl || !audioEl.src || audioEl.paused || audioStallPauseTimerRef.current) return
+    audioStallPauseTimerRef.current = setTimeout(() => {
+      audioStallPauseTimerRef.current = null
+      const v = videoRef.current
+      const a = audioRef.current
+      if (v && a && a.src && !v.paused && !a.paused && v.readyState < 3) {
+        a.pause()
+      }
+    }, 800)
+  }
 
   const releaseMediaElement = (mediaEl: HTMLMediaElement | null) => {
     if (!mediaEl) return
@@ -832,6 +874,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
       clearTimeout(seekPreviewThumbTimerRef.current)
       seekPreviewThumbTimerRef.current = null
     }
+    cancelDelayedAudioPause()
     clearIntroDbRuntimeWork()
     if (seriesSubtitleStatusTimerRef.current) {
       clearTimeout(seriesSubtitleStatusTimerRef.current)
@@ -1337,7 +1380,11 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
     applyStartupResumeTime()
 
     try {
-      await Promise.allSettled([audioEl.play(), videoEl.play()])
+      // Video first, then audio (see syncSelectedExternalAudio): starting
+      // the instantly-ready MP3 before the buffering torrent video banks an
+      // "audio early" lead.
+      await videoEl.play().catch((error) => console.error('Startup video play failed:', error))
+      await audioEl.play().catch((error) => console.error('Startup external audio play failed:', error))
       audioEl.playbackRate = playbackRate
       if (audioCtxRef.current?.state === 'suspended') {
         await audioCtxRef.current.resume()
@@ -1414,7 +1461,8 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
 
   const syncSelectedExternalAudio = async (
     time: number,
-    shouldPlay: boolean
+    shouldPlay: boolean,
+    isDriftCorrection = false
   ) => {
     const trackObj = availableAudio.find(a => a.id === selectedAudioId)
     const videoEl = videoRef.current
@@ -1424,6 +1472,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
 
     const syncToken = ++externalAudioSeekTokenRef.current
     externalAudioSeekBarrierRef.current = true
+    cancelDelayedAudioPause()
     hideBufferingIndicator()
     audioEl.pause()
     // Always pause video while preparing external audio stream to guarantee 0ms desync
@@ -1452,25 +1501,40 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
 
     lastSeekTimeRef.current = safeTime
     setLastSeekTime(safeTime)
+    // Only re-seek the video when it actually moved: re-assigning the same
+    // time forces a torrent re-buffer (waiting → audio paused → watchdog and
+    // drift corrector pile on with more rebuilds — the stutter loop).
     // The assignment below fires a 'seeked' event. Without this flag the
     // onSeeked handler would call syncSelectedExternalAudio again, which
     // re-pauses the video, rebuilds the ffmpeg audio stream and re-seeks —
     // the 1s play / 1s buffer loop seen on track switches and slow swarms.
-    suppressNextSeekSyncRef.current = true
-    videoEl.currentTime = safeTime
-    // If Chromium coalesces this seek (same-time assignment) no 'seeked'
-    // fires — clear the stale flag so the next genuine seek still syncs.
-    setTimeout(() => {
-      if (suppressNextSeekSyncRef.current) suppressNextSeekSyncRef.current = false
-    }, 1500)
+    if (Math.abs(videoEl.currentTime - safeTime) > 0.25) {
+      suppressNextSeekSyncRef.current = true
+      videoEl.currentTime = safeTime
+      // If Chromium coalesces this seek (same-time assignment) no 'seeked'
+      // fires — clear the stale flag so the next genuine seek still syncs.
+      setTimeout(() => {
+        if (suppressNextSeekSyncRef.current) suppressNextSeekSyncRef.current = false
+      }, 1500)
+    }
 
     if (!shouldPlay) {
       return
     }
 
     try {
-      await Promise.allSettled([audioEl.play(), videoEl.play()])
+      // Start video first, then audio: the MP3 stream is ready instantly
+      // while torrent video still buffers, so starting audio first (or both
+      // at once) banks a permanent "audio early" lead.
+      await videoEl.play().catch((e) => console.log('Video resume after audio seek failed:', e))
+      await audioEl.play().catch((e) => console.log('Audio resume after seek failed:', e))
       audioEl.playbackRate = playbackRate
+      // Aggressive correction window is for user-initiated (re)starts only.
+      // Re-arming it on drift-correction rebuilds makes every rebuild schedule
+      // the next one — a self-sustaining reload storm.
+      if (!isDriftCorrection) {
+        startupDriftCorrectionUntilRef.current = Date.now() + 3000
+      }
     } catch (e) {
       console.error('[Audio] Error resuming audio/video after seek:', e)
     }
@@ -1744,6 +1808,13 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
     startupResumeTimeRef.current = 0
     startupExternalAudioBarrierRef.current = false
     startupDriftCorrectionUntilRef.current = 0
+    driftReloadThrottleRef.current = 0
+    starvingReloadStreakRef.current = 0
+    strainHealthyChecksRef.current = 0
+    audioStrainNoticeShownRef.current = false
+    videoNotReadySinceRef.current = 0
+    cancelDelayedAudioPause()
+    setAudioStrainMode(false)
     lastRelaxedAudioSyncCheckRef.current = 0
     externalAudioSeekBarrierRef.current = false
     externalAudioSeekTokenRef.current = 0
@@ -1782,9 +1853,14 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
       }
     }
 
-    // Auto-enter fullscreen on first mount
+    // Auto-enter fullscreen on first mount — only when the open came from a
+    // user gesture. Programmatic opens (autoplay, prefetches) have no
+    // transient activation and the request just throws a console error.
     if (!document.fullscreenElement && playerShellRef.current) {
-      playerShellRef.current.requestFullscreen().catch(() => {})
+      const nav = navigator as Navigator & { userActivation?: { isActive?: boolean } }
+      if (!('userActivation' in navigator) || nav.userActivation?.isActive) {
+        playerShellRef.current.requestFullscreen().catch(() => {})
+      }
     }
 
     const handleFullscreenChange = () => {
@@ -2601,7 +2677,6 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
   }, [currentVideo.file_path, (currentVideo as any).tmdb_id, (currentVideo as any).season, (currentVideo as any).episode])
 
   useEffect(() => {
-    let lastDriftReloadTime = 0
     const driftInterval = setInterval(() => {
       const videoEl = videoRef.current
       const audioEl = audioRef.current
@@ -2613,13 +2688,20 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
       const trackObj = availableAudio.find(a => a.id === selectedAudioId)
       if (!trackObj || trackObj.native) return
 
-      // CRITICAL: If the video is buffering or paused, audio MUST be paused and never drifting
+      // CRITICAL: If the video is buffering or paused, audio MUST be paused and never drifting.
+      // Sub-second stalls ride through (unified with the waiting-event grace)
+      // so micro-buffering doesn't pause/resume audio 5x a second.
       if (videoEl.paused || videoEl.readyState < 3 || isBuffering || torrentBuffering || isTorrentLoading) {
         if (!audioEl.paused) {
-          audioEl.pause()
+          const stallNow = Date.now()
+          if (!videoNotReadySinceRef.current) videoNotReadySinceRef.current = stallNow
+          if (stallNow - videoNotReadySinceRef.current > 800) {
+            audioEl.pause()
+          }
         }
         return
       }
+      videoNotReadySinceRef.current = 0
 
       if (audioEl.paused || audioEl.readyState < 2) {
         if (!audioEl.error && audioEl.paused && !videoEl.paused) {
@@ -2631,25 +2713,82 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
       const expectedTime = videoEl.currentTime - lastSeekTimeRef.current
       if (expectedTime < 0) return
       const drift = audioEl.currentTime - expectedTime
+      const driftAbs = Math.abs(drift)
+      // Video hasn't rendered frame 1 yet (cold torrent, first bytes still
+      // arriving): the audio stream is fine, there's just nothing to sync to.
+      // Park audio and wait — rebuilding here loops forever against a frozen
+      // video (audio 1.3s → 2.0s → 2.3s while video sits at 0.00). The
+      // onPlaying handler resumes audio the moment video starts.
+      if (expectedTime < 0.5 && drift > 0.05) {
+        if (!audioEl.paused) audioEl.pause()
+        return
+      }
+      // Recovery: audio locked back in for ~15s straight → restore full
+      // enhancement and re-arm the strain notice.
+      if (audioStrainMode) {
+        if (driftAbs < 0.15) {
+          strainHealthyChecksRef.current += 1
+          if (strainHealthyChecksRef.current >= 75) {
+            strainHealthyChecksRef.current = 0
+            starvingReloadStreakRef.current = 0
+            audioStrainNoticeShownRef.current = false
+            setAudioStrainMode(false)
+          }
+        } else {
+          strainHealthyChecksRef.current = 0
+        }
+      }
+      // First seconds after (re)starting external audio: the MP3 stream is
+      // ready instantly while torrent video still buffers, so audio banks a
+      // permanent lead unless corrected aggressively here.
+      const inStartupWindow = Date.now() < startupDriftCorrectionUntilRef.current
 
-      // Continuous micro-drift correction (between 40ms and 500ms): smoothly adjust playbackRate
-      if (Math.abs(drift) >= 0.04 && Math.abs(drift) <= 0.5) {
+      // Medium/large drift: rebuild the audio stream at the current video
+      // time. (The stream is progressive with `Accept-Ranges: none`, so the
+      // audio element itself can't seek — a fresh ffmpeg stream is the only
+      // exact correction.) This also closes the old 0.5s–1.2s dead band where
+      // NOTHING was corrected, which is why a startup/buffering lead survived
+      // forever as "audio a bit early".
+      if (driftAbs > 0.5 || (inStartupWindow && driftAbs > 0.25)) {
+        // Chronic starvation (audio keeps falling behind rebuild after
+        // rebuild, e.g. EAC3 transcode under load): rebuilding every few
+        // seconds only adds stutter — back off, ease the heaviest renderer,
+        // and tell the user once.
+        const starving = drift < -1.0
+        const chronic = starving && starvingReloadStreakRef.current >= 1
+        const cooldownMs = chronic ? 20000 : 6000
+        if (Date.now() - driftReloadThrottleRef.current > cooldownMs) {
+          driftReloadThrottleRef.current = Date.now()
+          starvingReloadStreakRef.current = starving ? starvingReloadStreakRef.current + 1 : 0
+          console.log('[Audio] Drift correction reload: video=', videoEl.currentTime.toFixed(2), 'audio=', audioEl.currentTime.toFixed(2), 'expected=', expectedTime.toFixed(2), 'drift=', drift.toFixed(2))
+          if (chronic) {
+            if (fpsBoostEnabled && !audioStrainMode) {
+              setAudioStrainMode(true)
+            }
+            if (!audioStrainNoticeShownRef.current) {
+              audioStrainNoticeShownRef.current = true
+              setPerformanceNotice({
+                show: true,
+                text: 'Audio is falling behind — FPS Boost eased to let it catch up',
+                id: Date.now()
+              })
+            }
+          }
+          void syncSelectedExternalAudio(videoEl.currentTime, true, true)
+        }
+      } else if (driftAbs >= 0.04) {
+        // Continuous micro-drift correction: smoothly adjust playbackRate
         // If drift > 0, audio is ahead of video -> slow down audio slightly
         // If drift < 0, audio is behind video -> speed up audio slightly
         const nudgeFactor = drift > 0 ? 0.95 : 1.05
         audioEl.playbackRate = playbackRate * nudgeFactor
-      } else if (Math.abs(drift) < 0.03 && Math.abs(audioEl.playbackRate - playbackRate) > 0.001) {
+      } else if (driftAbs < 0.03 && Math.abs(audioEl.playbackRate - playbackRate) > 0.001) {
         // Back in sync -> restore target playback rate
         audioEl.playbackRate = playbackRate
-      } else if (Math.abs(drift) > 1.2 && Date.now() - lastDriftReloadTime > 6000) {
-        // Severe drift (> 1.2s) -> do a clean resync
-        lastDriftReloadTime = Date.now()
-        console.log('[Audio] Drift correction reload: video=', videoEl.currentTime.toFixed(2), 'audio=', audioEl.currentTime.toFixed(2), 'expected=', expectedTime.toFixed(2), 'drift=', drift.toFixed(2))
-        void syncSelectedExternalAudio(videoEl.currentTime, true)
       }
     }, 200)
     return () => clearInterval(driftInterval)
-  }, [isPlaying, lastSeekTime, isSeeking, selectedAudioId, availableAudio, isBuffering, torrentBuffering, isTorrentLoading, playbackRate, audioTrackSwitching])
+  }, [isPlaying, lastSeekTime, isSeeking, selectedAudioId, availableAudio, isBuffering, torrentBuffering, isTorrentLoading, playbackRate, audioTrackSwitching, fpsBoostEnabled, audioStrainMode])
 
   // Audio watchdog: if the external audio element dies (404 from a destroyed
   // torrent, a failed drift reload, a stalled ffmpeg stream, an autoplay
@@ -2671,14 +2810,23 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
       if (videoEl.paused || videoEl.readyState < 3 || isBuffering || torrentBuffering || isTorrentLoading) return
 
       const now = Date.now()
+      // Merely paused with data available is NOT dead — it just needs play()
+      // (e.g. after a video-buffering pause or a rejected play()). Rebuilding
+      // the ffmpeg stream here fights the drift corrector and causes the
+      // reload storm that freezes audio near 0s and stutters video.
+      if (audioEl.paused && !audioEl.error && !audioEl.ended) {
+        if (!videoEl.paused) {
+          audioEl.play().catch(() => {})
+        }
+        lastAudioTime = audioEl.currentTime
+        lastAudioWallTime = now
+        return
+      }
       let dead = false
       let reason = ''
       if (audioEl.error) {
         dead = true
         reason = `error=${audioEl.error.code}`
-      } else if (audioEl.paused) {
-        dead = true
-        reason = `paused with readyState=${audioEl.readyState}`
       } else if (audioEl.ended) {
         dead = true
         reason = 'ended'
@@ -3830,6 +3978,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
 
       const switchToken = ++externalAudioSeekTokenRef.current
       externalAudioSeekBarrierRef.current = true
+      cancelDelayedAudioPause()
 
       const ready = await prepareExternalAudioTrack(
         trackObj.index,
@@ -3857,18 +4006,26 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
       setLastSeekTime(safeTime)
       // Same seek-echo guard as syncSelectedExternalAudio: this programmatic
       // seek must not re-enter the external-audio sync (see onSeeked).
-      suppressNextSeekSyncRef.current = true
-      videoEl.currentTime = safeTime
-      // Same staleness guard as above — a coalesced same-time seek fires no
-      // 'seeked', so don't let the flag swallow the next genuine user seek.
-      setTimeout(() => {
-        if (suppressNextSeekSyncRef.current) suppressNextSeekSyncRef.current = false
-      }, 1500)
+      // Skip it when the video is already there — a pointless re-seek forces
+      // a torrent re-buffer and feeds the reload stutter loop.
+      if (Math.abs(videoEl.currentTime - safeTime) > 0.25) {
+        suppressNextSeekSyncRef.current = true
+        videoEl.currentTime = safeTime
+        // Same staleness guard as above — a coalesced same-time seek fires no
+        // 'seeked', so don't let the flag swallow the next genuine user seek.
+        setTimeout(() => {
+          if (suppressNextSeekSyncRef.current) suppressNextSeekSyncRef.current = false
+        }, 1500)
+      }
 
       if (wasPlaying) {
         try {
-          await Promise.allSettled([audioEl.play(), videoEl.play()])
+          // Video first, then audio — the MP3 is ready instantly while the
+          // video re-buffers, so audio-first banks an "audio early" lead.
+          await videoEl.play().catch(() => {})
+          await audioEl.play().catch(() => {})
           audioEl.playbackRate = playbackRate
+          startupDriftCorrectionUntilRef.current = Date.now() + 3000
         } catch (e) {
           console.error('[Audio] Playback resume failed after track switch:', e)
         }
@@ -4748,6 +4905,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
           }
           allowGuestPlaybackEventRef.current = false
           setIsPlaying(false)
+          cancelDelayedAudioPause()
           if (audioRef.current && audioRef.current.src) audioRef.current.pause()
         }}
         onEnded={handleEnded}
@@ -4762,7 +4920,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
           } else {
             showBufferingIndicatorSoon()
           }
-          if (audioRef.current && audioRef.current.src) audioRef.current.pause()
+          pauseAudioOnStallGracefully()
         }}
         onWaiting={() => {
           if (startupExternalAudioBarrierRef.current || externalAudioSeekBarrierRef.current) return
@@ -4778,7 +4936,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
           if (highSpeedPlaybackActive && fpsBoostEnabled) {
             activateHighSpeedPerformanceMode('Buffering at high speed; FPS Boost eased to help playback catch up')
           }
-          if (audioRef.current && audioRef.current.src) audioRef.current.pause()
+          pauseAudioOnStallGracefully()
         }}
         onPlaying={() => { 
           if (isTorrentStream && (isTorrentLoading || torrentBuffering)) {
@@ -4794,6 +4952,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
             }, 1100)
           }
           hideBufferingIndicator(); 
+          cancelDelayedAudioPause()
           if (isTorrentStreamPath(currentVideo.file_path) && !getSelectedExternalAudioTrack()) {
             forceTorrentNativeAudio()
           }
@@ -4810,6 +4969,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
         }}
         onCanPlay={() => {
           hideBufferingIndicator()
+          cancelDelayedAudioPause()
           if (crossFadeRef.current) {
             setCrossFade(false)
           }

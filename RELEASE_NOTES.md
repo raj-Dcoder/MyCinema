@@ -1,3 +1,36 @@
+# MyCinema v1.37.0
+
+Take control of your download queue, and get accurate sizes, honest new-episode alerts, and audio that finally stays in sync.
+
+### Download Queue Control
+- **Choose How Many Run At Once**: Set a limit in the Download tab (1, 2, 3, 5, or Unlimited). Extra downloads wait their turn instead of all fighting for your bandwidth at the same time.
+- **A Real Queue, In Order**: Waiting downloads are listed oldest-first and labelled Queued #1, #2, #3, so the next one to start is always the one you added first - never a reshuffled stack.
+- **Starts Itself**: When a download finishes, fails, is paused, or is removed, the next in line starts automatically. Pausing a queued item takes it out of the line; resuming puts it back.
+- **Keeps Your Setting**: Your choice is remembered, respected when the app restarts, and applied to downloads started from a title's page too. Streaming while downloading never eats a download slot.
+
+### Sizes You Can Trust
+- **Season Packs Show The Whole Season**: Pack listings that advertise per-episode sizes are now added up, so a full season reads as one honest total instead of a single episode's size.
+- **No More Raw Numbers**: Some trackers report sizes as unformatted byte counts; they now display as normal sizes (3.6 GB) like everywhere else.
+- **Real Totals Override Estimates**: Once the app has seen a release's true size, it stops trusting the tracker's guess - so the number you see before streaming matches what actually downloads.
+
+### New Episode Alerts That Earn It
+- **No More False Alerts**: Following a series no longer instantly flags episodes that were already out. You are told about an episode only when it actually drops after you started watching.
+- **Only When It's Watchable**: A new-episode banner appears only once a real source for that episode (or its season pack) can be found - no more banners that open to an empty list. If nothing is available yet, the alert waits quietly instead of disappearing forever.
+- **Starting Mid-Season Is Fine**: Whether you began at episode one, binge four episodes, or stop halfway, silence is the default. The banner appears when the next episode genuinely lands.
+
+### Audio & Playback Reliability
+- **Sample-Accurate External Audio**: Non-native audio tracks (EAC3, AC3, DTS and similar) now start at the exact requested moment, fixing dialogue that ran early or late against the picture.
+- **No More Audio Reload Storms**: Long streams no longer stutter through repeated audio restarts. Sync correction now escalates gradually, rides through brief buffering hitches, and stops rebuilding when restarts aren't helping.
+- **Steady Audio Under Load**: If audio falls behind during a busy scene, the heaviest on-screen enhancement eases itself off until sound catches up, then switches back on its own.
+- **Cold Streams Start Clean**: Opening a brand-new slow stream no longer leaves audio racing ahead of a video that hasn't rendered yet, and the visual enhancer recovers by itself if the graphics driver hiccups on startup.
+
+### Security & Privacy
+- **Fewer Simultaneous Connections**: The download limit caps how many torrents connect at once, so the app opens no more swarm connections than you asked for.
+- **Less Background Lookups**: New-episode source checks now run only for a genuinely new episode instead of on every followed series, reducing routine network requests to trackers and metadata services.
+- **Local-Only Settings**: Your download limit and queue order are stored in the app's own local database. No new permissions, no new data sharing, and nothing about your queue leaves your machine.
+
+***
+
 # MyCinema v1.36.0
 
 Streamed shows now remember you: online resume, next-episode tracking, new-episode alerts, and whole-season binge mode.

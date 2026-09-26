@@ -236,6 +236,22 @@ export function initDb() {
   if (!dlColumnNames.includes('download_path')) {
     db.exec("ALTER TABLE downloads ADD COLUMN download_path TEXT")
   }
+  // queue_order is a monotonic sequence used for true FIFO queue order.
+  // added_at only has second granularity (CURRENT_TIMESTAMP), so downloads
+  // started in the same second had no deterministic order — the queue came
+  // out shuffled/stacked instead of chronological.
+  if (!dlColumnNames.includes('queue_order')) {
+    db.exec("ALTER TABLE downloads ADD COLUMN queue_order INTEGER")
+    // Backfill existing rows in chronological order (added_at, then rowid).
+    db.exec(`
+      UPDATE downloads SET queue_order = (
+        SELECT COUNT(*) FROM downloads d2
+        WHERE d2.added_at < downloads.added_at
+           OR (d2.added_at = downloads.added_at AND d2.rowid <= downloads.rowid)
+      )
+      WHERE queue_order IS NULL
+    `)
+  }
 
   // file_index pins an unparsed pack file so resume lands on the exact file.
   const streamColumns = db.prepare("PRAGMA table_info(stream_progress)").all()
@@ -781,8 +797,8 @@ export function removeFolder(folderPath: string) {
 
 export function addDownload(dl: any) {
   const stmt = db.prepare(`
-    INSERT INTO downloads (id, title, name, magnet, progress, download_speed, time_remaining, status, size, downloaded, tmdb_id, media_type, season, episode, download_path, error_message)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO downloads (id, title, name, magnet, progress, download_speed, time_remaining, status, size, downloaded, tmdb_id, media_type, season, episode, download_path, error_message, queue_order)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(id) DO UPDATE SET
       title = excluded.title,
       name = excluded.name,
@@ -800,8 +816,18 @@ export function addDownload(dl: any) {
       error_message = excluded.error_message
   `)
   return stmt.run(
-    dl.id, dl.title, dl.name || null, dl.magnet, dl.progress || 0, dl.downloadSpeed || '0 B/s', dl.timeRemaining || '—', dl.status || 'pending', dl.size || '—', dl.downloaded || '0 B', dl.tmdbId || null, dl.mediaType || null, dl.season || null, dl.episode || null, dl.downloadPath || null, dl.errorMessage || null
+    dl.id, dl.title, dl.name || null, dl.magnet, dl.progress || 0, dl.downloadSpeed || '0 B/s', dl.timeRemaining || '—', dl.status || 'pending', dl.size || '—', dl.downloaded || '0 B', dl.tmdbId || null, dl.mediaType || null, dl.season || null, dl.episode || null, dl.downloadPath || null, dl.errorMessage || null, dl.queueOrder ?? getNextDownloadQueueOrder()
   )
+}
+
+// Next FIFO position for a newly queued download (back of the line).
+export function getNextDownloadQueueOrder(): number {
+  try {
+    const row = db.prepare('SELECT COALESCE(MAX(queue_order), 0) AS maxOrder FROM downloads').get() as any
+    return Number(row?.maxOrder || 0) + 1
+  } catch {
+    return Date.now()
+  }
 }
 
 export function updateDownload(dl: any) {
@@ -816,7 +842,7 @@ export function updateDownload(dl: any) {
 }
 
 export function getDownloads() {
-  return db.prepare('SELECT * FROM downloads ORDER BY added_at DESC').all().map((row: any) => ({
+  return db.prepare('SELECT * FROM downloads ORDER BY queue_order ASC, added_at ASC').all().map((row: any) => ({
     id: row.id,
     title: row.title,
     name: row.name,
@@ -833,8 +859,13 @@ export function getDownloads() {
     episode: row.episode,
     downloadPath: row.download_path,
     errorMessage: row.error_message,
+    queueOrder: row.queue_order ?? null,
     addedAt: row.added_at
   }))
+}
+
+export function setDownloadQueueOrder(id: string, order: number) {
+  return db.prepare('UPDATE downloads SET queue_order = ? WHERE id = ?').run(Number(order), id)
 }
 
 export function removeDownloadRow(id: string) {

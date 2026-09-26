@@ -483,12 +483,16 @@ type AppSettings = {
   launchFullscreen: boolean
   rememberOnlineProgress: boolean
   notifyNewEpisodes: boolean
+  // Max simultaneous persistent downloads. 0 (or <= 0) = unlimited.
+  // Extras wait with status 'queued' and auto-start oldest-first.
+  maxConcurrentDownloads: number
 }
 
 const defaultAppSettings: AppSettings = {
   launchFullscreen: true,
   rememberOnlineProgress: true,
-  notifyNewEpisodes: true
+  notifyNewEpisodes: true,
+  maxConcurrentDownloads: 0
 }
 
 function getAppSettingsPath() {
@@ -566,8 +570,12 @@ function createWindow(): void {
     // Kick off startup scan after window is visible (non-blocking)
     setImmediate(() => {
       runStartupScan().catch(err => console.error('[Startup] Scan error:', err))
+      backfillDownloadQueueOrder()
       autoResumeDownloads().catch(err => console.error('[Startup] Auto-resume error:', err))
     })
+    // Keep the simultaneous-download limit enforced even if extra downloads
+    // slipped past the gate (stale rows, races). No-op when Unlimited.
+    setInterval(() => enforceDownloadConcurrency(), 5000)
     handleCommandLine(process.argv, mainWindow)
   })
 
@@ -677,7 +685,11 @@ function getContentTypeForPath(filePath: string): string {
 
 function waitForTorrentReady(torrent: any, timeoutMs = 25000): Promise<void> {
   if (!torrent || torrent.destroyed) return Promise.reject(new Error('Torrent is not active'))
-  if (torrent.ready || (Array.isArray(torrent.files) && torrent.files.length > 0)) return Promise.resolve()
+  if (torrent.ready || (Array.isArray(torrent.files) && torrent.files.length > 0)) {
+    // Metadata is in — record the ground-truth total size (see learnedTorrentSizes).
+    rememberTorrentSize(torrent.infoHash, torrent.length)
+    return Promise.resolve()
+  }
 
   return new Promise((resolve, reject) => {
     const cleanup = () => {
@@ -687,6 +699,7 @@ function waitForTorrentReady(torrent: any, timeoutMs = 25000): Promise<void> {
     }
     const onReady = () => {
       cleanup()
+      rememberTorrentSize(torrent.infoHash, torrent.length)
       resolve()
     }
     const onError = (err: Error) => {
@@ -1294,9 +1307,22 @@ function registerAudioProtocol(): void {
       const pass = new PassThrough()
 
       const cmd = ffmpeg(sourcePath)
+      // Sample-accurate seek: a pure input seek (`-ss` before `-i`) can land
+      // on a packet boundary before/after `start`, baking a constant A/V
+      // offset into the MP3 stream (heard as permanently early/late audio
+      // that the renderer's drift corrector can never fully remove).
+      // Combine a fast coarse input seek with an accurate output seek
+      // (decode-and-drop) so the stream starts EXACTLY at `start`.
       if (Number.isFinite(start) && start > 0) {
-        cmd.seekInput(start)
+        const ACCURATE_WINDOW = 5
+        if (start > ACCURATE_WINDOW) {
+          cmd.seekInput(Math.max(0, start - ACCURATE_WINDOW))
+          cmd.seekOutput(ACCURATE_WINDOW)
+        } else {
+          cmd.seekOutput(start)
+        }
       }
+      cmd.inputOptions('-accurate_seek')
       cmd.outputOptions([
         `-map ${mapArg}`,
         '-vn',
@@ -1304,6 +1330,7 @@ function registerAudioProtocol(): void {
         '-c:a libmp3lame',
         '-b:a 192k',
         '-ac 2',
+        '-avoid_negative_ts make_zero',
         '-preset ultrafast',
         '-threads 2',
         '-f mp3'
@@ -1943,6 +1970,47 @@ ipcMain.handle('set-notify-new-episodes', (event, notifyNewEpisodes: boolean) =>
   return settings
 })
 
+ipcMain.handle('get-max-concurrent-downloads', () => {
+  return getMaxConcurrentDownloads()
+})
+
+ipcMain.handle('set-max-concurrent-downloads', (_, value: number) => {
+  const parsed = Math.floor(Number(value))
+  const settings = {
+    ...loadAppSettings(),
+    maxConcurrentDownloads: Number.isFinite(parsed) && parsed > 0 ? Math.min(parsed, 99) : 0
+  }
+  saveAppSettings(settings)
+
+  BrowserWindow.getAllWindows().forEach(window => {
+    window.webContents.send('app-settings-changed', settings)
+  })
+
+  // Converge on the new budget right away: raising it starts waiting items,
+  // lowering it parks the newest extras.
+  void pumpDownloadQueue()
+  setTimeout(() => enforceDownloadConcurrency(), 50)
+  return settings.maxConcurrentDownloads
+})
+
+// Assign FIFO positions to rows that predate the queue_order migration.
+function backfillDownloadQueueOrder(): void {
+  try {
+    const rows = db.getDownloads().filter((d: any) => d.queueOrder == null)
+    if (rows.length === 0) return
+    let order = db.getDownloads().reduce((max: number, d: any) => {
+      const v = Number(d.queueOrder)
+      return Number.isFinite(v) && v > max ? v : max
+    }, 0)
+    for (const row of rows.sort((a: any, b: any) => new Date(a.addedAt || 0).getTime() - new Date(b.addedAt || 0).getTime())) {
+      order += 1
+      db.setDownloadQueueOrder(row.id, order)
+    }
+  } catch (err: any) {
+    console.warn('[Torrent] Queue order backfill failed:', err?.message || err)
+  }
+}
+
 // ─── Followed series: new-episode alerts (#3) ────────────────────────────────
 const FOLLOW_CHECK_THROTTLE_MS = 20 * 3600 * 1000 // max one TMDB check per series per 20h
 
@@ -1963,41 +2031,23 @@ ipcMain.handle('follow-series', async (_, input) => {
   })
   // Baseline to the latest RELEASED episode so only future drops alert.
   // Lightweight single-request lookup (not the full catalog crawl).
+  // Following is ALWAYS silent: everything already released becomes the
+  // baseline, never an alert — even if it aired recently and is unwatched
+  // (flagging it would claim something "just dropped" that was out before
+  // the user started watching). If the lookup fails, the baseline stays
+  // unknown (NULL) and the first successful check adopts it silently instead
+  // of falling back to the watched position (which would false-alert every
+  // already-aired episode in between).
   let latest: { seasonNumber: number; episodeNumber: number; airDate?: string | null } | null = null
   try {
     const lookedUp = await tmdb.fetchTmdbLatestReleased(tmdbId)
     if (lookedUp?.released) latest = lookedUp
-  } catch { /* fall back to watched position below */ }
-  if (!latest && input.season != null) {
-    latest = { seasonNumber: Number(input.season) || 0, episodeNumber: Number(input.episode) || 0 }
-  }
+  } catch { /* baseline stays unknown; first check adopts silently */ }
   if (latest) db.setFollowedBaseline(tmdbId, latest.seasonNumber, latest.episodeNumber)
-  // Following a show mid-season surfaces a recent drop right away: if the
-  // latest release aired within the last 14 days (and past the availability
-  // grace) and is newer than anything watched, flag it — no waiting for the
-  // next daily check.
-  let hasNewDrop = false
-  if (latest?.airDate) {
-    try {
-      const age = Date.now() - new Date(latest.airDate).getTime()
-      const fresh = age >= ALERT_AVAILABILITY_GRACE_MS && age < 14 * 24 * 3600 * 1000
-      const w = db.getStreamMaxWatched(tmdbId)
-      const watched = w && w.season != null && w.episode != null
-        ? { season: Number(w.season), episode: Number(w.episode) }
-        : null
-      const newest = { season: latest.seasonNumber, episode: latest.episodeNumber }
-      if (fresh && (!watched || isEpisodeAfter(newest, watched))) {
-        db.touchFollowedChecked(tmdbId, newest.season, newest.episode, true)
-        hasNewDrop = true
-      }
-    } catch { /* flagging is best-effort */ }
-  }
   return {
     followed: true,
     isNew: Boolean(followResult?.isNew),
-    hasNewDrop,
-    dropSeason: hasNewDrop && latest ? latest.seasonNumber : undefined,
-    dropEpisode: hasNewDrop && latest ? latest.episodeNumber : undefined
+    hasNewDrop: false
   }
 })
 
@@ -2033,11 +2083,48 @@ function isAlertAvailable(airDate?: string | null) {
   return Date.now() - airTime >= ALERT_AVAILABILITY_GRACE_MS
 }
 
+// Candidate-only source check: is the newly-dropped episode actually
+// watchable right now (single episode or covering season pack, any
+// provider)? Only runs when an alert would otherwise fire, so the daily
+// sweep stays cheap. Inconclusive (lookup/provider failure) fails OPEN —
+// better a banner with few sources than a swallowed real drop. A successful
+// round with no match fails CLOSED (hold until sources appear).
+async function hasWatchableFollowedEpisode(f: any, ep: EpisodeCursor): Promise<boolean> {
+  const title = String(f.title || '').trim()
+  if (!title) return true
+  try {
+    const imdbId = await Promise.race([
+      getImdbIdForTmdb('series', Number(f.tmdb_id)),
+      new Promise<null>((_, reject) => setTimeout(() => reject(new Error('imdb lookup timeout')), 8000))
+    ]).catch(() => null)
+    if (!imdbId) return true
+    const settled = await Promise.allSettled([
+      fetchEztvSources(imdbId),
+      fetchTorrentioSources(imdbId, title, 'series')
+    ])
+    const raw: any[] = []
+    for (const s of settled) {
+      if (s.status !== 'fulfilled' || !Array.isArray(s.value)) return true
+      raw.push(...s.value)
+    }
+    if (raw.length === 0) return false
+    return raw.some(r => {
+      const seeds = Number(r?.seeds) || 0
+      if (seeds <= 0) return false
+      const meta = parseTvTorrentMetadata(String(r?.title || ''))
+      return (meta.parsedSeason === ep.season && meta.parsedEpisode === ep.episode) ||
+        (Boolean(meta.isSeasonPack) && meta.parsedSeason === ep.season)
+    })
+  } catch {
+    return true
+  }
+}
+
 // Single-series check shared by the throttled bulk pass and explicit UI
-// refreshes. Alert rule: latest released episode must be newer than BOTH what
-// the user has watched (stream rows) and what they were already notified
-// about — so following a show mid-season never false-alerts old episodes,
-// yet an in-progress watcher still hears about today's drop.
+// refreshes. Alert rule: the latest released episode must be newer than the
+// baseline captured at follow time AND newer than anything watched — i.e.
+// it dropped AFTER the user started following — plus engaged, past the
+// availability grace, and backed by at least one watchable source.
 async function checkOneFollowedSeries(f: any, opts: { explicit?: boolean } = {}): Promise<{ hasNew: boolean; season?: number; episode?: number }> {
   const latest = await tmdb.fetchTmdbLatestReleased(f.tmdb_id)
   if (!latest || !latest.released) {
@@ -2064,14 +2151,37 @@ async function checkOneFollowedSeries(f: any, opts: { explicit?: boolean } = {})
   const engaged = Boolean(opts.explicit) ||
     (lastActivity && Date.now() - new Date(lastActivity).getTime() < STALE_FOLLOW_MS) ||
     (followedAt && Date.now() - new Date(followedAt).getTime() < STALE_FOLLOW_MS)
-  if (newerThanWatched && newerThanKnown && engaged && isAlertAvailable(latest.airDate)) {
-    db.touchFollowedChecked(f.tmdb_id, newest.season, newest.episode, true)
-    return { hasNew: true, season: newest.season, episode: newest.episode }
+
+  // Never-baselined (followed while the TMDB lookup failed): adopt silently —
+  // everything already out predates the user. Exception: the newest episode
+  // aired AFTER the follow, i.e. a genuine drop happened before the first
+  // check could baseline — treat it as a candidate below.
+  if (!known) {
+    const followedAtMs = followedAt ? new Date(followedAt).getTime() : 0
+    const airedAtMs = latest.airDate ? new Date(latest.airDate).getTime() : 0
+    const droppedAfterFollow = followedAtMs > 0 && Number.isFinite(airedAtMs) && airedAtMs > followedAtMs
+    if (!droppedAfterFollow || !newerThanWatched || !engaged || !isAlertAvailable(latest.airDate)) {
+      db.setFollowedBaseline(f.tmdb_id, newest.season, newest.episode)
+      return { hasNew: false }
+    }
+  } else if (!(newerThanWatched && newerThanKnown && engaged && isAlertAvailable(latest.airDate))) {
+    // Caught up (or nothing watched yet with an existing baseline): keep the
+    // baseline fresh silently.
+    db.touchFollowedChecked(f.tmdb_id, newest.season, newest.episode, false)
+    return { hasNew: false }
   }
-  // Caught up (or nothing watched yet with an existing baseline): keep the
-  // baseline fresh silently.
-  db.touchFollowedChecked(f.tmdb_id, newest.season, newest.episode, false)
-  return { hasNew: false }
+
+  // Candidate: verify a watchable source exists before crying "new episode".
+  // If not, hold — advance only the clock (never the baseline past the held
+  // episode) so the next check retries instead of swallowing it forever.
+  const watchable = await hasWatchableFollowedEpisode(f, newest)
+  if (!watchable) {
+    console.log(`[Followed] Holding alert for ${f.tmdb_id} S${newest.season}E${newest.episode} — no watchable source yet`)
+    db.touchFollowedChecked(f.tmdb_id, null, null, false)
+    return { hasNew: false }
+  }
+  db.touchFollowedChecked(f.tmdb_id, newest.season, newest.episode, true)
+  return { hasNew: true, season: newest.season, episode: newest.episode }
 }
 
 ipcMain.handle('check-followed-updates', async () => {
@@ -2990,6 +3100,27 @@ const pausedTorrentIds = new Set<string>()
 // ─── Temp Stream (watch & forget) Engine ────────────────────────────────────
 const tempStreams = new Map<string, { torrent: any; folder: string; magnetUrl: string }>()
 
+// Ground-truth torrent sizes (infohash -> total bytes) learned when metadata
+// resolves. Provider-reported sizes are estimates and sometimes badly wrong
+// (e.g. a per-file size stamped on a whole season pack: "5.82 GB" on a
+// 50.5 GB torrent). Learned values override them in source lists.
+const learnedTorrentSizes = new Map<string, number>()
+function rememberTorrentSize(infoHash: string | undefined | null, length: number): void {
+  if (!infoHash || !Number.isFinite(length) || length <= 0) return
+  learnedTorrentSizes.set(infoHash.toLowerCase(), Math.floor(length))
+  if (learnedTorrentSizes.size > 500) {
+    const oldest = learnedTorrentSizes.keys().next().value
+    if (oldest) learnedTorrentSizes.delete(oldest)
+  }
+}
+function getLearnedTorrentSizeBytes(infoHash?: string | null, magnet?: string | null): number | null {
+  const rawHash = (typeof infoHash === 'string' && infoHash)
+    ? infoHash
+    : getMagnetInfoHash(typeof magnet === 'string' ? magnet : null)
+  if (!rawHash) return null
+  return learnedTorrentSizes.get(rawHash.toLowerCase()) ?? null
+}
+
 // Persistent downloads that completed get their torrent destroyed — but a video
 // element may still be streaming from them. Record their disk layout so the
 // torrent:// and audio:// handlers can serve the files straight from disk.
@@ -3163,6 +3294,8 @@ function clearTorrentProgressInterval(id: string): void {
 
 function markTorrentInactive(id: string): void {
   clearTorrentProgressInterval(id)
+  // A finished/errored/cancelled torrent frees its slot reservation too.
+  claimedDownloadSlots.delete(id)
   activeTorrents.delete(id)
 }
 
@@ -3196,7 +3329,18 @@ function getDownloadPath(): string {
 }
 
 function formatBytes(bytes: any): string {
-  if (typeof bytes === 'string') return bytes
+  // Some provider APIs (notably EZTV's size_bytes) return raw byte counts as
+  // STRINGS. The old code passed strings straight through, so the UI showed
+  // "3868391446" instead of "3.6 GB". Coerce numeric strings; leave already-
+  // formatted values ("1.2 GB", "—") untouched.
+  if (typeof bytes === 'string') {
+    const trimmed = bytes.trim()
+    if (trimmed !== '' && Number.isFinite(Number(trimmed))) {
+      bytes = Number(trimmed)
+    } else {
+      return bytes
+    }
+  }
   if (typeof bytes !== 'number' || isNaN(bytes)) return '—'
   if (bytes === 0) return '0 B'
   const k = 1024
@@ -3805,9 +3949,32 @@ function parseTorrentioStream(stream: any, fallbackTitle: string, options: { pro
   const qualityMatch = `${streamTitle} ${stream.name || ''}`.match(/(2160p|1080p|720p|480p)/i)
   const quality = qualityMatch ? qualityMatch[1] : (stream.name?.includes('1080p') ? '1080p' : 'HD')
   
-  // Parse size e.g. "💾 2.34 GB" or "💾 980 MB"
-  const sizeMatch = streamTitle.match(/([0-9.]+\s*(GB|MB|KB|GiB|MiB))/i)
-  const size = sizeMatch ? sizeMatch[1] : '—'
+  // Parse size e.g. "💾 2.34 GB" or "💾 980 MB".
+  // Season-pack listings from Stremio aggregators often carry PER-FILE sizes
+  // ("E01 … 1.4 GB … E02 … 1.5 GB …") — taking the first match shows a single
+  // episode's size on a whole-season pack. Combine every mention into the
+  // total; single-file results (one mention) are unchanged.
+  const sizeToBytes = (num: number, unit: string) => {
+    const u = unit.toUpperCase()
+    const k = 1024
+    if (u.charAt(0) === 'T') return num * k * k * k * k
+    if (u.charAt(0) === 'G') return num * k * k * k
+    if (u.charAt(0) === 'M') return num * k * k
+    if (u.charAt(0) === 'K') return num * k
+    return num
+  }
+  const sizeMentions = streamTitle.match(/[0-9.]+\s*(?:TB|GB|MB|KB|TIB|GIB|MIB|KIB)/gi) || []
+  let size = '—'
+  if (sizeMentions.length === 1) {
+    size = sizeMentions[0]
+  } else if (sizeMentions.length > 1) {
+    let totalBytes = 0
+    for (const mention of sizeMentions) {
+      const parts = /([0-9.]+)\s*((?:TB|GB|MB|KB|TIB|GIB|MIB|KIB))/i.exec(mention)
+      if (parts) totalBytes += sizeToBytes(parseFloat(parts[1]), parts[2])
+    }
+    if (totalBytes > 0) size = formatBytes(totalBytes)
+  }
 
   // Parse seeds e.g. "👤 123"
   const seedMatch = streamTitle.match(/(?:👤|Seeders:)\s*([0-9]+)/i)
@@ -3994,6 +4161,35 @@ function normalizeTorrentSources(sources: any[], mediaType: string): any[] {
         normalized.isSeasonPack = Boolean(metadata.isSeasonPack)
       }
       return normalized
+    })
+
+    // Correct wrong provider sizes with ground truth. Providers sometimes stamp
+    // a per-file size on a whole pack (e.g. "5.82 GB" on a 50.5 GB season),
+    // but once we've resolved a torrent's metadata — via an earlier download
+    // or stream — we know its real total length. Real data wins.
+    const realSizeByHash = new Map<string, string>()
+    try {
+      for (const dl of db.getDownloads()) {
+        const hash = getMagnetInfoHash((dl as any)?.magnet)
+        const sizeText = String((dl as any)?.size || '').trim()
+        if (hash && sizeText && sizeText !== '—' && sizeText !== '0 B') {
+          realSizeByHash.set(hash.toLowerCase(), sizeText)
+        }
+      }
+    } catch { /* best-effort */ }
+    enrichedSources = enrichedSources.map(src => {
+      const hash = ((src as any).infoHash && String((src as any).infoHash)) ||
+        getMagnetInfoHash(src.magnet)
+      if (!hash) return src
+      const learnedBytes = getLearnedTorrentSizeBytes(hash, null)
+      if (learnedBytes != null && learnedBytes > 0) {
+        return { ...src, size: formatBytes(learnedBytes) }
+      }
+      const knownSize = realSizeByHash.get(hash.toLowerCase())
+      if (knownSize) {
+        return { ...src, size: knownSize }
+      }
+      return src
     })
 
     // Improve quality label using file size when no explicit tag is present
@@ -5438,6 +5634,164 @@ ipcMain.handle('cancel-torrent-source-search', async (event, requestId: string) 
 
 // ΓöÇΓöÇΓöÇ IPC: Start Torrent Download ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
 
+// ─── Download queue: max simultaneous downloads ─────────────────────────────
+// 0 (or <= 0) = unlimited. Anything over the limit waits with status 'queued'
+// and auto-starts oldest-first as slots free up.
+function getMaxConcurrentDownloads(): number {
+  const v = Number(loadAppSettings().maxConcurrentDownloads)
+  if (!Number.isFinite(v) || v <= 0) return 0
+  return Math.min(Math.floor(v), 99)
+}
+
+// Slots claimed synchronously, BEFORE the async start begins. The gate used to
+// read the running count and then await startWebTorrent() — which awaits
+// getWebTorrentClient() before writing any status — so several starts in that
+// window all read the same "nothing running" and ALL launched. That's how
+// extra torrents got past a limit of 1: they resolved metadata (real sizes in
+// the list) and then sat at 0 B/s. A reservation makes the check atomic.
+const claimedDownloadSlots = new Set<string>()
+
+function getDownloadRow(id: string): any | undefined {
+  try {
+    return db.getDownloads().find((d: any) => d.id === id)
+  } catch {
+    return undefined
+  }
+}
+
+function countRunningDownloads(): number {
+  let rows: any[] = []
+  try {
+    rows = db.getDownloads()
+  } catch {
+    return activeTorrents.size + claimedDownloadSlots.size
+  }
+  const running = rows.filter((d: any) => d.status === 'downloading' || d.status === 'connecting').length
+  // Claims whose start hasn't reached the DB yet still hold their slot.
+  const starting = [...claimedDownloadSlots].filter((id) => {
+    const row = rows.find((d: any) => d.id === id)
+    return !row || (row.status !== 'downloading' && row.status !== 'connecting')
+  }).length
+  return running + starting
+}
+
+// True FIFO: monotonic queue_order (set when the download was added), with
+// added_at only as a legacy fallback. Sorting by added_at alone was unstable
+// for downloads created within the same second.
+function getQueuedDownloads(): any[] {
+  try {
+    return db.getDownloads()
+      .filter((d: any) => d.status === 'queued')
+      .sort((a: any, b: any) => {
+        const aOrder = Number(a.queueOrder)
+        const bOrder = Number(b.queueOrder)
+        if (Number.isFinite(aOrder) && Number.isFinite(bOrder) && aOrder !== bOrder) {
+          return aOrder - bOrder
+        }
+        return new Date(a.addedAt || 0).getTime() - new Date(b.addedAt || 0).getTime()
+      })
+  } catch {
+    return []
+  }
+}
+
+function broadcastQueuedState(id: string): void {
+  const row = db.getDownloads().find((d: any) => d.id === id)
+  if (!row) return
+  BrowserWindow.getAllWindows().forEach(w => w.webContents.send('torrent-progress', {
+    ...row,
+    status: 'queued',
+    downloadSpeed: '0 B/s',
+    timeRemaining: '—'
+  }))
+}
+
+// Start now if a slot is free, otherwise park as queued. The slot is claimed
+// synchronously so a burst of starts can't all pass the same check.
+async function startDownloadRespectingQueue(id: string, magnet: string, title: string, progress: number): Promise<'started' | 'queued'> {
+  const max = getMaxConcurrentDownloads()
+  if (max > 0 && countRunningDownloads() >= max) {
+    const row = getDownloadRow(id)
+    if (row) {
+      db.updateDownload({ ...row, status: 'queued', downloadSpeed: '0 B/s', timeRemaining: '—' })
+    }
+    console.log(`[Torrent] Slot full (${countRunningDownloads()}/${max}) — "${title}" queued`)
+    broadcastQueuedState(id)
+    return 'queued'
+  }
+  claimedDownloadSlots.add(id)
+  try {
+    await startWebTorrent(id, magnet, title, progress || 0)
+    return 'started'
+  } finally {
+    // The DB row now carries the running state, so the claim is redundant.
+    claimedDownloadSlots.delete(id)
+  }
+}
+
+// Fill free slots with the oldest queued downloads.
+// Safety net: whatever path started extra downloads (stale rows, races,
+// older builds), the running count converges back to the limit — oldest
+// wins, extras are parked as queued. Runs every few seconds; no-op when
+// unlimited or already within budget.
+function enforceDownloadConcurrency(): void {
+  try {
+    const max = getMaxConcurrentDownloads()
+    if (max <= 0) return
+    const running = db.getDownloads()
+      .filter((d: any) => d.status === 'downloading' || d.status === 'connecting')
+      .sort((a: any, b: any) => new Date(a.addedAt || 0).getTime() - new Date(b.addedAt || 0).getTime())
+    if (running.length <= max) return
+    for (const extra of running.slice(max)) {
+      const live = activeTorrents.get(extra.id)
+      if (live && !live.destroyed) {
+        try { live.destroy() } catch { /* ignore */ }
+        activeTorrents.delete(extra.id)
+      }
+      clearTorrentProgressInterval(extra.id)
+      db.updateDownload({ ...extra, status: 'queued', downloadSpeed: '0 B/s', timeRemaining: '—' })
+      broadcastQueuedState(extra.id)
+      console.log(`[Torrent] Over limit (${running.length}/${max}) — "${extra.title}" requeued`)
+    }
+  } catch (err: any) {
+    console.warn('[Torrent] Concurrency enforce failed:', err?.message || err)
+  }
+}
+
+// Fill free slots with the oldest queued downloads.
+let downloadPumpRunning = false
+async function pumpDownloadQueue(): Promise<void> {
+  if (downloadPumpRunning) return
+  downloadPumpRunning = true
+  try {
+    const max = getMaxConcurrentDownloads()
+    for (;;) {
+      if (max > 0 && countRunningDownloads() >= max) return
+      const next = getQueuedDownloads()[0]
+      if (!next) return
+      const live = activeTorrents.get(next.id)
+      if (live && !live.destroyed) {
+        // Already running (race) — fix the stale flag and move on.
+        try { db.updateDownload({ ...next, status: 'connecting' }) } catch { /* ignore */ }
+        continue
+      }
+      console.log(`[Torrent] Starting queued download: "${next.title}" (${countRunningDownloads()}/${max || '∞'})`)
+      // Claim before the await so a concurrent start/pump can't double-start it.
+      claimedDownloadSlots.add(next.id)
+      try {
+        await startWebTorrent(next.id, next.magnet, next.title, next.progress || 0)
+      } catch (err: any) {
+        console.error(`[Torrent] Queued start failed for "${next.title}":`, err?.message || err)
+        return
+      } finally {
+        claimedDownloadSlots.delete(next.id)
+      }
+    }
+  } finally {
+    downloadPumpRunning = false
+  }
+}
+
 async function startWebTorrent(torrentId: string, magnetUrl: string, title: string, initialProgress: number = 0, initialName?: string | null) {
   pausedTorrentIds.delete(torrentId)
   clearTorrentProgressInterval(torrentId)
@@ -5492,6 +5846,8 @@ async function startWebTorrent(torrentId: string, magnetUrl: string, title: stri
     clearTorrentProgressInterval(torrentId)
     broadcastProgress(torrentId, torrent, 'done')
     console.log(`[Torrent] Download complete: ${title}`)
+    // A slot just freed up — start the next queued download.
+    void pumpDownloadQueue()
     // Remember the disk layout so an in-flight video stream can keep reading
     // after the torrent instance is destroyed below.
     if (torrent.path) {
@@ -5519,23 +5875,37 @@ async function startWebTorrent(torrentId: string, magnetUrl: string, title: stri
       torrent.destroy()
     }
     markTorrentInactive(torrentId)
+    void pumpDownloadQueue()
   })
 
   return torrent
 }
 
 async function autoResumeDownloads() {
-  const downloads = db.getDownloads()
+  const downloads = [...db.getDownloads()].sort(
+    (a: any, b: any) => new Date(a.addedAt || 0).getTime() - new Date(b.addedAt || 0).getTime()
+  )
+  // Stale 'downloading' rows from the last session aren't actually running —
+  // if left as-is they'd occupy phantom slots and deadlock the queue.
+  // Requeue everything, then fill slots oldest-first.
+  let requeued = false
   for (const dl of downloads) {
     if (dl.status === 'downloading' || dl.status === 'connecting') {
-      console.log(`[AutoResume] Resuming incomplete download: ${dl.title}`)
+      console.log(`[AutoResume] Requeueing incomplete download: ${dl.title}`)
       try {
-        await startWebTorrent(dl.id, dl.magnet, dl.title, dl.progress || 0)
+        db.updateDownload({ ...dl, status: 'queued', downloadSpeed: '0 B/s', timeRemaining: '—' })
+        requeued = true
       } catch (e: any) {
-        console.error(`[AutoResume] Failed to resume ${dl.id}:`, e.message)
+        console.error(`[AutoResume] Failed to requeue ${dl.id}:`, e.message)
       }
     }
   }
+  if (requeued || getQueuedDownloads().length > 0) {
+    await pumpDownloadQueue()
+  }
+  // Show the effective budget + outcome so the queue state is verifiable in
+  // the console (mirrored from the renderer terminal).
+  console.log(`[TorrentQueue] Limit: ${getMaxConcurrentDownloads() || 'Unlimited'} · running: ${countRunningDownloads()} · queued: ${getQueuedDownloads().length}`)
 }
 
 ipcMain.handle('start-torrent-download', async (_, magnetUrl: string, title: string, tmdbId?: number, name?: string, media?: {
@@ -5559,7 +5929,10 @@ ipcMain.handle('start-torrent-download', async (_, magnetUrl: string, title: str
       title,
       name: displayName,
       magnet: enrichedMagnetUrl,
-      status: 'downloading',
+      // Park as queued FIRST — the gate starts it if a slot is free. Writing
+      // 'downloading' here would make the row count itself as running and
+      // deadlock the queue (everything queues, nothing starts).
+      status: 'queued',
       tmdbId,
       mediaType: media?.mediaType,
       season: media?.season,
@@ -5567,7 +5940,7 @@ ipcMain.handle('start-torrent-download', async (_, magnetUrl: string, title: str
       downloadPath
     })
 
-    await startWebTorrent(torrentId, enrichedMagnetUrl, title, 0, displayName)
+    await startDownloadRespectingQueue(torrentId, enrichedMagnetUrl, title, 0)
     return torrentId
   } catch (err) {
     console.error('[Torrent] Start download error:', err)
@@ -5606,6 +5979,8 @@ ipcMain.handle('cancel-torrent-download', async (_, id: string) => {
         name: dlDbData.name || getMagnetDisplayName(dlDbData.magnet) || dlDbData.title
       } as any, 'paused')
     }
+    // Cancelling freed a slot — start the next queued download.
+    void pumpDownloadQueue()
     return true
   } catch (err) {
     console.error('[Torrent] Cancel error:', err)
@@ -5616,6 +5991,15 @@ ipcMain.handle('cancel-torrent-download', async (_, id: string) => {
 // ─── IPC: Pause / Resume Torrent ─────────────────────────────────────────────
 ipcMain.handle('pause-resume-torrent', async (_, id: string) => {
   try {
+    // Dequeue: a queued item goes back to paused (it never started).
+    const existing = db.getDownloads().find((d: any) => d.id === id)
+    if (existing && existing.status === 'queued') {
+      const updated = { ...existing, status: 'paused', downloadSpeed: '0 B/s', timeRemaining: '—' }
+      db.updateDownload(updated)
+      BrowserWindow.getAllWindows().forEach(w => w.webContents.send('torrent-progress', updated))
+      return true
+    }
+
     const torrent = activeTorrents.get(id)
     
     // Resume Logic
@@ -5624,7 +6008,8 @@ ipcMain.handle('pause-resume-torrent', async (_, id: string) => {
       if (dbDl) {
         pausedTorrentIds.delete(id)
         console.log(`[Torrent] Resuming "${dbDl.title}" from ${dbDl.progress}%`)
-        await startWebTorrent(id, dbDl.magnet, dbDl.title, dbDl.progress || 0)
+        // Queues when slots are full instead of forcing an extra download.
+        await startDownloadRespectingQueue(id, dbDl.magnet, dbDl.title, dbDl.progress || 0)
         return true
       }
       return false
@@ -5656,6 +6041,9 @@ ipcMain.handle('pause-resume-torrent', async (_, id: string) => {
         name: dlDbData.name || getMagnetDisplayName(dlDbData.magnet) || dlDbData.title
       } as any, 'paused')
     }
+
+    // Pausing freed a slot — start the next queued download.
+    void pumpDownloadQueue()
     
     return true
   } catch (err) {
@@ -5690,13 +6078,12 @@ ipcMain.handle('retry-torrent-download', async (_, id: string) => {
 
     db.updateDownload({
       ...dbDl,
-      downloadSpeed: '0 B/s',
-      timeRemaining: '—',
-      status: 'connecting',
       errorMessage: null
     })
 
-    await startWebTorrent(id, dbDl.magnet, dbDl.title, dbDl.progress || 0)
+    // Queues when slots are full (status stays 'error' until the gate runs,
+    // so it never counts itself as running).
+    await startDownloadRespectingQueue(id, dbDl.magnet, dbDl.title, dbDl.progress || 0)
     return true
   } catch (err) {
     console.error('[Torrent] Retry error:', err)
@@ -6308,6 +6695,8 @@ ipcMain.handle('remove-download', async (_, id: string, deleteFile: boolean = fa
     // 2. Delete download row from DB
     db.removeDownloadRow(id)
     BrowserWindow.getAllWindows().forEach(w => w.webContents.send('downloads-changed'))
+    // Removing a running download frees a slot.
+    void pumpDownloadQueue()
 
     // 3. Optionally hard delete physical files and related library metadata
     if (deleteFile) {

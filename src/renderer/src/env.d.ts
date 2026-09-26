@@ -39,6 +39,8 @@ interface Api {
     externalWatchlist?: number
     localWatchlist?: number
     favorites?: number
+    streamProgress?: number
+    followedSeries?: number
     error?: string
   }>
   importUserBackup: () => Promise<{
@@ -51,6 +53,8 @@ interface Api {
     externalWatchlistImported?: number
     localWatchlistRestored?: number
     favoritesRestored?: number
+    streamProgressRestored?: number
+    followedSeriesRestored?: number
     error?: string
   }>
   clearAllData: () => Promise<boolean>
@@ -131,6 +135,7 @@ interface Api {
   prepareTorrentStream: (id: string) => Promise<{ url?: string; fileName?: string; size?: number; error?: string }>
   startTempStream: (magnetUrl: string, title?: string, options?: { fileIndex?: number; season?: number; episode?: number }) => Promise<{ url?: string; fileName?: string; size?: number; streamId?: string; parsedSeason?: number | null; parsedEpisode?: number | null; error?: string }>
   stopTempStream: (id: string) => Promise<boolean>
+  prioritizeTempFiles: (streamId: string, fileIndexes: number[]) => Promise<boolean>
   getTempStreamEpisodes: (streamId: string) => Promise<{ error?: string; episodes?: { index: number; fileName: string; size: number; season: number | null; episode: number | null; isSeasonPack: boolean }[] }>
   onDownloadsChanged: (callback: () => void) => () => void
   onTorrentProgress: (callback: (data: any) => void) => () => void
@@ -160,9 +165,22 @@ interface Api {
   isFullscreen: () => Promise<boolean>
   closeWindow: () => Promise<void>
   onFullscreenChanged: (callback: (isFullscreen: boolean) => void) => () => void
-  getAppSettings: () => Promise<{ launchFullscreen: boolean }>
-  setLaunchFullscreen: (launchFullscreen: boolean) => Promise<{ launchFullscreen: boolean }>
-  onAppSettingsChanged: (callback: (settings: { launchFullscreen: boolean }) => void) => () => void
+  getAppSettings: () => Promise<{ launchFullscreen: boolean; rememberOnlineProgress: boolean; notifyNewEpisodes: boolean }>
+  setLaunchFullscreen: (launchFullscreen: boolean) => Promise<{ launchFullscreen: boolean; rememberOnlineProgress: boolean; notifyNewEpisodes: boolean }>
+  setRememberOnlineProgress: (enabled: boolean) => Promise<{ launchFullscreen: boolean; rememberOnlineProgress: boolean; notifyNewEpisodes: boolean }>
+  setNotifyNewEpisodes: (enabled: boolean) => Promise<{ launchFullscreen: boolean; rememberOnlineProgress: boolean; notifyNewEpisodes: boolean }>
+  followSeries: (input: { tmdb_id: number; title?: string; poster_path?: string | null; backdrop_path?: string | null; overview?: string | null; season?: number | null; episode?: number | null }) => Promise<{ followed: boolean; isNew?: boolean; hasNewDrop?: boolean; dropSeason?: number; dropEpisode?: number }>
+  unfollowSeries: (tmdbId: number) => Promise<{ unfollowed: boolean }>
+  getFollowedSeries: () => Promise<any[]>
+  markFollowedSeen: (tmdbId: number) => Promise<{ seen: boolean }>
+  checkFollowedUpdates: () => Promise<any[]>
+  checkSeriesUpdates: (tmdbId: number) => Promise<{ checked: boolean; hasNew?: boolean; season?: number; episode?: number }>
+  getStreamProgress: (tmdbId: number, mediaType: string, season?: number | null, episode?: number | null) => Promise<any>
+  updateStreamProgress: (entry: any) => void
+  getStreamContinueWatching: () => Promise<any[]>
+  getStreamHistory: (limit?: number) => Promise<any[]>
+  deleteStreamProgress: (tmdbId: number, mediaType: string, season?: number | null, episode?: number | null) => Promise<any>
+  onAppSettingsChanged: (callback: (settings: { launchFullscreen: boolean; rememberOnlineProgress: boolean; notifyNewEpisodes: boolean }) => void) => () => void
   getTmdbReleaseInfo: (id: number, type: 'movie' | 'series') => Promise<import('./types').TmdbReleaseInfo | null>
 }
 

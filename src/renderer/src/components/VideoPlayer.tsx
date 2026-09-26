@@ -11,6 +11,7 @@ import { SubtitleOverlay, SUBTITLE_STYLE_KEY, SUBTITLE_FONT_SIZE_KEY, SUBTITLE_P
 import { VideoStatsOverlay } from './player/VideoStatsOverlay'
 import { SubtitleAppearanceGuide } from './FeatureGuides'
 import { useAudioBoost, AudioBoostProfile, AudioBoostIntensity, AUDIO_BOOST_PROFILES, AUDIO_BOOST_INTENSITIES } from '../hooks/useAudioBoost'
+import { isOnlineProgressEnabled, formatResumeTime, safeGetStreamProgress, safeUpdateStreamProgress, safeFollowSeries, safePrioritizeTempFiles, FOLLOW_TOAST_EVENT } from '../utils/streamResume'
 import { useIntroSkip, IntroDbSegment, getIntroDbSegmentKey, getIntroDbSegmentLabel, getIntroDbSegmentAccentClass, INTRODB_SKIP_END_PADDING_SECONDS, INTRODB_AUTO_SKIP_CONFIRMATION_MS } from '../hooks/useIntroSkip'
 import {
   SUBTITLE_SYNC_COARSE_STEP_MS,
@@ -41,6 +42,28 @@ const hasSourceEpisodeMarker = (source: any) => (
   /\b(?:episode|ep)[\s._-]*\d{1,3}\b/i.test(source.title || '')
 )
 const isSourceSeasonPack = (source: any) => Boolean(source.isSeasonPack) && !hasSourceEpisodeMarker(source)
+// ── Online stream resume identity (source-agnostic, TMDB-keyed) ─────────────
+const getStreamResumeIdentity = (video: Video) => {
+  if (!video.tmdb_id || (video.type !== 'movie' && video.type !== 'series')) return null
+  return {
+    tmdb_id: video.tmdb_id,
+    media_type: video.type,
+    season: video.type === 'series' ? (video.season ?? null) : null,
+    episode: video.type === 'series' ? (video.episode ?? null) : null
+  }
+}
+const buildStreamResumeSnapshot = (video: Video) => {
+  const title = video.type === 'series' && (video as any).series_name
+    ? (video as any).series_name
+    : video.title
+  return {
+    title,
+    poster_path: video.poster_path || null,
+    backdrop_path: video.backdrop_path || null,
+    overview: video.overview || null,
+    release_year: video.release_year ?? null
+  }
+}
 const getArtworkUrl = (artworkPath?: string | null, remoteSize: 'w342' | 'w780' | 'w1280' | 'original' = 'w780') => {
   if (!artworkPath) return null
   if (artworkPath.startsWith('http')) {
@@ -284,6 +307,16 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
     return () => clearInterval(interval);
   }, [isHost, isPlaying, broadcastState]);
   const [forceRestart, setForceRestart] = useState(false)
+  const [resumeNotice, setResumeNotice] = useState<string | null>(
+    video.resumeFrom && video.resumeFrom > 0
+      ? `Resuming from ${formatResumeTime(video.resumeFrom)}${video.sourceRefreshed ? ' · Source refreshed' : ''}`
+      : null
+  )
+  useEffect(() => {
+    if (!resumeNotice) return
+    const t = setTimeout(() => setResumeNotice(null), 7000)
+    return () => clearTimeout(t)
+  }, [resumeNotice])
   const [subtitlePath, setSubtitlePath] = useState<string | null>(null)
   const [volume, setVolume] = useState(1)
   const [currentVideo, setCurrentVideo] = useState<Video>(video)
@@ -624,6 +657,30 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
 
   // Torrent stream episode switching
   const [torrentEpisodes, setTorrentEpisodes] = useState<{ index: number; fileName: string; size: number; season: number | null; episode: number | null; isSeasonPack: boolean }[] | null>(null)
+  // ── Pack binge mode: a season-pack torrent plays as ONE virtual video ─────
+  // (combined duration, cross-file seek). Files stay separate on disk; only the
+  // timeline is virtual. Movies never binge.
+  interface PackBingeFile { index: number; season: number | null; episode: number | null; title: string; url: string }
+  interface PackBingeState { sid: string; base: string; files: PackBingeFile[]; index: number; durations: (number | null | undefined)[]; total: number | null }
+  const [packBinge, setPackBinge] = useState<PackBingeState | null>(null)
+  const packBingeRef = useRef<PackBingeState | null>(null)
+  packBingeRef.current = packBinge
+  const packPendingSeekRef = useRef<number | null>(null)
+  // File whose end-of-episode position was already flushed by a pack switch —
+  // the save effect's cleanup must not overwrite it with a zeroed clock.
+  const skipStreamSaveForRef = useRef<string | null>(null)
+  const packTimingRef = useRef<{ offsets: number[]; total: number } | null>(null)
+  const parsePackFileIndex = (filePath?: string | null) => {
+    const m = (filePath || '').match(/[?&]file=(\d+)/)
+    return m ? Number(m[1]) : null
+  }
+  // Keep the current + next pack files selected so the upcoming episode
+  // buffers while the current one plays (stream setup deselects the rest).
+  const prioritizePackWindow = (sid: string, files: PackBingeFile[], idx: number) => {
+    const wanted = [files[idx]?.index, files[idx + 1]?.index]
+      .filter((i): i is number => typeof i === 'number')
+    if (wanted.length > 0) safePrioritizeTempFiles(sid, wanted)
+  }
   const [seriesCatalog, setSeriesCatalog] = useState<{ seasonNumber: number; episodeNumber: number; name?: string }[]>([])
   const [episodeSwitchState, setEpisodeSwitchState] = useState<{ status: 'searching' | 'error'; label?: string } | null>(null)
 
@@ -1538,8 +1595,44 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
     const sessionToken = playerSessionTokenRef.current
 
     const fetchProgress = async () => {
+      // Explicit one-click resume target (Detail/Home pass resumeFrom) always wins.
+      const explicitResume = Math.max(0, Number((currentVideo as any).resumeFrom) || 0)
+      if (explicitResume > 0 && !(forceRestart || forceRestartRef.current)) {
+        startupResumeTimeRef.current = explicitResume
+        if (videoRef.current && videoRef.current.readyState >= 1) {
+          applyStartupResumeTime()
+        }
+        if (!isCancelled) setStartupProgressReady(true)
+        return
+      }
       if (isTorrentStreamPath(currentVideo.file_path) || currentVideo.id < 0) {
-        startupResumeTimeRef.current = 0
+        // Online stream: restore source-agnostic position by TMDB identity.
+        const streamIdent = getStreamResumeIdentity(currentVideo)
+        if (!streamIdent || !isOnlineProgressEnabled()) {
+          startupResumeTimeRef.current = explicitResume
+          if (!isCancelled) setStartupProgressReady(true)
+          return
+        }
+        try {
+          const row = await safeGetStreamProgress(
+            streamIdent.tmdb_id, streamIdent.media_type, streamIdent.season, streamIdent.episode
+          )
+          if (isCancelled || isPlayerClosingRef.current || sessionToken !== playerSessionTokenRef.current) return
+          let targetTime = row?.position || explicitResume
+          if (row?.completed) targetTime = 0
+          if (forceRestart || forceRestartRef.current) {
+            targetTime = 0
+            forceRestartRef.current = false
+            setForceRestart(false)
+          }
+          startupResumeTimeRef.current = Math.max(0, targetTime)
+          if (videoRef.current && targetTime > 0 && videoRef.current.readyState >= 1) {
+            applyStartupResumeTime()
+          }
+        } catch (err) {
+          console.warn('[StreamResume] progress lookup failed:', err)
+          startupResumeTimeRef.current = explicitResume
+        }
         if (!isCancelled) setStartupProgressReady(true)
         return
       }
@@ -2021,6 +2114,11 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
       switch(e.code) {
         case 'ArrowRight':
           if (!e.repeat) {
+            // Binge: arrows ride the virtual timeline (can cross episodes).
+            if (packTimingRef.current) {
+              seekRef.current(10)
+              break
+            }
             const currentT = videoRef.current?.currentTime ?? 0
             const nextT = Math.min(videoRef.current?.duration || 0, currentT + 10)
             if (videoRef.current) {
@@ -2054,6 +2152,10 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
           break
         case 'ArrowLeft':
           if (!e.repeat) {
+            if (packTimingRef.current) {
+              seekRef.current(-10)
+              break
+            }
             const currentT = videoRef.current?.currentTime ?? 0
             const nextT = Math.max(0, currentT - 10)
             if (videoRef.current) {
@@ -2250,15 +2352,10 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
     if (!('mediaSession' in navigator)) return
     const ms = navigator.mediaSession
     const canControl = isHost || roomId === null
-    // Shared ±10s step used by the PiP window buttons.
+    // Shared ±10s step used by the PiP window buttons (binge-aware via seekRef).
     const seekBy = (seconds: number) => {
       if (!canControl || !videoRef.current) return
-      const duration = Number.isFinite(videoRef.current.duration) ? videoRef.current.duration : 0
-      const target = duration > 0
-        ? Math.max(0, Math.min(duration, videoRef.current.currentTime + seconds))
-        : Math.max(0, videoRef.current.currentTime + seconds)
-      seekToTimeRef.current(target)
-      setSeekPopup(prev => ({ show: true, text: seconds > 0 ? `+${seconds}s` : `${seconds}s`, id: prev.id + 1 }))
+      seekRef.current(seconds)
     }
     try {
       ms.setActionHandler('play', () => {
@@ -2421,6 +2518,88 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
     }
   }, [currentVideo.id])
 
+  // Online streams: persist position by TMDB identity (source-agnostic resume).
+  useEffect(() => {
+    if (!isTorrentStreamPath(currentVideo.file_path)) return
+    const streamIdent = getStreamResumeIdentity(currentVideo)
+    if (!streamIdent) return
+    if (!isOnlineProgressEnabled()) return
+
+    const snapshot = buildStreamResumeSnapshot(currentVideo)
+    // #3: auto-follow series for new-episode alerts once the watch is
+    // meaningful (>2 min, >10%, or completed). Fired once per stream identity.
+    let followSent = false
+    const maybeAutoFollowSeries = (time: number, total: number, completed: boolean) => {
+      if (followSent || currentVideo.type !== 'series' || !streamIdent.tmdb_id) return
+      const meaningful = completed || time >= 120 || (total > 0 && time / total >= 0.1)
+      if (!meaningful) return
+      followSent = true
+      void safeFollowSeries({
+        tmdb_id: streamIdent.tmdb_id,
+        title: snapshot.title,
+        poster_path: snapshot.poster_path,
+        backdrop_path: snapshot.backdrop_path,
+        overview: snapshot.overview,
+        season: streamIdent.season,
+        episode: streamIdent.episode
+      }).then(res => {
+        if (res?.isNew) {
+          window.dispatchEvent(new CustomEvent(FOLLOW_TOAST_EVENT, {
+            detail: {
+              title: snapshot.title,
+              dropSeason: res?.hasNewDrop ? res?.dropSeason : undefined,
+              dropEpisode: res?.hasNewDrop ? res?.dropEpisode : undefined
+            }
+          }))
+        }
+      })
+    }
+    const saveStreamPosition = (isClosing: boolean) => {
+      if (!isOnlineProgressEnabled()) return
+      const time = Number(timeRef.current) || 0
+      const total = Number(durationRef.current) || Number(videoRef.current?.duration) || 0
+      if (!isClosing && time < 10) return
+      const completed = total > 0 && time / total > 0.95
+      safeUpdateStreamProgress({
+        ...streamIdent,
+        ...snapshot,
+        position: time,
+        duration: total,
+        completed,
+        source_magnet: (currentVideo as any).sourceMagnet || null,
+        file_index: parsePackFileIndex(currentVideo.file_path),
+        isClosing
+      })
+    }
+
+    const interval = setInterval(() => {
+      if (videoRef.current && !videoRef.current.paused) {
+        timeRef.current = videoRef.current.currentTime
+        const total = Number(videoRef.current.duration)
+        if (Number.isFinite(total) && total > 0) durationRef.current = total
+        saveStreamPosition(false)
+        const done = (Number(durationRef.current) || 0) > 0 &&
+          timeRef.current / (Number(durationRef.current) || 1) > 0.95
+        maybeAutoFollowSeries(timeRef.current, Number(durationRef.current) || 0, done)
+      }
+    }, 20000)
+
+    return () => {
+      clearInterval(interval)
+      // A pack switch already flushed this file's real end position — don't
+      // let the zeroed clock overwrite it.
+      if (skipStreamSaveForRef.current != null && skipStreamSaveForRef.current === currentVideo.file_path) {
+        skipStreamSaveForRef.current = null
+      } else {
+        saveStreamPosition(true)
+      }
+      const total = Number(durationRef.current) || 0
+      const done = total > 0 && (Number(timeRef.current) || 0) / total > 0.95
+      maybeAutoFollowSeries(Number(timeRef.current) || 0, total, done)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentVideo.file_path, (currentVideo as any).tmdb_id, (currentVideo as any).season, (currentVideo as any).episode])
+
   useEffect(() => {
     let lastDriftReloadTime = 0
     const driftInterval = setInterval(() => {
@@ -2557,6 +2736,10 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
 
   const handleEnded = async () => {
     console.log('[VideoPlayer] handleEnded fired. type=', currentVideo.type, 'series_name=', currentVideo.series_name, 'season=', currentVideo.season, 'episode=', currentVideo.episode, 'streamId=', currentVideo.streamSourceId)
+    if (packBingeRef.current) {
+      advancePack()
+      return
+    }
     playNextEpisode()
   }
 
@@ -2573,6 +2756,194 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
     }).catch(() => {})
     return () => { cancelled = true }
   }, [currentVideo.file_path, currentVideo.streamSourceId])
+
+  // Enter pack binge mode: same-torrent series pack with 2+ video files plays
+  // as one virtual timeline. Built once per stream id; the current ?file=
+  // position decides the starting episode.
+  useEffect(() => {
+    const sid = currentVideo.streamSourceId
+    if (!sid || !isTorrentStreamPath(currentVideo.file_path)) {
+      setPackBinge(null)
+      return
+    }
+    // A stale binge must never leak into a different stream (e.g. a movie
+    // started after a pack) — it would warp the timeline.
+    if (packBingeRef.current && packBingeRef.current.sid !== sid) {
+      setPackBinge(null)
+    }
+    if (currentVideo.type !== 'series' || !torrentEpisodes || torrentEpisodes.length < 2) {
+      return
+    }
+    if (packBingeRef.current?.sid === sid) return
+    const base = currentVideo.file_path.split('?')[0]
+    const files: PackBingeFile[] = [...torrentEpisodes]
+      .sort((a, b) => a.index - b.index)
+      .map(te => {
+        const s = te.season ?? null
+        const e = te.episode ?? null
+        return {
+          index: te.index,
+          season: s,
+          episode: e,
+          title: (s != null && e != null && episodeNameMapRef.current[`${s}-${e}`]) || te.fileName.replace(/\.[^/.]+$/, ''),
+          url: `${base}?file=${te.index}`
+        }
+      })
+    const at = parsePackFileIndex(currentVideo.file_path)
+    const found = at != null ? files.findIndex(f => f.index === at) : -1
+    const startIdx = found >= 0 ? found : 0
+    setPackBinge({ sid, base, files, index: startIdx, durations: files.map(() => undefined), total: null })
+    prioritizePackWindow(sid, files, startIdx)
+    setResumeNotice(`Playing all ${files.length} episodes as one video`)
+  }, [torrentEpisodes, currentVideo.streamSourceId, currentVideo.file_path, currentVideo.type])
+
+  // Probe per-file durations to build the combined timeline. Strictly
+  // SEQUENTIAL (one metadata load at a time) and deferred a few seconds so
+  // the playing file's buffering always wins the torrent connection. Priority
+  // order: current file, next files, then the rest. The total finalizes as
+  // soon as one duration is known (average-filled), refining as probes land.
+  const packProbeRef = useRef<{ sid: string; startedAt: number; cancelled: boolean } | null>(null)
+  useEffect(() => {
+    const pb = packBinge
+    if (!pb || pb.total != null) return
+    const sid = pb.sid
+    if (packProbeRef.current?.sid === sid) return
+    const probe = { sid, startedAt: Date.now(), cancelled: false }
+    packProbeRef.current = probe
+    let settled = false
+
+    const readDurations = () => packBingeRef.current && packBingeRef.current.sid === sid
+      ? packBingeRef.current.durations
+      : null
+
+    const maybeFinalize = () => {
+      if (settled || probe.cancelled) return
+      const durations = readDurations()
+      if (!durations) return
+      const known = durations.filter((d): d is number => typeof d === 'number' && d > 0)
+      if (known.length === 0) return
+      const allDone = durations.every(d => d !== undefined)
+      if (!allDone && Date.now() - probe.startedAt < 8000) return
+      const avg = known.reduce((a, b) => a + b, 0) / known.length
+      const total = durations.reduce<number>((acc, d) => acc + (typeof d === 'number' && d > 0 ? d : avg), 0)
+      if (total <= 0) return
+      settled = true
+      setPackBinge(prev => (prev && prev.sid === sid && prev.total == null ? { ...prev, total } : prev))
+    }
+
+    const probeOne = (i: number): Promise<void> => new Promise(resolve => {
+      const current = packBingeRef.current
+      const url = current && current.sid === sid ? current.files[i]?.url : undefined
+      if (!url) { resolve(); return }
+      const el = document.createElement('video') as HTMLVideoElement
+      let done = false
+      const finish = (d: number | null) => {
+        if (done) return
+        done = true
+        clearTimeout(timer)
+        try { el.removeAttribute('src'); el.load() } catch {}
+        if (!probe.cancelled) {
+          setPackBinge(prev => {
+            if (!prev || prev.sid !== sid || prev.durations[i] !== undefined) return prev
+            const durations = [...prev.durations]
+            durations[i] = d
+            return { ...prev, durations }
+          })
+          // Let state land before reading for finalize.
+          setTimeout(() => maybeFinalize(), 0)
+        }
+        resolve()
+      }
+      const timer = setTimeout(() => finish(null), 8000)
+      el.preload = 'metadata'
+      try { (el as any).crossOrigin = 'anonymous' } catch {}
+      el.onloadedmetadata = () => {
+        const d = Number(el.duration)
+        finish(Number.isFinite(d) && d > 0 ? d : null)
+      }
+      el.onerror = () => finish(null)
+      try { el.src = url } catch { finish(null) }
+    })
+
+    let startTimer: ReturnType<typeof setTimeout> | null = null
+    const run = async () => {
+      // Let the playing file buffer first — probing is background work.
+      await new Promise(r => { startTimer = setTimeout(r, 4000) })
+      if (probe.cancelled) return
+      const startIdx = packBingeRef.current && packBingeRef.current.sid === sid
+        ? packBingeRef.current.index
+        : 0
+      const count = packBingeRef.current && packBingeRef.current.sid === sid
+        ? packBingeRef.current.files.length
+        : 0
+      const order: number[] = []
+      for (let k = 0; k < count; k++) order.push((startIdx + k) % count)
+      for (const i of order) {
+        if (probe.cancelled) return
+        const durations = readDurations()
+        if (!durations) return
+        if (durations[i] !== undefined) continue
+        await probeOne(i)
+      }
+      maybeFinalize()
+    }
+    void run()
+    return () => {
+      probe.cancelled = true
+      packProbeRef.current = null
+      if (startTimer) clearTimeout(startTimer)
+    }
+  }, [packBinge?.sid, packBinge?.total])
+
+  // Apply a cross-file seek once the target file's metadata is ready.
+  useEffect(() => {
+    if (packPendingSeekRef.current == null) return
+    const el = videoRef.current
+    if (!el || el.readyState < 1) return
+    const want = packPendingSeekRef.current
+    const cap = Number.isFinite(el.duration) && el.duration > 0 ? el.duration : want
+    packPendingSeekRef.current = null
+    try {
+      el.currentTime = Math.max(0, Math.min(want, cap))
+      timeRef.current = el.currentTime
+      setCurrentTime(el.currentTime)
+    } catch {}
+  }, [currentVideo.file_path, duration])
+
+  // Virtual binge timeline: offsets map each pack file onto one combined
+  // duration. Everything below (bar, labels, seeks) uses the display values;
+  // the element, subtitles, audio and intro engine stay file-relative.
+  const packTiming = React.useMemo(() => {
+    if (!packBinge || packBinge.total == null) return null
+    const known = packBinge.durations.filter((d): d is number => typeof d === 'number' && d > 0)
+    const avg = known.length > 0 ? known.reduce((a, b) => a + b, 0) / known.length : 0
+    const durs = packBinge.durations.map(d => (typeof d === 'number' && d > 0 ? d : avg))
+    const offsets: number[] = []
+    let acc = 0
+    for (const d of durs) { offsets.push(acc); acc += d }
+    return { offsets, total: acc }
+  }, [packBinge])
+  packTimingRef.current = packTiming
+  const packFileOffset = packTiming
+    ? packTiming.offsets[Math.min(Math.max(packBinge?.index ?? 0, 0), packTiming.offsets.length - 1)] ?? 0
+    : 0
+  const displayDuration = packTiming && packTiming.total > 0 ? packTiming.total : duration
+  const displayCurrentTime = packTiming ? Math.min(packFileOffset + currentTime, packTiming.total) : currentTime
+  const displayIntroSegments = packTiming
+    ? introDbSegments.map(s => ({ ...s, startSec: s.startSec + packFileOffset, endSec: s.endSec + packFileOffset }))
+    : introDbSegments
+
+  // Keep the OS/PiP scrub bar on the virtual timeline while binging.
+  useEffect(() => {
+    if (!('mediaSession' in navigator) || !packTiming) return
+    try {
+      navigator.mediaSession.setPositionState({
+        duration: packTiming.total,
+        playbackRate: Number.isFinite(playbackRate) ? playbackRate : 1,
+        position: Math.max(0, Math.min(displayCurrentTime, packTiming.total))
+      })
+    } catch {}
+  }, [packTiming, displayCurrentTime, playbackRate])
 
   // Live progress for the in-player magnets panel
   useEffect(() => {
@@ -2612,6 +2983,12 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
     let timer: ReturnType<typeof setInterval> | null = null
     const check = () => {
       if (cancelled) return
+      // Binge packs switch files instantly on the same torrent — no prefetch.
+      if (packBingeRef.current) {
+        if (timer) clearInterval(timer)
+        timer = null
+        return
+      }
       const el = videoRef.current
       if (!el || !isFinite(el.duration) || el.duration <= 0 || el.currentTime < 5) return
       const remaining = el.duration - el.currentTime
@@ -2825,7 +3202,9 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
           title: episodeNameMapRef.current[`${targetSeason}-${targetEpisode}`] || tEp.fileName.replace(/\.[^/.]+$/, ''),
           file_path: `${base}?file=${tEp.index}`,
           duration: 0,
-          streamSourceId: currentVideo.streamSourceId
+          streamSourceId: currentVideo.streamSourceId,
+          resumeFrom: 0,
+          sourceRefreshed: false
         }
       }
     }
@@ -2840,6 +3219,37 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
 
   const playEpisode = async (targetSeason: number, targetEpisode: number) => {
     if (Number(currentVideo.season || 1) === targetSeason && Number(currentVideo.episode || 0) === targetEpisode) return
+    // Offline-first: a downloaded copy always wins over the stream, even
+    // inside a binge (leaving binge mode for the local file).
+    const localMatch = seriesEpisodes.find(ep =>
+      Number(ep.season || 1) === targetSeason && Number(ep.episode) === targetEpisode
+    )
+    if (localMatch) {
+      setPackBinge(null)
+      episodeSwitchOccurredRef.current = true
+      setEpisodeSwitchState({ status: 'searching', label: `Preparing S${targetSeason}E${targetEpisode}…` })
+      setEpisodeSwitchState(null)
+      setCrossFade(true)
+      setTimeout(() => {
+        forceRestartRef.current = false
+        setForceRestart(false)
+        setCurrentVideo(localMatch)
+      }, 200)
+      return
+    }
+    // Inside a binge, hop within the virtual timeline (no re-search).
+    const pb = packBingeRef.current
+    if (pb && currentVideo.type === 'series') {
+      const k = pb.files.findIndex(f => (f.season ?? 1) === targetSeason && (f.episode ?? -1) === targetEpisode)
+      if (k >= 0) {
+        if (k === pb.index) return
+        episodeSwitchOccurredRef.current = true
+        setEpisodeSwitchState({ status: 'searching', label: `Preparing S${targetSeason}E${targetEpisode}…` })
+        switchPackFile(k, { fresh: false })
+        setEpisodeSwitchState(null)
+        return
+      }
+    }
     episodeSwitchOccurredRef.current = true
     setEpisodeSwitchState({ status: 'searching', label: `Preparing S${targetSeason}E${targetEpisode}…` })
     const resolved = await resolveEpisodeForPlay(targetSeason, targetEpisode)
@@ -2847,13 +3257,115 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
     setEpisodeSwitchState(null)
     setCrossFade(true)
     setTimeout(() => {
-      forceRestartRef.current = true
-      setForceRestart(true)
+      // Manual jump: let any saved position resume instead of restarting.
+      forceRestartRef.current = false
+      setForceRestart(false)
       setCurrentVideo(resolved)
     }, 200)
   }
 
+  // Binge: swap to another pack file on the SAME torrent (instant, no
+  // re-search). Per-file progress keeps saving via the normal stream effect
+  // because season/episode/file_path all update through setCurrentVideo.
+  // fresh=false (manual jumps: panel, Next, scrub) lets a saved position
+  // resume; fresh=true (auto-advance at end of file) starts at zero.
+  const switchPackFile = (targetIndex: number, opts?: { seekLocal?: number; fresh?: boolean }) => {
+    const pb = packBingeRef.current
+    if (!pb || targetIndex < 0 || targetIndex >= pb.files.length || targetIndex === pb.index) return
+    const f = pb.files[targetIndex]
+    if (opts?.seekLocal != null && Number.isFinite(opts.seekLocal)) {
+      packPendingSeekRef.current = Math.max(0, opts.seekLocal)
+    }
+    episodeSwitchOccurredRef.current = true
+    const cur = currentVideoRef.current
+    const season = f.season ?? Number(cur.season ?? 1)
+    const prevEp = Number(cur.episode ?? 0)
+    const episode = f.episode ?? (prevEp > 0 ? prevEp + 1 : undefined)
+    // Flush the outgoing file's real end position first: the clock is zeroed
+    // below, and the save effect's cleanup would otherwise wipe the row.
+    if (isOnlineProgressEnabled()) {
+      const flushIdent = getStreamResumeIdentity(cur)
+      const flushTime = Number(timeRef.current) || 0
+      const flushTotal = Number(durationRef.current) || 0
+      if (flushIdent && flushTime > 0) {
+        safeUpdateStreamProgress({
+          ...flushIdent,
+          ...buildStreamResumeSnapshot(cur),
+          position: flushTime,
+          duration: flushTotal,
+          completed: flushTotal > 0 && flushTime / flushTotal > 0.95,
+          source_magnet: (cur as any).sourceMagnet || null,
+          file_index: parsePackFileIndex(cur.file_path),
+          isClosing: true
+        })
+        skipStreamSaveForRef.current = cur.file_path
+      }
+    }
+    setPackBinge({ ...pb, index: targetIndex })
+    // Pre-buffer the new current + upcoming file immediately.
+    prioritizePackWindow(pb.sid, pb.files, targetIndex)
+    // Reset the clock immediately so the bar doesn't spike during crossfade.
+    // Stale resume targets must not leak into the new file either.
+    timeRef.current = 0
+    setCurrentTime(0)
+    setCrossFade(true)
+    const fresh = opts?.fresh !== false
+    setTimeout(() => {
+      forceRestartRef.current = fresh
+      setForceRestart(fresh)
+      setCurrentVideo({
+        ...cur,
+        id: -Math.abs(Date.now()),
+        title: f.title,
+        season,
+        episode,
+        file_path: f.url,
+        duration: 0,
+        streamSourceId: pb.sid,
+        resumeFrom: 0,
+        sourceRefreshed: false
+      })
+    }, 200)
+    setResumeNotice(episode != null
+      ? `S${season} E${episode} · ${targetIndex + 1}/${pb.files.length}`
+      : `Part ${targetIndex + 1}/${pb.files.length}`)
+  }
+
+  const advancePack = (opts?: { fresh?: boolean }) => {
+    const pb = packBingeRef.current
+    if (!pb) return
+    if (pb.index >= pb.files.length - 1) {
+      setEpisodeSwitchState({ status: 'error', label: 'That was the last episode in this pack' })
+      return
+    }
+    // Auto-advance (ended/outro) starts fresh; manual hops resume.
+    switchPackFile(pb.index + 1, { fresh: opts?.fresh !== false })
+  }
+
+  // Binge-aware absolute seek: a global timestamp maps onto whichever pack
+  // file contains it (switching files first when needed).
+  const seekToGlobalTime = (globalTime: number) => {
+    const pb = packBingeRef.current
+    const timing = packTimingRef.current
+    if (!pb || !timing || timing.total <= 0) {
+      seekToTime(globalTime)
+      return
+    }
+    const g = Math.max(0, Math.min(globalTime, timing.total))
+    let k = 0
+    timing.offsets.forEach((off, i) => { if (off <= g + 0.001) k = i })
+    const local = Math.max(0, g - timing.offsets[k])
+    if (k !== pb.index) switchPackFile(k, { seekLocal: local })
+    else seekToTime(local)
+  }
+
   const playNextEpisode = async () => {
+    // Binge packs advance inside the virtual timeline, never via re-search.
+    // (No timing needed — file order alone advances.)
+    if (packBingeRef.current) {
+      advancePack()
+      return
+    }
     if (currentVideo.type === 'series' && currentVideo.series_name) {
       if (episodeTransitionGuardRef.current) return
       episodeTransitionGuardRef.current = true
@@ -2917,6 +3429,43 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
         setEpisodeSwitchState({ status: 'error', label: `No sources found for S${target.season}E${target.episode}` })
         episodeTransitionGuardRef.current = false
         return
+      }
+
+      // Last resort: advance by torrent file order. Needs zero parsing — even
+      // when filenames carry no S/E tags, the next video file in the pack
+      // almost always is the next episode.
+      const fileIdx = parsePackFileIndex(currentVideo.file_path)
+      if (fileIdx != null && torrentEpisodes && torrentEpisodes.length > 1) {
+        const ordered = [...torrentEpisodes].sort((a, b) => a.index - b.index)
+        const pos = ordered.findIndex(e => e.index === fileIdx)
+        const nxt = pos >= 0 ? ordered[pos + 1] : undefined
+        if (nxt) {
+          const base = currentVideo.file_path.split('?')[0]
+          const season = nxt.season ?? currentSeason
+          const ep = nxt.episode ?? (currentEpisode > 0 ? currentEpisode + 1 : undefined)
+          if (ep && ep > 0) {
+            episodeSwitchOccurredRef.current = true
+            const resolved = {
+              ...currentVideo,
+              id: -Math.abs(Date.now()),
+              title: (nxt.season != null && nxt.episode != null && episodeNameMapRef.current[`${nxt.season}-${nxt.episode}`]) || nxt.fileName.replace(/\.[^/.]+$/, ''),
+              season,
+              episode: ep,
+              file_path: `${base}?file=${nxt.index}`,
+              duration: 0,
+              streamSourceId: currentVideo.streamSourceId,
+              resumeFrom: 0,
+              sourceRefreshed: false
+            }
+            setCrossFade(true)
+            setTimeout(() => {
+              forceRestartRef.current = true
+              setForceRestart(true)
+              setCurrentVideo(resolved)
+            }, 200)
+            return
+          }
+        }
       }
 
       // No next-episode candidate — never close the player for series; surface it instead.
@@ -3795,11 +4344,20 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
   const seek = (seconds: number) => {
     if (!isHost && roomId !== null) return;
     if (videoRef.current) {
-      const time = videoRef.current.currentTime + seconds
-      seekToTime(time)
+      // Binge: relative jumps ride the virtual timeline (can cross episodes).
+      const base = packTimingRef.current
+        ? (packFileOffset + videoRef.current.currentTime)
+        : videoRef.current.currentTime
+      if (packTimingRef.current) {
+        seekToGlobalTime(base + seconds)
+      } else {
+        seekToTime(base + seconds)
+      }
       setSeekPopup(prev => ({ show: true, text: seconds > 0 ? `+${seconds}s` : `${seconds}s`, id: prev.id + 1 }))
     }
   }
+  const seekRef = useRef(seek)
+  seekRef.current = seek
 
   const performIntroDbSkip = (segment: IntroDbSegment) => {
     const targetTime = segment.endSec + INTRODB_SKIP_END_PADDING_SECONDS
@@ -3829,16 +4387,31 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
 
   const handleSeekChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const time = parseFloat(e.target.value)
-    setCurrentTime(time)
-    timeRef.current = time
+    // Binge: the slider runs on the virtual timeline — convert back to
+    // file-relative for element state so the bar doesn't double-count.
+    const timing = packTimingRef.current
+    const pb = packBingeRef.current
+    const off = timing && pb
+      ? timing.offsets[Math.min(Math.max(pb.index, 0), timing.offsets.length - 1)] ?? 0
+      : 0
+    const local = time - off
+    setCurrentTime(local)
+    timeRef.current = local
     if (videoRef.current && !isSeeking) {
-      videoRef.current.currentTime = time
+      videoRef.current.currentTime = local
     }
   }
 
   const handleSeekMouseUp = (e: React.MouseEvent<HTMLInputElement> | React.TouchEvent<HTMLInputElement>) => {
     if (!isHost && roomId !== null) return;
     const time = parseFloat((e.target as HTMLInputElement).value)
+    // Binge: the slider runs on the virtual timeline — map back onto files.
+    if (packTimingRef.current) {
+      setIsSeeking(false)
+      seekToGlobalTime(time)
+      if (isHost) broadcastState({ type: 'SEEK', time });
+      return
+    }
     if (videoRef.current) {
       setIsSeeking(false)
       pendingControlledSeekTimeRef.current = time
@@ -3913,7 +4486,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
     
     let x = e.clientX - rect.left
     const percentage = Math.max(0, Math.min(1, x / rect.width))
-    const time = percentage * duration
+    const time = percentage * (packTimingRef.current ? packTimingRef.current.total : duration)
     
     setHoverTime(time)
 
@@ -4523,6 +5096,16 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
         </div>
       )}
 
+      {/* Online resume receipt */}
+      {resumeNotice && (
+        <div className="pointer-events-none absolute left-1/2 top-20 z-[65] -translate-x-1/2">
+          <div className="flex items-center gap-2 rounded-full border border-white/10 bg-black/70 px-4 py-2 text-[12px] font-bold text-white/85 shadow-2xl backdrop-blur-xl">
+            <Check size={14} strokeWidth={3} className="text-emerald-400" />
+            <span className="whitespace-nowrap">{resumeNotice}</span>
+          </div>
+        </div>
+      )}
+
       {/* Buffering Indicator */}
       {isBuffering && !isTorrentStream && (
         <div className="absolute inset-0 flex items-center justify-center bg-black/20 pointer-events-none">
@@ -5062,9 +5645,13 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
               )}
             </div>
 
-          {currentVideo.type === 'series' && hasNextEpisode && (
-            <button 
-              onClick={(e) => { e.stopPropagation(); playNextEpisode(); }}
+          {currentVideo.type === 'series' && (hasNextEpisode || packBinge) && (
+            <button
+              onClick={(e) => {
+                e.stopPropagation()
+                if (packBingeRef.current) { advancePack({ fresh: false }); return }
+                playNextEpisode();
+              }}
               className="flex items-center space-x-2 px-4 py-2 rounded-lg bg-black/50 transition-colors backdrop-blur-md border border-white/5 text-white hover:bg-black/80 group/next"
             >
               <span className="text-sm font-bold tracking-wide">Next Episode</span>
@@ -5095,10 +5682,10 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
         hoverPosition={hoverPosition}
         seekPreviewImageSrc={seekPreviewImageSrc}
         seekPreviewLoading={seekPreviewLoading}
-        duration={duration}
-        currentTime={currentTime}
+        duration={displayDuration}
+        currentTime={displayCurrentTime}
         seekPreview={seekPreview}
-        introDbSegments={introDbSegments}
+        introDbSegments={displayIntroSegments}
         isPlaying={isPlaying}
         isHost={isHost}
         roomId={roomId}
@@ -5135,7 +5722,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
         handleSeekMouseDown={handleSeekMouseDown}
         handleSeekMouseUp={handleSeekMouseUp}
         seek={seek}
-        seekToTime={seekToTime}
+        seekToTime={seekToGlobalTime}
         togglePlay={togglePlay}
         handleVolumeChange={handleVolumeChange}
         setShowEpisodesPanel={handleToggleEpisodesPanel}

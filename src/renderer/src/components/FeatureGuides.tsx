@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react'
-import { ArrowUpRight, Subtitles, X, Trash2 } from 'lucide-react'
+import { ArrowUpRight, Subtitles, X, Trash2, BellRing } from 'lucide-react'
 import { LATEST_RELEASE } from './WhatsNewOnboarding'
 
 interface InlineFeatureGuideProps {
@@ -191,6 +191,39 @@ export const DeleteHintGuide: React.FC = () => {
           >
             Got it, thanks!
           </button>
+        </div>
+      )}
+    />
+  )
+}
+
+export const FollowGuide: React.FC = () => {
+  return (
+    <InlineFeatureGuide
+      featureId="detail-follow-button"
+      targetVersion="1.36.0"
+      render={(dismiss) => (
+        <div className="absolute left-1/2 top-full z-40 mt-3 w-[245px] -translate-x-1/2 rounded-xl border border-sky-300/20 bg-[#07111c] p-3 text-left shadow-2xl shadow-black/45 ring-1 ring-white/5 animate-in fade-in slide-in-from-top-1 duration-200">
+          <div className="absolute left-1/2 top-0 h-3 w-3 -translate-x-1/2 -translate-y-1/2 rotate-45 border-l border-t border-sky-300/20 bg-[#07111c]" />
+          <div className="flex items-start gap-3">
+            <div className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-sky-300/12 text-sky-200">
+              <BellRing size={14} />
+            </div>
+            <div className="min-w-0 flex-1">
+              <p className="text-[10px] font-black uppercase tracking-[0.18em] text-sky-100">New</p>
+              <p className="mt-1 text-[11px] font-semibold leading-relaxed text-white/60">
+                Follow this show — fresh episodes will flag themselves here.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={dismiss}
+              className="rounded-md p-1 text-white/35 transition-colors hover:bg-white/10 hover:text-white"
+              title="Dismiss hint"
+            >
+              <X size={13} />
+            </button>
+          </div>
         </div>
       )}
     />

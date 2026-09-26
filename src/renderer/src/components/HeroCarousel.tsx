@@ -1,11 +1,14 @@
 import React, { useState, useEffect } from 'react'
-import { Play, ChevronLeft, ChevronRight } from 'lucide-react'
+import { Play, ChevronLeft, ChevronRight, Loader2 } from 'lucide-react'
 import { Video } from '../types'
+import { getOnlineResumeKey } from '../utils/streamResume'
+import { NewEpisodeBadge, OnlineBadge, NextEpisodeBadge } from './StreamBadges'
 
 interface HeroCarouselProps {
   items: Video[]
   onPlay: (video: Video) => void
   onShowDetail: (video: Video) => void
+  resumingKey?: string | null
 }
 
 const getHeroImageUrl = (path?: string | null) => {
@@ -26,7 +29,7 @@ const hasOwnLogoResolution = (logoPaths: Record<string, string | null>, key: str
   Object.prototype.hasOwnProperty.call(logoPaths, key)
 )
 
-const HeroCarousel: React.FC<HeroCarouselProps> = ({ items, onPlay, onShowDetail }) => {
+const HeroCarousel: React.FC<HeroCarouselProps> = ({ items, onPlay, onShowDetail, resumingKey }) => {
   const [currentIndex, setCurrentIndex] = useState(0)
   const [isAutoPlaying, setIsAutoPlaying] = useState(true)
   const [resolvedLogoPaths, setResolvedLogoPaths] = useState<Record<string, string | null>>({})
@@ -153,11 +156,16 @@ const HeroCarousel: React.FC<HeroCarouselProps> = ({ items, onPlay, onShowDetail
   const progressPercent = current.last_watched_time && current.duration
     ? Math.min(100, Math.max(0, (current.last_watched_time / current.duration) * 100))
     : 0
-  const actionLabel = progressPercent > 0 ? 'Resume' : 'Play Now'
+  const episodeTag = current.season && current.episode
+    ? `S${current.season} E${current.episode}`
+    : null
+  const actionLabel = current.onlineNewEpisode && episodeTag
+    ? `Watch ${episodeTag}`
+    : current.onlineNextEpisode && episodeTag
+      ? `Play ${episodeTag}`
+      : progressPercent > 0 ? 'Resume' : 'Play Now'
   const mediaLabel = current.type === 'series'
-    ? current.season && current.episode
-      ? `S${current.season} E${current.episode}`
-      : 'Web Series'
+    ? episodeTag || 'Web Series'
     : current.type === 'video'
       ? 'Video'
       : 'Movie'
@@ -251,6 +259,15 @@ const HeroCarousel: React.FC<HeroCarouselProps> = ({ items, onPlay, onShowDetail
           <div className="h-14 md:h-20" aria-hidden="true" />
         )}
 
+        {/* Status badges — loudest first: NEW > NEXT > ONLINE */}
+        {current.isOnlineResume && (
+          <div className="flex flex-wrap items-center gap-2.5 animate-in fade-in slide-in-from-left-12 duration-700 delay-150">
+            {current.onlineNewEpisode && <NewEpisodeBadge />}
+            {current.onlineNextEpisode && !current.onlineNewEpisode && <NextEpisodeBadge />}
+            <OnlineBadge />
+          </div>
+        )}
+
         <div className="flex items-center gap-3 text-white/60 font-bold text-xs animate-in fade-in slide-in-from-left-12 duration-700 delay-200">
           {current.release_year && (
             <>
@@ -273,14 +290,24 @@ const HeroCarousel: React.FC<HeroCarouselProps> = ({ items, onPlay, onShowDetail
 
         <div className="flex items-center gap-4 pt-1 animate-in fade-in slide-in-from-left-20 duration-700 delay-500">
           <button
+            disabled={Boolean(resumingKey) && getOnlineResumeKey(current) === resumingKey}
             onClick={(e) => {
               e.stopPropagation()
               onPlay(current)
             }}
-            className="flex items-center gap-2.5 bg-red-600 hover:bg-red-700 text-white px-7 py-3.5 rounded-2xl font-black text-xs tracking-widest transition-all shadow-lg hover:scale-105 active:scale-95 group/btn uppercase italic"
+            className="flex items-center gap-2.5 bg-red-600 hover:bg-red-700 text-white px-7 py-3.5 rounded-2xl font-black text-xs tracking-widest transition-all shadow-lg hover:scale-105 active:scale-95 group/btn uppercase italic disabled:cursor-wait disabled:hover:scale-100"
           >
-            <Play fill="white" size={18} className="group-hover/btn:scale-110 transition-transform" />
-            {actionLabel}
+            {Boolean(resumingKey) && getOnlineResumeKey(current) === resumingKey ? (
+              <>
+                <Loader2 size={18} className="animate-spin" />
+                Loading…
+              </>
+            ) : (
+              <>
+                <Play fill="white" size={18} className="group-hover/btn:scale-110 transition-transform" />
+                {actionLabel}
+              </>
+            )}
           </button>
         </div>
       </div>

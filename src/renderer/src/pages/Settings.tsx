@@ -1,7 +1,8 @@
 import React, { useEffect, useState } from 'react'
-import { FolderOpen, Trash2, Plus, HardDrive, AlertTriangle, Check, X as CloseIcon, Maximize2, Download, Upload, Image as ImageIcon, Subtitles } from 'lucide-react'
+import { FolderOpen, Trash2, Plus, HardDrive, AlertTriangle, Check, X as CloseIcon, Maximize2, Download, Upload, Image as ImageIcon, Subtitles, Wifi, Bell } from 'lucide-react'
 import ProfilePictureModal from '../components/ProfilePictureModal'
 import { SUBTITLE_STYLE_KEY, SUBTITLE_FONT_SIZE_KEY, SUBTITLE_POSITION_KEY, type SubtitleStyle } from '../components/player/SubtitleOverlay'
+import { ONLINE_PROGRESS_STORAGE_KEY, setOnlineProgressEnabledLocal, NOTIFY_NEW_EPISODES_KEY, setNewEpisodeNotifyLocal } from '../utils/streamResume'
 
 const Settings: React.FC = () => {
   const [folders, setFolders] = useState<any[]>([])
@@ -12,6 +13,20 @@ const Settings: React.FC = () => {
   const [isEditingName, setIsEditingName] = useState(false)
   const [tempName, setTempName] = useState(userName)
   const [launchFullscreen, setLaunchFullscreen] = useState(true)
+  const [rememberOnlineProgress, setRememberOnlineProgress] = useState(() => {
+    try {
+      return localStorage.getItem(ONLINE_PROGRESS_STORAGE_KEY) !== 'false'
+    } catch {
+      return true
+    }
+  })
+  const [notifyNewEpisodes, setNotifyNewEpisodes] = useState(() => {
+    try {
+      return localStorage.getItem(NOTIFY_NEW_EPISODES_KEY) !== 'false'
+    } catch {
+      return true
+    }
+  })
   const [backupBusy, setBackupBusy] = useState(false)
   const [backupMessage, setBackupMessage] = useState<string | null>(null)
   const [subtitleStyle, setSubtitleStyle] = useState<SubtitleStyle>(() => {
@@ -60,6 +75,14 @@ const Settings: React.FC = () => {
     fetchFolders()
     window.api.getAppSettings().then(settings => {
       setLaunchFullscreen(settings.launchFullscreen)
+      if (typeof settings.rememberOnlineProgress === 'boolean') {
+        setRememberOnlineProgress(settings.rememberOnlineProgress)
+        setOnlineProgressEnabledLocal(settings.rememberOnlineProgress)
+      }
+      if (typeof settings.notifyNewEpisodes === 'boolean') {
+        setNotifyNewEpisodes(settings.notifyNewEpisodes)
+        setNewEpisodeNotifyLocal(settings.notifyNewEpisodes)
+      }
     }).catch(() => {})
   }, [])
 
@@ -71,6 +94,38 @@ const Settings: React.FC = () => {
     } catch (err) {
       console.error('Failed to update fullscreen launch setting:', err)
       setLaunchFullscreen(!enabled)
+    }
+  }
+
+  const handleNotifyNewEpisodesChange = async (enabled: boolean) => {
+    setNotifyNewEpisodes(enabled)
+    setNewEpisodeNotifyLocal(enabled)
+    try {
+      const setter = (window as any)?.api?.setNotifyNewEpisodes
+      if (typeof setter !== 'function') return // stale preload: keep local-only value
+      const settings = await setter.call((window as any).api, enabled)
+      setNotifyNewEpisodes(settings.notifyNewEpisodes)
+      setNewEpisodeNotifyLocal(settings.notifyNewEpisodes)
+    } catch (err) {
+      console.error('Failed to update new-episode alert setting:', err)
+      setNotifyNewEpisodes(!enabled)
+      setNewEpisodeNotifyLocal(!enabled)
+    }
+  }
+
+  const handleRememberOnlineProgressChange = async (enabled: boolean) => {
+    setRememberOnlineProgress(enabled)
+    setOnlineProgressEnabledLocal(enabled)
+    try {
+      const setter = (window as any)?.api?.setRememberOnlineProgress
+      if (typeof setter !== 'function') return // stale preload: keep local-only value
+      const settings = await setter.call((window as any).api, enabled)
+      setRememberOnlineProgress(settings.rememberOnlineProgress)
+      setOnlineProgressEnabledLocal(settings.rememberOnlineProgress)
+    } catch (err) {
+      console.error('Failed to update online resume setting:', err)
+      setRememberOnlineProgress(!enabled)
+      setOnlineProgressEnabledLocal(!enabled)
     }
   }
 
@@ -101,7 +156,7 @@ const Settings: React.FC = () => {
         return
       }
 
-      setBackupMessage(`Exported ${result.folders || 0} folders, ${(result.externalWatchlist || 0) + (result.localWatchlist || 0)} watchlist items, and ${result.favorites || 0} favorites.`)
+      setBackupMessage(`Exported ${result.folders || 0} folders, ${(result.externalWatchlist || 0) + (result.localWatchlist || 0)} watchlist items, ${result.favorites || 0} favorites, ${result.streamProgress || 0} online resumes and ${result.followedSeries || 0} followed series.`)
     } finally {
       setBackupBusy(false)
     }
@@ -121,7 +176,7 @@ const Settings: React.FC = () => {
       await fetchFolders()
       const watchlistCount = (result.externalWatchlistImported || 0) + (result.localWatchlistRestored || 0)
       const missingText = result.foldersMissing ? ` ${result.foldersMissing} folder${result.foldersMissing === 1 ? '' : 's'} not found.` : ''
-      setBackupMessage(`Imported ${result.foldersAdded || 0} folders, scanned ${result.foldersScanned || 0}, restored ${watchlistCount} watchlist items and ${result.favoritesRestored || 0} favorites.${missingText}`)
+      setBackupMessage(`Imported ${result.foldersAdded || 0} folders, scanned ${result.foldersScanned || 0}, restored ${watchlistCount} watchlist items, ${result.favoritesRestored || 0} favorites, ${result.streamProgressRestored || 0} online resumes and ${result.followedSeriesRestored || 0} followed series.${missingText}`)
     } finally {
       setBackupBusy(false)
     }
@@ -235,6 +290,70 @@ const Settings: React.FC = () => {
               <span
                 className={`absolute top-1 h-4 w-4 rounded-full bg-white shadow-lg transition-all ${
                   launchFullscreen ? 'left-6' : 'left-1'
+                }`}
+              />
+            </button>
+          </div>
+        </section>
+
+        <section>
+          <h3 className={sectionTitleClass}>Streaming</h3>
+          <div className={`${panelClass} flex items-center justify-between gap-6 p-6`}>
+            <div className="flex items-center gap-4 min-w-0">
+              <div className={iconBoxClass}>
+                <Wifi size={17} />
+              </div>
+              <div className="min-w-0">
+                <h4 className="text-xs font-black text-white uppercase tracking-tight">Remember Online Progress</h4>
+                <p className="mt-0.5 text-[11px] font-medium leading-4 text-white/35">
+                  Resume streamed movies and episodes from where you left off, right from Home. Positions stay on this device only — turn off to stay fully offline.
+                </p>
+              </div>
+            </div>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={rememberOnlineProgress}
+              onClick={() => handleRememberOnlineProgressChange(!rememberOnlineProgress)}
+              className={`relative h-6 w-11 flex-shrink-0 rounded-full border transition-all ${
+                rememberOnlineProgress
+                  ? 'border-red-500/50 bg-red-600 shadow-lg shadow-red-950/30'
+                  : 'border-white/10 bg-white/5'
+              }`}
+            >
+              <span
+                className={`absolute top-1 h-4 w-4 rounded-full bg-white shadow-lg transition-all ${
+                  rememberOnlineProgress ? 'left-6' : 'left-1'
+                }`}
+              />
+            </button>
+          </div>
+          <div className={`${panelClass} mt-3 flex items-center justify-between gap-6 p-6`}>
+            <div className="flex items-center gap-4 min-w-0">
+              <div className={iconBoxClass}>
+                <Bell size={17} />
+              </div>
+              <div className="min-w-0">
+                <h4 className="text-xs font-black text-white uppercase tracking-tight">New Episode Alerts</h4>
+                <p className="mt-0.5 text-[11px] font-medium leading-4 text-white/35">
+                  Flag series you follow when a new episode drops — with a badge on Home and a heads-up here. Checked at most once a day, on this device only.
+                </p>
+              </div>
+            </div>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={notifyNewEpisodes}
+              onClick={() => handleNotifyNewEpisodesChange(!notifyNewEpisodes)}
+              className={`relative h-6 w-11 flex-shrink-0 rounded-full border transition-all ${
+                notifyNewEpisodes
+                  ? 'border-red-500/50 bg-red-600 shadow-lg shadow-red-950/30'
+                  : 'border-white/10 bg-white/5'
+              }`}
+            >
+              <span
+                className={`absolute top-1 h-4 w-4 rounded-full bg-white shadow-lg transition-all ${
+                  notifyNewEpisodes ? 'left-6' : 'left-1'
                 }`}
               />
             </button>

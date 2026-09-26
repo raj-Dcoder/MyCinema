@@ -150,8 +150,26 @@ const App: React.FC = () => {
   }, [])
 
   useEffect(() => {
+    const syncStreamingMirrors = (settings: { rememberOnlineProgress?: boolean; notifyNewEpisodes?: boolean }) => {
+      try {
+        if (typeof settings.rememberOnlineProgress === 'boolean') {
+          localStorage.setItem(
+            'mycinema_remember_online_progress',
+            settings.rememberOnlineProgress ? 'true' : 'false'
+          )
+        }
+        if (typeof settings.notifyNewEpisodes === 'boolean') {
+          localStorage.setItem(
+            'mycinema_notify_new_episodes',
+            settings.notifyNewEpisodes ? 'true' : 'false'
+          )
+        }
+      } catch { /* ignore */ }
+    }
     window.api.getAppSettings().then(settings => {
       setLaunchFullscreen(settings.launchFullscreen)
+      // Keep the renderer's sync online-progress gates aligned with main.
+      syncStreamingMirrors(settings)
     }).catch(() => {})
 
     return window.api.onAppSettingsChanged(settings => {
@@ -159,6 +177,7 @@ const App: React.FC = () => {
       if (!settings.launchFullscreen) {
         setShowWindowControls(false)
       }
+      syncStreamingMirrors(settings)
     })
   }, [])
 

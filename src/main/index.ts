@@ -481,10 +481,14 @@ function saveWindowState(win: BrowserWindow) {
 
 type AppSettings = {
   launchFullscreen: boolean
+  rememberOnlineProgress: boolean
+  notifyNewEpisodes: boolean
 }
 
 const defaultAppSettings: AppSettings = {
-  launchFullscreen: true
+  launchFullscreen: true,
+  rememberOnlineProgress: true,
+  notifyNewEpisodes: true
 }
 
 function getAppSettingsPath() {
@@ -1595,6 +1599,8 @@ type BackupImportSummary = {
   externalWatchlistImported: number
   localWatchlistRestored: number
   favoritesRestored: number
+  streamProgressRestored: number
+  followedSeriesRestored: number
 }
 
 const BACKUP_FORMAT = 'mycinema.backup'
@@ -1910,6 +1916,203 @@ ipcMain.handle('set-launch-fullscreen', (event, launchFullscreen: boolean) => {
   return settings
 })
 
+ipcMain.handle('set-remember-online-progress', (event, rememberOnlineProgress: boolean) => {
+  const settings = { ...loadAppSettings(), rememberOnlineProgress }
+  saveAppSettings(settings)
+
+  BrowserWindow.getAllWindows().forEach(window => {
+    window.webContents.send('app-settings-changed', settings)
+  })
+
+  return settings
+})
+
+ipcMain.handle('set-notify-new-episodes', (event, notifyNewEpisodes: boolean) => {
+  const settings = { ...loadAppSettings(), notifyNewEpisodes }
+  saveAppSettings(settings)
+  // Turning alerts off clears pending flags so re-enabling doesn't resurface
+  // stale drops.
+  if (!notifyNewEpisodes) {
+    try { db.clearAllFollowedNewFlags() } catch { /* best-effort */ }
+  }
+
+  BrowserWindow.getAllWindows().forEach(window => {
+    window.webContents.send('app-settings-changed', settings)
+  })
+
+  return settings
+})
+
+// ─── Followed series: new-episode alerts (#3) ────────────────────────────────
+const FOLLOW_CHECK_THROTTLE_MS = 20 * 3600 * 1000 // max one TMDB check per series per 20h
+
+function isFollowCheckDue(lastChecked?: string | null) {
+  if (!lastChecked) return true
+  return Date.now() - new Date(lastChecked).getTime() > FOLLOW_CHECK_THROTTLE_MS
+}
+
+ipcMain.handle('follow-series', async (_, input) => {
+  const tmdbId = Number(input?.tmdb_id)
+  if (!tmdbId) return { followed: false }
+  const followResult = db.upsertFollowedSeries({
+    tmdb_id: tmdbId,
+    title: input.title,
+    poster_path: input.poster_path,
+    backdrop_path: input.backdrop_path,
+    overview: input.overview
+  })
+  // Baseline to the latest RELEASED episode so only future drops alert.
+  // Lightweight single-request lookup (not the full catalog crawl).
+  let latest: { seasonNumber: number; episodeNumber: number; airDate?: string | null } | null = null
+  try {
+    const lookedUp = await tmdb.fetchTmdbLatestReleased(tmdbId)
+    if (lookedUp?.released) latest = lookedUp
+  } catch { /* fall back to watched position below */ }
+  if (!latest && input.season != null) {
+    latest = { seasonNumber: Number(input.season) || 0, episodeNumber: Number(input.episode) || 0 }
+  }
+  if (latest) db.setFollowedBaseline(tmdbId, latest.seasonNumber, latest.episodeNumber)
+  // Following a show mid-season surfaces a recent drop right away: if the
+  // latest release aired within the last 14 days (and past the availability
+  // grace) and is newer than anything watched, flag it — no waiting for the
+  // next daily check.
+  let hasNewDrop = false
+  if (latest?.airDate) {
+    try {
+      const age = Date.now() - new Date(latest.airDate).getTime()
+      const fresh = age >= ALERT_AVAILABILITY_GRACE_MS && age < 14 * 24 * 3600 * 1000
+      const w = db.getStreamMaxWatched(tmdbId)
+      const watched = w && w.season != null && w.episode != null
+        ? { season: Number(w.season), episode: Number(w.episode) }
+        : null
+      const newest = { season: latest.seasonNumber, episode: latest.episodeNumber }
+      if (fresh && (!watched || isEpisodeAfter(newest, watched))) {
+        db.touchFollowedChecked(tmdbId, newest.season, newest.episode, true)
+        hasNewDrop = true
+      }
+    } catch { /* flagging is best-effort */ }
+  }
+  return {
+    followed: true,
+    isNew: Boolean(followResult?.isNew),
+    hasNewDrop,
+    dropSeason: hasNewDrop && latest ? latest.seasonNumber : undefined,
+    dropEpisode: hasNewDrop && latest ? latest.episodeNumber : undefined
+  }
+})
+
+ipcMain.handle('unfollow-series', (_, tmdbId) => {
+  db.unfollowSeries(Number(tmdbId))
+  return { unfollowed: true }
+})
+
+ipcMain.handle('get-followed-series', () => {
+  return db.getFollowedSeries()
+})
+
+ipcMain.handle('mark-followed-seen', (_, tmdbId) => {
+  db.markFollowedSeen(Number(tmdbId))
+  return { seen: true }
+})
+
+type EpisodeCursor = { season: number; episode: number }
+
+function isEpisodeAfter(a: EpisodeCursor, b: EpisodeCursor) {
+  return a.season > b.season || (a.season === b.season && a.episode > b.episode)
+}
+
+// Episodes become alertable a few hours after their air date — TMDB flips
+// "released" at UTC midnight but the episode airs that evening and torrents
+// land later. Alerting immediately would point at unwatchable episodes.
+const ALERT_AVAILABILITY_GRACE_MS = 6 * 3600 * 1000
+
+function isAlertAvailable(airDate?: string | null) {
+  if (!airDate) return false
+  const airTime = new Date(airDate).getTime()
+  if (!Number.isFinite(airTime)) return false
+  return Date.now() - airTime >= ALERT_AVAILABILITY_GRACE_MS
+}
+
+// Single-series check shared by the throttled bulk pass and explicit UI
+// refreshes. Alert rule: latest released episode must be newer than BOTH what
+// the user has watched (stream rows) and what they were already notified
+// about — so following a show mid-season never false-alerts old episodes,
+// yet an in-progress watcher still hears about today's drop.
+async function checkOneFollowedSeries(f: any, opts: { explicit?: boolean } = {}): Promise<{ hasNew: boolean; season?: number; episode?: number }> {
+  const latest = await tmdb.fetchTmdbLatestReleased(f.tmdb_id)
+  if (!latest || !latest.released) {
+    db.touchFollowedChecked(f.tmdb_id)
+    return { hasNew: false }
+  }
+  const newest: EpisodeCursor = { season: latest.seasonNumber, episode: latest.episodeNumber }
+  const watchedRow = db.getStreamMaxWatched(f.tmdb_id)
+  const watched: EpisodeCursor | null = watchedRow && watchedRow.season != null && watchedRow.episode != null
+    ? { season: Number(watchedRow.season), episode: Number(watchedRow.episode) }
+    : null
+  const known: EpisodeCursor | null = f.last_known_season != null && f.last_known_episode != null
+    ? { season: Number(f.last_known_season), episode: Number(f.last_known_episode) }
+    : null
+  const newerThanWatched = !watched || isEpisodeAfter(newest, watched)
+  const newerThanKnown = !known || isEpisodeAfter(newest, known)
+  // Stale follows never alert: no stream activity in 14 days and the follow
+  // itself is older than that means the show was abandoned — pinging every
+  // daily drop would just be spam. Watching again re-arms automatically.
+  const STALE_FOLLOW_MS = 14 * 24 * 3600 * 1000
+  const lastActivity = db.getStreamLatestActivity(f.tmdb_id)?.latest
+  const followedAt = f.added_at
+  // Explicit refreshes (user opened the show) always count as engagement.
+  const engaged = Boolean(opts.explicit) ||
+    (lastActivity && Date.now() - new Date(lastActivity).getTime() < STALE_FOLLOW_MS) ||
+    (followedAt && Date.now() - new Date(followedAt).getTime() < STALE_FOLLOW_MS)
+  if (newerThanWatched && newerThanKnown && engaged && isAlertAvailable(latest.airDate)) {
+    db.touchFollowedChecked(f.tmdb_id, newest.season, newest.episode, true)
+    return { hasNew: true, season: newest.season, episode: newest.episode }
+  }
+  // Caught up (or nothing watched yet with an existing baseline): keep the
+  // baseline fresh silently.
+  db.touchFollowedChecked(f.tmdb_id, newest.season, newest.episode, false)
+  return { hasNew: false }
+}
+
+ipcMain.handle('check-followed-updates', async () => {
+  try {
+    if (!loadAppSettings().rememberOnlineProgress || !loadAppSettings().notifyNewEpisodes) {
+      return db.getFollowedSeries()
+    }
+  } catch { /* fall through and check */ }
+  const followed = db.getFollowedSeries()
+  for (const f of followed) {
+    if (!isFollowCheckDue(f.last_checked)) continue
+    try {
+      await checkOneFollowedSeries(f)
+    } catch (err) {
+      console.warn('[Followed] update check failed for', f.tmdb_id, err)
+    }
+  }
+  return db.getFollowedSeries()
+})
+
+// Explicit per-series refresh (e.g. opening a show's Detail screen).
+// Bypasses the daily throttle — the user asked for it right now.
+ipcMain.handle('check-series-updates', async (_, tmdbId) => {
+  const id = Number(tmdbId)
+  if (!id) return { checked: false }
+  const f = db.getFollowed(id)
+  if (!f) return { checked: false, followed: false }
+  try {
+    if (!loadAppSettings().rememberOnlineProgress || !loadAppSettings().notifyNewEpisodes) {
+      return { checked: false }
+    }
+  } catch { /* fall through and check */ }
+  try {
+    const result = await checkOneFollowedSeries(f, { explicit: true })
+    return { checked: true, ...result }
+  } catch (err) {
+    console.warn('[Followed] explicit check failed for', id, err)
+    return { checked: false }
+  }
+})
+
 ipcMain.handle('select-folder', async () => {
   const result = await showAppOpenDialog({
     properties: ['openDirectory']
@@ -1936,6 +2139,40 @@ ipcMain.on('update-video-progress', (_, videoId, time, completed, isClosing) => 
 
 ipcMain.handle('get-continue-watching', () => {
   return db.getContinueWatching();
+})
+
+ipcMain.handle('get-stream-progress', (_, tmdbId, mediaType, season, episode) => {
+  return db.getStreamProgress(Number(tmdbId), mediaType, season ?? null, episode ?? null)
+})
+
+ipcMain.on('update-stream-progress', (_, entry) => {
+  if (!entry || !entry.tmdb_id) return
+  // Gate on the persisted toggle so "off" means zero writes.
+  try {
+    if (!loadAppSettings().rememberOnlineProgress) return
+  } catch { /* default to writing if settings unreadable */ }
+  db.upsertStreamProgress(entry)
+  if (entry.isClosing) {
+    BrowserWindow.getAllWindows().forEach(w => w.webContents.send('library-updated'))
+  }
+})
+
+ipcMain.handle('get-stream-continue-watching', () => {
+  try {
+    if (!loadAppSettings().rememberOnlineProgress) return []
+  } catch { /* fall through and return rows */ }
+  return db.getStreamContinueWatching(10)
+})
+
+ipcMain.handle('delete-stream-progress', (_, tmdbId, mediaType, season, episode) => {
+  return db.deleteStreamProgress(Number(tmdbId), mediaType, season ?? null, episode ?? null)
+})
+
+ipcMain.handle('get-stream-history', (_, limit) => {
+  try {
+    if (!loadAppSettings().rememberOnlineProgress) return []
+  } catch { /* fall through and return rows */ }
+  return db.getStreamHistory(Math.max(1, Math.min(200, Number(limit) || 100)))
 })
 
 ipcMain.handle('get-series-info', (_, seriesName) => {
@@ -1984,7 +2221,9 @@ ipcMain.handle('export-user-backup', async () => {
       folders: backup.data.folders.length,
       externalWatchlist: backup.data.watchlist.external.length,
       localWatchlist: backup.data.watchlist.local.length,
-      favorites: backup.data.favorites.length
+      favorites: backup.data.favorites.length,
+      streamProgress: (backup.data.streamProgress || []).length,
+      followedSeries: (backup.data.followedSeries || []).length
     }
   } catch (err) {
     console.error('[Backup] Export failed:', err)
@@ -2015,6 +2254,8 @@ ipcMain.handle('import-user-backup', async (): Promise<BackupImportSummary | { i
     const externalWatchlist = Array.isArray(backup.data.watchlist?.external) ? backup.data.watchlist.external : []
     const localWatchlist = Array.isArray(backup.data.watchlist?.local) ? backup.data.watchlist.local : []
     const favorites = Array.isArray(backup.data.favorites) ? backup.data.favorites : []
+    const streamProgress = Array.isArray(backup.data.streamProgress) ? backup.data.streamProgress : []
+    const followedSeries = Array.isArray(backup.data.followedSeries) ? backup.data.followedSeries : []
 
     const summary: BackupImportSummary = {
       imported: true,
@@ -2024,7 +2265,9 @@ ipcMain.handle('import-user-backup', async (): Promise<BackupImportSummary | { i
       foldersMissing: 0,
       externalWatchlistImported: 0,
       localWatchlistRestored: 0,
-      favoritesRestored: 0
+      favoritesRestored: 0,
+      streamProgressRestored: 0,
+      followedSeriesRestored: 0
     }
 
     for (const folder of folders) {
@@ -2063,6 +2306,18 @@ ipcMain.handle('import-user-backup', async (): Promise<BackupImportSummary | { i
       if (!item || !['movie', 'series', 'video'].includes(item.type)) continue
       const restoreResult = db.restoreFavoriteItem(item)
       summary.favoritesRestored += restoreResult.changes > 0 ? 1 : 0
+    }
+
+    for (const item of streamProgress) {
+      if (!item || typeof item.tmdb_id !== 'number' || !['movie', 'series'].includes(item.media_type)) continue
+      const restoreResult = db.restoreStreamProgressRow(item)
+      summary.streamProgressRestored += restoreResult.changes > 0 ? 1 : 0
+    }
+
+    for (const item of followedSeries) {
+      if (!item || typeof item.tmdb_id !== 'number' || !item.title) continue
+      const restoreResult = db.restoreFollowedSeriesRow(item)
+      summary.followedSeriesRestored += restoreResult.changes > 0 ? 1 : 0
     }
 
     // Legacy backups may carry watchlist categories — absorb them into
@@ -3671,11 +3926,14 @@ function getTorrentSourceCacheKey(title: string, year: string, mediaType: string
 }
 
 function parseTvTorrentMetadata(sourceTitle: string): { parsedSeason?: number; parsedEpisode?: number; isSeasonPack?: boolean } {
+  // NOTE: input is often a full torrent-relative path (folders included), e.g.
+  // "Show S01/Show.S01E01.mkv" or "Season 1/E01.mkv" — separators include "/".
   const titleLower = sourceTitle.toLowerCase()
+  const SEP = '[\\s._\\-/]*'
   const seasonEpisodeMatch =
-    titleLower.match(/\bs(\d{1,2})[\s._-]*e(?:p)?[\s._-]*(\d{1,3})\b/i) ||
+    titleLower.match(new RegExp(`\\bs(\\d{1,2})${SEP}e(?:p)?${SEP}(\\d{1,3})(?=e\\d|\\b)`, 'i')) ||
     titleLower.match(/\b(\d{1,2})x(\d{1,3})\b/i) ||
-    titleLower.match(/\bseason[\s._-]*(\d{1,2})[\s._-]*(?:episode|ep)[\s._-]*(\d{1,3})\b/i) ||
+    titleLower.match(new RegExp(`\\bseason${SEP}(\\d{1,2})${SEP}(?:episode|ep)${SEP}(\\d{1,3})\\b`, 'i')) ||
     titleLower.match(/\b(?:episode|ep)\s*(\d{1,3})\b[\s\S]*?\bseason\s*(\d{1,2})\b/i)
 
   if (seasonEpisodeMatch) {
@@ -3683,6 +3941,20 @@ function parseTvTorrentMetadata(sourceTitle: string): { parsedSeason?: number; p
     return {
       parsedSeason: parseInt(seasonEpisodeMatch[episodeFirst ? 2 : 1]),
       parsedEpisode: parseInt(seasonEpisodeMatch[episodeFirst ? 1 : 2]),
+      isSeasonPack: false
+    }
+  }
+
+  // Bare episode token ("E01", "EP 3", "Episode 4") with the season stated
+  // anywhere else in the path ("Season 1/E01.mkv", "Show.S01/E02.mkv").
+  const bareEpisodeMatch = titleLower.match(new RegExp(`\\b(?:e(?:p)?|episode)${SEP}(\\d{1,3})\\b`, 'i'))
+  const seasonTokenMatch =
+    titleLower.match(/\bs(\d{1,2})\b/i) ||
+    titleLower.match(new RegExp(`\\bseason${SEP}(\\d{1,2})\\b`, 'i'))
+  if (bareEpisodeMatch && seasonTokenMatch) {
+    return {
+      parsedSeason: parseInt(seasonTokenMatch[1]),
+      parsedEpisode: parseInt(bareEpisodeMatch[1]),
       isSeasonPack: false
     }
   }
@@ -3701,6 +3973,13 @@ function parseTvTorrentMetadata(sourceTitle: string): { parsedSeason?: number; p
     parsedSeason: parseInt(seasonMatch[1]),
     isSeasonPack: !hasEpisodeSignal
   }
+}
+
+// Sample/proof stubs are unwatchable and often carry the real episode's
+// number ("Show.S01E01.Sample.mkv") — never let them win file selection or
+// pollute the episode roster when real files exist.
+function isSampleVideoFile(filePath?: string | null): boolean {
+  return /\b(sample|proof|samplehd)\b/i.test(filePath || '')
 }
 
 function normalizeTorrentSources(sources: any[], mediaType: string): any[] {
@@ -5468,10 +5747,13 @@ function selectTorrentVideoFile(
   opts: { fileIndex?: number; season?: number; episode?: number } = {}
 ): { file: any; index: number } | null {
   if (!torrent || !Array.isArray(torrent.files)) return null
-  const videoFiles = (torrent.files as any[])
+  const allVideoFiles = (torrent.files as any[])
     .map((f: any, i: number) => ({ f, i }))
     .filter(({ f }) => isVideoFilePath(f?.path || f?.name))
-  if (videoFiles.length === 0) return null
+  if (allVideoFiles.length === 0) return null
+  // Prefer real episodes over sample/proof stubs (which often spoof S/E tags).
+  const nonSample = allVideoFiles.filter(({ f }) => !isSampleVideoFile(f?.path || f?.name))
+  const videoFiles = nonSample.length > 0 ? nonSample : allVideoFiles
 
   if (typeof opts.fileIndex === 'number' && Number.isFinite(opts.fileIndex)) {
     const exactFile = videoFiles.find(v => v.i === opts.fileIndex)
@@ -5498,6 +5780,13 @@ function selectTorrentVideoFile(
       (a.meta.parsedEpisode as number) - (b.meta.parsedEpisode as number)
     )
   if (withEpisodes.length > 0) return { file: withEpisodes[0].f, index: withEpisodes[0].i }
+
+  // Series with unparseable filenames: torrent order is near-always episode
+  // order — start at the first file, not the largest (which may be any ep).
+  if (opts.episode != null || opts.season != null) {
+    const firstOrdered = [...videoFiles].sort((a, b) => a.i - b.i)[0]
+    if (firstOrdered) return { file: firstOrdered.f, index: firstOrdered.i }
+  }
 
   const bySize = videoFiles.sort((a, b) => (b.f.length || 0) - (a.f.length || 0))[0]
   return { file: bySize.f, index: bySize.i }
@@ -5581,6 +5870,13 @@ ipcMain.handle('stop-temp-stream', async (_, id: string) => {
   return true
 })
 
+ipcMain.handle('prioritize-temp-files', (_, streamId: string, fileIndexes: number[]) => {
+  const entry = tempStreams.get(streamId)
+  const torrent = entry?.torrent
+  if (!torrent || torrent.destroyed) return false
+  return prioritizeUpcomingPackFiles(torrent, fileIndexes)
+})
+
 ipcMain.handle('get-temp-stream-episodes', async (_, streamId: string) => {
   const entry = tempStreams.get(streamId)
   const torrent = entry?.torrent
@@ -5590,8 +5886,16 @@ ipcMain.handle('get-temp-stream-episodes', async (_, streamId: string) => {
   } catch (err: any) {
     return { error: err?.message || 'Torrent metadata is not ready yet' }
   }
+  // NOTE: `index` below must stay the ORIGINAL torrent file position — the
+  // player switches files via `?file=<index>`.
+  const allFiles = (torrent.files || []).map((f: any, index: number) => ({ f, index }))
+  const videoFiles = allFiles.filter(({ f }: any) => isVideoFilePath(f?.path || f?.name || ''))
+  const nonSample = videoFiles.filter(({ f }: any) => !isSampleVideoFile(f?.path || f?.name))
+  const rosterFiles = nonSample.length > 0 ? nonSample : videoFiles
+  const rosterSet = new Set(rosterFiles.map(({ index }: any) => index))
   const episodes: any[] = []
-  ;(torrent.files || []).forEach((f: any, index: number) => {
+  ;(allFiles || []).forEach(({ f, index }: any) => {
+    if (!rosterSet.has(index)) return
     const filePath = f?.path || f?.name || ''
     if (!isVideoFilePath(filePath)) return
     const meta = parseTvTorrentMetadata(filePath)
@@ -5770,6 +6074,28 @@ function prioritizeTorrentPlaybackFiles(torrent: any, playable: any): void {
     }
   } catch (err) {
     console.warn('[TorrentStream] Could not reprioritize torrent files:', err)
+  }
+}
+
+// Binge helper: keep the upcoming pack file(s) selected so the next episode
+// is already buffered when the player advances. Never deselects — the stream
+// setup owns the baseline selection.
+function prioritizeUpcomingPackFiles(torrent: any, wantedIndexes: number[]): boolean {
+  if (!torrent || torrent.destroyed || !Array.isArray(torrent.files)) return false
+  try {
+    const wanted = new Set((wantedIndexes || []).map(Number).filter(Number.isFinite))
+    if (wanted.size === 0) return false
+    let applied = false
+    torrent.files.forEach((file: any, i: number) => {
+      if (!wanted.has(i)) return
+      if (!isVideoFilePath(file?.path || file?.name)) return
+      file.select?.(50)
+      applied = true
+    })
+    return applied
+  } catch (err) {
+    console.warn('[TorrentStream] Could not prioritize upcoming pack files:', err)
+    return false
   }
 }
 

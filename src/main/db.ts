@@ -174,6 +174,45 @@ export function initDb() {
       error_message TEXT,
       added_at DATETIME DEFAULT CURRENT_TIMESTAMP
     );
+
+    -- Online (streamed, not downloaded) resume positions, keyed by stable
+    -- TMDB identity so they survive dead magnets / re-searched sources.
+    CREATE TABLE IF NOT EXISTS stream_progress (
+      id TEXT PRIMARY KEY,
+      tmdb_id INTEGER NOT NULL,
+      media_type TEXT CHECK(media_type IN ('movie', 'series')) NOT NULL,
+      season INTEGER,
+      episode INTEGER,
+      title TEXT NOT NULL,
+      poster_path TEXT,
+      backdrop_path TEXT,
+      overview TEXT,
+      release_year INTEGER,
+      position REAL DEFAULT 0,
+      duration REAL DEFAULT 0,
+      completed BOOLEAN DEFAULT 0,
+      source_magnet TEXT,
+      file_index INTEGER,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE INDEX IF NOT EXISTS idx_stream_progress_updated
+      ON stream_progress(updated_at DESC);
+
+    -- Series the user follows for new-episode alerts (#3). last_known_* is the
+    -- latest RELEASED episode seen by the checker; has_unseen_new flags a drop
+    -- the user hasn't opened yet.
+    CREATE TABLE IF NOT EXISTS followed_series (
+      tmdb_id INTEGER PRIMARY KEY,
+      title TEXT NOT NULL,
+      poster_path TEXT,
+      backdrop_path TEXT,
+      overview TEXT,
+      last_known_season INTEGER,
+      last_known_episode INTEGER,
+      has_unseen_new BOOLEAN DEFAULT 0,
+      last_checked DATETIME,
+      added_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
   `)
 
   // Check and add columns for downloads if they don't exist
@@ -196,6 +235,13 @@ export function initDb() {
   }
   if (!dlColumnNames.includes('download_path')) {
     db.exec("ALTER TABLE downloads ADD COLUMN download_path TEXT")
+  }
+
+  // file_index pins an unparsed pack file so resume lands on the exact file.
+  const streamColumns = db.prepare("PRAGMA table_info(stream_progress)").all()
+  const streamColumnNames = streamColumns.map((c: any) => c.name)
+  if (!streamColumnNames.includes('file_index')) {
+    db.exec("ALTER TABLE stream_progress ADD COLUMN file_index INTEGER")
   }
 }
 
@@ -526,14 +572,71 @@ export function getBackupData() {
     ORDER BY added_at DESC
   `).all()
 
+  const streamProgress = db.prepare(`
+    SELECT tmdb_id, media_type, season, episode, title, poster_path, backdrop_path,
+           overview, release_year, position, duration, completed, source_magnet,
+           file_index, updated_at
+    FROM stream_progress
+    ORDER BY updated_at DESC
+  `).all()
+
+  const followedSeries = db.prepare(`
+    SELECT tmdb_id, title, poster_path, backdrop_path, overview,
+           last_known_season, last_known_episode, has_unseen_new, last_checked, added_at
+    FROM followed_series
+    ORDER BY added_at DESC
+  `).all()
+
   return {
     folders,
     watchlist: {
       external: externalWatchlist,
       local: localWatchlist
     },
-    favorites
+    favorites,
+    streamProgress,
+    followedSeries
   }
+}
+
+export function restoreStreamProgressRow(item: any) {
+  const tmdbId = Number(item?.tmdb_id)
+  if (!tmdbId || (item.media_type !== 'movie' && item.media_type !== 'series')) return { changes: 0 }
+  const id = buildStreamProgressId(tmdbId, item.media_type, item.season, item.episode)
+  return db.prepare(`
+    INSERT INTO stream_progress
+      (id, tmdb_id, media_type, season, episode, title, poster_path, backdrop_path, overview,
+       release_year, position, duration, completed, source_magnet, file_index, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE(?, CURRENT_TIMESTAMP))
+    ON CONFLICT(id) DO NOTHING
+  `).run(
+    id, tmdbId, item.media_type,
+    item.season ?? null, item.episode ?? null,
+    item.title || 'Unknown Title',
+    item.poster_path || null, item.backdrop_path || null, item.overview || null,
+    item.release_year ?? null,
+    Math.max(0, Number(item.position) || 0), Math.max(0, Number(item.duration) || 0),
+    item.completed ? 1 : 0, item.source_magnet || null,
+    Number.isFinite(Number(item.file_index)) ? Number(item.file_index) : null,
+    item.updated_at || null
+  )
+}
+
+export function restoreFollowedSeriesRow(item: any) {
+  const tmdbId = Number(item?.tmdb_id)
+  if (!tmdbId || !item.title) return { changes: 0 }
+  return db.prepare(`
+    INSERT INTO followed_series
+      (tmdb_id, title, poster_path, backdrop_path, overview, last_known_season,
+       last_known_episode, has_unseen_new, last_checked, added_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE(?, CURRENT_TIMESTAMP))
+    ON CONFLICT(tmdb_id) DO NOTHING
+  `).run(
+    tmdbId, item.title,
+    item.poster_path || null, item.backdrop_path || null, item.overview || null,
+    item.last_known_season ?? null, item.last_known_episode ?? null,
+    item.has_unseen_new ? 1 : 0, item.last_checked || null, item.added_at || null
+  )
 }
 
 export function importExternalWatchlistItem(item: any) {
@@ -817,6 +920,181 @@ export function deleteVideoAndProgress(id: number) {
     db.prepare('DELETE FROM videos WHERE id = ?').run(id)
   })
   tx()
+}
+
+// ─── Online stream resume (source-agnostic, TMDB-keyed) ──────────────────────
+// id format: `${tmdb_id}:${media_type}:s${season ?? 0}:e${episode ?? 0}`
+// Hero visibility: 10 days. Data retention: 30 days (purged lazily on read).
+export function buildStreamProgressId(tmdbId: number, mediaType: string, season?: number | null, episode?: number | null) {
+  return `${tmdbId}:${mediaType}:s${season ?? 0}:e${episode ?? 0}`
+}
+
+export function upsertStreamProgress(entry: any) {
+  const tmdbId = Number(entry.tmdb_id)
+  if (!tmdbId || (entry.media_type !== 'movie' && entry.media_type !== 'series')) return null
+  const id = buildStreamProgressId(tmdbId, entry.media_type, entry.season, entry.episode)
+  const position = Math.max(0, Number(entry.position) || 0)
+  const duration = Math.max(0, Number(entry.duration) || 0)
+  const completed = entry.completed ? 1 : 0
+  // Positions under 10s carry no resume value (accidental tap, or rewound to
+  // the start). Drop the row — unless it already marks the episode watched,
+  // in which case the watched marker must survive (#2 next-episode needs it).
+  if (!completed && position < 10) {
+    const existing = db.prepare('SELECT completed FROM stream_progress WHERE id = ?').get(id) as any
+    if (existing?.completed) return existing
+    db.prepare('DELETE FROM stream_progress WHERE id = ?').run(id)
+    return { deleted: true, id }
+  }
+  // Completed rows are KEPT (completed=1): excluded from Continue Watching but
+  // used to derive "watched till E3 → next E4". Purged after 30 days like rest.
+  const fileIndex = Number.isFinite(Number(entry.file_index)) ? Number(entry.file_index) : null
+  return db.prepare(`
+    INSERT INTO stream_progress
+      (id, tmdb_id, media_type, season, episode, title, poster_path, backdrop_path, overview, release_year, position, duration, completed, source_magnet, file_index, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+    ON CONFLICT(id) DO UPDATE SET
+      title = excluded.title,
+      poster_path = COALESCE(excluded.poster_path, stream_progress.poster_path),
+      backdrop_path = COALESCE(excluded.backdrop_path, stream_progress.backdrop_path),
+      overview = COALESCE(excluded.overview, stream_progress.overview),
+      release_year = COALESCE(excluded.release_year, stream_progress.release_year),
+      position = excluded.position,
+      duration = CASE WHEN excluded.duration > 0 THEN excluded.duration ELSE stream_progress.duration END,
+      completed = excluded.completed,
+      source_magnet = COALESCE(excluded.source_magnet, stream_progress.source_magnet),
+      file_index = excluded.file_index,
+      updated_at = CURRENT_TIMESTAMP
+  `).run(
+    id, tmdbId, entry.media_type,
+    entry.season ?? null, entry.episode ?? null,
+    entry.title || 'Unknown Title',
+    entry.poster_path || null, entry.backdrop_path || null,
+    entry.overview || null, entry.release_year ?? null,
+    position, duration, completed, entry.source_magnet || null, fileIndex
+  )
+}
+
+export function clearAllFollowedNewFlags() {
+  return db.prepare('UPDATE followed_series SET has_unseen_new = 0').run()
+}
+
+export function getStreamProgress(tmdbId: number, mediaType: string, season?: number | null, episode?: number | null) {
+  const id = buildStreamProgressId(Number(tmdbId), mediaType, season, episode)
+  return db.prepare('SELECT * FROM stream_progress WHERE id = ?').get(id) as any
+}
+
+export function getStreamContinueWatching(limit: number = 10) {
+  try {
+    // Lazily purge rows older than 30 days on every read (cheap, indexed).
+    db.prepare(`DELETE FROM stream_progress WHERE updated_at < datetime('now', '-30 days')`).run()
+  } catch (err) {
+    console.error('[DB] stream_progress purge failed:', err)
+  }
+  // Hero visibility window: 10 days of inactivity hides the card (per UX decision),
+  // but DetailScreen can still resume via getStreamProgress until the 30-day purge.
+  return db.prepare(`
+    SELECT * FROM stream_progress
+    WHERE completed = 0 AND position >= 10
+      AND updated_at > datetime('now', '-10 days')
+    ORDER BY updated_at DESC
+    LIMIT ?
+  `).all(limit) as any[]
+}
+
+export function deleteStreamProgress(tmdbId: number, mediaType: string, season?: number | null, episode?: number | null) {
+  const id = buildStreamProgressId(Number(tmdbId), mediaType, season, episode)
+  return db.prepare('DELETE FROM stream_progress WHERE id = ?').run(id)
+}
+
+// ─── Followed series for new-episode alerts (#3) ─────────────────────────────
+export function getFollowed(tmdbId: number) {
+  return db.prepare('SELECT * FROM followed_series WHERE tmdb_id = ?').get(Number(tmdbId)) as any
+}
+
+export function getFollowedSeries() {
+  return db.prepare('SELECT * FROM followed_series ORDER BY added_at DESC').all() as any[]
+}
+
+export function upsertFollowedSeries(meta: any) {
+  const tmdbId = Number(meta.tmdb_id)
+  if (!tmdbId) return null
+  const prev = getFollowed(tmdbId)
+  db.prepare(`
+    INSERT INTO followed_series (tmdb_id, title, poster_path, backdrop_path, overview)
+    VALUES (?, ?, ?, ?, ?)
+    ON CONFLICT(tmdb_id) DO UPDATE SET
+      title = excluded.title,
+      poster_path = COALESCE(excluded.poster_path, followed_series.poster_path),
+      backdrop_path = COALESCE(excluded.backdrop_path, followed_series.backdrop_path),
+      overview = COALESCE(excluded.overview, followed_series.overview)
+  `).run(
+    tmdbId, meta.title || 'Unknown Title',
+    meta.poster_path || null, meta.backdrop_path || null, meta.overview || null
+  )
+  return { isNew: !prev }
+}
+
+export function setFollowedBaseline(tmdbId: number, season?: number | null, episode?: number | null) {
+  return db.prepare(`
+    UPDATE followed_series
+    SET last_known_season = ?, last_known_episode = ?,
+        has_unseen_new = 0, last_checked = CURRENT_TIMESTAMP
+    WHERE tmdb_id = ?
+  `).run(season ?? null, episode ?? null, Number(tmdbId))
+}
+
+export function touchFollowedChecked(tmdbId: number, season?: number | null, episode?: number | null, hasNew: boolean = false) {
+  return db.prepare(`
+    UPDATE followed_series
+    SET last_known_season = COALESCE(?, last_known_season),
+        last_known_episode = COALESCE(?, last_known_episode),
+        has_unseen_new = CASE WHEN ? = 1 THEN 1 ELSE has_unseen_new END,
+        last_checked = CURRENT_TIMESTAMP
+    WHERE tmdb_id = ?
+  `).run(season ?? null, episode ?? null, hasNew ? 1 : 0, Number(tmdbId))
+}
+
+export function markFollowedSeen(tmdbId: number) {
+  return db.prepare('UPDATE followed_series SET has_unseen_new = 0 WHERE tmdb_id = ?').run(Number(tmdbId))
+}
+
+export function unfollowSeries(tmdbId: number) {
+  return db.prepare('DELETE FROM followed_series WHERE tmdb_id = ?').run(Number(tmdbId))
+}
+
+// Highest S/E with any stream row (watched or in-progress) for a series.
+// Drives #3: a release newer than this is genuinely unwatched news.
+export function getStreamMaxWatched(tmdbId: number) {
+  return db.prepare(`
+    SELECT season, episode FROM stream_progress
+    WHERE tmdb_id = ? AND media_type = 'series'
+    ORDER BY COALESCE(season, 0) DESC, COALESCE(episode, 0) DESC
+    LIMIT 1
+  `).get(Number(tmdbId)) as { season: number | null; episode: number | null } | undefined
+}
+
+// Latest stream activity for a series (any row). Drives the stale-follow rule:
+// series nobody has touched in weeks stop alerting until watched again.
+export function getStreamLatestActivity(tmdbId: number) {
+  return db.prepare(`
+    SELECT MAX(updated_at) AS latest FROM stream_progress
+    WHERE tmdb_id = ?
+  `).get(Number(tmdbId)) as { latest: string | null } | undefined
+}
+
+// Full recent history INCLUDING completed rows (powers #2 series grouping and
+// Detail episode ticks). Continue Watching stays on getStreamContinueWatching.
+export function getStreamHistory(limit: number = 100) {
+  try {
+    db.prepare(`DELETE FROM stream_progress WHERE updated_at < datetime('now', '-30 days')`).run()
+  } catch (err) {
+    console.error('[DB] stream_progress purge failed:', err)
+  }
+  return db.prepare(`
+    SELECT * FROM stream_progress
+    ORDER BY updated_at DESC
+    LIMIT ?
+  `).all(limit) as any[]
 }
 
 export default db

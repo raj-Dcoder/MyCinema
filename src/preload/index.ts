@@ -124,6 +124,8 @@ const api = {
     ipcRenderer.invoke('start-temp-stream', magnetUrl, title, options),
   stopTempStream: (id: string) =>
     ipcRenderer.invoke('stop-temp-stream', id),
+  prioritizeTempFiles: (streamId: string, fileIndexes: number[]) =>
+    ipcRenderer.invoke('prioritize-temp-files', streamId, fileIndexes).catch(() => false),
   getTempStreamEpisodes: (streamId: string) =>
     ipcRenderer.invoke('get-temp-stream-episodes', streamId),
   onDownloadsChanged: (callback: () => void) => {
@@ -167,8 +169,24 @@ const api = {
   },
   getAppSettings: () => ipcRenderer.invoke('get-app-settings'),
   setLaunchFullscreen: (launchFullscreen: boolean) => ipcRenderer.invoke('set-launch-fullscreen', launchFullscreen),
-  onAppSettingsChanged: (callback: (settings: { launchFullscreen: boolean }) => void) => {
-    const handler = (_event: any, settings: { launchFullscreen: boolean }) => callback(settings)
+  setRememberOnlineProgress: (enabled: boolean) => ipcRenderer.invoke('set-remember-online-progress', enabled),
+  getStreamProgress: (tmdbId: number, mediaType: string, season?: number | null, episode?: number | null) =>
+    ipcRenderer.invoke('get-stream-progress', tmdbId, mediaType, season ?? null, episode ?? null),
+  updateStreamProgress: (entry: any) => ipcRenderer.send('update-stream-progress', entry),
+  getStreamContinueWatching: () => ipcRenderer.invoke('get-stream-continue-watching'),
+  getStreamHistory: (limit?: number) => ipcRenderer.invoke('get-stream-history', limit ?? 100),
+  setNotifyNewEpisodes: (enabled: boolean) => ipcRenderer.invoke('set-notify-new-episodes', enabled),
+  followSeries: (input: { tmdb_id: number; title?: string; poster_path?: string | null; backdrop_path?: string | null; overview?: string | null; season?: number | null; episode?: number | null }) =>
+    ipcRenderer.invoke('follow-series', input),
+  unfollowSeries: (tmdbId: number) => ipcRenderer.invoke('unfollow-series', tmdbId),
+  getFollowedSeries: () => ipcRenderer.invoke('get-followed-series'),
+  markFollowedSeen: (tmdbId: number) => ipcRenderer.invoke('mark-followed-seen', tmdbId),
+  checkFollowedUpdates: () => ipcRenderer.invoke('check-followed-updates'),
+  checkSeriesUpdates: (tmdbId: number) => ipcRenderer.invoke('check-series-updates', tmdbId),
+  deleteStreamProgress: (tmdbId: number, mediaType: string, season?: number | null, episode?: number | null) =>
+    ipcRenderer.invoke('delete-stream-progress', tmdbId, mediaType, season ?? null, episode ?? null),
+  onAppSettingsChanged: (callback: (settings: { launchFullscreen: boolean; rememberOnlineProgress: boolean; notifyNewEpisodes: boolean }) => void) => {
+    const handler = (_event: any, settings: { launchFullscreen: boolean; rememberOnlineProgress: boolean; notifyNewEpisodes: boolean }) => callback(settings)
     ipcRenderer.on('app-settings-changed', handler)
     return () => ipcRenderer.removeListener('app-settings-changed', handler)
   },

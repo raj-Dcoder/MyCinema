@@ -1,8 +1,9 @@
 import React, { useEffect, useRef, useState } from 'react'
-import { X, Play, Info, Calendar, Clock, Star, FolderOpen, Film, Music, Subtitles, HardDrive, ChevronDown, ChevronUp, Heart, Bookmark, Share2, Search, Zap, Users, Download, AlertTriangle, Clapperboard, Loader2, ExternalLink, Languages, CheckCircle2, Copy, MessageCircle, Send, Trash2 } from 'lucide-react'
+import { X, Play, Info, Calendar, Clock, Star, FolderOpen, Film, Music, Subtitles, HardDrive, ChevronDown, ChevronUp, Heart, Bookmark, Share2, Search, Zap, Users, Download, AlertTriangle, Clapperboard, Loader2, ExternalLink, Languages, CheckCircle2, Copy, MessageCircle, Send, Trash2, Bell, BellRing } from 'lucide-react'
 import { Video } from '../types'
-import { ShareHintGuide, DeleteHintGuide } from './FeatureGuides'
+import { ShareHintGuide, DeleteHintGuide, FollowGuide } from './FeatureGuides'
 import { getTorrentSourceHealthScore, getTorrentSourceSpeedLabel, isHevcSource } from '../utils/torrentSources'
+import { isOnlineProgressEnabled, isNewEpisodeNotifyEnabled, formatResumeTime, formatSeasonEpisode, getTorrentFileQueryIndex, safeGetStreamHistory, safeGetStreamProgress, safeDeleteStreamProgress, safeFollowSeries, safeUnfollowSeries, safeGetFollowedSeries, safeCheckSeriesUpdates, safeMarkFollowedSeen } from '../utils/streamResume'
 import { getMediaUnitIdentity, getVersionLabel, groupMediaVersions, pickPreferredVersion } from '../utils/mediaVersions'
 
 interface DetailScreenProps {
@@ -179,6 +180,70 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
   const [isFavorite, setIsFavorite] = useState(video.is_favorite)
   const [isWatchlist, setIsWatchlist] = useState(video.is_watchlist)
   const [watchlistBusy, setWatchlistBusy] = useState(false)
+  // #3: manual follow for new-episode alerts (auto-follow also fires on watch).
+  const [isFollowing, setIsFollowing] = useState(false)
+  const [followBusy, setFollowBusy] = useState(false)
+  // #3: just-dropped episode for the strip above the episode list.
+  const [newDrop, setNewDrop] = useState<{ season: number; episode: number } | null>(null)
+  useEffect(() => {
+    let cancelled = false
+    setNewDrop(null)
+    if (video.type !== 'series' || !video.tmdb_id) return
+    if (!isOnlineProgressEnabled() || !isNewEpisodeNotifyEnabled()) return
+    // Explicit per-series refresh — the user opened this show right now, so
+    // bypass the daily throttle and tell them about today's drop.
+    safeCheckSeriesUpdates(video.tmdb_id).then(res => {
+      if (cancelled || !res?.checked || !res?.hasNew) return
+      if (res.season == null || res.episode == null) return
+      setNewDrop({ season: res.season, episode: res.episode })
+    }).catch(() => {})
+    return () => { cancelled = true }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [video.tmdb_id, video.type])
+  useEffect(() => {
+    let cancelled = false
+    setIsFollowing(false)
+    if (video.type !== 'series' || !video.tmdb_id) return
+    safeGetFollowedSeries().then(list => {
+      if (cancelled) return
+      setIsFollowing((list || []).some(f => Number(f.tmdb_id) === video.tmdb_id))
+    }).catch(() => {})
+    return () => { cancelled = true }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [video.tmdb_id, video.type])
+  const handleToggleFollow = async () => {
+    if (!video.tmdb_id || followBusy) return
+    setFollowBusy(true)
+    try {
+      if (isFollowing) {
+        await safeUnfollowSeries(video.tmdb_id)
+        setIsFollowing(false)
+        setNewDrop(null)
+      } else {
+        const res = await safeFollowSeries({
+          tmdb_id: video.tmdb_id,
+          title: displayTitle,
+          poster_path: video.poster_path ?? null,
+          backdrop_path: video.backdrop_path ?? null,
+          overview: video.overview ?? null,
+          season: video.season ?? null,
+          episode: video.episode ?? null
+        })
+        if (res?.followed) {
+          setIsFollowing(true)
+          // A fresh drop may already be out (followed mid-season) — surface
+          // the strip without waiting for any scheduled check.
+          safeCheckSeriesUpdates(video.tmdb_id).then(check => {
+            if (check?.hasNew && check.season != null && check.episode != null) {
+              setNewDrop({ season: check.season, episode: check.episode })
+            }
+          }).catch(() => {})
+        }
+      }
+    } finally {
+      setFollowBusy(false)
+    }
+  }
   const [shareCopied, setShareCopied] = useState(false)
   const [showShareModal, setShowShareModal] = useState(false)
   const [shareFeedback, setShareFeedback] = useState<string | null>(null)
@@ -192,6 +257,54 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
   const [expandedOverview, setExpandedOverview] = useState(false)
   const [tmdbKeywords, setTmdbKeywords] = useState<string[]>([])
   const [isWebPopupOpen, setIsWebPopupOpen] = useState(false)
+  // Online resume (#1): source-agnostic position for the primary identity.
+  // #2: per-episode online map for the series episode list.
+  const [streamResume, setStreamResume] = useState<{ position: number; duration: number } | null>(null)
+  const [onlineEpisodeMap, setOnlineEpisodeMap] = useState<Map<string, { position: number; duration: number; completed: boolean }>>(new Map())
+  useEffect(() => {
+    let cancelled = false
+    setOnlineEpisodeMap(new Map())
+    if (video.type !== 'series' || !video.tmdb_id || !isOnlineProgressEnabled()) return
+    safeGetStreamHistory(100).then(rows => {
+      if (cancelled) return
+      const map = new Map<string, { position: number; duration: number; completed: boolean }>()
+      for (const row of rows || []) {
+        if (Number(row.tmdb_id) !== video.tmdb_id || row.media_type !== 'series') continue
+        map.set(`${Number(row.season || 0)}:${Number(row.episode || 0)}`, {
+          position: Number(row.position) || 0,
+          duration: Number(row.duration) || 0,
+          completed: Boolean(row.completed)
+        })
+      }
+      setOnlineEpisodeMap(map)
+    }).catch(() => {})
+    return () => { cancelled = true }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [video.tmdb_id, video.type])
+  const primaryStreamIdentity = video.tmdb_id && (video.type === 'movie' || video.type === 'series') && (video.type === 'movie' || video.season != null || video.episode != null)
+    ? {
+        tmdb_id: video.tmdb_id,
+        media_type: video.type,
+        season: video.type === 'series' ? (video.season ?? null) : null,
+        episode: video.type === 'series' ? (video.episode ?? null) : null
+      }
+    : null
+  useEffect(() => {
+    let cancelled = false
+    setStreamResume(null)
+    if (!primaryStreamIdentity || !isOnlineProgressEnabled()) return
+    safeGetStreamProgress(
+      primaryStreamIdentity.tmdb_id,
+      primaryStreamIdentity.media_type,
+      primaryStreamIdentity.season,
+      primaryStreamIdentity.episode
+    ).then(row => {
+      if (cancelled || !row || row.completed || (Number(row.position) || 0) < 10) return
+      setStreamResume({ position: Number(row.position) || 0, duration: Number(row.duration) || 0 })
+    }).catch(() => {})
+    return () => { cancelled = true }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [video.tmdb_id, video.type, video.season, video.episode])
 
 
   // Torrent Search State
@@ -588,6 +701,8 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
         duration: 0,
         isExternal: false,
         logo_path: video.logo_path || resolvedLogoPath || undefined,
+        sourceMagnet: activeDownloads.find(d => d.id === downloadId)?.magnet,
+        fileIndex: getTorrentFileQueryIndex(result.url) ?? undefined,
         fetchedSources: sources.length > 0 ? sources : undefined
       })
     } catch (err: any) {
@@ -642,6 +757,29 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
         return
       }
 
+      // Attach any saved online position so the player resumes instantly
+      // (it also falls back to a DB lookup on start if this is skipped).
+      let resumeFrom = 0
+      let resumeFileIndex: number | null = getTorrentFileQueryIndex(result.url)
+      try {
+        if (video.tmdb_id && isOnlineProgressEnabled()) {
+          const row = await safeGetStreamProgress(
+            video.tmdb_id,
+            video.type,
+            video.type === 'series' ? (result.parsedSeason ?? source.parsedSeason ?? video.season ?? null) : null,
+            video.type === 'series' ? (result.parsedEpisode ?? source.parsedEpisode ?? video.episode ?? null) : null
+          )
+          if (row && !row.completed && (Number(row.position) || 0) >= 10) {
+            resumeFrom = Number(row.position) || 0
+            // Same torrent as the saved row: pin the exact file, not just S/E.
+            if (row.source_magnet && getMagnetInfoHash(row.source_magnet) === getMagnetInfoHash(source.magnet) &&
+              Number.isFinite(Number(row.file_index))) {
+              resumeFileIndex = Number(row.file_index)
+            }
+          }
+        }
+      } catch { /* resume is best-effort */ }
+
       onPlay({
         ...video,
         id: -Math.abs(Date.now()),
@@ -654,7 +792,10 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
         logo_path: video.logo_path || resolvedLogoPath || undefined,
         streamSourceId: result.streamId,
         sourceMagnet: source.magnet,
-        fetchedSources: sources.length > 0 ? sources : undefined
+        fileIndex: resumeFileIndex ?? undefined,
+        fetchedSources: sources.length > 0 ? sources : undefined,
+        resumeFrom,
+        sourceRefreshed: false
       })
     } catch (err: any) {
       setTorrentStreamError(getTorrentStreamErrorMessage(err?.message))
@@ -1393,6 +1534,39 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
                   {torrentStreamError || `${roundedDownloadProgress}% downloaded${matchingDownload?.downloadSpeed ? ` / ${matchingDownload.downloadSpeed}` : ''}`}
                 </div>
               )}
+
+              {streamResume && !isLocalMedia && (
+                <div className="flex basis-full flex-wrap items-center gap-2 rounded-xl border border-sky-400/20 bg-sky-400/[0.07] px-4 py-3">
+                  <Play size={14} className="shrink-0 text-sky-300" fill="currentColor" />
+                  <p className="text-[11px] font-bold text-sky-100/90">
+                    Online resume available — continue from {formatResumeTime(streamResume.position)}
+                    {streamResume.duration > 0 ? ` of ${formatResumeTime(streamResume.duration)}` : ''}
+                  </p>
+                  <div className="ml-auto flex items-center gap-2">
+                    <button
+                      onClick={handleOpenDownloadOptions}
+                      className="rounded-lg bg-sky-500 px-3 py-1.5 text-[10px] font-black uppercase tracking-widest text-white transition-all hover:bg-sky-400 active:scale-95"
+                    >
+                      Resume
+                    </button>
+                    <button
+                      onClick={async () => {
+                        if (!primaryStreamIdentity) return
+                        await safeDeleteStreamProgress(
+                          primaryStreamIdentity.tmdb_id,
+                          primaryStreamIdentity.media_type,
+                          primaryStreamIdentity.season,
+                          primaryStreamIdentity.episode
+                        )
+                        setStreamResume(null)
+                      }}
+                      className="rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-[10px] font-black uppercase tracking-widest text-white/60 transition-all hover:bg-white/10 hover:text-white active:scale-95"
+                    >
+                      Restart
+                    </button>
+                  </div>
+                </div>
+              )}
               
               <div className="flex flex-wrap items-center gap-2 basis-full pt-1">
                 <button
@@ -1414,6 +1588,21 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
                 >
                   <Heart size={20} fill={isFavorite ? "currentColor" : "none"} />
                 </button>
+                {video.type === 'series' && video.tmdb_id && (
+                  <div className="relative">
+                    <button
+                      onClick={handleToggleFollow}
+                      disabled={followBusy}
+                      className={`p-3.5 rounded-xl border transition-all hover:-translate-y-0.5 active:scale-95 glass-effect ${
+                        isFollowing ? 'bg-sky-500/20 border-sky-400 text-sky-300' : 'bg-white/5 border-white/10 text-white/40 hover:text-white'
+                      } disabled:opacity-50 disabled:cursor-wait`}
+                      title={isFollowing ? 'Following — click to unfollow new-episode alerts' : 'Follow for new-episode alerts'}
+                    >
+                      {followBusy ? <Loader2 size={20} className="animate-spin" /> : isFollowing ? <BellRing size={20} /> : <Bell size={20} />}
+                    </button>
+                    <FollowGuide />
+                  </div>
+                )}
                 {isLocalMedia && (
                   <button
                     onClick={handleShowInfo}
@@ -1787,6 +1976,29 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
             {/* Released, local, and upcoming series episodes */}
             {video.type === 'series' && (loading || catalogLoading || episodeRows.length > 0) && (
               <div className="border-t border-white/[0.08] pt-8 space-y-4">
+                {newDrop && (
+                  <div className="flex flex-wrap items-center gap-3 rounded-2xl border border-sky-400/25 bg-sky-400/[0.08] px-5 py-4">
+                    <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-sky-500/20 text-sky-300">
+                      <BellRing size={16} />
+                    </span>
+                    <div className="min-w-0 flex-1">
+                      <p className="text-[9px] font-black uppercase tracking-[0.2em] text-sky-300">Just dropped</p>
+                      <p className="truncate text-[13px] font-bold text-white">
+                        {formatSeasonEpisode(newDrop.season, newDrop.episode)} is out — pick a source and keep watching
+                      </p>
+                    </div>
+                    <button
+                      onClick={() => {
+                        if (video.tmdb_id) void safeMarkFollowedSeen(video.tmdb_id)
+                        setNewDrop(null)
+                        void handleOpenEpisodeSources(newDrop.season, newDrop.episode)
+                      }}
+                      className="shrink-0 rounded-xl bg-sky-500 px-4 py-2 text-[10px] font-black uppercase tracking-widest text-white transition-all hover:bg-sky-400 active:scale-95"
+                    >
+                      Watch now
+                    </button>
+                  </div>
+                )}
                 <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
                   <div>
                     <p className="mb-1 text-[10px] font-black uppercase tracking-[0.2em] text-red-400">Browse the show</p>
@@ -1833,6 +2045,14 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
 
                       const isUpcoming = !ep.released && !ep.localVideo && !isDownloading
                       const isMissing = ep.released && !ep.localVideo && !isDownloading
+                      const onlineState = (!ep.localVideo && !isDownloading)
+                        ? onlineEpisodeMap.get(`${ep.season}:${ep.episode}`)
+                        : undefined
+                      const onlineLabel = onlineState
+                        ? onlineState.completed
+                          ? 'Watched online'
+                          : (onlineState.position >= 10 ? `Resume ${formatResumeTime(onlineState.position)} online` : null)
+                        : null
                       return (
                       <button
                         key={`${ep.season}:${ep.episode}`}
@@ -1875,9 +2095,9 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
                             {ep.title}{ep.versionCount > 1 ? ` • ${ep.versionCount} versions` : ''}
                           </div>
                           <div className={`mt-1 text-[8px] font-black uppercase tracking-widest ${
-                            ep.localVideo ? 'text-emerald-300/70' : isDownloading ? 'text-green-400' : isMissing ? 'text-primary/80' : 'text-white/30'
+                            ep.localVideo ? 'text-emerald-300/70' : isDownloading ? 'text-green-400' : onlineLabel ? (onlineState?.completed ? 'text-emerald-300/70' : 'text-sky-300/80') : isMissing ? 'text-primary/80' : 'text-white/30'
                           }`}>
-                            {ep.localVideo ? 'In library' : isDownloading ? `Downloading • ${Math.round(epDownloadProgress)}%` : isMissing ? 'Released • choose source' : ep.airDate ? `Upcoming • ${ep.airDate}` : 'Upcoming'}
+                            {ep.localVideo ? 'In library' : isDownloading ? `Downloading • ${Math.round(epDownloadProgress)}%` : onlineLabel || (isMissing ? 'Released • choose source' : ep.airDate ? `Upcoming • ${ep.airDate}` : 'Upcoming')}
                           </div>
                         </div>
                         <div className={`ml-4 transition-opacity z-10 ${isUpcoming ? 'opacity-40' : 'opacity-0 group-hover:opacity-100'}`}>

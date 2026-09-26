@@ -1,3 +1,40 @@
+# MyCinema v1.36.0
+
+Streamed shows now remember you: online resume, next-episode tracking, new-episode alerts, and whole-season binge mode.
+
+### Online Resume
+- **Streamed Titles Join Continue Watching**: Movies and episodes you stream (not download) now appear in Hero with your exact position, badge-labeled Online — no more re-searching and scrubbing to find your place.
+- **One-Click Resume, Fresh Sources**: Resume reuses your last working source instantly, or quietly re-finds the healthiest one in the background while the button shows a loading state.
+- **Resume Receipts**: The player confirms where you picked up ("Resuming from 42:15 · Source refreshed"), and title pages show a resume pill plus per-episode progress ticks.
+
+### Next Up, Automatically
+- **One Card Per Series**: Watched-till progress collapses into a single card that points at the next released episode ("Watched till S1 E3 · S1 E4 up next").
+- **Drops Jump The Queue**: Unseen new episodes take hero position one with a NEW EPISODE badge and a Watch S2 E3 button; the hero stays lean at five cards max.
+- **Quieter Badges, Louder Meaning**: NEW EPISODE, NEXT EPISODE, and ONLINE pills share one visual family so fresh drops grab your eye first.
+
+### Follow Your Shows
+- **Follow Bell**: Tap the bell on any series page to track it — or just keep watching, and meaningful watches follow automatically with a confirmation toast.
+- **New-Episode Alerts**: A throttled daily check flags genuinely unwatched drops (never old episodes, never abandoned shows), with a "just dropped" strip right above the episode list.
+- **Your Switches**: Separate Settings toggles for remembering online progress and for alerts — turning alerts off also clears pending flags.
+
+### Season-Pack Binge Mode
+- **One Timeline For The Whole Pack**: A season pack plays as a single virtual video with a combined duration (like /4:34:23) — seek bar, arrows, slider scrub, and PiP controls all ride across episodes.
+- **No Dead Air Between Episodes**: The next file stays buffered while you watch, and playback auto-advances with a brief crossfade.
+- **Unparseable Packs Still Work**: When filenames carry no episode tags, the player advances in torrent order, pins resume to the exact file, and starts at the first file instead of the largest.
+- **Downloads Still Win**: If you own an episode locally, picking it leaves the stream for your file.
+
+### Reliability
+- **Smarter Source Matching**: Torrent filename parsing now handles folder-structured packs, bare episode tokens, and multi-episode files, while sample/proof stubs can no longer hijack playback.
+- **Stale-Session Safe**: New bridge calls degrade gracefully if the dev preload is out of sync, instead of crashing the screen.
+- **Online State In Backups**: Stream positions and followed series now export and restore with the rest of your library.
+
+### Security & Privacy
+- **Off Means Zero Writes**: Disabling online progress blocks all stream-position storage in both renderer and main process; disabling alerts stops all follow checks.
+- **Local-First Data**: Positions, follows, and alert flags live only in your local database — the only network calls are the existing TMDB lookups (throttled) and torrent providers you explicitly use.
+- **Validated Restores**: Imported backup rows are type-checked before touching your library, and existing rows are never overwritten by a restore.
+
+***
+
 # MyCinema v1.35.0
 
 Sources got a full makeover, PiP finally gets out of your way, and scrolling feels silkier.

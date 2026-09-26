@@ -34,6 +34,18 @@ export interface Video {
   streamSourceId?: string
   sourceMagnet?: string
   fetchedSources?: any[]
+  // Online resume (#1): explicit seek target + whether the magnet was re-found.
+  resumeFrom?: number
+  sourceRefreshed?: boolean
+  isOnlineResume?: boolean
+  // #2: card points at the computed next episode (unwatched) rather than a
+  // partially-watched one.
+  onlineNextEpisode?: boolean
+  // #3: that next episode dropped since the user last caught up.
+  onlineNewEpisode?: boolean
+  // Original torrent file position (?file=) — pins resume to the exact file
+  // for packs whose filenames carry no parseable S/E tags.
+  fileIndex?: number
 }
 
 export interface TmdbProvider {

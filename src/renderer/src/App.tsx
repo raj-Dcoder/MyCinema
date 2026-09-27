@@ -56,6 +56,10 @@ const sortDownloadsForTray = (items: ActiveDownload[]) => (
 
 const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState<AppTab>('home')
+  // Focus Tube is opt-out. While off the tab is not rendered at all, which also
+  // means its page never mounts and therefore issues no feed requests. The
+  // main process has already stopped the background polling.
+  const [focusTubeEnabled, setFocusTubeEnabled] = useState(true)
   const [isSidebarExpanded, setIsSidebarExpanded] = useState(() => {
     return localStorage.getItem(SIDEBAR_EXPANDED_STORAGE_KEY) !== 'false'
   })
@@ -150,6 +154,14 @@ const App: React.FC = () => {
     }
   }, [])
 
+  // If Focus Tube is switched off while its tab is open, that tab stops
+  // rendering, so move somewhere real rather than leaving a blank pane.
+  useEffect(() => {
+    if (!focusTubeEnabled && activeTab === 'focustube') {
+      setActiveTab('home')
+    }
+  }, [focusTubeEnabled, activeTab])
+
   useEffect(() => {
     const syncStreamingMirrors = (settings: { rememberOnlineProgress?: boolean; notifyNewEpisodes?: boolean }) => {
       try {
@@ -169,12 +181,14 @@ const App: React.FC = () => {
     }
     window.api.getAppSettings().then(settings => {
       setLaunchFullscreen(settings.launchFullscreen)
+      setFocusTubeEnabled(settings.focusTubeEnabled !== false)
       // Keep the renderer's sync online-progress gates aligned with main.
       syncStreamingMirrors(settings)
     }).catch(() => {})
 
     return window.api.onAppSettingsChanged(settings => {
       setLaunchFullscreen(settings.launchFullscreen)
+      setFocusTubeEnabled(settings.focusTubeEnabled !== false)
       if (!settings.launchFullscreen) {
         setShowWindowControls(false)
       }
@@ -332,7 +346,10 @@ const App: React.FC = () => {
 
   const navItems = [
     { id: 'home' as const,     label: 'Home',         icon: <HomeIcon size={20} /> },
-    { id: 'focustube' as const, label: 'Focus Tube',  icon: <Compass size={20} /> },
+    // Hidden entirely while the feature is off in Settings.
+    ...(focusTubeEnabled
+      ? [{ id: 'focustube' as const, label: 'Focus Tube', icon: <Compass size={20} /> }]
+      : []),
     { id: 'movies' as const,   label: 'Movies',       icon: <Film size={20} /> },
     { id: 'series' as const,   label: 'Web Series',   icon: <Tv size={20} /> },
     { id: 'videos' as const,   label: 'Videos',       icon: <VideoIcon size={20} /> },
@@ -803,7 +820,7 @@ const App: React.FC = () => {
           <div ref={activePageScrollRef} className="absolute inset-0 overflow-y-auto scrollbar-hide">
             <div className="px-8 pt-6 pb-14 max-w-[1600px] mx-auto">
               {activeTab === 'videos'  && <Videos onPlay={handlePlayVideo} />}
-              {activeTab === 'focustube' && <FocusTube />}
+              {activeTab === 'focustube' && focusTubeEnabled && <FocusTube />}
               {activeTab === 'movies'  && <Movies onPlay={handlePlayVideo} onShowDetail={setSelectedVideo} />}
               {activeTab === 'series'  && <Series onPlay={handlePlayVideo} onShowDetail={setSelectedVideo} />}
               {activeTab === 'collections' && <Collections onPlay={handlePlayVideo} onShowDetail={setSelectedVideo} focusCollectionId={sharedCollectionFocus?.id ?? null} focusNonce={sharedCollectionFocus?.nonce ?? 0} />}

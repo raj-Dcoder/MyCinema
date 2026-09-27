@@ -546,13 +546,19 @@ type AppSettings = {
   // Max simultaneous persistent downloads. 0 (or <= 0) = unlimited.
   // Extras wait with status 'queued' and auto-start oldest-first.
   maxConcurrentDownloads: number
+  // Focus Tube visibility. Turning this off hides the tab and stops all of its
+  // background work, but never deletes anything: categories, subscriptions,
+  // watch progress and seen state all stay in the database and come straight
+  // back when it is switched on again.
+  focusTubeEnabled: boolean
 }
 
 const defaultAppSettings: AppSettings = {
   launchFullscreen: true,
   rememberOnlineProgress: true,
   notifyNewEpisodes: true,
-  maxConcurrentDownloads: 0
+  maxConcurrentDownloads: 0,
+  focusTubeEnabled: true
 }
 
 function getAppSettingsPath() {
@@ -1801,21 +1807,11 @@ app.whenReady().then(() => {
 
   createWindow()
 
-  // Focus Tube: refresh subscribed channel feeds shortly after launch, then on
-  // the cadence YouTube itself advertises (max-age=900) so we never poll
-  // faster than the feeds change.
-  //
-  // The startup poll is delayed past the app's initial TMDB burst on purpose:
-  // the feed request that lands immediately after a burst of other traffic is
-  // the one YouTube's edge tends to reject once, and the UI would then show an
-  // empty stack until the next 15-minute cycle.
-  setTimeout(() => {
-    runFocusTubePoll(false).catch((err) => console.warn('[FocusTube] Startup poll failed:', err))
-  }, 9000)
-  focusTubePollTimer = setInterval(() => {
-    runFocusTubePoll(false).catch((err) => console.warn('[FocusTube] Scheduled poll failed:', err))
-  }, focusTubeFeed.FEED_MIN_POLL_MINUTES * 60_000)
-  focusTubePollTimer.unref?.()
+  // Focus Tube polls only while the user has the feature switched on. Its tables
+  // are always created (see focusTube.initFocusTube) so that turning the feature
+  // off and on again never loses categories, subscriptions or watch progress.
+  startFocusTubePolling()
+
   app.on('activate', function () {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()
   })
@@ -1824,7 +1820,7 @@ app.whenReady().then(() => {
 app.on('before-quit', () => {
   folderWatchers.forEach(w => w.close())
   folderWatchers.clear()
-  if (focusTubePollTimer) clearInterval(focusTubePollTimer)
+  stopFocusTubePolling()
   // Gracefully destroy all active torrents
   torrentProgressIntervals.forEach(interval => clearInterval(interval))
   torrentProgressIntervals.clear()
@@ -2027,6 +2023,27 @@ ipcMain.handle('open-web-popup', (event, url: string, title?: string) => {
   popup.loadURL(url)
   popup.once('ready-to-show', () => popup.show())
   return true
+})
+
+ipcMain.handle('set-focus-tube-enabled', (event, enabled: boolean) => {
+  const settings = { ...loadAppSettings(), focusTubeEnabled: enabled !== false }
+  saveAppSettings(settings)
+
+  // Start or stop the background polling to match the new state. No user data
+  // is touched either way — the tables stay exactly as they are.
+  if (settings.focusTubeEnabled) {
+    console.log('[FocusTube] enabled — background polling started')
+    startFocusTubePolling()
+  } else {
+    console.log('[FocusTube] disabled — tab hidden, background polling stopped (saved data kept)')
+    stopFocusTubePolling()
+  }
+
+  BrowserWindow.getAllWindows().forEach(window => {
+    window.webContents.send('app-settings-changed', settings)
+  })
+
+  return settings
 })
 
 ipcMain.handle('get-app-settings', () => {
@@ -2421,12 +2438,20 @@ ipcMain.handle('export-user-backup', async () => {
       return { exported: false, canceled: true }
     }
 
+    // Focus Tube is included even while the feature is switched off: turning it
+    // off hides the tab and stops polling, but the user's categories,
+    // subscriptions and watch progress are theirs and must survive a backup.
+    // db.ts cannot import focusTube (focusTube already imports db), so the
+    // snapshot is attached here where both are in scope.
     const backup = {
       app: 'MyCinema',
       format: BACKUP_FORMAT,
       version: BACKUP_VERSION,
       exportedAt: new Date().toISOString(),
-      data: db.getBackupData()
+      data: {
+        ...db.getBackupData(),
+        focusTube: focusTube.getBackupData()
+      }
     }
 
     fs.writeFileSync(result.filePath, JSON.stringify(backup, null, 2), 'utf8')
@@ -2534,6 +2559,18 @@ ipcMain.handle('import-user-backup', async (): Promise<BackupImportSummary | { i
       if (!item || typeof item.tmdb_id !== 'number' || !item.title) continue
       const restoreResult = db.restoreFollowedSeriesRow(item)
       summary.followedSeriesRestored += restoreResult.changes > 0 ? 1 : 0
+    }
+
+    // Focus Tube, when the backup contains it. Restored regardless of whether
+    // the feature is currently switched on, so a restore never quietly drops it.
+    try {
+      const focusTubeData = (backup as any)?.data?.focusTube
+      if (focusTubeData && Array.isArray(focusTubeData.categories)) {
+        focusTube.restoreBackupData(focusTubeData)
+        console.log(`[Backup] Restored Focus Tube: ${focusTubeData.categories.length} categories, ${focusTubeData.channels?.length || 0} channels`)
+      }
+    } catch (err) {
+      console.error('[Backup] Focus Tube restore failed:', err)
     }
 
     // Legacy backups may carry watchlist categories — absorb them into
@@ -7109,8 +7146,17 @@ function broadcastFeedUpdated(payload: { added: number; channelIds: string[] }):
 }
 
 let ftPollInFlight = false
+let ftPollStartTimer: NodeJS.Timeout | null = null
+
+function isFocusTubeEnabled(): boolean {
+  return loadAppSettings().focusTubeEnabled !== false
+}
 
 async function runFocusTubePoll(force: boolean): Promise<{ added: number; channelIds: string[]; failed: string[] }> {
+  // Defence in depth: the tab cannot be opened while the feature is off, but
+  // this also guarantees no network request can escape while it is disabled,
+  // whatever calls it.
+  if (!isFocusTubeEnabled()) return { added: 0, channelIds: [], failed: [] }
   if (ftPollInFlight) return { added: 0, channelIds: [], failed: [] }
   ftPollInFlight = true
   try {
@@ -7119,6 +7165,35 @@ async function runFocusTubePoll(force: boolean): Promise<{ added: number; channe
     return result
   } finally {
     ftPollInFlight = false
+  }
+}
+
+/** Starts the recurring poll plus the delayed first pass. No-op when disabled. */
+function startFocusTubePolling(): void {
+  if (!isFocusTubeEnabled()) return
+  if (focusTubePollTimer) return
+  // Delayed past the app's initial TMDB burst: the feed request that lands
+  // immediately after a burst of other traffic is the one YouTube's edge tends
+  // to reject once, which would leave the stack empty until the next cycle.
+  ftPollStartTimer = setTimeout(() => {
+    ftPollStartTimer = null
+    runFocusTubePoll(false).catch((err) => console.warn('[FocusTube] Startup poll failed:', err))
+  }, 9000)
+  focusTubePollTimer = setInterval(() => {
+    runFocusTubePoll(false).catch((err) => console.warn('[FocusTube] Scheduled poll failed:', err))
+  }, focusTubeFeed.FEED_MIN_POLL_MINUTES * 60_000)
+  focusTubePollTimer.unref?.()
+}
+
+/** Stops all Focus Tube background work. Touches no user data. */
+function stopFocusTubePolling(): void {
+  if (ftPollStartTimer) {
+    clearTimeout(ftPollStartTimer)
+    ftPollStartTimer = null
+  }
+  if (focusTubePollTimer) {
+    clearInterval(focusTubePollTimer)
+    focusTubePollTimer = null
   }
 }
 

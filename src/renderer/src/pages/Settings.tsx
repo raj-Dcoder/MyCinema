@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react'
-import { FolderOpen, Trash2, Plus, HardDrive, AlertTriangle, Check, X as CloseIcon, Maximize2, Download, Upload, Image as ImageIcon, Subtitles, Wifi, Bell } from 'lucide-react'
+import { FolderOpen, Trash2, Plus, HardDrive, AlertTriangle, Check, X as CloseIcon, Maximize2, Download, Upload, Image as ImageIcon, Subtitles, Wifi, Bell, Compass } from 'lucide-react'
 import ProfilePictureModal from '../components/ProfilePictureModal'
 import { SUBTITLE_STYLE_KEY, SUBTITLE_FONT_SIZE_KEY, SUBTITLE_POSITION_KEY, type SubtitleStyle } from '../components/player/SubtitleOverlay'
 import { ONLINE_PROGRESS_STORAGE_KEY, setOnlineProgressEnabledLocal, NOTIFY_NEW_EPISODES_KEY, setNewEpisodeNotifyLocal } from '../utils/streamResume'
@@ -27,6 +27,9 @@ const Settings: React.FC = () => {
       return true
     }
   })
+  // Focus Tube. Defaults to on; the main process owns the persisted value in
+  // app-settings.json and mirrors it here so the toggle can never disagree.
+  const [focusTubeEnabled, setFocusTubeEnabled] = useState(true)
   const [backupBusy, setBackupBusy] = useState(false)
   const [backupMessage, setBackupMessage] = useState<string | null>(null)
   const [subtitleStyle, setSubtitleStyle] = useState<SubtitleStyle>(() => {
@@ -83,6 +86,9 @@ const Settings: React.FC = () => {
         setNotifyNewEpisodes(settings.notifyNewEpisodes)
         setNewEpisodeNotifyLocal(settings.notifyNewEpisodes)
       }
+      if (typeof settings.focusTubeEnabled === 'boolean') {
+        setFocusTubeEnabled(settings.focusTubeEnabled)
+      }
     }).catch(() => {})
   }, [])
 
@@ -126,6 +132,19 @@ const Settings: React.FC = () => {
       console.error('Failed to update online resume setting:', err)
       setRememberOnlineProgress(!enabled)
       setOnlineProgressEnabledLocal(!enabled)
+    }
+  }
+
+  const handleFocusTubeChange = async (enabled: boolean) => {
+    setFocusTubeEnabled(enabled)
+    try {
+      const setter = (window as any)?.api?.setFocusTubeEnabled
+      if (typeof setter !== 'function') return // stale preload: keep local-only value
+      const settings = await setter.call((window as any).api, enabled)
+      setFocusTubeEnabled(settings.focusTubeEnabled)
+    } catch (err) {
+      console.error('Failed to update Focus Tube setting:', err)
+      setFocusTubeEnabled(!enabled)
     }
   }
 
@@ -354,6 +373,43 @@ const Settings: React.FC = () => {
               <span
                 className={`absolute top-1 h-4 w-4 rounded-full bg-white shadow-lg transition-all ${
                   notifyNewEpisodes ? 'left-6' : 'left-1'
+                }`}
+              />
+            </button>
+          </div>
+        </section>
+
+        <section>
+          <h3 className={sectionTitleClass}>Features</h3>
+          <div className={`${panelClass} flex items-center justify-between gap-6 p-6`}>
+            <div className="flex items-center gap-4 min-w-0">
+              <div className={iconBoxClass}>
+                <Compass size={17} />
+              </div>
+              <div className="min-w-0">
+                <h4 className="text-xs font-black text-white uppercase tracking-tight">Focus Tube</h4>
+                <p className="mt-0.5 text-[11px] font-medium leading-4 text-white/35">
+                  A YouTube tab driven by your own channels and categories instead of an algorithm. Turn it off to hide
+                  the tab and stop all background refreshing. Nothing is deleted — your categories, channels and watch
+                  progress are still here when you switch it back on.
+                </p>
+              </div>
+            </div>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={focusTubeEnabled}
+              aria-label="Enable Focus Tube"
+              onClick={() => handleFocusTubeChange(!focusTubeEnabled)}
+              className={`relative h-6 w-11 flex-shrink-0 rounded-full border transition-all ${
+                focusTubeEnabled
+                  ? 'border-red-500/50 bg-red-600 shadow-lg shadow-red-950/30'
+                  : 'border-white/10 bg-white/5'
+              }`}
+            >
+              <span
+                className={`absolute top-1 h-4 w-4 rounded-full bg-white shadow-lg transition-all ${
+                  focusTubeEnabled ? 'left-6' : 'left-1'
                 }`}
               />
             </button>

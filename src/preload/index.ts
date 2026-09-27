@@ -180,6 +180,7 @@ const api = {
   getStreamContinueWatching: () => ipcRenderer.invoke('get-stream-continue-watching'),
   getStreamHistory: (limit?: number) => ipcRenderer.invoke('get-stream-history', limit ?? 100),
   setNotifyNewEpisodes: (enabled: boolean) => ipcRenderer.invoke('set-notify-new-episodes', enabled),
+  setFocusTubeEnabled: (enabled: boolean) => ipcRenderer.invoke('set-focus-tube-enabled', enabled),
   followSeries: (input: { tmdb_id: number; title?: string; poster_path?: string | null; backdrop_path?: string | null; overview?: string | null; season?: number | null; episode?: number | null }) =>
     ipcRenderer.invoke('follow-series', input),
   unfollowSeries: (tmdbId: number) => ipcRenderer.invoke('unfollow-series', tmdbId),

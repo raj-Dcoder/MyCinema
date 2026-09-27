@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useLayoutEffect, useRef } from 'react'
-import { Home as HomeIcon, Film, Tv, Settings as SettingsIcon, Video as VideoIcon, Download as DownloadIcon, Menu, Bookmark, Clock, Heart, Settings, RefreshCw, Maximize2, Minimize2, Loader2, PauseCircle, AlertCircle, X, Minus, ArrowUpRight, Image as ImageIcon, ChevronLeft, ChevronRight, Layers } from 'lucide-react'
+import { Home as HomeIcon, Film, Tv, Settings as SettingsIcon, Video as VideoIcon, Download as DownloadIcon, Menu, Bookmark, Clock, Heart, Settings, RefreshCw, Maximize2, Minimize2, Loader2, PauseCircle, AlertCircle, X, Minus, ArrowUpRight, Image as ImageIcon, ChevronLeft, ChevronRight, Layers, Compass } from 'lucide-react'
 import { Video } from './types'
 import Home from './pages/Home'
 import Videos from './pages/Videos'
@@ -15,12 +15,13 @@ import DetailScreen from './components/DetailScreen'
 import WhatsNewOnboarding, { LATEST_RELEASE } from './components/WhatsNewOnboarding'
 import { WindowControlsGuide } from './components/FeatureGuides'
 import Download from './pages/Download'
+import FocusTube from './pages/FocusTube'
 import appLogo from './assets/mycinema-logo.png'
 
 const getWhatsNewStorageKey = (version: string) => `mycinema_whats_new_seen_${version}`
 const SIDEBAR_EXPANDED_STORAGE_KEY = 'mycinema_sidebar_expanded'
 const DOUBLE_TAP_WINDOW_MS = 300
-type AppTab = 'home' | 'videos' | 'movies' | 'series' | 'collections' | 'download' | 'settings' | 'watchlist' | 'history' | 'favorites'
+type AppTab = 'home' | 'videos' | 'movies' | 'series' | 'collections' | 'download' | 'settings' | 'watchlist' | 'history' | 'favorites' | 'focustube'
 
 type ActiveDownload = {
   id: string
@@ -331,6 +332,7 @@ const App: React.FC = () => {
 
   const navItems = [
     { id: 'home' as const,     label: 'Home',         icon: <HomeIcon size={20} /> },
+    { id: 'focustube' as const, label: 'Focus Tube',  icon: <Compass size={20} /> },
     { id: 'movies' as const,   label: 'Movies',       icon: <Film size={20} /> },
     { id: 'series' as const,   label: 'Web Series',   icon: <Tv size={20} /> },
     { id: 'videos' as const,   label: 'Videos',       icon: <VideoIcon size={20} /> },
@@ -801,6 +803,7 @@ const App: React.FC = () => {
           <div ref={activePageScrollRef} className="absolute inset-0 overflow-y-auto scrollbar-hide">
             <div className="px-8 pt-6 pb-14 max-w-[1600px] mx-auto">
               {activeTab === 'videos'  && <Videos onPlay={handlePlayVideo} />}
+              {activeTab === 'focustube' && <FocusTube />}
               {activeTab === 'movies'  && <Movies onPlay={handlePlayVideo} onShowDetail={setSelectedVideo} />}
               {activeTab === 'series'  && <Series onPlay={handlePlayVideo} onShowDetail={setSelectedVideo} />}
               {activeTab === 'collections' && <Collections onPlay={handlePlayVideo} onShowDetail={setSelectedVideo} focusCollectionId={sharedCollectionFocus?.id ?? null} focusNonce={sharedCollectionFocus?.nonce ?? 0} />}

@@ -58,3 +58,55 @@ export interface TmdbReleaseInfo {
   providers: TmdbProvider[]
   type: 'theatrical' | 'digital' | 'tv' | null
 }
+
+// ─── Focus Tube ───────────────────────────────────────────────────────────────
+
+export interface FtCategory {
+  id: number
+  name: string
+  color: string
+  position: number
+  channelCount?: number
+  unseenCount?: number
+}
+
+export interface FtChannel {
+  channelId: string
+  title: string
+  handle: string | null
+  avatarUrl: string | null
+  url: string
+  hideShorts: boolean
+  position: number
+  lastFetched: string | null
+  lastError: string | null
+  categoryIds: number[]
+}
+
+export interface FtVideo {
+  videoId: string
+  channelId: string
+  channelTitle: string
+  title: string
+  publishedAt: string
+  duration: number | null
+  isLive: boolean
+  isShort: boolean
+  views: number | null
+  description: string | null
+  embeddable: boolean
+  firstSeenAt: string
+  seen: boolean
+  seenAt: string | null
+  saved: boolean
+  position: number
+}
+
+export interface FtFeedOptions {
+  categoryId: number | null
+  includeSeen?: boolean
+  includeSavedOnly?: boolean
+  hideShorts?: boolean
+  limit?: number
+  search?: string | null
+}

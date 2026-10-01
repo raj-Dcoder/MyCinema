@@ -102,22 +102,34 @@ export function watchUrl(videoId: string): string {
  * Without the param, YouTube falls back to the message event's own origin and
  * the full bridge works: commands, playerState, currentTime, duration.
  *
- * `controls=0` hides YouTube's chrome because MyCinema renders its own control
- * bar (FocusTubeControls) over the video. Click-to-toggle and the player's own
- * keyboard shortcuts keep working as a fallback if the bridge ever breaks.
+ * `controls=0` hides YouTube's chrome because MyCinema renders its own top
+ * bar + bottom control bar as overlays over the video. Click-to-toggle and
+ * the player's own keyboard shortcuts keep working as a fallback if the
+ * bridge ever breaks.
  */
 export const FOCUS_TUBE_EMBED_ORIGIN = 'https://mycinema.app'
 
 /**
- * The embed is rendered with YouTube's own control bar (controls=1).
+ * The embed is rendered CHROMELESS (controls=0) so MyCinema draws the only UI.
  *
- * That is deliberate. A chromeless embed (`controls=0`) was tried so MyCinema
- * could draw its own bar, but YouTube still surfaces its own controls on hover
- * regardless — verified by reading the live iframe src and observing the
- * rendered bar — which left two competing control bars. YouTube's bar is also
- * strictly better than anything worth reimplementing: quality selection,
- * playback speed, Picture-in-Picture, captions, chapters, playback stats, and
- * keyboard shortcuts, all maintained upstream.
+ * Why: with controls=1 YouTube draws its own seekbar, title, buttons and logo
+ * on top of the video, and any custom top/bottom bar overlaps it — double
+ * seekbars, double titles, cluttered icons. Chromeless removes all of that:
+ * a single MyCinema top bar + bottom bar, and nothing else.
+ *
+ * What YouTube keeps even chromeless (cannot be disabled by any param):
+ * creator-baked endscreens and the end-of-video suggestion grid. The player
+ * masks the last seconds with its own fade and auto-closes on ENDED.
+ *
+ * Quality is ALWAYS YouTube Auto — and that is not our choice. Verified live
+ * (Oct-2026 probe against the real embed): setPlaybackQuality is a documented
+ * no-op, setPlaybackQualityRange is now ignored too, loadVideoById's
+ * suggestedQuality is ignored, and even the `vq` URL param is ignored. The
+ * player picks by viewport size + bandwidth and answers getPlaybackQuality
+ * truthfully, so we show the live rendition as a readout but offer no manual
+ * selector (a menu that can't act would be a lie). Speed, captions and
+ * fullscreen are driven by us through the IFrame API (setPlaybackRate,
+ * loadModule/unloadModule captions).
  *
  * `cc_load_policy=0` means "do not force captions", which is NOT the same as
  * off. FocusTubePlayer additionally unloads the captions module on ready so
@@ -136,7 +148,7 @@ export function embedUrl(videoId: string, startSeconds = 0): string {
     modestbranding: '1',
     playsinline: '1',
     fs: '1',
-    controls: '1',
+    controls: '0',
     enablejsapi: '1',
     // No annotation overlays; they fight with our own overlays.
     iv_load_policy: '3',

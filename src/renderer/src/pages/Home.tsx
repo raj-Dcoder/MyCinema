@@ -1214,7 +1214,7 @@ const Home: React.FC<HomeProps> = ({ onPlay, onShowDetail, onNavigate, refreshKe
   const fallbackHeroItems = [...recentMovies, ...recentSeries].slice(0, TRENDING_RAIL_LIMIT)
   const heroItems = hasContinueWatching ? continueWatching : fallbackHeroItems
   const showHero = heroItems.length > 0
-  const heroTitle = hasContinueWatching ? 'Continue Watching' : 'Recently Added'
+  const heroTitle = hasContinueWatching ? 'Continue Watching' : 'Your Library'
 
   return (
     <div onClickCapture={handleHomeClickCapture}>
@@ -1392,11 +1392,11 @@ const Home: React.FC<HomeProps> = ({ onPlay, onShowDetail, onNavigate, refreshKe
         </section>
       )}
 
-      {/* 2. Recently Added Movies */}
+      {/* 2. Library Movies */}
       <section className="mx-auto mt-7 max-w-[1600px] px-8">
         <SectionHeader
           eyebrow=""
-          title="Recently Added Movies"
+          title="Your Library Movies"
           icon={<Film size={18} />}
           tone="emerald"
           action={(
@@ -1427,11 +1427,11 @@ const Home: React.FC<HomeProps> = ({ onPlay, onShowDetail, onNavigate, refreshKe
         )}
       </section>
 
-      {/* 3. Recently Added Series */}
+      {/* 3. Library Series */}
       <section className="mx-auto mt-7 max-w-[1600px] px-8">
         <SectionHeader
           eyebrow=""
-          title="Recently Added Series"
+          title="Your Library Series"
           icon={<Tv size={18} />}
           tone="cyan"
           action={(

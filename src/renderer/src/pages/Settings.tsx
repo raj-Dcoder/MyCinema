@@ -381,13 +381,20 @@ const Settings: React.FC = () => {
 
         <section>
           <h3 className={sectionTitleClass}>Features</h3>
-          <div className={`${panelClass} flex items-center justify-between gap-6 p-6`}>
+          <div data-tour="settings-focustube" className={`${panelClass} flex items-center justify-between gap-6 p-6`}>
             <div className="flex items-center gap-4 min-w-0">
               <div className={iconBoxClass}>
                 <Compass size={17} />
               </div>
               <div className="min-w-0">
-                <h4 className="text-xs font-black text-white uppercase tracking-tight">Focus Tube</h4>
+                <h4 className="text-xs font-black text-white uppercase tracking-tight flex items-center gap-2">Focus Tube
+                  <span
+                    title="Focus Tube is in beta — some things may still change"
+                    className="inline-flex items-center rounded border border-amber-300/20 bg-amber-400/10 px-1 py-[1px] text-[8px] font-bold uppercase leading-none tracking-[0.08em] text-amber-200/90"
+                  >
+                    Beta
+                  </span>
+                </h4>
                 <p className="mt-0.5 text-[11px] font-medium leading-4 text-white/35">
                   A YouTube tab driven by your own channels and categories instead of an algorithm. Turn it off to hide
                   the tab and stop all background refreshing. Nothing is deleted — your categories, channels and watch

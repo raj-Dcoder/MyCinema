@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useLayoutEffect, useRef } from 'react'
+import React, { useState, useEffect, useLayoutEffect, useRef, useCallback } from 'react'
 import { Home as HomeIcon, Film, Tv, Settings as SettingsIcon, Video as VideoIcon, Download as DownloadIcon, Menu, Bookmark, Clock, Heart, Settings, RefreshCw, Maximize2, Minimize2, Loader2, PauseCircle, AlertCircle, X, Minus, ArrowUpRight, Image as ImageIcon, ChevronLeft, ChevronRight, Layers, Compass } from 'lucide-react'
 import { Video } from './types'
 import Home from './pages/Home'
@@ -13,6 +13,7 @@ import SettingsPage from './pages/Settings'
 import VideoPlayer from './components/VideoPlayer'
 import DetailScreen from './components/DetailScreen'
 import WhatsNewOnboarding, { LATEST_RELEASE } from './components/WhatsNewOnboarding'
+import ProductTour, { TOURS, isTourSeen, markTourSeen } from './components/ProductTour'
 import { WindowControlsGuide } from './components/FeatureGuides'
 import Download from './pages/Download'
 import FocusTube from './pages/FocusTube'
@@ -66,6 +67,9 @@ const App: React.FC = () => {
   const [showWhatsNew, setShowWhatsNew] = useState(() => {
     return localStorage.getItem(getWhatsNewStorageKey(LATEST_RELEASE.version)) !== 'true'
   })
+  // Spotlight product tour. Starts chained after What's New closes (when the
+  // release defines LATEST_RELEASE.tourId), or via ?tour=<id> preview.
+  const [activeTourId, setActiveTourId] = useState<string | null>(null)
 
   const [playingVideo, setPlayingVideo] = useState<Video | null>(null)
   const [selectedVideo, setSelectedVideo] = useState<Video | null>(null)
@@ -161,6 +165,43 @@ const App: React.FC = () => {
       setActiveTab('home')
     }
   }, [focusTubeEnabled, activeTab])
+
+  const startTourIfPending = useCallback((tourId?: string | null) => {
+    if (!tourId || !TOURS[tourId] || isTourSeen(tourId)) return
+    setActiveTourId(tourId)
+  }, [])
+
+  const closeWhatsNew = useCallback(
+    (startTour: boolean) => {
+      localStorage.setItem(getWhatsNewStorageKey(LATEST_RELEASE.version), 'true')
+      setShowWhatsNew(false)
+      if (startTour) {
+        // Breather: let the dialog fade and the home screen settle before
+        // the dim + spotlight drops in, so it never feels like an ambush.
+        window.setTimeout(() => {
+          startTourIfPending(LATEST_RELEASE.tourId)
+        }, 900)
+      }
+    },
+    [startTourIfPending],
+  )
+
+  // Preview a tour without touching release state: open the app with
+  // ?tour=<id> (e.g. ?tour=focus-tube), or run this in the console:
+  //   localStorage.setItem('mycinema_preview_tour', 'focus-tube'); location.reload()
+  // Clear it with: localStorage.removeItem('mycinema_preview_tour')
+  useEffect(() => {
+    try {
+      const previewId =
+        new URLSearchParams(window.location.search).get('tour') ||
+        localStorage.getItem('mycinema_preview_tour')
+      if (previewId && TOURS[previewId]) {
+        setActiveTourId(previewId)
+      }
+    } catch {
+      /* ignore */
+    }
+  }, [])
 
   useEffect(() => {
     const syncStreamingMirrors = (settings: { rememberOnlineProgress?: boolean; notifyNewEpisodes?: boolean }) => {
@@ -324,7 +365,8 @@ const App: React.FC = () => {
             title: filePath.split(/[\\/]/).pop() || 'Unknown Video',
             file_path: filePath,
             type: 'video',
-            duration: 0
+            duration: 0,
+            isExternal: true
           }
           setPlayingVideo(fakeVideo)
         }
@@ -348,7 +390,7 @@ const App: React.FC = () => {
     { id: 'home' as const,     label: 'Home',         icon: <HomeIcon size={20} /> },
     // Hidden entirely while the feature is off in Settings.
     ...(focusTubeEnabled
-      ? [{ id: 'focustube' as const, label: 'Focus Tube', icon: <Compass size={20} /> }]
+      ? [{ id: 'focustube' as const, label: 'Focus Tube', icon: <Compass size={20} />, badge: 'Beta' }]
       : []),
     { id: 'movies' as const,   label: 'Movies',       icon: <Film size={20} /> },
     { id: 'series' as const,   label: 'Web Series',   icon: <Tv size={20} /> },
@@ -606,16 +648,33 @@ const App: React.FC = () => {
             {navItems.map(item => (
               <button
                 key={item.id}
+                data-tour={item.id === 'focustube' ? 'sidebar-focustube' : undefined}
                 onClick={() => navigateToTab(item.id)}
                 className={`relative w-full flex items-center h-12 rounded-xl transition-colors duration-200 group ${
                   activeTab === item.id ? 'bg-primary/10 text-primary' : 'text-white/40 hover:bg-white/5 hover:text-white'
                 }`}
               >
-                <div className="w-12 h-full flex items-center justify-center flex-shrink-0 text-current">
-                  {item.icon}
+                <div className="w-12 h-full flex flex-col items-center justify-center flex-shrink-0 text-current relative">
+                  <span className="flex items-center justify-center leading-none">{item.icon}</span>
+                  {'badge' in item && (item as { badge?: string }).badge && !isSidebarExpanded && (
+                    <span
+                      title={`${item.label} is in beta`}
+                      className="mt-[3px] inline-flex items-center justify-center rounded border border-amber-300/25 bg-amber-400/15 px-[3px] py-px text-[6px] font-bold uppercase leading-none tracking-[0.08em] text-amber-200/90"
+                    >
+                      {(item as { badge?: string }).badge}
+                    </span>
+                  )}
                 </div>
-                <div className={`absolute left-12 whitespace-nowrap text-sm font-bold transition-all duration-300 ${isSidebarExpanded ? 'opacity-100 translate-x-0' : 'opacity-0 -translate-x-2 pointer-events-none'}`}>
+                <div className={`absolute left-12 whitespace-nowrap text-sm font-bold transition-all duration-300 flex items-center ${isSidebarExpanded ? 'opacity-100 translate-x-0' : 'opacity-0 -translate-x-2 pointer-events-none'}`}>
                   {item.label}
+                  {'badge' in item && (item as { badge?: string }).badge && (
+                    <span
+                      title={`${item.label} is in beta — some things may still change`}
+                      className="ml-1.5 inline-flex items-center rounded border border-amber-300/20 bg-amber-400/10 px-1 py-[1px] text-[8px] font-bold uppercase leading-none tracking-[0.08em] text-amber-200/90"
+                    >
+                      {(item as { badge?: string }).badge}
+                    </span>
+                  )}
                 </div>
               </button>
             ))}
@@ -962,9 +1021,19 @@ const App: React.FC = () => {
 
       {showWhatsNew && (
         <WhatsNewOnboarding
-          onClose={() => {
-            localStorage.setItem(getWhatsNewStorageKey(LATEST_RELEASE.version), 'true')
-            setShowWhatsNew(false)
+          onClose={() => closeWhatsNew(false)}
+          onSkipSession={() => setShowWhatsNew(false)}
+          onStartTour={() => closeWhatsNew(true)}
+        />
+      )}
+
+      {activeTourId && TOURS[activeTourId] && (
+        <ProductTour
+          tour={TOURS[activeTourId]}
+          onNavigate={(tab) => navigateToTab(tab as AppTab)}
+          onDone={() => {
+            markTourSeen(activeTourId)
+            setActiveTourId(null)
           }}
         />
       )}

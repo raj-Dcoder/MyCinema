@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Check, CheckCheck, Compass, Eye, EyeOff, Layers, Plus, Radio, Search, SlidersHorizontal, Sparkles, X } from 'lucide-react'
+import { Check, CheckCheck, Compass, Eye, EyeOff, GripVertical, Layers, Plus, Radio, Search, SlidersHorizontal, Sparkles, Users, X } from 'lucide-react'
 import type { FtCategory, FtVideo } from '../types'
 import FocusTubeCard from '../components/focus/FocusTubeCard'
 import FocusTubePlayer from '../components/focus/FocusTubePlayer'
@@ -18,6 +18,7 @@ const CATEGORY_DOT: Record<string, string> = {
 }
 
 const HIDE_SHORTS_KEY = 'mycinema_ft_hide_shorts'
+const AUTOPLAY_NEXT_KEY = 'mycinema_ft_autoplay_next'
 
 const FocusTube: React.FC = () => {
   const [categories, setCategories] = useState<FtCategory[]>([])
@@ -36,6 +37,16 @@ const FocusTube: React.FC = () => {
   })
   const [includeSeen, setIncludeSeen] = useState(false)
   const [search, setSearch] = useState('')
+  // Player-only autoplay: when ON, finishing a video auto-plays the next
+  // unseen video in the current stack instead of closing. Toggled only from
+  // inside FocusTubePlayer; persisted here so the queue can advance.
+  const [autoplayNext, setAutoplayNext] = useState(() => {
+    try {
+      return localStorage.getItem(AUTOPLAY_NEXT_KEY) === '1'
+    } catch {
+      return false
+    }
+  })
 
   const [newCategoryName, setNewCategoryName] = useState<string | null>(null)
   // Which pill is awaiting delete confirmation (first click arms, second confirms).
@@ -44,14 +55,221 @@ const FocusTube: React.FC = () => {
   const [editingId, setEditingId] = useState<number | null>(null)
   const [editName, setEditName] = useState('')
   const [managing, setManaging] = useState(false)
+  const [totalChannels, setTotalChannels] = useState(0)
   const [playing, setPlaying] = useState<{ video: FtVideo; startSeconds: number } | null>(null)
+
+  // ── Press-and-hold drag-to-reorder for category pills ───────────────────
+  // Touch: hold ~450ms (scroll still works until then), then drag left/right.
+  // Mouse: drag starts after a small move. Mirrors the Collections pattern.
+  const pillRefs = useRef(new Map<number, HTMLDivElement>())
+  const [dragId, setDragId] = useState<number | null>(null)
+  const ghostRef = useRef<HTMLDivElement | null>(null)
+  const latestPoint = useRef<{ x: number; y: number } | null>(null)
+  const rafRef = useRef<number | null>(null)
+  const rectCache = useRef(new Map<number, { cx: number; cy: number; w: number; h: number }>())
+  const rectsDirty = useRef(true)
+  const pressRef = useRef<{ id: number; x: number; y: number; pointerId: number; element: HTMLDivElement } | null>(null)
+  const pressTimer = useRef<number | null>(null)
+  const dragIdRef = useRef<number | null>(null)
+  const categoriesRef = useRef<FtCategory[]>(categories)
+  categoriesRef.current = categories
+  const orderChangedRef = useRef(false)
+  const suppressClick = useRef(false)
+
+  const clearPillPressTimer = () => {
+    if (pressTimer.current) {
+      window.clearTimeout(pressTimer.current)
+      pressTimer.current = null
+    }
+  }
+
+  const cancelPillReorderRaf = () => {
+    if (rafRef.current != null) {
+      window.cancelAnimationFrame(rafRef.current)
+      rafRef.current = null
+    }
+  }
+
+  const positionPillGhost = (x: number, y: number) => {
+    const ghost = ghostRef.current
+    if (ghost) {
+      ghost.style.transform = `translate(${x - 60}px, ${y - 20}px) rotate(2deg) scale(1.05)`
+    }
+  }
+
+  const refreshPillRectCache = () => {
+    rectCache.current.clear()
+    pillRefs.current.forEach((el, id) => {
+      const rect = el.getBoundingClientRect()
+      rectCache.current.set(id, {
+        cx: rect.left + rect.width / 2,
+        cy: rect.top + rect.height / 2,
+        w: rect.width,
+        h: rect.height,
+      })
+    })
+  }
+
+  const activatePillDrag = (pointerId: number) => {
+    const press = pressRef.current
+    if (!press || dragIdRef.current != null) return
+    dragIdRef.current = press.id
+    orderChangedRef.current = false
+    try {
+      press.element.setPointerCapture(pointerId)
+    } catch { /* noop */ }
+    try {
+      ;(navigator as any).vibrate?.(25)
+    } catch { /* noop */ }
+    rectsDirty.current = true
+    latestPoint.current = { x: press.x, y: press.y }
+    setDragId(press.id)
+  }
+
+  const computePillInsertionIndex = (x: number, y: number, excludeId: number): number => {
+    const order = categoriesRef.current.map((c) => c.id).filter((id) => id !== excludeId)
+    let index = 0
+    for (const id of order) {
+      const cached = rectCache.current.get(id)
+      if (!cached) {
+        index += 1
+        continue
+      }
+      const sameRow = Math.abs(y - cached.cy) <= cached.h / 2
+      if (y > cached.cy + cached.h * 0.2 || (sameRow && x > cached.cx)) {
+        index += 1
+      } else {
+        break
+      }
+    }
+    return Math.max(0, Math.min(order.length, index))
+  }
+
+  const runPillReorderPass = () => {
+    rafRef.current = null
+    const pt = latestPoint.current
+    const draggedId = dragIdRef.current
+    if (!pt || draggedId == null) return
+    if (rectsDirty.current) {
+      refreshPillRectCache()
+      rectsDirty.current = false
+    }
+    const others = categoriesRef.current.map((c) => c.id).filter((id) => id !== draggedId)
+    const index = computePillInsertionIndex(pt.x, pt.y, draggedId)
+    const next = [...others.slice(0, index), draggedId, ...others.slice(index)]
+    const prev = categoriesRef.current.map((c) => c.id)
+    if (next.some((id, i) => id !== prev[i])) {
+      orderChangedRef.current = true
+      const byId = new Map(categoriesRef.current.map((c) => [c.id, c]))
+      setCategories(next.map((id) => byId.get(id)!).filter(Boolean))
+      rectsDirty.current = true
+    }
+  }
+
+  const schedulePillReorderPass = () => {
+    if (rafRef.current != null) return
+    rafRef.current = window.requestAnimationFrame(runPillReorderPass)
+  }
+
+  const onPillPointerDown = (e: React.PointerEvent<HTMLDivElement>, id: number) => {
+    if (!e.isPrimary) return
+    if (e.pointerType === 'mouse' && e.button !== 0) return
+    pressRef.current = { id, x: e.clientX, y: e.clientY, pointerId: e.pointerId, element: e.currentTarget }
+    if (e.pointerType !== 'mouse') {
+      clearPillPressTimer()
+      pressTimer.current = window.setTimeout(() => activatePillDrag(e.pointerId), 450)
+    }
+  }
+
+  const onPillPointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    const press = pressRef.current
+    if (!press || e.pointerId !== press.pointerId) return
+    const dx = e.clientX - press.x
+    const dy = e.clientY - press.y
+    const dist = Math.hypot(dx, dy)
+
+    if (dragIdRef.current == null) {
+      if (e.pointerType === 'mouse') {
+        if (dist < 8) return
+        activatePillDrag(e.pointerId)
+      } else {
+        // Touch moving before hold completes = scrolling, abort the pickup.
+        if (dist > 12) {
+          clearPillPressTimer()
+          pressRef.current = null
+        }
+        return
+      }
+    }
+
+    if (dragIdRef.current == null) return
+    if (dist > 10) suppressClick.current = true
+    latestPoint.current = { x: e.clientX, y: e.clientY }
+    positionPillGhost(e.clientX, e.clientY)
+    schedulePillReorderPass()
+  }
+
+  const endPillDrag = (persist: boolean) => {
+    clearPillPressTimer()
+    cancelPillReorderRaf()
+    const wasDragging = dragIdRef.current != null
+    pressRef.current = null
+    dragIdRef.current = null
+    latestPoint.current = null
+    setDragId(null)
+    if (wasDragging && persist && orderChangedRef.current) {
+      const ids = categoriesRef.current.map((c) => c.id)
+      window.api.ftReorderCategories(ids).catch((err) => {
+        console.error('[FocusTube] Reorder failed:', err)
+        void loadCategories()
+      })
+    }
+    orderChangedRef.current = false
+    window.setTimeout(() => {
+      suppressClick.current = false
+    }, 0)
+  }
+
+  useEffect(() => {
+    if (dragId == null) return
+    const finish = () => endPillDrag(true)
+    const markRectsDirty = () => {
+      rectsDirty.current = true
+    }
+    window.addEventListener('pointerup', finish)
+    window.addEventListener('pointercancel', finish)
+    window.addEventListener('scroll', markRectsDirty, true)
+    return () => {
+      window.removeEventListener('pointerup', finish)
+      window.removeEventListener('pointercancel', finish)
+      window.removeEventListener('scroll', markRectsDirty, true)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dragId])
+
+  useEffect(() => {
+    if (dragId == null) return
+    const press = pressRef.current
+    if (press) positionPillGhost(press.x, press.y)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dragId])
 
   // Progress is read on play rather than fetched for the whole feed.
   const progressCacheRef = useRef(new Map<string, number>())
+  // Mirror of the current stack for queue lookups that must not go stale
+  // inside async advance handlers.
+  const videosRef = useRef<FtVideo[]>([])
+  useEffect(() => { videosRef.current = videos }, [videos])
 
   const loadCategories = useCallback(async () => {
     const list = (await window.api.ftListCategories()) || []
     setCategories(list)
+    try {
+      const allChannels = await window.api.ftListChannels(null)
+      setTotalChannels((allChannels || []).length)
+    } catch {
+      // Total is a nicety for badges; per-category counts already came with list.
+    }
     return list
   }, [])
 
@@ -147,6 +365,42 @@ const FocusTube: React.FC = () => {
   // Split out so a live stream is never buried in the middle of the stack.
   const liveVideos = useMemo(() => videos.filter((video) => video.isLive), [videos])
   const restVideos = useMemo(() => videos.filter((video) => !video.isLive), [videos])
+  // Playback queue = display order (live first, then newest-first rest).
+  const playQueue = useMemo(() => [...liveVideos, ...restVideos], [liveVideos, restVideos])
+
+  const toggleAutoplayNext = useCallback(() => {
+    setAutoplayNext((was) => {
+      const next = !was
+      try {
+        localStorage.setItem(AUTOPLAY_NEXT_KEY, next ? '1' : '0')
+      } catch {
+        // Persistence is a nicety; the toggle itself must never fail.
+      }
+      return next
+    })
+  }, [])
+
+  const getNextInQueue = useCallback((currentVideoId: string): FtVideo | null => {
+    const queue = videosRef.current.length
+      ? [...videosRef.current.filter((v) => v.isLive), ...videosRef.current.filter((v) => !v.isLive)]
+      : playQueue
+    const index = queue.findIndex((video) => video.videoId === currentVideoId)
+    if (index === -1) return queue[0] ?? null
+    return queue[index + 1] ?? null
+  }, [playQueue])
+
+  const resolveStartSeconds = useCallback(async (video: FtVideo): Promise<number> => {
+    const cached = progressCacheRef.current.get(video.videoId)
+    if (cached !== undefined) return cached
+    try {
+      const progress = await window.api.ftGetProgress(video.videoId)
+      const startSeconds = Number(progress?.position || 0)
+      progressCacheRef.current.set(video.videoId, startSeconds)
+      return startSeconds
+    } catch {
+      return 0
+    }
+  }, [])
 
   const handleCreateCategory = useCallback(async () => {
     const name = (newCategoryName || '').trim()
@@ -200,6 +454,46 @@ const FocusTube: React.FC = () => {
     await loadFeed(activeCategoryId)
   }, [activeCategoryId, loadCategories, loadFeed])
 
+  // Autoplay path: the finished video counts as watched, then playback
+  // continues with the next unseen video in the same stack. The switch
+  // happens first (snappy), the seen-mark + feed refresh follow in the
+  // background so the finished card disappears underneath.
+  const handleAutoAdvance = useCallback(async (finishedVideoId: string) => {
+    const next = getNextInQueue(finishedVideoId)
+    if (!next) {
+      await handleMarkSeen(finishedVideoId)
+      setPlaying(null)
+      return
+    }
+    const startSeconds = await resolveStartSeconds(next)
+    setPlaying({ video: next, startSeconds })
+    progressCacheRef.current.delete(finishedVideoId)
+    try {
+      await window.api.ftSetVideoSeen(finishedVideoId, true)
+      await loadCategories()
+      await loadFeed(activeCategoryId)
+    } catch (err) {
+      console.error('[FocusTube] Auto-advance refresh failed:', err)
+    }
+  }, [activeCategoryId, getNextInQueue, handleMarkSeen, loadCategories, loadFeed, resolveStartSeconds])
+
+  // Manual "Next" path: skip without marking the current video seen.
+  // The player saves the current position before calling this.
+  const handleManualNext = useCallback(async (currentVideoId: string) => {
+    const next = getNextInQueue(currentVideoId)
+    if (!next) return
+    const startSeconds = await resolveStartSeconds(next)
+    setPlaying({ video: next, startSeconds })
+  }, [getNextInQueue, resolveStartSeconds])
+
+  const nextUpVideo = useMemo(
+    () => (playing ? getNextInQueue(playing.video.videoId) : null),
+    // getNextInQueue already reads the live ref; depend on queue + playing
+    // so the label refreshes when the feed reloads underneath.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [playing, playQueue],
+  )
+
   const handleSaveProgress = useCallback((videoId: string, position: number) => {
     progressCacheRef.current.set(videoId, position)
     void window.api.ftUpdateProgress(videoId, position)
@@ -237,7 +531,14 @@ const FocusTube: React.FC = () => {
             <Compass size={32} />
           </div>
           <div>
-            <h2 className="text-4xl font-black text-white tracking-tighter uppercase italic">Focus Tube</h2>
+            <h2 className="text-4xl font-black text-white tracking-tighter uppercase italic flex items-center gap-3">Focus Tube
+              <span
+                title="Focus Tube is in beta — some things may still change"
+                className="not-italic inline-flex items-center rounded border border-amber-300/20 bg-amber-400/10 px-1.5 py-[3px] text-[9px] font-bold uppercase leading-none tracking-[0.1em] text-amber-200/90"
+              >
+                Beta
+              </span>
+            </h2>
             <p className="text-white/30 font-bold text-sm tracking-wide">
               {unseenTotal > 0
                 ? `${unseenTotal} new video${unseenTotal === 1 ? '' : 's'} from your channels`
@@ -259,10 +560,11 @@ const FocusTube: React.FC = () => {
           </div>
           <button
             type="button"
+            data-tour="focustube-channels"
             onClick={() => setManaging(true)}
             className="inline-flex items-center gap-1.5 rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-xs font-black uppercase tracking-widest text-white/60 hover:bg-white/10 hover:text-white"
           >
-            <SlidersHorizontal size={13} /> Channels
+            <SlidersHorizontal size={13} /> Channels{totalChannels > 0 ? ` (${totalChannels})` : ''}
           </button>
           <button
             type="button"
@@ -276,7 +578,7 @@ const FocusTube: React.FC = () => {
       </div>
 
       {/* Category pills — the core control. */}
-      <div className="flex flex-wrap items-center gap-2">
+      <div data-tour="focustube-categories" className="flex flex-wrap items-center gap-2">
         <button
           type="button"
           onClick={() => void selectCategory(null)}
@@ -291,6 +593,8 @@ const FocusTube: React.FC = () => {
 
         {categories.map((category) => {
           const isActive = activeCategoryId === category.id
+          const channelCount = category.channelCount ?? 0
+          const unseen = category.unseenCount || 0
 
           // Rename mode (double-clicked): inline editor commits on Enter/blur.
           if (editingId === category.id) {
@@ -373,24 +677,69 @@ const FocusTube: React.FC = () => {
           }
 
           return (
-            <div key={category.id} className="group/cat relative">
+            <div
+              key={category.id}
+              ref={(el) => {
+                if (el) pillRefs.current.set(category.id, el)
+                else pillRefs.current.delete(category.id)
+              }}
+              onPointerDown={(e) => onPillPointerDown(e, category.id)}
+              onPointerMove={onPillPointerMove}
+              onPointerUp={() => endPillDrag(true)}
+              onPointerCancel={() => endPillDrag(false)}
+              onContextMenu={(e) => { if (pressRef.current || dragIdRef.current != null) e.preventDefault() }}
+              onKeyDown={(e) => {
+                if ((e.altKey || e.ctrlKey) && (e.key === 'ArrowLeft' || e.key === 'ArrowRight')) {
+                  e.preventDefault()
+                  const ids = categoriesRef.current.map((c) => c.id)
+                  const idx = ids.indexOf(category.id)
+                  const swapWith = e.key === 'ArrowLeft' ? idx - 1 : idx + 1
+                  if (idx < 0 || swapWith < 0 || swapWith >= ids.length) return
+                  const next = [...ids]
+                  const [moved] = next.splice(idx, 1)
+                  next.splice(swapWith, 0, moved)
+                  const byId = new Map(categoriesRef.current.map((c) => [c.id, c]))
+                  setCategories(next.map((id) => byId.get(id)!).filter(Boolean))
+                  window.api.ftReorderCategories(next).catch((err) => {
+                    console.error('[FocusTube] Reorder failed:', err)
+                    void loadCategories()
+                  })
+                }
+              }}
+              className={`group/cat relative select-none touch-pan-y ${dragId === category.id ? 'invisible' : 'cursor-grab'}`}
+            >
               <button
                 type="button"
-                onClick={() => void selectCategory(category.id)}
+                onClick={() => {
+                  if (suppressClick.current) {
+                    suppressClick.current = false
+                    return
+                  }
+                  void selectCategory(category.id)
+                }}
                 onDoubleClick={() => {
+                  if (suppressClick.current) return
                   setEditingId(category.id)
                   setEditName(category.name)
                   setConfirmDeleteId(null)
                 }}
-                title="Click to open · double-click to rename"
-                className={`inline-flex items-center gap-2 rounded-full border py-2 pl-3 pr-4 text-xs font-black uppercase tracking-widest transition-colors ${
+                title={`${category.name} — ${channelCount} channel${channelCount === 1 ? '' : 's'}, ${unseen} unseen. Click to open · double-click to rename · drag to reorder (Alt+←/→ also moves)`}
+                className={`inline-flex items-center gap-1.5 rounded-full border py-2 pl-2 pr-4 text-xs font-black uppercase tracking-widest transition-colors ${
                   isActive
                     ? 'border-primary bg-primary/15 text-white'
                     : 'border-white/10 bg-white/5 text-white/50 hover:bg-white/10 hover:text-white'
-                }`}
+                } ${dragId != null ? 'pointer-events-none' : ''}`}
               >
+                <GripVertical size={12} className="shrink-0 text-white/25" aria-hidden />
                 <span className={`h-2 w-2 rounded-full ${CATEGORY_DOT[category.color] || 'bg-red-500'}`} />
                 {category.name}
+                <span
+                  className="inline-flex items-center gap-1 text-[10px] font-bold normal-case tracking-normal text-white/35"
+                  title={`${channelCount} subscribed channel${channelCount === 1 ? '' : 's'} in ${category.name}`}
+                >
+                  <Users size={11} className="opacity-60" aria-hidden />
+                  {channelCount}
+                </span>
                 {(category.unseenCount || 0) > 0 && (
                   <span className="rounded-full bg-primary px-1.5 py-0.5 text-[10px] text-white">
                     {category.unseenCount}
@@ -399,6 +748,7 @@ const FocusTube: React.FC = () => {
               </button>
               <button
                 type="button"
+                onPointerDown={(e) => e.stopPropagation()}
                 onClick={(event) => {
                   event.stopPropagation()
                   setConfirmDeleteId(category.id)
@@ -446,14 +796,44 @@ const FocusTube: React.FC = () => {
         )}
       </div>
 
+      {dragId != null && (() => {
+        const dragged = categories.find((c) => c.id === dragId)
+        if (!dragged) return null
+        return (
+          <div
+            ref={ghostRef}
+            className="pointer-events-none fixed left-0 top-0 z-[90] inline-flex cursor-grabbing items-center gap-1.5 rounded-full border border-primary/50 bg-[#141a26]/95 px-4 py-2 text-xs font-black uppercase tracking-widest text-white shadow-[0_18px_40px_-12px_rgba(0,0,0,0.9)] backdrop-blur will-change-transform"
+          >
+            <GripVertical size={12} className="text-white/40" />
+            <span className={`h-2 w-2 rounded-full ${CATEGORY_DOT[dragged.color] || 'bg-red-500'}`} />
+            {dragged.name}
+          </div>
+        )
+      })()}
+
       {/* Stack header */}
-      <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-white/10 bg-white/[0.03] px-5 py-4">
+      <div data-tour="focustube-feed" className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-white/10 bg-white/[0.03] px-5 py-4">
         <div className="flex items-center gap-3">
           <Sparkles size={16} className="text-primary" />
           <span className="text-sm font-black uppercase italic tracking-wider text-white">
             {videos.length} in the stack
           </span>
-          <span className="text-xs font-semibold text-white/35">newest first</span>
+          <span className="text-xs font-semibold text-white/35">
+            newest first{activeCategory
+              ? ` · from ${activeCategory.channelCount ?? 0} channel${(activeCategory.channelCount ?? 0) === 1 ? '' : 's'} in ${activeCategory.name}`
+              : totalChannels > 0 ? ` · from ${totalChannels} channel${totalChannels === 1 ? '' : 's'}` : ''}
+          </span>
+          {(activeCategory || totalChannels > 0) && (
+            <button
+              type="button"
+              onClick={() => setManaging(true)}
+              title={activeCategory ? `See channels subscribed in ${activeCategory.name}` : 'See all subscribed channels'}
+              className="inline-flex items-center gap-1 rounded-full border border-white/10 bg-white/5 px-2.5 py-1 text-[10px] font-black uppercase tracking-widest text-white/50 hover:bg-white/10 hover:text-white"
+            >
+              <Users size={11} />
+              {activeCategory ? `View ${activeCategory.name} channels` : 'View channels'}
+            </button>
+          )}
         </div>
 
         <div className="flex items-center gap-2">
@@ -538,6 +918,25 @@ const FocusTube: React.FC = () => {
             Nothing in your subscriptions matches “{search}”
           </p>
         </div>
+      ) : activeCategory && (activeCategory.channelCount ?? 0) === 0 ? (
+        <div className="flex flex-col items-center justify-center py-32 text-center space-y-5">
+          <Users size={72} strokeWidth={1} className="opacity-30" />
+          <div className="space-y-2">
+            <h3 className="text-2xl font-black uppercase italic text-white">
+              No channels in {activeCategory.name} yet
+            </h3>
+            <p className="text-xs font-bold uppercase tracking-widest max-w-md text-white/40">
+              Subscribe to channels to fill this category
+            </p>
+            <button
+              type="button"
+              onClick={() => setManaging(true)}
+              className="mt-2 inline-flex items-center gap-1.5 rounded-lg bg-primary px-4 py-2 text-xs font-black uppercase tracking-widest text-white"
+            >
+              <Plus size={13} /> Add channels to {activeCategory.name}
+            </button>
+          </div>
+        </div>
       ) : (
         <div className="flex flex-col items-center justify-center py-32 text-center space-y-5 opacity-30">
           <CheckCheck size={72} strokeWidth={1} />
@@ -564,6 +963,12 @@ const FocusTube: React.FC = () => {
 
       {playing && (
         <FocusTubePlayer
+          // No key on videoId on purpose: the player shell (the element we
+          // put into fullscreen) must stay the SAME DOM node across Next /
+          // auto-advance. Keying by videoId unmounted the shell, which makes
+          // the browser exit fullscreen and the next video starts windowed.
+          // The player already resets all per-video state on video.videoId.
+          key="focustube-player"
           video={playing.video}
           startSeconds={playing.startSeconds}
           onClose={() => setPlaying(null)}
@@ -571,6 +976,12 @@ const FocusTube: React.FC = () => {
           onSaveProgress={handleSaveProgress}
           onObserved={handleObserved}
           onNotEmbeddable={handleNotEmbeddable}
+          autoplayNext={autoplayNext}
+          onToggleAutoplayNext={toggleAutoplayNext}
+          hasNext={!!nextUpVideo}
+          nextTitle={nextUpVideo?.title ?? null}
+          onAutoAdvance={(videoId) => void handleAutoAdvance(videoId)}
+          onManualNext={(videoId) => void handleManualNext(videoId)}
         />
       )}
     </div>

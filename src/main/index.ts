@@ -5,6 +5,7 @@ import * as db from './db'
 import * as collections from './collections'
 import * as focusTube from './focusTube'
 import * as focusTubeFeed from './focusTubeFeed'
+import * as sponsorBlock from './sponsorBlock'
 import { scanFolder, getEmbeddedSubtitles, getEmbeddedAudio } from './scanner'
 import * as tmdb from './tmdb'
 import fs from 'fs'
@@ -7205,32 +7206,84 @@ ipcMain.handle('ft-refresh-feeds', async (_e, options?: { force?: boolean }) => 
 ipcMain.handle('ft-resolve-channel', async (_e, query: string) =>
   ftGuard('resolveChannel', () => focusTubeFeed.resolveChannel(query)))
 
+ipcMain.handle('ft-search-channels', async (_e, query: string) => {
+  try {
+    return await focusTubeFeed.searchChannels(query)
+  } catch (err: any) {
+    console.error('[FocusTube] Search channels failed:', err?.message)
+    return { error: err?.message || 'Search failed' }
+  }
+})
+
+// Backfills logos for previously-subscribed channels stored without one.
+ipcMain.handle('ft-refresh-avatars', async () => {
+  try {
+    return await focusTubeFeed.refreshMissingAvatars()
+  } catch (err: any) {
+    console.error('[FocusTube] Avatar refresh failed:', err?.message)
+    return { error: err?.message || 'Avatar refresh failed' }
+  }
+})
+
+/** Shared subscribe flow: store the channel, file it, backfill its backlog. */
+async function subscribeResolvedChannel(
+  resolved: { channelId: string; title: string; handle?: string | null; avatarUrl?: string | null; url?: string | null },
+  categoryIds: number[],
+) {
+  const channel = focusTube.upsertChannel(resolved)
+  if (Array.isArray(categoryIds) && categoryIds.length) {
+    focusTube.setChannelCategories(channel.channelId, categoryIds)
+  }
+  // Pull this channel's backlog immediately so the stack is not empty.
+  try {
+    const feed = await focusTubeFeed.fetchChannelFeed(channel.channelId)
+    const upsert = focusTube.upsertFeedEntries(channel.channelId, feed.entries)
+    focusTube.setChannelLastFetched(channel.channelId, null)
+    try {
+      focusTube.setVideosShort(await focusTubeFeed.fetchChannelShorts(channel.channelId))
+    } catch (shortsErr: any) {
+      console.warn(`[FocusTube] Shorts tab failed for ${channel.title}: ${shortsErr?.message}`)
+    }
+    broadcastFeedUpdated({ added: upsert.inserted, channelIds: [channel.channelId] })
+  } catch (err: any) {
+    // The channel is subscribed; its feed will be retried on the next poll.
+    console.warn(`[FocusTube] Could not backfill ${channel.title}: ${err?.message}`)
+  }
+  return focusTube.getChannel(channel.channelId)
+}
+
 ipcMain.handle('ft-add-channel', async (_e, input: { query: string; categoryIds: number[] }) => {
   try {
     const resolved = await focusTubeFeed.resolveChannel(input.query)
-    const channel = focusTube.upsertChannel(resolved)
-    if (Array.isArray(input.categoryIds) && input.categoryIds.length) {
-      focusTube.setChannelCategories(channel.channelId, input.categoryIds)
-    }
-    // Pull this channel's backlog immediately so the stack is not empty.
-    try {
-      const feed = await focusTubeFeed.fetchChannelFeed(channel.channelId)
-      const upsert = focusTube.upsertFeedEntries(channel.channelId, feed.entries)
-      focusTube.setChannelLastFetched(channel.channelId, null)
-      try {
-        focusTube.setVideosShort(await focusTubeFeed.fetchChannelShorts(channel.channelId))
-      } catch (shortsErr: any) {
-        console.warn(`[FocusTube] Shorts tab failed for ${channel.title}: ${shortsErr?.message}`)
-      }
-      broadcastFeedUpdated({ added: upsert.inserted, channelIds: [channel.channelId] })
-    } catch (err: any) {
-      // The channel is subscribed; its feed will be retried on the next poll.
-      console.warn(`[FocusTube] Could not backfill ${channel.title}: ${err?.message}`)
-    }
-    return focusTube.getChannel(channel.channelId)
+    return await subscribeResolvedChannel(resolved, input.categoryIds)
   } catch (err: any) {
     console.error('[FocusTube] Add channel failed:', err?.message)
     return { error: err?.message || 'Could not add that channel' }
+  }
+})
+
+// Subscribes directly from a search result (avatar/handle already known — no
+// re-resolve, so the search-list logo is what gets stored).
+ipcMain.handle('ft-subscribe-channel', async (_e, input: {
+  channel: { channelId: string; title: string; handle?: string | null; avatarUrl?: string | null; url?: string | null }
+  categoryIds: number[]
+}) => {
+  try {
+    const picked = input.channel
+    if (!picked || !picked.channelId) throw new Error('Pick a channel from the results first')
+    return await subscribeResolvedChannel(
+      {
+        channelId: picked.channelId,
+        title: picked.title || picked.channelId,
+        handle: picked.handle ?? null,
+        avatarUrl: picked.avatarUrl ?? null,
+        url: picked.url ?? `https://www.youtube.com/channel/${picked.channelId}`,
+      },
+      input.categoryIds,
+    )
+  } catch (err: any) {
+    console.error('[FocusTube] Subscribe channel failed:', err?.message)
+    return { error: err?.message || 'Could not subscribe to that channel' }
   }
 })
 
@@ -7245,3 +7298,25 @@ ipcMain.handle('ft-mark-not-embeddable', (_e, videoId: string) =>
     focusTubeFeed.markNotEmbeddable(videoId)
     return { ok: true }
   }))
+
+ipcMain.handle('ft-get-sponsor-segments', async (_e, videoId: string) => {
+  try {
+    const segments = await sponsorBlock.getSponsorSegments(videoId)
+    return { segments }
+  } catch (err: any) {
+    console.warn('[FocusTube] SponsorBlock lookup failed:', err?.message)
+    return { segments: [] }
+  }
+})
+
+ipcMain.handle('ft-get-comments', async (_e, input: { videoId: string; sortBy?: 'top' | 'new'; continuation?: string | null }) => {
+  try {
+    const videoId = String(input?.videoId || '')
+    const sortBy = input?.sortBy === 'new' ? 'new' : 'top'
+    const continuation = typeof input?.continuation === 'string' && input.continuation ? input.continuation : null
+    return await focusTubeFeed.fetchVideoComments(videoId, { sortBy, continuation })
+  } catch (err: any) {
+    console.warn('[FocusTube] Comments lookup failed:', err?.message)
+    return { error: err?.message || 'Could not load comments' }
+  }
+})

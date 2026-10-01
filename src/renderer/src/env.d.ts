@@ -207,9 +207,14 @@ interface Api {
   ftGetCategorySummary: (categoryId: number | null) => Promise<{ unseen: number; latestPublished: string | null }>
   ftRefreshFeeds: (options?: { force?: boolean }) => Promise<{ added: number; channelIds: string[]; failed: string[] }>
   ftResolveChannel: (query: string) => Promise<{ channelId: string; title: string; handle: string | null; avatarUrl: string | null; url: string } | { error: string }>
+  ftSearchChannels: (query: string) => Promise<Array<{ channelId: string; title: string; handle: string | null; avatarUrl: string | null; subscriberText: string | null; videoCountText: string | null; descriptionSnippet: string | null }> | { error: string }>
+  ftRefreshChannelAvatars: () => Promise<{ checked: number; updated: number } | { error: string }>
+  ftSubscribeChannel: (channel: { channelId: string; title: string; handle?: string | null; avatarUrl?: string | null; url?: string | null }, categoryIds: number[]) => Promise<import('./types').FtChannel | { error: string }>
   ftAddChannel: (query: string, categoryIds: number[]) => Promise<import('./types').FtChannel | { error: string }>
   ftRecordPlayback: (videoId: string, observation: { duration?: number | null; ended?: boolean }) => Promise<{ ok: boolean }>
   ftMarkNotEmbeddable: (videoId: string) => Promise<{ ok: boolean }>
+  ftGetSponsorSegments: (videoId: string) => Promise<{ segments: Array<{ category: string; start: number; end: number }> }>
+  ftGetComments: (videoId: string, options?: { sortBy?: 'top' | 'new'; continuation?: string | null }) => Promise<{ comments: import('./types').FtComment[]; continuation: string | null; commentCount: number | null; disabled: boolean } | { error: string }>
   onFeedUpdated: (callback: (payload: { added: number; channelIds: string[] }) => void) => () => void
 }
 

@@ -226,10 +226,18 @@ const api = {
   ftGetCategorySummary: (categoryId: number | null) => ipcRenderer.invoke('ft-get-category-summary', categoryId),
   ftRefreshFeeds: (options?: { force?: boolean }) => ipcRenderer.invoke('ft-refresh-feeds', options ?? { force: true }),
   ftResolveChannel: (query: string) => ipcRenderer.invoke('ft-resolve-channel', query),
+  ftSearchChannels: (query: string) => ipcRenderer.invoke('ft-search-channels', query),
+  ftRefreshChannelAvatars: () => ipcRenderer.invoke('ft-refresh-avatars'),
+  ftSubscribeChannel: (channel: { channelId: string; title: string; handle?: string | null; avatarUrl?: string | null; url?: string | null }, categoryIds: number[]) =>
+    ipcRenderer.invoke('ft-subscribe-channel', { channel, categoryIds }),
   ftAddChannel: (query: string, categoryIds: number[]) => ipcRenderer.invoke('ft-add-channel', { query, categoryIds }),
   ftRecordPlayback: (videoId: string, observation: { duration?: number | null; ended?: boolean }) =>
     ipcRenderer.invoke('ft-record-playback', { videoId, ...observation }),
   ftMarkNotEmbeddable: (videoId: string) => ipcRenderer.invoke('ft-mark-not-embeddable', videoId),
+  ftGetSponsorSegments: (videoId: string) =>
+    ipcRenderer.invoke('ft-get-sponsor-segments', videoId),
+  ftGetComments: (videoId: string, options?: { sortBy?: 'top' | 'new'; continuation?: string | null }) =>
+    ipcRenderer.invoke('ft-get-comments', { videoId, ...options }),
   onFeedUpdated: (callback: (payload: { added: number; channelIds: string[] }) => void) => {
     const handler = (_event: any, payload: { added: number; channelIds: string[] }) => callback(payload)
     ipcRenderer.on('ft-feed-updated', handler)

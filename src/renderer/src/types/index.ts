@@ -110,3 +110,15 @@ export interface FtFeedOptions {
   limit?: number
   search?: string | null
 }
+
+export interface FtComment {
+  commentId: string | null
+  author: string
+  authorId: string | null
+  avatarUrl: string | null
+  content: string
+  publishedText: string | null
+  likeCount: number | null
+  replyCount: number
+  replyContinuation: string | null
+}

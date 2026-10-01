@@ -89,11 +89,11 @@ const UPDATE_ICONS: Record<UpdateIconKey, { icon: React.ReactNode; tile: string 
 }
 
 export const LATEST_RELEASE: ReleaseNotes = {
-  version: '1.37.0',
-  title: 'A smoother watching experience.',
-  highlight: 'watching experience.',
+  version: '1.38.0',
+  title: 'YouTube on your terms.',
+  highlight: 'your terms.',
   description:
-    "We've made some improvements and added new features to make the app faster, simpler and more reliable.",
+    'Meet Focus Tube — a new tab built around channels you pick, with a short tour to show you around.',
   tourId: 'focus-tube',
   updates: [
     {
@@ -102,24 +102,24 @@ export const LATEST_RELEASE: ReleaseNotes = {
       description: 'A new YouTube tab built around your channels.',
     },
     {
-      icon: 'download',
-      title: 'Download queue control',
-      description: 'Set a limit and manage multiple downloads at once.',
-    },
-    {
       icon: 'layers',
-      title: 'True season-pack sizes',
-      description: 'Season packs now show the full season total for honest sizing.',
+      title: 'Categories for channels',
+      description: 'File subscriptions into rooms you name and reorder.',
     },
     {
-      icon: 'bell',
-      title: 'Trusted episode alerts',
-      description: 'Get notified only when a new episode is actually watchable.',
+      icon: 'sparkles',
+      title: 'A tour that shows it',
+      description: 'Hit Continue once and walk the new tab.',
     },
     {
-      icon: 'audio',
-      title: 'Audio stays in sync',
-      description: 'External audio now starts at the right moment.',
+      icon: 'play',
+      title: 'Scroll the seek bar',
+      description: 'Roll the wheel over the bar to jump.',
+    },
+    {
+      icon: 'shield',
+      title: 'Private by design',
+      description: 'No account or key; data stays on this device.',
     },
   ],
 }

@@ -1,3 +1,31 @@
+# MyCinema v1.38.0
+
+YouTube on your terms: a new Focus Tube tab built around channels you pick, with a short guided tour on first launch.
+
+### Focus Tube (Beta)
+- **A New Tab, No Algorithm**: A Focus Tube tab in the sidebar shows uploads only from channels you subscribe to, newest-first and unseen-only. Nothing is recommended and nothing autoplays.
+- **Subscribe In Seconds**: The Channels manager finds channels as you type by name, @handle, ID, or pasted URL, with logos and one-tap subscribe into the category you are viewing.
+- **Categories You Organize**: File channels into rooms you name, with unseen badges, double-click rename, drag-to-reorder, and two-step delete confirmation.
+- **A Player That Respects The Stack**: The cinema player resumes where you left off, can autoplay the next unseen video, reads chapters from descriptions, shows comments, and skips sponsor segments automatically.
+- **Opt Out Anytime**: A switch under Settings > Features hides the tab and stops all background refreshing. Categories, channels, and progress are kept for when you switch it back on.
+- **A Tour On First Launch**: After the What's New card, a 5-step spotlight tour walks you from the new tab through setup to the off-switch.
+
+### Player & Discovery
+- **Scroll The Seek Bar**: Rolling the mouse wheel over the player's progress bar now jumps in small steps, with trackpad-friendly smoothing.
+- **Letterboxd Lookup**: Title pages now offer a one-tap Letterboxd lookup that opens in the in-app window.
+- **Your Library, Named Clearly**: Home rails now read Continue Watching and Your Library so local titles are never confused with trending rows.
+
+### Reliability
+- **Focus Tube Joins Backups**: Categories, channels, watched state, and resume positions now export and restore with the rest of your library.
+- **Feeds That Retry**: Channel polling retries failed requests and refreshes missing channel logos once, so the stack fills in instead of stalling.
+
+### Security & Privacy
+- **No Account, No API Key**: Focus Tube reads public channel feeds and plays through the official YouTube embed — no stream extraction and no credentials anywhere.
+- **Minimal Lookups**: Sponsor data is fetched per video ID only, and channel search runs only when you type in the Channels manager.
+- **Local-Only Data**: Subscriptions, categories, and watch progress live in the app's own local database. Switching Focus Tube off stops every background request.
+
+***
+
 # MyCinema v1.37.0
 
 Take control of your download queue, and get accurate sizes, honest new-episode alerts, and audio that finally stays in sync.

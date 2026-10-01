@@ -92,6 +92,11 @@ const HIGH_SPEED_DROPPED_FRAME_RATIO = 0.18
 const BUFFERING_INDICATOR_DELAY_MS = 450
 const SERIES_SUBTITLE_AUTO_LOAD_VALUE = 'external'
 const DOUBLE_TAP_WINDOW_MS = 300
+const ARROW_SEEK_STEP_SECONDS = 10
+const SHIFT_ARROW_SEEK_STEP_SECONDS = 3
+const SEEK_BAR_WHEEL_STEP_SECONDS = 5
+const SEEK_BAR_WHEEL_ACCUM_THRESHOLD = 40
+const SEEK_BAR_WHEEL_RESET_MS = 300
 
 
 
@@ -165,6 +170,11 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
   const [currentTime, setCurrentTime] = useState(0)
   const [duration, setDuration] = useState(0)
   const [showControls, setShowControls] = useState(true)
+  // Playback-finished state: when a standalone video (local file, movie,
+  // external file opened from the OS) reaches the end we stay in the player
+  // and show a Replay / Close end screen instead of dumping to Home.
+  // Series / binge flows auto-advance and never set this.
+  const [hasEnded, setHasEnded] = useState(false)
 
   const [sleepTimerEnd, setSleepTimerEnd] = useState<number | null>(null)
   const [showStats, setShowStats] = useState(false)
@@ -722,8 +732,17 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
   const seekPreviewThumbTimerRef = useRef<NodeJS.Timeout | null>(null)
   const seekPreviewThumbRequestRef = useRef(0)
   const lastSeekPreviewBucketRef = useRef<number | null>(null)
+  // Wheel-to-seek accumulation over the seek bar. Trackpad gestures emit many
+  // tiny deltas; we accumulate them until a full step threshold is reached so
+  // one notch ≈ one SEEK_BAR_WHEEL_STEP_SECONDS jump without hypersensitivity.
+  const seekBarWheelAccumRef = useRef(0)
+  const seekBarWheelResetTimerRef = useRef<NodeJS.Timeout | null>(null)
   const [videoAspectRatio, setVideoAspectRatio] = useState(16 / 9)
-  const isAnyFullscreen = isFullscreen || isWindowFullscreen
+  // Video element fullscreen only — the app window mode must not drive the
+  // icon, otherwise the button shows "exit" while windowed just because the
+  // app launched fullscreen. isWindowFullscreen is still tracked below for
+  // diagnostics but no longer affects the player chrome.
+  const isAnyFullscreen = isFullscreen
   const forceRestartRef = useRef(false)
   const startupPlaybackTokenRef = useRef(0)
   const startupPlaybackPendingRef = useRef(true)
@@ -874,6 +893,11 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
       clearTimeout(seekPreviewThumbTimerRef.current)
       seekPreviewThumbTimerRef.current = null
     }
+    if (seekBarWheelResetTimerRef.current) {
+      clearTimeout(seekBarWheelResetTimerRef.current)
+      seekBarWheelResetTimerRef.current = null
+    }
+    seekBarWheelAccumRef.current = 0
     cancelDelayedAudioPause()
     clearIntroDbRuntimeWork()
     if (seriesSubtitleStatusTimerRef.current) {
@@ -1059,7 +1083,47 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
   // This ensures that switching from one external file to another (both with ID -1) triggers a re-load.
   useEffect(() => {
     setCurrentVideo(video)
+    setHasEnded(false)
   }, [video])
+
+  // A new file inside the player (episode switch, magnet switch, pack hop)
+  // is a fresh watch — clear any finished state from the previous file.
+  useEffect(() => {
+    setHasEnded(false)
+  }, [currentVideo.file_path])
+
+  // Keep controls visible while the end screen is up so Replay / Close are reachable.
+  useEffect(() => {
+    if (hasEnded) {
+      setShowControls(true)
+      clearTimeout(window.controlsTimeout)
+    }
+  }, [hasEnded])
+
+  // Enter replays from the end screen (fresh closure per hasEnded change,
+  // so it never goes stale like the global shortcut effect).
+  useEffect(() => {
+    if (!hasEnded) return
+    const onKey = (e: KeyboardEvent) => {
+      const active = document.activeElement as HTMLElement | null
+      if (active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA' || active.tagName === 'SELECT')) return
+      if (e.code === 'Enter' || e.code === 'NumpadEnter') {
+        e.preventDefault()
+        const el = videoRef.current
+        setHasEnded(false)
+        setEpisodeSwitchState(null)
+        try {
+          if (el) {
+            el.currentTime = 0
+            el.play().catch(() => {})
+            setIsPlaying(true)
+          }
+        } catch { /* ignore */ }
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [hasEnded])
 
   const handleOpenFolder = () => {
     if (isTorrentStream) return
@@ -2190,13 +2254,16 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
       switch(e.code) {
         case 'ArrowRight':
           if (!e.repeat) {
+            e.preventDefault()
+            // Shift + Right = fine seek (3s), plain Right = coarse seek (10s).
+            const stepRight = e.shiftKey ? SHIFT_ARROW_SEEK_STEP_SECONDS : ARROW_SEEK_STEP_SECONDS
             // Binge: arrows ride the virtual timeline (can cross episodes).
             if (packTimingRef.current) {
-              seekRef.current(10)
+              seekRef.current(stepRight)
               break
             }
             const currentT = videoRef.current?.currentTime ?? 0
-            const nextT = Math.min(videoRef.current?.duration || 0, currentT + 10)
+            const nextT = Math.min(videoRef.current?.duration || 0, currentT + stepRight)
             if (videoRef.current) {
               seekWasPlayingRef.current = !videoRef.current.paused
               pendingControlledSeekTimeRef.current = nextT
@@ -2205,7 +2272,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
               timeRef.current = nextT
             }
             if (isHost) broadcastState({ type: 'SEEK', time: nextT });
-            setSeekPopup({ show: true, text: '+10s', id: Date.now() })
+            setSeekPopup({ show: true, text: `+${stepRight}s`, id: Date.now() })
 
             arrowHoldTimerRef.current = setTimeout(() => {
               seekPreviewRef.current = videoRef.current?.currentTime ?? 0
@@ -2215,8 +2282,8 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
               if (seekPreviewIntervalRef.current) clearInterval(seekPreviewIntervalRef.current)
               seekPreviewIntervalRef.current = setInterval(() => {
                 const dur = videoRef.current?.duration || 1
-                // 10.0s per 100ms = 100x real-time speed
-                seekPreviewRef.current = Math.min(dur, seekPreviewRef.current + 10.0)
+                // Hold-scrub speed follows the initial step: 3s/100ms for Shift, 10s/100ms otherwise.
+                seekPreviewRef.current = Math.min(dur, seekPreviewRef.current + stepRight)
                 setSeekPreview(seekPreviewRef.current)
                 // Drive the existing thumbnail preview to show frame at this timestamp
                 const pct = (seekPreviewRef.current / dur) * 100
@@ -2228,12 +2295,15 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
           break
         case 'ArrowLeft':
           if (!e.repeat) {
+            e.preventDefault()
+            // Shift + Left = fine seek (-3s), plain Left = coarse seek (-10s).
+            const stepLeft = e.shiftKey ? SHIFT_ARROW_SEEK_STEP_SECONDS : ARROW_SEEK_STEP_SECONDS
             if (packTimingRef.current) {
-              seekRef.current(-10)
+              seekRef.current(-stepLeft)
               break
             }
             const currentT = videoRef.current?.currentTime ?? 0
-            const nextT = Math.max(0, currentT - 10)
+            const nextT = Math.max(0, currentT - stepLeft)
             if (videoRef.current) {
               seekWasPlayingRef.current = !videoRef.current.paused
               pendingControlledSeekTimeRef.current = nextT
@@ -2242,7 +2312,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
               timeRef.current = nextT
             }
             if (isHost) broadcastState({ type: 'SEEK', time: nextT });
-            setSeekPopup({ show: true, text: '-10s', id: Date.now() })
+            setSeekPopup({ show: true, text: `-${stepLeft}s`, id: Date.now() })
 
             arrowHoldTimerRef.current = setTimeout(() => {
               seekPreviewRef.current = videoRef.current?.currentTime ?? 0
@@ -2252,8 +2322,8 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
               if (seekPreviewIntervalRef.current) clearInterval(seekPreviewIntervalRef.current)
               seekPreviewIntervalRef.current = setInterval(() => {
                 const dur = videoRef.current?.duration || 1
-                // 10.0s per 100ms = 100x real-time speed
-                seekPreviewRef.current = Math.max(0, seekPreviewRef.current - 10.0)
+                // Hold-scrub speed follows the initial step: 3s/100ms for Shift, 10s/100ms otherwise.
+                seekPreviewRef.current = Math.max(0, seekPreviewRef.current - stepLeft)
                 setSeekPreview(seekPreviewRef.current)
                 const pct = (seekPreviewRef.current / dur) * 100
                 setHoverTime(seekPreviewRef.current)
@@ -2882,13 +2952,55 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
     return () => clearInterval(watchdogInterval)
   }, [isPlaying, isSeeking, selectedAudioId, availableAudio, volume])
 
+  const showPlaybackFinished = () => {
+    setIsPlaying(false)
+    setShowControls(true)
+    clearTimeout(window.controlsTimeout)
+    // Persist completed state for library items so Home/History reflect it.
+    try {
+      if (currentVideoRef.current.id >= 0 && !isTorrentStreamPath(currentVideoRef.current.file_path)) {
+        const total = Number(durationRef.current) || Number(videoRef.current?.duration) || 0
+        const at = total > 0 ? total : Number(timeRef.current) || 0
+        if (at > 0) {
+          timeRef.current = at
+          setCurrentTime(videoRef.current?.currentTime ?? at)
+          window.api.updateVideoProgress(currentVideoRef.current.id, at, true, true)
+        }
+      }
+    } catch { /* ignore */ }
+    setHasEnded(true)
+  }
+
   const handleEnded = async () => {
     console.log('[VideoPlayer] handleEnded fired. type=', currentVideo.type, 'series_name=', currentVideo.series_name, 'season=', currentVideo.season, 'episode=', currentVideo.episode, 'streamId=', currentVideo.streamSourceId)
     if (packBingeRef.current) {
-      advancePack()
+      const pb = packBingeRef.current
+      if (pb.index < pb.files.length - 1) {
+        advancePack()
+        return
+      }
+      // Last file of the pack — stay and show the finished screen.
+      showPlaybackFinished()
       return
     }
     playNextEpisode()
+  }
+
+  const handleReplay = () => {
+    const el = videoRef.current
+    setHasEnded(false)
+    setEpisodeSwitchState(null)
+    try {
+      if (el) {
+        el.currentTime = 0
+        timeRef.current = 0
+        setCurrentTime(0)
+        el.play().then(() => setIsPlaying(true)).catch(() => {})
+      }
+    } catch { /* ignore */ }
+    setShowControls(true)
+    clearTimeout(window.controlsTimeout)
+    window.controlsTimeout = setTimeout(() => setShowControls(false), 3000)
   }
 
   // Load the video files inside the current temp stream (season packs expose
@@ -3631,7 +3743,10 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
         return
       }
       episodeTransitionGuardRef.current = false
-      onClose()
+      // Standalone video finished — stay in the player on an end screen
+      // (Replay / Close) instead of dropping to Home. This is the path hit
+      // by local files opened from the OS file explorer.
+      showPlaybackFinished()
     }
   }
 
@@ -3825,6 +3940,12 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
   const togglePlay = (e?: React.MouseEvent | React.KeyboardEvent) => {
     if (e) e.stopPropagation()
     if (!isHost && roomId !== null) return;
+    // Pressing play on the finished screen restarts from the beginning
+    // (VLC-style) instead of sitting on the last frame.
+    if (hasEnded) {
+      handleReplay()
+      return
+    }
     if (videoRef.current) {
       if (videoRef.current.paused) {
         videoRef.current.play()
@@ -4484,6 +4605,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
   const seekToTime = (time: number) => {
     if (!isHost && roomId !== null) return;
     if (videoRef.current) {
+      if (hasEnded) setHasEnded(false)
       const durationLimit = Number.isFinite(videoRef.current.duration) ? videoRef.current.duration : durationRef.current
       const boundedTime = durationLimit > 0
         ? Math.max(0, Math.min(time, durationLimit))
@@ -4668,26 +4790,63 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
     setSeekPreviewLoading(false)
   }
 
+  // Scroll / trackpad swipe over the seek bar scrubs the timestamp.
+  // Vertical scroll up (or horizontal swipe right) = forward, the opposite = backward.
+  // Deltas are accumulated so precise trackpads need a full notch worth of
+  // movement for one SEEK_BAR_WHEEL_STEP_SECONDS jump — no per-pixel thrashing.
+  const handleProgressWheel = (e: React.WheelEvent<HTMLDivElement>) => {
+    if (!isHost && roomId !== null) return
+    if (isSeeking) return
+    const dx = e.deltaX || 0
+    const dy = e.deltaY || 0
+    if (dx === 0 && dy === 0) return
+    e.preventDefault()
+    e.stopPropagation()
+
+    const unitScale = e.deltaMode === 1 ? 16 : 1
+    const horizontalDominant = Math.abs(dx) > Math.abs(dy)
+    // Positive forwardDelta = move forward in time.
+    const forwardDelta = (horizontalDominant ? dx : -dy) * unitScale
+    if (forwardDelta === 0) return
+
+    seekBarWheelAccumRef.current += forwardDelta
+    if (seekBarWheelResetTimerRef.current) {
+      clearTimeout(seekBarWheelResetTimerRef.current)
+    }
+    seekBarWheelResetTimerRef.current = setTimeout(() => {
+      seekBarWheelAccumRef.current = 0
+      seekBarWheelResetTimerRef.current = null
+    }, SEEK_BAR_WHEEL_RESET_MS)
+
+    let steps = 0
+    while (seekBarWheelAccumRef.current >= SEEK_BAR_WHEEL_ACCUM_THRESHOLD) {
+      seekBarWheelAccumRef.current -= SEEK_BAR_WHEEL_ACCUM_THRESHOLD
+      steps += 1
+    }
+    while (seekBarWheelAccumRef.current <= -SEEK_BAR_WHEEL_ACCUM_THRESHOLD) {
+      seekBarWheelAccumRef.current += SEEK_BAR_WHEEL_ACCUM_THRESHOLD
+      steps -= 1
+    }
+    if (steps === 0) return
+
+    // Keep controls visible while scrubbing with the wheel.
+    setShowControls(true)
+    clearTimeout(window.controlsTimeout)
+    window.controlsTimeout = setTimeout(() => setShowControls(false), 3000)
+
+    seek(steps * SEEK_BAR_WHEEL_STEP_SECONDS)
+  }
+
   const toggleFullscreen = async () => {
     if (fullscreenToggleInFlightRef.current) return
     fullscreenToggleInFlightRef.current = true
 
     try {
-      const hasDocumentFullscreen = !!document.fullscreenElement
-      const hasWindowFullscreen = await window.api.isFullscreen().catch(() => isWindowFullscreen)
-
-      if (hasDocumentFullscreen || hasWindowFullscreen) {
-        if (hasDocumentFullscreen) {
-          await document.exitFullscreen().catch(() => {})
-        }
-
-        const stillWindowFullscreen = await window.api.isFullscreen().catch(() => hasWindowFullscreen)
-        if (stillWindowFullscreen) {
-          const nextState = await window.api.toggleFullscreen()
-          setIsWindowFullscreen(nextState)
-        } else if (hasWindowFullscreen) {
-          setIsWindowFullscreen(false)
-        }
+      // VIDEO-ONLY: the app window fullscreen is a separate layer and must
+      // never be toggled here. The app often runs window-fullscreen; the
+      // video element fullscreen stacks on top of it and exits back to it.
+      if (document.fullscreenElement) {
+        await document.exitFullscreen().catch(() => {})
 
         setShowControls(true)
         clearTimeout(window.controlsTimeout)
@@ -4696,7 +4855,15 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
         return
       }
 
-      await playerShellRef.current?.requestFullscreen()
+      try {
+        await playerShellRef.current?.requestFullscreen()
+      } catch {
+        // Last-resort fallback only when element fullscreen is unavailable.
+        try {
+          const nextState = await window.api.toggleFullscreen()
+          setIsWindowFullscreen(nextState)
+        } catch { /* ignore */ }
+      }
       setFullscreenPopup(previous => ({ show: true, isFullscreen: true, id: previous.id + 1 }))
     } catch (err) {
       console.error('Fullscreen toggle failed:', err)
@@ -4855,6 +5022,8 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
           const time = videoRef.current.currentTime
           setCurrentTime(time)
           timeRef.current = time
+          // Scrubbing away from the end dismisses the finished screen.
+          setHasEnded(false)
           if (pendingControlledSeekTimeRef.current !== null) {
             const shouldResume = pendingControlledSeekResumeRef.current
             pendingControlledSeekTimeRef.current = null
@@ -4888,7 +5057,8 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
             return
           }
           allowGuestPlaybackEventRef.current = false
-          setIsPlaying(true); 
+          setHasEnded(false)
+          setIsPlaying(true);
           const trackObj = availableAudio.find(a => a.id === selectedAudioId);
           if (trackObj && !trackObj.native && audioRef.current && !startupExternalAudioBarrierRef.current && !externalAudioSeekBarrierRef.current && !audioTrackSwitchRetryRef.current && !audioTrackSwitching) {
             if (!audioRef.current.src || audioRef.current.error) {
@@ -5270,6 +5440,68 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
       {isBuffering && !isTorrentStream && (
         <div className="absolute inset-0 flex items-center justify-center bg-black/20 pointer-events-none">
           <div className="w-16 h-16 border-4 border-primary border-t-transparent rounded-full animate-spin" />
+        </div>
+      )}
+
+      {/* Playback-finished end screen — stays in the player instead of
+          dropping to Home (VLC / YouTube style). Seek bar + controls stay
+          interactive underneath (z-38 < controls z-40); the card is the
+          only pointer-capturing element so seeking dismisses this screen. */}
+      {hasEnded && (
+        <div className="absolute inset-0 z-[38] flex items-center justify-center pointer-events-none">
+          <div className="absolute inset-0 bg-black/60 backdrop-blur-[2px] pointer-events-none" />
+          <div
+            role="dialog"
+            aria-label="Playback finished"
+            className="pointer-events-auto relative mx-4 w-[min(420px,92vw)] rounded-2xl border border-white/10 bg-[#0b1018]/95 p-6 text-center shadow-[0_24px_80px_rgba(0,0,0,0.6)] backdrop-blur-2xl animate-in fade-in zoom-in duration-200"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-emerald-500/15 text-emerald-300 ring-1 ring-emerald-400/25">
+              <Check size={22} strokeWidth={3} />
+            </div>
+            <h2 className="mt-4 text-lg font-black text-white">Playback finished</h2>
+            <p className="mt-1 truncate text-sm font-semibold text-white/60" title={currentVideo.title}>
+              {currentVideo.title}
+            </p>
+            {currentVideo.id === -1 && (
+              <p className="mt-1 text-[11px] font-medium text-white/35">
+                Opened from your files — it stays here so you can replay it.
+              </p>
+            )}
+            <div className="mt-5 flex items-center justify-center gap-2.5">
+              <button
+                type="button"
+                autoFocus
+                onClick={(e) => { e.stopPropagation(); handleReplay() }}
+                className="flex h-10 items-center gap-2 rounded-xl bg-primary px-5 text-sm font-black text-white transition-all hover:bg-[#c40812] active:scale-95"
+              >
+                <RotateCcw size={16} strokeWidth={2.5} />
+                Replay
+              </button>
+              {!isTorrentStream && (
+                <button
+                  type="button"
+                  onClick={(e) => { e.stopPropagation(); handleOpenFolder() }}
+                  title="Show in folder"
+                  className="flex h-10 items-center gap-2 rounded-xl bg-white/8 px-4 text-sm font-bold text-white/75 ring-1 ring-white/10 transition-all hover:bg-white/15 hover:text-white active:scale-95"
+                >
+                  <FolderOpen size={16} />
+                  Folder
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={(e) => { e.stopPropagation(); onClose() }}
+                className="flex h-10 items-center gap-2 rounded-xl bg-white/8 px-4 text-sm font-bold text-white/75 ring-1 ring-white/10 transition-all hover:bg-white/15 hover:text-white active:scale-95"
+              >
+                <X size={16} />
+                Close
+              </button>
+            </div>
+            <p className="mt-4 text-[10px] font-bold uppercase tracking-[0.18em] text-white/30">
+              Press Enter to replay · Esc to close
+            </p>
+          </div>
         </div>
       )}
 
@@ -5878,6 +6110,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
 
         handleProgressMouseMove={handleProgressMouseMove}
         handleProgressMouseLeave={handleProgressMouseLeave}
+        handleProgressWheel={handleProgressWheel}
         handleSeekChange={handleSeekChange}
         handleSeekMouseDown={handleSeekMouseDown}
         handleSeekMouseUp={handleSeekMouseUp}

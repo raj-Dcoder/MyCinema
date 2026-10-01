@@ -51,6 +51,7 @@ export interface PlayerControlsProps {
 
   handleProgressMouseMove: (e: React.MouseEvent<HTMLDivElement>) => void
   handleProgressMouseLeave: () => void
+  handleProgressWheel: (e: React.WheelEvent<HTMLDivElement>) => void
   handleSeekChange: (e: React.ChangeEvent<HTMLInputElement>) => void
   handleSeekMouseDown: () => void
   handleSeekMouseUp: (e: React.MouseEvent<HTMLInputElement> | React.TouchEvent<HTMLInputElement>) => void
@@ -135,6 +136,7 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
   showStats,
   handleProgressMouseMove,
   handleProgressMouseLeave,
+  handleProgressWheel,
   handleSeekChange,
   handleSeekMouseDown,
   handleSeekMouseUp,
@@ -197,6 +199,7 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
         className="group/progress relative h-6 mb-4 flex items-center cursor-pointer"
         onMouseMove={handleProgressMouseMove}
         onMouseLeave={handleProgressMouseLeave}
+        onWheel={handleProgressWheel}
       >
         {/* Hover Preview Tooltip */}
         <div 

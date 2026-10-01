@@ -167,10 +167,11 @@ interface Api {
   isFullscreen: () => Promise<boolean>
   closeWindow: () => Promise<void>
   onFullscreenChanged: (callback: (isFullscreen: boolean) => void) => () => void
-  getAppSettings: () => Promise<{ launchFullscreen: boolean; rememberOnlineProgress: boolean; notifyNewEpisodes: boolean }>
+  getAppSettings: () => Promise<{ launchFullscreen: boolean; rememberOnlineProgress: boolean; notifyNewEpisodes: boolean; focusTubeEnabled: boolean }>
   setLaunchFullscreen: (launchFullscreen: boolean) => Promise<{ launchFullscreen: boolean; rememberOnlineProgress: boolean; notifyNewEpisodes: boolean }>
   setRememberOnlineProgress: (enabled: boolean) => Promise<{ launchFullscreen: boolean; rememberOnlineProgress: boolean; notifyNewEpisodes: boolean }>
-  setNotifyNewEpisodes: (enabled: boolean) => Promise<{ launchFullscreen: boolean; rememberOnlineProgress: boolean; notifyNewEpisodes: boolean }>
+  setNotifyNewEpisodes: (enabled: boolean) => Promise<{ launchFullscreen: boolean; rememberOnlineProgress: boolean; notifyNewEpisodes: boolean; focusTubeEnabled: boolean }>
+  setFocusTubeEnabled: (enabled: boolean) => Promise<{ launchFullscreen: boolean; rememberOnlineProgress: boolean; notifyNewEpisodes: boolean; focusTubeEnabled: boolean }>
   followSeries: (input: { tmdb_id: number; title?: string; poster_path?: string | null; backdrop_path?: string | null; overview?: string | null; season?: number | null; episode?: number | null }) => Promise<{ followed: boolean; isNew?: boolean; hasNewDrop?: boolean; dropSeason?: number; dropEpisode?: number }>
   unfollowSeries: (tmdbId: number) => Promise<{ unfollowed: boolean }>
   getFollowedSeries: () => Promise<any[]>
@@ -182,8 +183,39 @@ interface Api {
   getStreamContinueWatching: () => Promise<any[]>
   getStreamHistory: (limit?: number) => Promise<any[]>
   deleteStreamProgress: (tmdbId: number, mediaType: string, season?: number | null, episode?: number | null) => Promise<any>
-  onAppSettingsChanged: (callback: (settings: { launchFullscreen: boolean; rememberOnlineProgress: boolean; notifyNewEpisodes: boolean }) => void) => () => void
+  onAppSettingsChanged: (callback: (settings: { launchFullscreen: boolean; rememberOnlineProgress: boolean; notifyNewEpisodes: boolean; focusTubeEnabled: boolean }) => void) => () => void
   getTmdbReleaseInfo: (id: number, type: 'movie' | 'series') => Promise<import('./types').TmdbReleaseInfo | null>
+
+  // ─── Focus Tube ────────────────────────────────────────────────────────────
+  ftListCategories: () => Promise<import('./types').FtCategory[]>
+  ftCreateCategory: (name: string, color?: string) => Promise<import('./types').FtCategory>
+  ftUpdateCategory: (id: number, name: string, color?: string) => Promise<import('./types').FtCategory>
+  ftDeleteCategory: (id: number) => Promise<boolean>
+  ftReorderCategories: (ids: number[]) => Promise<boolean>
+  ftListChannels: (categoryId?: number | null) => Promise<import('./types').FtChannel[]>
+  ftUpsertChannel: (input: { channelId: string; title: string; handle?: string | null; avatarUrl?: string | null; url?: string | null }) => Promise<import('./types').FtChannel>
+  ftDeleteChannel: (channelId: string) => Promise<boolean>
+  ftSetChannelCategories: (channelId: string, categoryIds: number[]) => Promise<boolean>
+  ftSetChannelHideShorts: (channelId: string, hideShorts: boolean) => Promise<boolean>
+  ftGetFeed: (options?: import('./types').FtFeedOptions) => Promise<import('./types').FtVideo[]>
+  ftGetVideo: (videoId: string) => Promise<import('./types').FtVideo | null>
+  ftSetVideoSeen: (videoId: string, seen: boolean) => Promise<boolean>
+  ftMarkAllSeen: (categoryId: number | null) => Promise<{ changed: number }>
+  ftToggleSaved: (videoId: string, saved: boolean) => Promise<boolean>
+  ftGetProgress: (videoId: string) => Promise<{ position: number }>
+  ftUpdateProgress: (videoId: string, position: number) => Promise<boolean>
+  ftGetCategorySummary: (categoryId: number | null) => Promise<{ unseen: number; latestPublished: string | null }>
+  ftRefreshFeeds: (options?: { force?: boolean }) => Promise<{ added: number; channelIds: string[]; failed: string[] }>
+  ftResolveChannel: (query: string) => Promise<{ channelId: string; title: string; handle: string | null; avatarUrl: string | null; url: string } | { error: string }>
+  ftSearchChannels: (query: string) => Promise<Array<{ channelId: string; title: string; handle: string | null; avatarUrl: string | null; subscriberText: string | null; videoCountText: string | null; descriptionSnippet: string | null }> | { error: string }>
+  ftRefreshChannelAvatars: () => Promise<{ checked: number; updated: number } | { error: string }>
+  ftSubscribeChannel: (channel: { channelId: string; title: string; handle?: string | null; avatarUrl?: string | null; url?: string | null }, categoryIds: number[]) => Promise<import('./types').FtChannel | { error: string }>
+  ftAddChannel: (query: string, categoryIds: number[]) => Promise<import('./types').FtChannel | { error: string }>
+  ftRecordPlayback: (videoId: string, observation: { duration?: number | null; ended?: boolean }) => Promise<{ ok: boolean }>
+  ftMarkNotEmbeddable: (videoId: string) => Promise<{ ok: boolean }>
+  ftGetSponsorSegments: (videoId: string) => Promise<{ segments: Array<{ category: string; start: number; end: number }> }>
+  ftGetComments: (videoId: string, options?: { sortBy?: 'top' | 'new'; continuation?: string | null }) => Promise<{ comments: import('./types').FtComment[]; continuation: string | null; commentCount: number | null; disabled: boolean } | { error: string }>
+  onFeedUpdated: (callback: (payload: { added: number; channelIds: string[] }) => void) => () => void
 }
 
 declare global {

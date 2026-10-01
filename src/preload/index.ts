@@ -180,6 +180,7 @@ const api = {
   getStreamContinueWatching: () => ipcRenderer.invoke('get-stream-continue-watching'),
   getStreamHistory: (limit?: number) => ipcRenderer.invoke('get-stream-history', limit ?? 100),
   setNotifyNewEpisodes: (enabled: boolean) => ipcRenderer.invoke('set-notify-new-episodes', enabled),
+  setFocusTubeEnabled: (enabled: boolean) => ipcRenderer.invoke('set-focus-tube-enabled', enabled),
   followSeries: (input: { tmdb_id: number; title?: string; poster_path?: string | null; backdrop_path?: string | null; overview?: string | null; season?: number | null; episode?: number | null }) =>
     ipcRenderer.invoke('follow-series', input),
   unfollowSeries: (tmdbId: number) => ipcRenderer.invoke('unfollow-series', tmdbId),
@@ -193,6 +194,54 @@ const api = {
     const handler = (_event: any, settings: { launchFullscreen: boolean; rememberOnlineProgress: boolean; notifyNewEpisodes: boolean }) => callback(settings)
     ipcRenderer.on('app-settings-changed', handler)
     return () => ipcRenderer.removeListener('app-settings-changed', handler)
+  },
+  // ─── Focus Tube ────────────────────────────────────────────────────────────
+  ftListCategories: () => ipcRenderer.invoke('ft-list-categories'),
+  ftCreateCategory: (name: string, color?: string) => ipcRenderer.invoke('ft-create-category', { name, color }),
+  ftUpdateCategory: (id: number, name: string, color?: string) => ipcRenderer.invoke('ft-update-category', { id, name, color }),
+  ftDeleteCategory: (id: number) => ipcRenderer.invoke('ft-delete-category', id),
+  ftReorderCategories: (ids: number[]) => ipcRenderer.invoke('ft-reorder-categories', ids),
+  ftListChannels: (categoryId?: number | null) => ipcRenderer.invoke('ft-list-channels', categoryId ?? null),
+  ftUpsertChannel: (input: { channelId: string; title: string; handle?: string | null; avatarUrl?: string | null; url?: string | null }) =>
+    ipcRenderer.invoke('ft-upsert-channel', input),
+  ftDeleteChannel: (channelId: string) => ipcRenderer.invoke('ft-delete-channel', channelId),
+  ftSetChannelCategories: (channelId: string, categoryIds: number[]) =>
+    ipcRenderer.invoke('ft-set-channel-categories', { channelId, categoryIds }),
+  ftSetChannelHideShorts: (channelId: string, hideShorts: boolean) =>
+    ipcRenderer.invoke('ft-set-channel-hide-shorts', { channelId, hideShorts }),
+  ftGetFeed: (options?: {
+    categoryId?: number | null
+    includeSeen?: boolean
+    includeSavedOnly?: boolean
+    hideShorts?: boolean
+    limit?: number
+    search?: string | null
+  }) => ipcRenderer.invoke('ft-get-feed', options ?? {}),
+  ftGetVideo: (videoId: string) => ipcRenderer.invoke('ft-get-video', videoId),
+  ftSetVideoSeen: (videoId: string, seen: boolean) => ipcRenderer.invoke('ft-set-video-seen', { videoId, seen }),
+  ftMarkAllSeen: (categoryId: number | null) => ipcRenderer.invoke('ft-mark-all-seen', categoryId),
+  ftToggleSaved: (videoId: string, saved: boolean) => ipcRenderer.invoke('ft-toggle-saved', { videoId, saved }),
+  ftGetProgress: (videoId: string) => ipcRenderer.invoke('ft-get-progress', videoId),
+  ftUpdateProgress: (videoId: string, position: number) => ipcRenderer.invoke('ft-update-progress', { videoId, position }),
+  ftGetCategorySummary: (categoryId: number | null) => ipcRenderer.invoke('ft-get-category-summary', categoryId),
+  ftRefreshFeeds: (options?: { force?: boolean }) => ipcRenderer.invoke('ft-refresh-feeds', options ?? { force: true }),
+  ftResolveChannel: (query: string) => ipcRenderer.invoke('ft-resolve-channel', query),
+  ftSearchChannels: (query: string) => ipcRenderer.invoke('ft-search-channels', query),
+  ftRefreshChannelAvatars: () => ipcRenderer.invoke('ft-refresh-avatars'),
+  ftSubscribeChannel: (channel: { channelId: string; title: string; handle?: string | null; avatarUrl?: string | null; url?: string | null }, categoryIds: number[]) =>
+    ipcRenderer.invoke('ft-subscribe-channel', { channel, categoryIds }),
+  ftAddChannel: (query: string, categoryIds: number[]) => ipcRenderer.invoke('ft-add-channel', { query, categoryIds }),
+  ftRecordPlayback: (videoId: string, observation: { duration?: number | null; ended?: boolean }) =>
+    ipcRenderer.invoke('ft-record-playback', { videoId, ...observation }),
+  ftMarkNotEmbeddable: (videoId: string) => ipcRenderer.invoke('ft-mark-not-embeddable', videoId),
+  ftGetSponsorSegments: (videoId: string) =>
+    ipcRenderer.invoke('ft-get-sponsor-segments', videoId),
+  ftGetComments: (videoId: string, options?: { sortBy?: 'top' | 'new'; continuation?: string | null }) =>
+    ipcRenderer.invoke('ft-get-comments', { videoId, ...options }),
+  onFeedUpdated: (callback: (payload: { added: number; channelIds: string[] }) => void) => {
+    const handler = (_event: any, payload: { added: number; channelIds: string[] }) => callback(payload)
+    ipcRenderer.on('ft-feed-updated', handler)
+    return () => ipcRenderer.removeListener('ft-feed-updated', handler)
   },
   log: (message: string) => ipcRenderer.send('log-to-main', message),
 }

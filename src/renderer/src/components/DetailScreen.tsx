@@ -860,6 +860,32 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
     window.api.openWebPopup(`https://www.google.com/search?q=${query}`, `${searchTitle} — Search`)
   }
 
+  const handleOpenLetterboxd = () => {
+    const searchTitle = video.type === 'series' && video.series_name ? video.series_name : video.title
+    // Direct film page when we can: Letterboxd resolves /tmdb/<id> and
+    // /imdb/<id> straight to the film (no search-click needed).
+    // TV entries can't use the tmdb shortcut, so series fall back to search.
+    let url: string
+    if (video.type === 'movie' && video.tmdb_id) {
+      url = `https://letterboxd.com/tmdb/${video.tmdb_id}/`
+    } else if (video.imdb_id) {
+      url = `https://letterboxd.com/imdb/${video.imdb_id}/`
+    } else {
+      const query = encodeURIComponent(`${searchTitle} ${video.release_year || ''}`.trim())
+      // films-only tab — skips members/lists noise from generic /search/
+      url = `https://letterboxd.com/search/films/${query}/`
+    }
+    window.dispatchEvent(new CustomEvent('web-popup-opened'))
+    setIsWebPopupOpen(true)
+    const clearBlurOnFocus = () => {
+      window.dispatchEvent(new CustomEvent('web-popup-closed'))
+      setIsWebPopupOpen(false)
+      window.removeEventListener('focus', clearBlurOnFocus)
+    }
+    window.addEventListener('focus', clearBlurOnFocus)
+    window.api.openWebPopup(url, `${searchTitle} — Letterboxd`)
+  }
+
   const getSharePayload = () => {
     if (!video.tmdb_id || (video.type !== 'movie' && video.type !== 'series')) return null
 
@@ -1568,117 +1594,135 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
                 </div>
               )}
               
-              <div className="flex flex-wrap items-center gap-2 basis-full pt-1">
-                <button
-                  onClick={handleToggleWatchlist}
-                  disabled={watchlistBusy}
-                  className={`p-3.5 rounded-xl border transition-all hover:-translate-y-0.5 active:scale-95 glass-effect ${
-                    isWatchlist ? 'bg-primary/20 border-primary text-primary' : 'bg-white/5 border-white/10 text-white/40 hover:text-white'
-                  } disabled:opacity-50 disabled:cursor-wait`}
-                  title={isWatchlist ? 'Remove from Watchlist' : 'Add to Watchlist'}
-                >
-                  {watchlistBusy ? <Loader2 size={20} className="animate-spin" /> : <Bookmark size={20} fill={isWatchlist ? "currentColor" : "none"} />}
-                </button>
-                <button
-                  onClick={handleToggleFavorite}
-                  className={`p-3.5 rounded-xl border transition-all hover:-translate-y-0.5 active:scale-95 glass-effect ${
-                    isFavorite ? 'bg-red-500/20 border-red-500 text-red-500' : 'bg-white/5 border-white/10 text-white/40 hover:text-white'
-                  }`}
-                  title="Mark as Favorite"
-                >
-                  <Heart size={20} fill={isFavorite ? "currentColor" : "none"} />
-                </button>
-                {video.type === 'series' && video.tmdb_id && (
-                  <div className="relative">
+              <div className="flex flex-col gap-4 basis-full pt-1">
+                <div>
+                  <p className="text-[10px] font-black uppercase tracking-[0.18em] text-white/35 mb-2">My Library</p>
+                  <div className="flex flex-wrap items-center gap-2">
                     <button
-                      onClick={handleToggleFollow}
-                      disabled={followBusy}
+                      onClick={handleToggleWatchlist}
+                      disabled={watchlistBusy}
                       className={`p-3.5 rounded-xl border transition-all hover:-translate-y-0.5 active:scale-95 glass-effect ${
-                        isFollowing ? 'bg-sky-500/20 border-sky-400 text-sky-300' : 'bg-white/5 border-white/10 text-white/40 hover:text-white'
+                        isWatchlist ? 'bg-primary/20 border-primary text-primary' : 'bg-white/5 border-white/10 text-white/40 hover:text-white'
                       } disabled:opacity-50 disabled:cursor-wait`}
-                      title={isFollowing ? 'Following — click to unfollow new-episode alerts' : 'Follow for new-episode alerts'}
+                      title={isWatchlist ? 'Remove from Watchlist' : 'Add to Watchlist'}
                     >
-                      {followBusy ? <Loader2 size={20} className="animate-spin" /> : isFollowing ? <BellRing size={20} /> : <Bell size={20} />}
+                      {watchlistBusy ? <Loader2 size={20} className="animate-spin" /> : <Bookmark size={20} fill={isWatchlist ? "currentColor" : "none"} />}
                     </button>
-                    <FollowGuide />
-                  </div>
-                )}
-                {isLocalMedia && (
-                  <button
-                    onClick={handleShowInfo}
-                    className="flex h-12 w-12 items-center justify-center bg-white/5 border border-white/10 rounded-xl text-white/40 hover:text-white transition-all hover:-translate-y-0.5 active:scale-95 glass-effect"
-                    title="View Media Info"
-                  >
-                    <Info size={20} />
-                  </button>
-                )}
-                {video.tmdb_id && (video.type === 'movie' || video.type === 'series') && (
-                  <div className="relative">
                     <button
-                      onClick={handleShare}
-                      className="flex h-12 items-center gap-2 px-4 bg-white/5 border border-white/10 rounded-xl text-white/45 hover:text-white hover:border-cyan-400/30 hover:bg-cyan-400/10 transition-all hover:-translate-y-0.5 active:scale-95 glass-effect group"
-                      title="Share this title"
+                      onClick={handleToggleFavorite}
+                      className={`p-3.5 rounded-xl border transition-all hover:-translate-y-0.5 active:scale-95 glass-effect ${
+                        isFavorite ? 'bg-red-500/20 border-red-500 text-red-500' : 'bg-white/5 border-white/10 text-white/40 hover:text-white'
+                      }`}
+                      title="Mark as Favorite"
                     >
-                      {shareCopied ? <CheckCircle2 size={18} /> : <Share2 size={18} />}
-                      {/* <span className="text-[10px] font-black uppercase tracking-widest">{shareCopied ? 'Copied' : 'Share'}</span> */}
+                      <Heart size={20} fill={isFavorite ? "currentColor" : "none"} />
                     </button>
-                    <ShareHintGuide />
-                  </div>
-                )}
-                {isTmdbBacked && (
-                  <button
-                    onClick={handleOpenMoctale}
-                    className="flex h-12 items-center gap-2 px-4 bg-white/5 border border-white/10 rounded-xl text-white/45 hover:text-white hover:border-red-500/30 hover:bg-red-600/10 transition-all hover:-translate-y-0.5 active:scale-95 glass-effect"
-                    title="Open reviews on Moctale"
-                  >
-                    <ExternalLink size={18} />
-                    <span className="text-[10px] font-black uppercase tracking-widest">Moctale</span>
-                  </button>
-                )}
-                <button
-                  onClick={handleOpenGoogleSearch}
-                  className="flex h-12 w-12 items-center justify-center bg-white/5 border border-white/10 rounded-xl text-white/45 hover:text-white hover:border-blue-500/30 hover:bg-blue-600/10 transition-all hover:-translate-y-0.5 active:scale-95 glass-effect group"
-                  title="Search on Google"
-                >
-                  <svg viewBox="0 0 24 24" width="18" height="18" xmlns="http://www.w3.org/2000/svg" className="opacity-80 group-hover:opacity-100 transition-opacity">
-                    <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#4285F4"/>
-                    <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853"/>
-                    <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" fill="#FBBC05"/>
-                    <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335"/>
-                  </svg>
-                </button>
-                {!video.isExternal && (
-                  <>
-                    <button
-                      onClick={handleOpenFolder}
-                      className="flex h-12 w-12 items-center justify-center bg-white/5 border border-white/10 rounded-xl text-white/40 hover:text-white transition-all hover:-translate-y-0.5 active:scale-95 glass-effect"
-                      title="Open Folder"
-                    >
-                      <FolderOpen size={20} />
-                    </button>
-                    <div className="relative">
+                    {video.type === 'series' && video.tmdb_id && (
+                      <div className="relative">
+                        <button
+                          onClick={handleToggleFollow}
+                          disabled={followBusy}
+                          className={`p-3.5 rounded-xl border transition-all hover:-translate-y-0.5 active:scale-95 glass-effect ${
+                            isFollowing ? 'bg-sky-500/20 border-sky-400 text-sky-300' : 'bg-white/5 border-white/10 text-white/40 hover:text-white'
+                          } disabled:opacity-50 disabled:cursor-wait`}
+                          title={isFollowing ? 'Following — click to unfollow new-episode alerts' : 'Follow for new-episode alerts'}
+                        >
+                          {followBusy ? <Loader2 size={20} className="animate-spin" /> : isFollowing ? <BellRing size={20} /> : <Bell size={20} />}
+                        </button>
+                        <FollowGuide />
+                      </div>
+                    )}
+                    {isLocalMedia && (
                       <button
-                        onClick={handleDeleteFile}
-                        className="flex h-12 w-12 items-center justify-center bg-white/5 border border-white/10 rounded-xl text-white/40 hover:text-red-400 hover:border-red-500/30 hover:bg-red-500/10 transition-all hover:-translate-y-0.5 active:scale-95 glass-effect"
-                        title="Delete completely from disk"
+                        onClick={handleShowInfo}
+                        className="flex h-12 w-12 items-center justify-center bg-white/5 border border-white/10 rounded-xl text-white/40 hover:text-white transition-all hover:-translate-y-0.5 active:scale-95 glass-effect"
+                        title="View Media Info"
                       >
-                        <Trash2 size={20} />
+                        <Info size={20} />
                       </button>
-                      <DeleteHintGuide />
-                    </div>
-                  </>
-                )}
-                {isTmdbBacked && (
-                  <button
-                    onClick={handleOpenTrailer}
-                    className="flex h-12 items-center justify-center gap-2 px-4 bg-white/5 border border-white/10 rounded-xl text-white/45 hover:text-white hover:border-red-500/30 hover:bg-red-600/10 transition-all hover:-translate-y-0.5 active:scale-95 glass-effect"
-                    title={trailer ? 'Watch trailer' : 'Find trailer'}
-                  >
-                    <Clapperboard size={19} />
-                    <span className="text-[10px] font-black uppercase tracking-widest">Trailer</span>
-
-                  </button>
-                )}
+                    )}
+                    {video.tmdb_id && (video.type === 'movie' || video.type === 'series') && (
+                      <div className="relative">
+                        <button
+                          onClick={handleShare}
+                          className="flex h-12 items-center gap-2 px-4 bg-white/5 border border-white/10 rounded-xl text-white/45 hover:text-white hover:border-cyan-400/30 hover:bg-cyan-400/10 transition-all hover:-translate-y-0.5 active:scale-95 glass-effect group"
+                          title="Share this title"
+                        >
+                          {shareCopied ? <CheckCircle2 size={18} /> : <Share2 size={18} />}
+                        </button>
+                        <ShareHintGuide />
+                      </div>
+                    )}
+                    {!video.isExternal && (
+                      <>
+                        <button
+                          onClick={handleOpenFolder}
+                          className="flex h-12 w-12 items-center justify-center bg-white/5 border border-white/10 rounded-xl text-white/40 hover:text-white transition-all hover:-translate-y-0.5 active:scale-95 glass-effect"
+                          title="Open Folder"
+                        >
+                          <FolderOpen size={20} />
+                        </button>
+                        <div className="relative">
+                          <button
+                            onClick={handleDeleteFile}
+                            className="flex h-12 w-12 items-center justify-center bg-white/5 border border-white/10 rounded-xl text-white/40 hover:text-red-400 hover:border-red-500/30 hover:bg-red-500/10 transition-all hover:-translate-y-0.5 active:scale-95 glass-effect"
+                            title="Delete completely from disk"
+                          >
+                            <Trash2 size={20} />
+                          </button>
+                          <DeleteHintGuide />
+                        </div>
+                      </>
+                    )}
+                  </div>
+                </div>
+                <div>
+                  <p className="text-[10px] font-black uppercase tracking-[0.18em] text-white/35 mb-2">Research & Reviews</p>
+                  <div className="flex flex-wrap items-center gap-2">
+                    {isTmdbBacked && (
+                      <button
+                        onClick={handleOpenTrailer}
+                        className="flex h-12 items-center justify-center gap-2 px-4 bg-white/5 border border-white/10 rounded-xl text-white/45 hover:text-white hover:border-red-500/30 hover:bg-red-600/10 transition-all hover:-translate-y-0.5 active:scale-95 glass-effect"
+                        title={trailer ? 'Watch trailer' : 'Find trailer'}
+                      >
+                        <Clapperboard size={19} />
+                        <span className="text-[10px] font-black uppercase tracking-widest">Trailer</span>
+                      </button>
+                    )}
+                    {isTmdbBacked && (
+                      <button
+                        onClick={handleOpenMoctale}
+                        className="flex h-12 items-center gap-2 px-4 bg-white/5 border border-white/10 rounded-xl text-white/45 hover:text-white hover:border-red-500/30 hover:bg-red-600/10 transition-all hover:-translate-y-0.5 active:scale-95 glass-effect"
+                        title="Open reviews on Moctale"
+                      >
+                        <ExternalLink size={18} />
+                        <span className="text-[10px] font-black uppercase tracking-widest">Moctale</span>
+                      </button>
+                    )}
+                    <button
+                      onClick={handleOpenGoogleSearch}
+                      className="flex h-12 w-12 items-center justify-center bg-white/5 border border-white/10 rounded-xl text-white/45 hover:text-white hover:border-blue-500/30 hover:bg-blue-600/10 transition-all hover:-translate-y-0.5 active:scale-95 glass-effect group"
+                      title="Search on Google"
+                    >
+                      <svg viewBox="0 0 24 24" width="18" height="18" xmlns="http://www.w3.org/2000/svg" className="opacity-80 group-hover:opacity-100 transition-opacity">
+                        <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#4285F4"/>
+                        <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853"/>
+                        <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" fill="#FBBC05"/>
+                        <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335"/>
+                      </svg>
+                    </button>
+                    {isTmdbBacked && (
+                      <button
+                        onClick={handleOpenLetterboxd}
+                        className="flex h-12 items-center gap-2 px-4 bg-white/5 border border-white/10 rounded-xl text-white/45 hover:text-white hover:border-green-500/30 hover:bg-green-600/10 transition-all hover:-translate-y-0.5 active:scale-95 glass-effect"
+                        title="Open reviews on Letterboxd"
+                      >
+                        <Star size={18} />
+                        <span className="text-[10px] font-black uppercase tracking-widest">Letterboxd</span>
+                      </button>
+                    )}
+                  </div>
+                </div>
               </div>
             </div>
 

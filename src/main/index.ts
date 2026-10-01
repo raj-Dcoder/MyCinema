@@ -3,6 +3,9 @@ import { join } from 'path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import * as db from './db'
 import * as collections from './collections'
+import * as focusTube from './focusTube'
+import * as focusTubeFeed from './focusTubeFeed'
+import * as sponsorBlock from './sponsorBlock'
 import { scanFolder, getEmbeddedSubtitles, getEmbeddedAudio } from './scanner'
 import * as tmdb from './tmdb'
 import fs from 'fs'
@@ -383,6 +386,64 @@ ffmpeg.setFfprobePath(ffprobeExecPath)
 
 const YOUTUBE_EMBED_ORIGIN = 'https://mycinema.app'
 
+/**
+ * True for the sign-in / account-creation flows YouTube can raise from an
+ * embed. Anything that is just a video, channel or help page is a normal
+ * external link and still goes to the user's browser.
+ */
+function isYouTubeAuthUrl(url: string): boolean {
+  if (url.startsWith('https://accounts.google.com')) return true
+  if (!/^https?:\/\/([\w-]+\.)*(youtube\.com|youtube-nocookie\.com)\//i.test(url)) return false
+  return /\/(accounts|signin|login|serviceLogin|o\/oauth|get_account_info)/i.test(url)
+}
+
+/**
+ * In-app YouTube sign-in. Shares the default session (no custom partition) so
+ * the cookies it sets are the ones the embed player will read, and deliberately
+ * runs with no preload and no node integration since it renders a Google page.
+ */
+function openYouTubeAuthWindow(parent: BrowserWindow, url: string): void {
+  try {
+    const auth = new BrowserWindow({
+      parent,
+      modal: false,
+      show: true,
+      width: 520,
+      height: 720,
+      title: 'Sign in to YouTube',
+      autoHideMenuBar: true,
+      backgroundColor: '#0f0f0f',
+      webPreferences: {
+        nodeIntegration: false,
+        contextIsolation: true,
+        sandbox: true,
+        // No preload: this window renders a Google account page, so it must
+        // never see the MyCinema IPC bridge.
+      },
+    })
+
+    // Keep any secondary popups (2FA, recovery) inside the app too, and never
+    // let this window spawn arbitrary children.
+    auth.webContents.setWindowOpenHandler(({ url: childUrl }) => {
+      if (/^https:\/\//i.test(childUrl)) shell.openExternal(childUrl)
+      return { action: 'deny' }
+    })
+    auth.webContents.on('will-navigate', (event, target) => {
+      // Allow the auth flow to move between Google/YouTube pages only.
+      if (!/^https:\/\/([\w-]+\.)*(youtube\.com|youtube-nocookie\.com|google\.com|accounts\.google\.com|gstatic\.com)\//i.test(target)) {
+        event.preventDefault()
+        shell.openExternal(target)
+      }
+    })
+
+    auth.loadURL(url)
+    auth.on('closed', () => { /* session cookies persist on their own */ })
+  } catch (err: any) {
+    console.error('[YouTube] Failed to open in-app sign-in window:', err?.message)
+    shell.openExternal(url)
+  }
+}
+
 function setupYoutubeEmbedHeaders(): void {
   const filter = {
     urls: [
@@ -486,13 +547,19 @@ type AppSettings = {
   // Max simultaneous persistent downloads. 0 (or <= 0) = unlimited.
   // Extras wait with status 'queued' and auto-start oldest-first.
   maxConcurrentDownloads: number
+  // Focus Tube visibility. Turning this off hides the tab and stops all of its
+  // background work, but never deletes anything: categories, subscriptions,
+  // watch progress and seen state all stay in the database and come straight
+  // back when it is switched on again.
+  focusTubeEnabled: boolean
 }
 
 const defaultAppSettings: AppSettings = {
   launchFullscreen: true,
   rememberOnlineProgress: true,
   notifyNewEpisodes: true,
-  maxConcurrentDownloads: 0
+  maxConcurrentDownloads: 0,
+  focusTubeEnabled: true
 }
 
 function getAppSettingsPath() {
@@ -511,6 +578,8 @@ function loadAppSettings(): AppSettings {
 function saveAppSettings(settings: AppSettings) {
   fs.writeFileSync(getAppSettingsPath(), JSON.stringify(settings))
 }
+
+let thirdPartyCookieNoticeShown = false
 
 function createWindow(): void {
   const state = loadWindowState()
@@ -582,6 +651,15 @@ function createWindow(): void {
   mainWindow.webContents.setWindowOpenHandler((details) => {
     // Only allow safe external URLs — block javascript:, file:, data: etc.
     if (details.url.startsWith('https://') || details.url.startsWith('http://')) {
+      // The YouTube embed raises a sign-in flow when it wants to verify the
+      // viewer. Handing that to the external browser is pointless: a login
+      // completed there cannot satisfy the embed inside this app, so the video
+      // would stay blocked. Run it in an in-app window on the default session
+      // instead, so the resulting cookies land in the session the embed uses.
+      if (isYouTubeAuthUrl(details.url)) {
+        openYouTubeAuthWindow(mainWindow, details.url)
+        return { action: 'deny' }
+      }
       shell.openExternal(details.url)
     } else if (details.url === 'about:blank') {
       // Document Picture-in-Picture (video mini-player) opens an about:blank
@@ -600,6 +678,20 @@ function createWindow(): void {
   // errors are visible without opening DevTools.
   mainWindow.webContents.on('console-message', (_event, level, message, line, sourceId) => {
     if (level < 1) return
+    // Electron refuses to store third-party cookies and exposes no API to
+    // allow them (electron/electron#39021), so the YouTube embed logs one
+    // "Third-party cookie will be blocked" notice per cookie it attempts.
+    // This is expected platform behaviour, not an app fault: the embed lives in
+    // a cross-site context, playback is unaffected (verified end-to-end), and
+    // only YouTube's ad/analytics/consent cookies are dropped. Deduplicated to
+    // a single line so it cannot flood the terminal. Every other message,
+    // including real errors, still passes through untouched.
+    if (/third-party cookie will be blocked/i.test(String(message))) {
+      if (thirdPartyCookieNoticeShown) return
+      thirdPartyCookieNoticeShown = true
+      console.log('[Renderer] Third-party cookie notices suppressed (Electron blocks 3p cookies; playback is unaffected)')
+      return
+    }
     const tag = sourceId ? String(sourceId).split('/').pop() : 'renderer'
     console.log(`[Renderer:${tag}:${line}] ${message}`)
   })
@@ -1672,6 +1764,10 @@ const showAppSaveDialog = (options: any) => {
   return parent ? dialog.showSaveDialog(parent, options) : dialog.showSaveDialog(options)
 }
 
+// Focus Tube poll cadence. Hoisted so before-quit can clear it; created in
+// app.whenReady() once the database is up.
+let focusTubePollTimer: NodeJS.Timeout | null = null
+
 app.whenReady().then(() => {
   // Purge any stale temporary stream folders left over from previous ungraceful exits
   purgeStaleTempStreamFolder()
@@ -1683,6 +1779,7 @@ app.whenReady().then(() => {
   setupYoutubeEmbedHeaders()
   db.initDb()
   collections.initCollections()
+  focusTube.initFocusTube()
   try {
     const { migrated } = collections.migrateWatchlistCategoriesToCollections()
     if (migrated.length > 0) console.log(`[Collections] Migrated watchlist lists to collections: ${migrated.join(', ')}`)
@@ -1711,6 +1808,11 @@ app.whenReady().then(() => {
 
   createWindow()
 
+  // Focus Tube polls only while the user has the feature switched on. Its tables
+  // are always created (see focusTube.initFocusTube) so that turning the feature
+  // off and on again never loses categories, subscriptions or watch progress.
+  startFocusTubePolling()
+
   app.on('activate', function () {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()
   })
@@ -1719,6 +1821,7 @@ app.whenReady().then(() => {
 app.on('before-quit', () => {
   folderWatchers.forEach(w => w.close())
   folderWatchers.clear()
+  stopFocusTubePolling()
   // Gracefully destroy all active torrents
   torrentProgressIntervals.forEach(interval => clearInterval(interval))
   torrentProgressIntervals.clear()
@@ -1921,6 +2024,27 @@ ipcMain.handle('open-web-popup', (event, url: string, title?: string) => {
   popup.loadURL(url)
   popup.once('ready-to-show', () => popup.show())
   return true
+})
+
+ipcMain.handle('set-focus-tube-enabled', (event, enabled: boolean) => {
+  const settings = { ...loadAppSettings(), focusTubeEnabled: enabled !== false }
+  saveAppSettings(settings)
+
+  // Start or stop the background polling to match the new state. No user data
+  // is touched either way — the tables stay exactly as they are.
+  if (settings.focusTubeEnabled) {
+    console.log('[FocusTube] enabled — background polling started')
+    startFocusTubePolling()
+  } else {
+    console.log('[FocusTube] disabled — tab hidden, background polling stopped (saved data kept)')
+    stopFocusTubePolling()
+  }
+
+  BrowserWindow.getAllWindows().forEach(window => {
+    window.webContents.send('app-settings-changed', settings)
+  })
+
+  return settings
 })
 
 ipcMain.handle('get-app-settings', () => {
@@ -2315,12 +2439,20 @@ ipcMain.handle('export-user-backup', async () => {
       return { exported: false, canceled: true }
     }
 
+    // Focus Tube is included even while the feature is switched off: turning it
+    // off hides the tab and stops polling, but the user's categories,
+    // subscriptions and watch progress are theirs and must survive a backup.
+    // db.ts cannot import focusTube (focusTube already imports db), so the
+    // snapshot is attached here where both are in scope.
     const backup = {
       app: 'MyCinema',
       format: BACKUP_FORMAT,
       version: BACKUP_VERSION,
       exportedAt: new Date().toISOString(),
-      data: db.getBackupData()
+      data: {
+        ...db.getBackupData(),
+        focusTube: focusTube.getBackupData()
+      }
     }
 
     fs.writeFileSync(result.filePath, JSON.stringify(backup, null, 2), 'utf8')
@@ -2428,6 +2560,18 @@ ipcMain.handle('import-user-backup', async (): Promise<BackupImportSummary | { i
       if (!item || typeof item.tmdb_id !== 'number' || !item.title) continue
       const restoreResult = db.restoreFollowedSeriesRow(item)
       summary.followedSeriesRestored += restoreResult.changes > 0 ? 1 : 0
+    }
+
+    // Focus Tube, when the backup contains it. Restored regardless of whether
+    // the feature is currently switched on, so a restore never quietly drops it.
+    try {
+      const focusTubeData = (backup as any)?.data?.focusTube
+      if (focusTubeData && Array.isArray(focusTubeData.categories)) {
+        focusTube.restoreBackupData(focusTubeData)
+        console.log(`[Backup] Restored Focus Tube: ${focusTubeData.categories.length} categories, ${focusTubeData.channels?.length || 0} channels`)
+      }
+    } catch (err) {
+      console.error('[Backup] Focus Tube restore failed:', err)
     }
 
     // Legacy backups may carry watchlist categories — absorb them into
@@ -6908,5 +7052,271 @@ ipcMain.handle('download-opensubtitle', async (_, params: {
   } catch (err: any) {
     console.error('[OpenSubtitles] Download error:', err.message)
     return { error: err.message }
+  }
+})
+
+// ─── Focus Tube: user-controlled YouTube ──────────────────────────────────────
+// Categories + subscribed channels, merged latest-first. Playback uses the
+// official YouTube embed; no direct stream extraction anywhere in this feature.
+
+function ftGuard<T>(label: string, fn: () => T): T | { error: string } {
+  try {
+    return fn()
+  } catch (err: any) {
+    console.error(`[FocusTube] ${label} failed:`, err?.message)
+    return { error: err?.message || 'Unknown error' }
+  }
+}
+
+ipcMain.handle('ft-list-categories', () => ftGuard('listCategories', () => focusTube.listCategories()))
+
+ipcMain.handle('ft-create-category', (_e, { name, color }: { name: string; color?: string }) =>
+  ftGuard('createCategory', () => focusTube.createCategory(name, color)))
+
+ipcMain.handle('ft-update-category', (_e, { id, name, color }: { id: number; name: string; color?: string }) =>
+  ftGuard('updateCategory', () => focusTube.renameCategory(id, name, color)))
+
+ipcMain.handle('ft-delete-category', (_e, id: number) =>
+  ftGuard('deleteCategory', () => focusTube.deleteCategory(id)))
+
+ipcMain.handle('ft-reorder-categories', (_e, ids: number[]) =>
+  ftGuard('reorderCategories', () => focusTube.reorderCategories(ids)))
+
+ipcMain.handle('ft-list-channels', (_e, categoryId?: number | null) =>
+  ftGuard('listChannels', () => focusTube.listChannels(categoryId ?? null)))
+
+ipcMain.handle('ft-upsert-channel', (_e, input: { channelId: string; title: string; handle?: string | null; avatarUrl?: string | null; url?: string | null }) =>
+  ftGuard('upsertChannel', () => focusTube.upsertChannel(input)))
+
+ipcMain.handle('ft-delete-channel', (_e, channelId: string) =>
+  ftGuard('deleteChannel', () => focusTube.deleteChannel(channelId)))
+
+ipcMain.handle('ft-set-channel-categories', (_e, { channelId, categoryIds }: { channelId: string; categoryIds: number[] }) =>
+  ftGuard('setChannelCategories', () => focusTube.setChannelCategories(channelId, categoryIds)))
+
+ipcMain.handle('ft-set-channel-hide-shorts', (_e, { channelId, hideShorts }: { channelId: string; hideShorts: boolean }) =>
+  ftGuard('setChannelHideShorts', () => focusTube.setChannelHideShorts(channelId, hideShorts)))
+
+ipcMain.handle('ft-get-feed', (_e, options?: Partial<{
+  categoryId: number | null
+  includeSeen: boolean
+  includeSavedOnly: boolean
+  hideShorts: boolean
+  limit: number
+  search: string | null
+}>) => ftGuard('getFeed', () => focusTube.getFeed({
+  categoryId: options?.categoryId ?? null,
+  includeSeen: options?.includeSeen ?? false,
+  includeSavedOnly: options?.includeSavedOnly ?? false,
+  hideShorts: options?.hideShorts ?? false,
+  limit: options?.limit ?? 60,
+  search: options?.search ?? null,
+})))
+
+ipcMain.handle('ft-get-video', (_e, videoId: string) =>
+  ftGuard('getVideo', () => focusTube.getVideo(videoId)))
+
+ipcMain.handle('ft-set-video-seen', (_e, { videoId, seen }: { videoId: string; seen: boolean }) =>
+  ftGuard('setVideoSeen', () => focusTube.setVideoSeen(videoId, seen)))
+
+ipcMain.handle('ft-mark-all-seen', (_e, categoryId: number | null) =>
+  ftGuard('markAllSeen', () => ({ changed: focusTube.markAllSeen(categoryId) })))
+
+ipcMain.handle('ft-toggle-saved', (_e, { videoId, saved }: { videoId: string; saved: boolean }) =>
+  ftGuard('toggleSaved', () => focusTube.toggleVideoSaved(videoId, saved)))
+
+ipcMain.handle('ft-get-progress', (_e, videoId: string) =>
+  ftGuard('getProgress', () => ({ position: focusTube.getVideoProgress(videoId) })))
+
+ipcMain.handle('ft-update-progress', (_e, { videoId, position }: { videoId: string; position: number }) =>
+  ftGuard('updateProgress', () => focusTube.updateVideoProgress(videoId, position)))
+
+ipcMain.handle('ft-get-category-summary', (_e, categoryId: number | null) =>
+  ftGuard('getCategorySummary', () => ({
+    unseen: focusTube.getUnseenCount(categoryId),
+    latestPublished: focusTube.getLatestPublished(categoryId),
+  })))
+
+// ─── Focus Tube: network ──────────────────────────────────────────────────────
+
+function broadcastFeedUpdated(payload: { added: number; channelIds: string[] }): void {
+  for (const window of BrowserWindow.getAllWindows()) {
+    if (window.isDestroyed()) continue
+    window.webContents.send('ft-feed-updated', payload)
+  }
+}
+
+let ftPollInFlight = false
+let ftPollStartTimer: NodeJS.Timeout | null = null
+
+function isFocusTubeEnabled(): boolean {
+  return loadAppSettings().focusTubeEnabled !== false
+}
+
+async function runFocusTubePoll(force: boolean): Promise<{ added: number; channelIds: string[]; failed: string[] }> {
+  // Defence in depth: the tab cannot be opened while the feature is off, but
+  // this also guarantees no network request can escape while it is disabled,
+  // whatever calls it.
+  if (!isFocusTubeEnabled()) return { added: 0, channelIds: [], failed: [] }
+  if (ftPollInFlight) return { added: 0, channelIds: [], failed: [] }
+  ftPollInFlight = true
+  try {
+    const result = await focusTubeFeed.pollFeeds({ force })
+    if (result.added > 0) broadcastFeedUpdated({ added: result.added, channelIds: result.channelIds })
+    return result
+  } finally {
+    ftPollInFlight = false
+  }
+}
+
+/** Starts the recurring poll plus the delayed first pass. No-op when disabled. */
+function startFocusTubePolling(): void {
+  if (!isFocusTubeEnabled()) return
+  if (focusTubePollTimer) return
+  // Delayed past the app's initial TMDB burst: the feed request that lands
+  // immediately after a burst of other traffic is the one YouTube's edge tends
+  // to reject once, which would leave the stack empty until the next cycle.
+  ftPollStartTimer = setTimeout(() => {
+    ftPollStartTimer = null
+    runFocusTubePoll(false).catch((err) => console.warn('[FocusTube] Startup poll failed:', err))
+  }, 9000)
+  focusTubePollTimer = setInterval(() => {
+    runFocusTubePoll(false).catch((err) => console.warn('[FocusTube] Scheduled poll failed:', err))
+  }, focusTubeFeed.FEED_MIN_POLL_MINUTES * 60_000)
+  focusTubePollTimer.unref?.()
+}
+
+/** Stops all Focus Tube background work. Touches no user data. */
+function stopFocusTubePolling(): void {
+  if (ftPollStartTimer) {
+    clearTimeout(ftPollStartTimer)
+    ftPollStartTimer = null
+  }
+  if (focusTubePollTimer) {
+    clearInterval(focusTubePollTimer)
+    focusTubePollTimer = null
+  }
+}
+
+ipcMain.handle('ft-refresh-feeds', async (_e, options?: { force?: boolean }) => {
+  console.log(`[FocusTube] Manual refresh (force=${Boolean(options?.force)})`)
+  return await runFocusTubePoll(options?.force ?? true)
+})
+
+ipcMain.handle('ft-resolve-channel', async (_e, query: string) =>
+  ftGuard('resolveChannel', () => focusTubeFeed.resolveChannel(query)))
+
+ipcMain.handle('ft-search-channels', async (_e, query: string) => {
+  try {
+    return await focusTubeFeed.searchChannels(query)
+  } catch (err: any) {
+    console.error('[FocusTube] Search channels failed:', err?.message)
+    return { error: err?.message || 'Search failed' }
+  }
+})
+
+// Backfills logos for previously-subscribed channels stored without one.
+ipcMain.handle('ft-refresh-avatars', async () => {
+  try {
+    return await focusTubeFeed.refreshMissingAvatars()
+  } catch (err: any) {
+    console.error('[FocusTube] Avatar refresh failed:', err?.message)
+    return { error: err?.message || 'Avatar refresh failed' }
+  }
+})
+
+/** Shared subscribe flow: store the channel, file it, backfill its backlog. */
+async function subscribeResolvedChannel(
+  resolved: { channelId: string; title: string; handle?: string | null; avatarUrl?: string | null; url?: string | null },
+  categoryIds: number[],
+) {
+  const channel = focusTube.upsertChannel(resolved)
+  if (Array.isArray(categoryIds) && categoryIds.length) {
+    focusTube.setChannelCategories(channel.channelId, categoryIds)
+  }
+  // Pull this channel's backlog immediately so the stack is not empty.
+  try {
+    const feed = await focusTubeFeed.fetchChannelFeed(channel.channelId)
+    const upsert = focusTube.upsertFeedEntries(channel.channelId, feed.entries)
+    focusTube.setChannelLastFetched(channel.channelId, null)
+    try {
+      focusTube.setVideosShort(await focusTubeFeed.fetchChannelShorts(channel.channelId))
+    } catch (shortsErr: any) {
+      console.warn(`[FocusTube] Shorts tab failed for ${channel.title}: ${shortsErr?.message}`)
+    }
+    broadcastFeedUpdated({ added: upsert.inserted, channelIds: [channel.channelId] })
+  } catch (err: any) {
+    // The channel is subscribed; its feed will be retried on the next poll.
+    console.warn(`[FocusTube] Could not backfill ${channel.title}: ${err?.message}`)
+  }
+  return focusTube.getChannel(channel.channelId)
+}
+
+ipcMain.handle('ft-add-channel', async (_e, input: { query: string; categoryIds: number[] }) => {
+  try {
+    const resolved = await focusTubeFeed.resolveChannel(input.query)
+    return await subscribeResolvedChannel(resolved, input.categoryIds)
+  } catch (err: any) {
+    console.error('[FocusTube] Add channel failed:', err?.message)
+    return { error: err?.message || 'Could not add that channel' }
+  }
+})
+
+// Subscribes directly from a search result (avatar/handle already known — no
+// re-resolve, so the search-list logo is what gets stored).
+ipcMain.handle('ft-subscribe-channel', async (_e, input: {
+  channel: { channelId: string; title: string; handle?: string | null; avatarUrl?: string | null; url?: string | null }
+  categoryIds: number[]
+}) => {
+  try {
+    const picked = input.channel
+    if (!picked || !picked.channelId) throw new Error('Pick a channel from the results first')
+    return await subscribeResolvedChannel(
+      {
+        channelId: picked.channelId,
+        title: picked.title || picked.channelId,
+        handle: picked.handle ?? null,
+        avatarUrl: picked.avatarUrl ?? null,
+        url: picked.url ?? `https://www.youtube.com/channel/${picked.channelId}`,
+      },
+      input.categoryIds,
+    )
+  } catch (err: any) {
+    console.error('[FocusTube] Subscribe channel failed:', err?.message)
+    return { error: err?.message || 'Could not subscribe to that channel' }
+  }
+})
+
+ipcMain.handle('ft-record-playback', (_e, input: { videoId: string; duration?: number | null; ended?: boolean }) =>
+  ftGuard('recordPlayback', () => {
+    focusTubeFeed.recordPlaybackObservation(input.videoId, input)
+    return { ok: true }
+  }))
+
+ipcMain.handle('ft-mark-not-embeddable', (_e, videoId: string) =>
+  ftGuard('markNotEmbeddable', () => {
+    focusTubeFeed.markNotEmbeddable(videoId)
+    return { ok: true }
+  }))
+
+ipcMain.handle('ft-get-sponsor-segments', async (_e, videoId: string) => {
+  try {
+    const segments = await sponsorBlock.getSponsorSegments(videoId)
+    return { segments }
+  } catch (err: any) {
+    console.warn('[FocusTube] SponsorBlock lookup failed:', err?.message)
+    return { segments: [] }
+  }
+})
+
+ipcMain.handle('ft-get-comments', async (_e, input: { videoId: string; sortBy?: 'top' | 'new'; continuation?: string | null }) => {
+  try {
+    const videoId = String(input?.videoId || '')
+    const sortBy = input?.sortBy === 'new' ? 'new' : 'top'
+    const continuation = typeof input?.continuation === 'string' && input.continuation ? input.continuation : null
+    return await focusTubeFeed.fetchVideoComments(videoId, { sortBy, continuation })
+  } catch (err: any) {
+    console.warn('[FocusTube] Comments lookup failed:', err?.message)
+    return { error: err?.message || 'Could not load comments' }
   }
 })

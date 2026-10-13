@@ -1,21 +1,10 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Check, CheckCheck, Compass, Eye, EyeOff, GripVertical, Layers, Plus, Radio, Search, SlidersHorizontal, Sparkles, Users, X } from 'lucide-react'
+import { Check, CheckCheck, Compass, Eye, EyeOff, GripVertical, Layers, Plus, RefreshCw, Search, SlidersHorizontal, Sparkles, Users, X } from 'lucide-react'
 import type { FtCategory, FtVideo } from '../types'
 import FocusTubeCard from '../components/focus/FocusTubeCard'
 import FocusTubePlayer from '../components/focus/FocusTubePlayer'
 import ChannelManager from '../components/focus/ChannelManager'
-import { formatAgo, formatPublishedExact } from '../utils/focusTube'
-
-const CATEGORY_DOT: Record<string, string> = {
-  red: 'bg-red-500',
-  blue: 'bg-blue-500',
-  emerald: 'bg-emerald-500',
-  amber: 'bg-amber-500',
-  violet: 'bg-violet-500',
-  cyan: 'bg-cyan-500',
-  rose: 'bg-rose-500',
-  lime: 'bg-lime-500',
-}
+import { categoryDot, formatAgo, formatPublishedExact } from '../utils/focusTube'
 
 const HIDE_SHORTS_KEY = 'mycinema_ft_hide_shorts'
 const AUTOPLAY_NEXT_KEY = 'mycinema_ft_autoplay_next'
@@ -499,10 +488,12 @@ const FocusTube: React.FC = () => {
     void window.api.ftUpdateProgress(videoId, position)
   }, [])
 
-  const handleToggleSaved = useCallback(async (video: FtVideo) => {
-    await window.api.ftToggleSaved(video.videoId, !video.saved)
+  const handleToggleSeen = useCallback(async (video: FtVideo) => {
+    progressCacheRef.current.delete(video.videoId)
+    await window.api.ftSetVideoSeen(video.videoId, !video.seen)
+    await loadCategories()
     await loadFeed(activeCategoryId)
-  }, [activeCategoryId, loadFeed])
+  }, [activeCategoryId, loadCategories, loadFeed])
 
   const handleObserved = useCallback((videoId: string, observation: { duration?: number | null; ended?: boolean }) => {
     void window.api.ftRecordPlayback(videoId, observation).catch(() => {})
@@ -525,70 +516,111 @@ const FocusTube: React.FC = () => {
 
   return (
     <div className="space-y-8">
-      <div className="flex flex-wrap items-center justify-between gap-4">
-        <div className="flex items-center gap-4">
-          <div className="p-4 bg-primary/10 rounded-2xl text-primary">
-            <Compass size={32} />
-          </div>
-          <div>
-            <h2 className="text-4xl font-black text-white tracking-tighter uppercase italic flex items-center gap-3">Focus Tube
-              <span
-                title="Focus Tube is in beta — some things may still change"
-                className="not-italic inline-flex items-center rounded border border-amber-300/20 bg-amber-400/10 px-1.5 py-[3px] text-[9px] font-bold uppercase leading-none tracking-[0.1em] text-amber-200/90"
-              >
-                Beta
-              </span>
-            </h2>
-            <p className="text-white/30 font-bold text-sm tracking-wide">
-              {unseenTotal > 0
-                ? `${unseenTotal} new video${unseenTotal === 1 ? '' : 's'} from your channels`
-                : 'You are all caught up'}
-            </p>
-          </div>
-        </div>
+      <header className="relative overflow-hidden rounded-3xl border border-white/[0.07] bg-gradient-to-b from-white/[0.06] to-white/[0.015] px-6 py-6">
+        <div
+          aria-hidden
+          className="pointer-events-none absolute -right-16 -top-24 h-64 w-64 rounded-full bg-primary/20 blur-[90px]"
+        />
+        <div
+          aria-hidden
+          className="pointer-events-none absolute -left-20 bottom-[-6rem] h-56 w-56 rounded-full bg-primary/10 blur-[80px]"
+        />
 
-        <div className="flex items-center gap-2">
-          <div className="relative">
-            <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-white/30" />
-            <input
-              value={search}
-              onChange={(event) => setSearch(event.target.value)}
-              onKeyDown={(event) => { if (event.key === 'Enter') void runSearch() }}
-              placeholder="Search your channels"
-              className="w-52 rounded-lg border border-white/10 bg-white/5 py-2 pl-8 pr-3 text-xs font-semibold text-white placeholder:text-white/25 focus:border-primary/50 focus:outline-none"
-            />
+        <div className="relative flex flex-wrap items-start justify-between gap-x-6 gap-y-5">
+          <div className="flex items-center gap-4">
+            <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl border border-primary/25 bg-gradient-to-br from-primary/30 to-primary/5 text-primary shadow-[0_10px_30px_-12px_rgba(229,9,20,0.8)]">
+              <Compass size={28} strokeWidth={2.25} />
+            </div>
+            <div className="min-w-0">
+              <h2 className="flex flex-wrap items-center gap-2.5 text-3xl font-black uppercase italic leading-none tracking-tighter text-white sm:text-4xl">
+                Focus Tube
+                <span
+                  title="Focus Tube is in beta — some things may still change"
+                  className="not-italic inline-flex items-center rounded-md border border-amber-300/20 bg-amber-400/10 px-2 py-1 text-[9px] font-bold uppercase leading-none tracking-[0.14em] text-amber-200/90"
+                >
+                  Beta
+                </span>
+              </h2>
+              <p className="mt-2 text-sm font-semibold tracking-wide text-white/40">
+                {unseenTotal > 0 ? (
+                  <>
+                    <span className="font-black text-primary">{unseenTotal}</span> new video
+                    {unseenTotal === 1 ? '' : 's'} from your channels
+                  </>
+                ) : (
+                  'You are all caught up'
+                )}
+              </p>
+            </div>
           </div>
-          <button
-            type="button"
-            data-tour="focustube-channels"
-            onClick={() => setManaging(true)}
-            className="inline-flex items-center gap-1.5 rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-xs font-black uppercase tracking-widest text-white/60 hover:bg-white/10 hover:text-white"
-          >
-            <SlidersHorizontal size={13} /> Channels{totalChannels > 0 ? ` (${totalChannels})` : ''}
-          </button>
-          <button
-            type="button"
-            onClick={() => void refresh()}
-            disabled={refreshing}
-            className="rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-xs font-black uppercase tracking-widest text-white/60 hover:bg-white/10 hover:text-white disabled:opacity-40"
-          >
-            {refreshing ? '...' : 'Refresh'}
-          </button>
+
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="relative">
+              <Search size={15} className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-white/30" />
+              <input
+                value={search}
+                onChange={(event) => setSearch(event.target.value)}
+                onKeyDown={(event) => { if (event.key === 'Enter') void runSearch() }}
+                placeholder="Search your channels"
+                aria-label="Search videos in your subscriptions"
+                className="h-11 w-56 rounded-xl border border-white/10 bg-black/30 pl-10 pr-9 text-sm font-semibold text-white placeholder:text-white/25 transition-colors hover:border-white/20 focus:border-primary/60 focus:bg-black/40 focus:outline-none focus:ring-4 focus:ring-primary/10"
+              />
+              {search && (
+                <button
+                  type="button"
+                  onClick={() => { setSearch(''); void runSearch() }}
+                  aria-label="Clear search"
+                  className="absolute right-2.5 top-1/2 -translate-y-1/2 rounded-md p-1 text-white/30 transition-colors hover:bg-white/10 hover:text-white"
+                >
+                  <X size={14} />
+                </button>
+              )}
+            </div>
+
+            <button
+              type="button"
+              data-tour="focustube-channels"
+              onClick={() => setManaging(true)}
+              className="inline-flex h-11 items-center gap-2 rounded-xl border border-white/10 bg-white/5 px-4 text-xs font-black uppercase tracking-widest text-white/70 transition-colors hover:border-white/20 hover:bg-white/10 hover:text-white"
+            >
+              <SlidersHorizontal size={14} /> Channels
+              {totalChannels > 0 && (
+                <span className="rounded-md bg-white/10 px-1.5 py-0.5 text-[10px] tabular-nums text-white/70">
+                  {totalChannels}
+                </span>
+              )}
+            </button>
+
+            <button
+              type="button"
+              onClick={() => void refresh()}
+              disabled={refreshing}
+              aria-label="Refresh subscriptions"
+              title="Pull the latest uploads"
+              className="inline-flex h-11 items-center gap-2 rounded-xl border border-white/10 bg-white/5 px-4 text-xs font-black uppercase tracking-widest text-white/70 transition-colors hover:border-white/20 hover:bg-white/10 hover:text-white disabled:opacity-40"
+            >
+              <RefreshCw size={14} className={refreshing ? 'animate-spin' : undefined} />
+              {refreshing ? 'Syncing' : 'Refresh'}
+            </button>
+          </div>
         </div>
-      </div>
+      </header>
 
       {/* Category pills — the core control. */}
-      <div data-tour="focustube-categories" className="flex flex-wrap items-center gap-2">
+      <div
+        data-tour="focustube-categories"
+        className="flex flex-wrap items-center gap-2 rounded-2xl border border-white/[0.07] bg-white/[0.02] p-2"
+      >
         <button
           type="button"
           onClick={() => void selectCategory(null)}
-          className={`inline-flex items-center gap-2 rounded-full border px-4 py-2 text-xs font-black uppercase tracking-widest transition-colors ${
+          className={`inline-flex items-center gap-2 rounded-xl border px-3.5 py-2 text-xs font-black uppercase tracking-widest transition-all ${
             activeCategoryId === null
-              ? 'border-primary bg-primary/15 text-white'
-              : 'border-white/10 bg-white/5 text-white/50 hover:bg-white/10 hover:text-white'
+              ? 'border-primary/60 bg-primary/20 text-white shadow-[0_6px_20px_-8px_rgba(229,9,20,0.9)]'
+              : 'border-transparent bg-transparent text-white/45 hover:bg-white/[0.06] hover:text-white'
           }`}
         >
-          <Layers size={13} /> All
+          <Layers size={14} /> All
         </button>
 
         {categories.map((category) => {
@@ -601,7 +633,7 @@ const FocusTube: React.FC = () => {
             return (
               <div
                 key={category.id}
-                className="inline-flex items-center gap-1 rounded-full border border-primary/60 bg-primary/10 py-1.5 pl-3 pr-1.5"
+                className="inline-flex items-center gap-1 rounded-xl border border-primary/60 bg-primary/15 py-1.5 pl-3 pr-1.5"
               >
                 <input
                   autoFocus
@@ -615,7 +647,7 @@ const FocusTube: React.FC = () => {
                     if (editingId === category.id) void handleRenameCategory(category.id, editName)
                   }}
                   onClick={(event) => event.stopPropagation()}
-                  className="w-28 bg-transparent text-xs font-black uppercase tracking-widest text-white focus:outline-none"
+                  className="w-32 bg-transparent text-xs font-black uppercase tracking-widest text-white focus:outline-none"
                   aria-label={`Rename ${category.name}`}
                 />
                 <button
@@ -648,7 +680,7 @@ const FocusTube: React.FC = () => {
             return (
               <div
                 key={category.id}
-                className="inline-flex items-center gap-2 rounded-full border border-red-500/70 bg-red-500/10 px-3 py-2"
+                className="inline-flex items-center gap-2 rounded-xl border border-red-500/50 bg-red-500/10 px-3 py-2"
                 onKeyDown={(event) => {
                   if (event.key === 'Escape') setConfirmDeleteId(null)
                 }}
@@ -724,25 +756,33 @@ const FocusTube: React.FC = () => {
                   setConfirmDeleteId(null)
                 }}
                 title={`${category.name} — ${channelCount} channel${channelCount === 1 ? '' : 's'}, ${unseen} unseen. Click to open · double-click to rename · drag to reorder (Alt+←/→ also moves)`}
-                className={`inline-flex items-center gap-1.5 rounded-full border py-2 pl-2 pr-4 text-xs font-black uppercase tracking-widest transition-colors ${
+                className={`group/pill inline-flex items-center gap-2 rounded-xl border py-2 pl-2.5 pr-3.5 text-xs font-black uppercase tracking-widest transition-all ${
                   isActive
-                    ? 'border-primary bg-primary/15 text-white'
-                    : 'border-white/10 bg-white/5 text-white/50 hover:bg-white/10 hover:text-white'
+                    ? 'border-primary/60 bg-primary/20 text-white shadow-[0_6px_20px_-8px_rgba(229,9,20,0.9)]'
+                    : 'border-transparent text-white/50 hover:bg-white/[0.06] hover:text-white'
                 } ${dragId != null ? 'pointer-events-none' : ''}`}
               >
-                <GripVertical size={12} className="shrink-0 text-white/25" aria-hidden />
-                <span className={`h-2 w-2 rounded-full ${CATEGORY_DOT[category.color] || 'bg-red-500'}`} />
-                {category.name}
+                <GripVertical
+                  size={13}
+                  className="shrink-0 text-white/20 transition-colors group-hover/pill:text-white/40"
+                  aria-hidden
+                />
                 <span
-                  className="inline-flex items-center gap-1 text-[10px] font-bold normal-case tracking-normal text-white/35"
+                  className={`h-2 w-2 shrink-0 rounded-full ring-4 ring-white/[0.04] ${
+                    isActive ? 'scale-110' : ''
+                  } ${categoryDot(category.color)}`}
+                />
+                <span className="max-w-[10rem] truncate">{category.name}</span>
+                <span
+                  className="inline-flex items-center gap-1 rounded-md bg-white/[0.07] px-1.5 py-0.5 text-[10px] font-bold normal-case tabular-nums tracking-normal text-white/40 transition-colors group-hover/pill:bg-white/10"
                   title={`${channelCount} subscribed channel${channelCount === 1 ? '' : 's'} in ${category.name}`}
                 >
-                  <Users size={11} className="opacity-60" aria-hidden />
+                  <Users size={10} className="opacity-70" aria-hidden />
                   {channelCount}
                 </span>
-                {(category.unseenCount || 0) > 0 && (
-                  <span className="rounded-full bg-primary px-1.5 py-0.5 text-[10px] text-white">
-                    {category.unseenCount}
+                {unseen > 0 && (
+                  <span className="rounded-md bg-primary px-1.5 py-0.5 text-[10px] font-black tabular-nums text-white shadow-[0_2px_10px_-2px_rgba(229,9,20,0.9)]">
+                    {unseen}
                   </span>
                 )}
               </button>
@@ -755,7 +795,7 @@ const FocusTube: React.FC = () => {
                 }}
                 title={`Delete ${category.name}`}
                 aria-label={`Delete ${category.name}`}
-                className="absolute -right-1 -top-1 hidden rounded-full border border-white/10 bg-surface p-0.5 text-white/40 hover:text-red-400 group-hover/cat:block"
+                className="absolute -right-1 -top-1 hidden rounded-full border border-white/10 bg-surface p-0.5 text-white/40 shadow-lg transition-colors hover:border-red-500/40 hover:bg-red-500/15 hover:text-red-400 group-hover/cat:block"
               >
                 <X size={11} />
               </button>
@@ -767,12 +807,12 @@ const FocusTube: React.FC = () => {
           <button
             type="button"
             onClick={() => setNewCategoryName('')}
-            className="inline-flex items-center gap-1 rounded-full border border-dashed border-white/15 px-4 py-2 text-xs font-black uppercase tracking-widest text-white/40 hover:border-primary/50 hover:text-white"
+            className="inline-flex items-center gap-1.5 rounded-xl border border-dashed border-white/15 px-3.5 py-2 text-xs font-black uppercase tracking-widest text-white/40 transition-colors hover:border-primary/50 hover:bg-primary/5 hover:text-white"
           >
-            <Plus size={13} /> Category
+            <Plus size={14} /> Category
           </button>
         ) : (
-          <div className="inline-flex items-center gap-1 rounded-full border border-primary/50 bg-primary/10 py-1 pl-3 pr-1">
+          <div className="inline-flex items-center gap-1 rounded-xl border border-primary/50 bg-primary/10 py-1.5 pl-3 pr-1.5">
             <input
               autoFocus
               value={newCategoryName}
@@ -782,12 +822,13 @@ const FocusTube: React.FC = () => {
                 if (event.key === 'Escape') setNewCategoryName(null)
               }}
               placeholder="Name"
-              className="w-32 bg-transparent text-xs font-bold text-white placeholder:text-white/30 focus:outline-none"
+              aria-label="New category name"
+              className="w-36 bg-transparent text-xs font-bold text-white placeholder:text-white/30 focus:outline-none"
             />
             <button
               type="button"
               onClick={() => void handleCreateCategory()}
-              className="rounded-full bg-primary p-1 text-white"
+              className="rounded-lg bg-primary p-1.5 text-white transition-colors hover:bg-primary/80"
               aria-label="Create category"
             >
               <Plus size={12} />
@@ -802,24 +843,29 @@ const FocusTube: React.FC = () => {
         return (
           <div
             ref={ghostRef}
-            className="pointer-events-none fixed left-0 top-0 z-[90] inline-flex cursor-grabbing items-center gap-1.5 rounded-full border border-primary/50 bg-[#141a26]/95 px-4 py-2 text-xs font-black uppercase tracking-widest text-white shadow-[0_18px_40px_-12px_rgba(0,0,0,0.9)] backdrop-blur will-change-transform"
+            className="pointer-events-none fixed left-0 top-0 z-[90] inline-flex cursor-grabbing items-center gap-2 rounded-xl border border-primary/50 bg-[#141a26]/95 px-4 py-2 text-xs font-black uppercase tracking-widest text-white shadow-[0_18px_40px_-12px_rgba(0,0,0,0.9)] backdrop-blur will-change-transform"
           >
             <GripVertical size={12} className="text-white/40" />
-            <span className={`h-2 w-2 rounded-full ${CATEGORY_DOT[dragged.color] || 'bg-red-500'}`} />
+            <span className={`h-2 w-2 rounded-full ${categoryDot(dragged.color)}`} />
             {dragged.name}
           </div>
         )
       })()}
 
       {/* Stack header */}
-      <div data-tour="focustube-feed" className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-white/10 bg-white/[0.03] px-5 py-4">
-        <div className="flex items-center gap-3">
-          <Sparkles size={16} className="text-primary" />
-          <span className="text-sm font-black uppercase italic tracking-wider text-white">
+      <div
+        data-tour="focustube-feed"
+        className="flex flex-wrap items-center justify-between gap-x-4 gap-y-3 rounded-2xl border border-white/[0.07] bg-white/[0.02] px-4 py-3"
+      >
+        <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-2">
+          <span className="inline-flex items-center gap-2 text-sm font-black uppercase italic tracking-wider text-white">
+            <Sparkles size={15} className="text-primary" />
             {videos.length} in the stack
           </span>
+          <span className="hidden h-4 w-px bg-white/10 sm:block" aria-hidden />
           <span className="text-xs font-semibold text-white/35">
-            newest first{activeCategory
+            newest first
+            {activeCategory
               ? ` · from ${activeCategory.channelCount ?? 0} channel${(activeCategory.channelCount ?? 0) === 1 ? '' : 's'} in ${activeCategory.name}`
               : totalChannels > 0 ? ` · from ${totalChannels} channel${totalChannels === 1 ? '' : 's'}` : ''}
           </span>
@@ -828,7 +874,7 @@ const FocusTube: React.FC = () => {
               type="button"
               onClick={() => setManaging(true)}
               title={activeCategory ? `See channels subscribed in ${activeCategory.name}` : 'See all subscribed channels'}
-              className="inline-flex items-center gap-1 rounded-full border border-white/10 bg-white/5 px-2.5 py-1 text-[10px] font-black uppercase tracking-widest text-white/50 hover:bg-white/10 hover:text-white"
+              className="inline-flex items-center gap-1.5 rounded-lg border border-white/10 bg-white/[0.04] px-2.5 py-1.5 text-[10px] font-black uppercase tracking-widest text-white/50 transition-colors hover:bg-white/10 hover:text-white"
             >
               <Users size={11} />
               {activeCategory ? `View ${activeCategory.name} channels` : 'View channels'}
@@ -836,118 +882,151 @@ const FocusTube: React.FC = () => {
           )}
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1.5">
           <button
             type="button"
             onClick={toggleShorts}
             title={hideShorts ? 'Show Shorts' : 'Hide Shorts'}
-            className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[11px] font-black uppercase tracking-widest transition-colors ${
-              hideShorts ? 'bg-primary/20 text-white' : 'text-white/40 hover:bg-white/5 hover:text-white'
+            className={`inline-flex items-center gap-1.5 rounded-lg border px-3 py-2 text-[11px] font-black uppercase tracking-widest transition-colors ${
+              hideShorts
+                ? 'border-primary/50 bg-primary/15 text-white'
+                : 'border-transparent text-white/40 hover:bg-white/[0.06] hover:text-white'
             }`}
           >
-            {hideShorts ? <EyeOff size={13} /> : <Eye size={13} />}
+            {hideShorts ? <EyeOff size={14} /> : <Eye size={14} />}
             Shorts {hideShorts ? 'hidden' : 'shown'}
           </button>
           <button
             type="button"
             onClick={() => { setIncludeSeen((value) => !value); void loadFeed(activeCategoryId, { includeSeen: !includeSeen }) }}
-            className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[11px] font-black uppercase tracking-widest transition-colors ${
-              includeSeen ? 'bg-white/10 text-white' : 'text-white/40 hover:bg-white/5 hover:text-white'
+            title="Include videos you have already watched"
+            className={`inline-flex items-center gap-1.5 rounded-lg border px-3 py-2 text-[11px] font-black uppercase tracking-widest transition-colors ${
+              includeSeen
+                ? 'border-white/20 bg-white/10 text-white'
+                : 'border-transparent text-white/40 hover:bg-white/[0.06] hover:text-white'
             }`}
           >
-            <CheckCheck size={13} />
+            <CheckCheck size={14} />
             {includeSeen ? 'Including watched' : 'Unseen only'}
           </button>
           <button
             type="button"
             onClick={() => void handleMarkAllSeen()}
-            className="rounded-lg px-3 py-1.5 text-[11px] font-black uppercase tracking-widest text-white/40 hover:bg-white/5 hover:text-white"
+            title="Mark every video in this view as watched"
+            className="inline-flex items-center gap-1.5 rounded-lg border border-transparent px-3 py-2 text-[11px] font-black uppercase tracking-widest text-white/40 transition-colors hover:bg-white/[0.06] hover:text-white"
           >
+            <CheckCheck size={14} className="opacity-70" />
             Mark all seen
           </button>
         </div>
       </div>
 
       {loading ? (
-        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">
-          {[1, 2, 3, 4, 5, 6, 7, 8].map((index) => (
+        <div className="grid grid-cols-2 gap-x-5 gap-y-8 md:grid-cols-3 lg:grid-cols-4">
+          {Array.from({ length: 8 }, (_, index) => (
             <div key={index}>
-              <div className="aspect-video w-full rounded-xl bg-white/5 animate-pulse" />
-              <div className="mt-2.5 h-3 w-4/5 rounded bg-white/5 animate-pulse" />
-              <div className="mt-2 h-3 w-1/3 rounded bg-white/5 animate-pulse" />
+              <div className="skeleton aspect-video w-full rounded-xl" />
+              <div className="skeleton mt-3 h-3.5 w-4/5 rounded" />
+              <div className="skeleton mt-2 h-3 w-1/3 rounded" />
             </div>
           ))}
         </div>
       ) : videos.length > 0 ? (
         <div className="space-y-10">
           {liveVideos.length > 0 && (
-            <div className="space-y-4">
-              <div className="flex items-center gap-2">
-                <Radio size={16} className="text-red-500" />
+            <section className="space-y-5">
+              <div className="flex items-center gap-2.5">
+                <span className="relative flex h-2 w-2">
+                  <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-red-500 opacity-75" />
+                  <span className="relative inline-flex h-2 w-2 rounded-full bg-red-500" />
+                </span>
                 <h3 className="text-sm font-black uppercase italic tracking-wider text-white">Live now</h3>
+                <span className="rounded-md bg-red-500/15 px-2 py-0.5 text-[10px] font-black tabular-nums tracking-widest text-red-300">
+                  {liveVideos.length}
+                </span>
               </div>
-              <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">
+              <div className="grid grid-cols-2 gap-x-5 gap-y-8 md:grid-cols-3 lg:grid-cols-4">
                 {liveVideos.map((video) => (
                   <FocusTubeCard
                     key={video.videoId}
                     video={video}
                     onPlay={(item) => void handlePlay(item)}
-                    onToggleSaved={(item) => void handleToggleSaved(item)}
+                    onToggleSeen={(item) => void handleToggleSeen(item)}
                   />
                 ))}
               </div>
-            </div>
+            </section>
           )}
 
-          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">
+          <div className="grid grid-cols-2 gap-x-5 gap-y-8 md:grid-cols-3 lg:grid-cols-4">
             {restVideos.map((video) => (
               <FocusTubeCard
                 key={video.videoId}
                 video={video}
                 onPlay={(item) => void handlePlay(item)}
-                onToggleSaved={(item) => void handleToggleSaved(item)}
+                onToggleSeen={(item) => void handleToggleSeen(item)}
               />
             ))}
           </div>
         </div>
       ) : search.trim() ? (
-        <div className="flex flex-col items-center justify-center py-32 text-center space-y-4 opacity-30">
-          <Search size={64} strokeWidth={1} />
-          <h3 className="text-xl font-black uppercase italic">No matches</h3>
-          <p className="text-xs font-bold uppercase tracking-widest">
+        <div className="flex flex-col items-center justify-center gap-4 rounded-3xl border border-dashed border-white/10 py-24 text-center">
+          <Search size={52} strokeWidth={1} className="text-white/20" />
+          <h3 className="text-xl font-black uppercase italic text-white">No matches</h3>
+          <p className="max-w-md text-xs font-bold uppercase tracking-widest text-white/35">
             Nothing in your subscriptions matches “{search}”
           </p>
+          <button
+            type="button"
+            onClick={() => { setSearch(''); void runSearch() }}
+            className="mt-1 inline-flex items-center gap-1.5 rounded-lg border border-white/10 bg-white/5 px-3.5 py-2 text-xs font-black uppercase tracking-widest text-white/60 transition-colors hover:bg-white/10 hover:text-white"
+          >
+            <X size={13} /> Clear search
+          </button>
         </div>
       ) : activeCategory && (activeCategory.channelCount ?? 0) === 0 ? (
-        <div className="flex flex-col items-center justify-center py-32 text-center space-y-5">
-          <Users size={72} strokeWidth={1} className="opacity-30" />
+        <div className="flex flex-col items-center justify-center gap-5 rounded-3xl border border-dashed border-white/10 py-24 text-center">
+          <div className="flex h-20 w-20 items-center justify-center rounded-2xl border border-white/[0.07] bg-white/[0.03] text-white/25">
+            <Users size={34} strokeWidth={1.5} />
+          </div>
           <div className="space-y-2">
-            <h3 className="text-2xl font-black uppercase italic text-white">
+            <h3 className="text-2xl font-black uppercase italic tracking-tight text-white">
               No channels in {activeCategory.name} yet
             </h3>
-            <p className="text-xs font-bold uppercase tracking-widest max-w-md text-white/40">
+            <p className="mx-auto max-w-md text-xs font-bold uppercase tracking-widest text-white/40">
               Subscribe to channels to fill this category
             </p>
             <button
               type="button"
               onClick={() => setManaging(true)}
-              className="mt-2 inline-flex items-center gap-1.5 rounded-lg bg-primary px-4 py-2 text-xs font-black uppercase tracking-widest text-white"
+              className="mt-2 inline-flex items-center gap-1.5 rounded-xl bg-primary px-5 py-2.5 text-xs font-black uppercase tracking-widest text-white shadow-[0_10px_30px_-12px_rgba(229,9,20,0.9)] transition-colors hover:bg-primary/85"
             >
-              <Plus size={13} /> Add channels to {activeCategory.name}
+              <Plus size={14} /> Add channels to {activeCategory.name}
             </button>
           </div>
         </div>
       ) : (
-        <div className="flex flex-col items-center justify-center py-32 text-center space-y-5 opacity-30">
-          <CheckCheck size={72} strokeWidth={1} />
+        <div className="flex flex-col items-center justify-center gap-5 rounded-3xl border border-dashed border-white/10 py-24 text-center">
+          <div className="flex h-20 w-20 items-center justify-center rounded-2xl border border-emerald-400/15 bg-emerald-400/[0.06] text-emerald-400/70">
+            <CheckCheck size={34} strokeWidth={1.5} />
+          </div>
           <div className="space-y-2">
-            <h3 className="text-2xl font-black uppercase italic">
+            <h3 className="text-2xl font-black uppercase italic tracking-tight text-white">
               {activeCategory ? `${activeCategory.name} is clear` : 'Nothing new'}
             </h3>
-            <p className="text-xs font-bold uppercase tracking-widest max-w-md">
+            <p className="mx-auto max-w-md text-xs font-bold uppercase tracking-widest text-white/35">
               You have watched everything from your channels here
               {latestPublished ? `. Last upload ${formatAgo(latestPublished)} ago, on ${formatPublishedExact(latestPublished)}` : ''}
             </p>
+            <button
+              type="button"
+              onClick={() => void refresh()}
+              disabled={refreshing}
+              className="mt-2 inline-flex items-center gap-1.5 rounded-xl border border-white/10 bg-white/5 px-4 py-2.5 text-xs font-black uppercase tracking-widest text-white/60 transition-colors hover:bg-white/10 hover:text-white disabled:opacity-40"
+            >
+              <RefreshCw size={13} className={refreshing ? 'animate-spin' : undefined} />
+              {refreshing ? 'Checking' : 'Check for new'}
+            </button>
           </div>
         </div>
       )}

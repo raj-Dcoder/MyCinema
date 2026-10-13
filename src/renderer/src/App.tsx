@@ -61,6 +61,17 @@ const App: React.FC = () => {
   // means its page never mounts and therefore issues no feed requests. The
   // main process has already stopped the background polling.
   const [focusTubeEnabled, setFocusTubeEnabled] = useState(true)
+  // Once visited, FocusTube stays mounted (hidden) so its mini-player keeps
+  // playing across tabs. Gated on first visit so app startup issues no feed
+  // requests for users who never open the tab.
+  const [focusTubeMounted, setFocusTubeMounted] = useState(false)
+  useEffect(() => {
+    if (!focusTubeEnabled) {
+      setFocusTubeMounted(false)
+      return
+    }
+    if (activeTab === 'focustube') setFocusTubeMounted(true)
+  }, [activeTab, focusTubeEnabled])
   const [isSidebarExpanded, setIsSidebarExpanded] = useState(() => {
     return localStorage.getItem(SIDEBAR_EXPANDED_STORAGE_KEY) !== 'false'
   })
@@ -868,18 +879,24 @@ const App: React.FC = () => {
           opacity-0 (HeroCarousel timers, decoded images, scroll listeners all
           kept running behind Collections/Movies/etc. and caused scroll jank). */}
       <main className="relative flex-1 overflow-hidden">
-        {activeTab === 'home' ? (
-          <div
-            ref={homeScrollRef}
-            className="absolute inset-0 overflow-y-auto scrollbar-hide pt-6 pb-14"
-          >
-            <Home onPlay={handlePlayVideo} onShowDetail={setSelectedVideo} onNavigate={navigateToTab} refreshKey={homeRefreshKey} />
-          </div>
-        ) : (
-          <div ref={activePageScrollRef} className="absolute inset-0 overflow-y-auto scrollbar-hide">
+        {/* The non-home container stays mounted (hidden) when Home is active.
+            Home used to own the other branch of this ternary, so visiting it
+            unmounted everything — including FocusTube's keep-alive wrapper —
+            and killed a minimized FocusTube dock. Every inner page keeps its
+            exact conditional mount, so only visibility changed, not lifecycles. */}
+        <div ref={activePageScrollRef} className={`absolute inset-0 overflow-y-auto scrollbar-hide ${activeTab === 'home' ? 'hidden' : ''}`}>
             <div className="px-8 pt-6 pb-14 max-w-[1600px] mx-auto">
               {activeTab === 'videos'  && <Videos onPlay={handlePlayVideo} />}
-              {activeTab === 'focustube' && focusTubeEnabled && <FocusTube />}
+              {/* FocusTube stays mounted (hidden) when you leave its tab so its
+                  mini-player dock — portalled to document.body — keeps playing
+                  across the whole app. `hidden` (display:none) only hides the
+                  feed; portal content is unaffected. State (feed, queue,
+                  player) is preserved, so coming back resumes where you left. */}
+              {focusTubeEnabled && focusTubeMounted && (
+                <div className={activeTab === 'focustube' ? 'contents' : 'hidden'}>
+                  <FocusTube />
+                </div>
+              )}
               {activeTab === 'movies'  && <Movies onPlay={handlePlayVideo} onShowDetail={setSelectedVideo} />}
               {activeTab === 'series'  && <Series onPlay={handlePlayVideo} onShowDetail={setSelectedVideo} />}
               {activeTab === 'collections' && <Collections onPlay={handlePlayVideo} onShowDetail={setSelectedVideo} focusCollectionId={sharedCollectionFocus?.id ?? null} focusNonce={sharedCollectionFocus?.nonce ?? 0} />}
@@ -889,6 +906,13 @@ const App: React.FC = () => {
               {activeTab === 'download' && <Download onShowDetail={setSelectedVideo} />}
               {activeTab === 'settings' && <SettingsPage />}
             </div>
+        </div>
+        {activeTab === 'home' && (
+          <div
+            ref={homeScrollRef}
+            className="absolute inset-0 overflow-y-auto scrollbar-hide pt-6 pb-14"
+          >
+            <Home onPlay={handlePlayVideo} onShowDetail={setSelectedVideo} onNavigate={navigateToTab} refreshKey={homeRefreshKey} />
           </div>
         )}
       </main>

@@ -1,19 +1,20 @@
 import React, { useState } from 'react'
-import { Bookmark, CheckCircle2, Radio } from 'lucide-react'
+import { Check, CheckCircle2, Loader2, Play, Radio } from 'lucide-react'
 import type { FtVideo } from '../../types'
 import { formatDuration, formatRelativeTime, formatViews, thumbnailUrl } from '../../utils/focusTube'
 
 interface FocusTubeCardProps {
   video: FtVideo
   onPlay: (video: FtVideo) => void
-  onToggleSaved: (video: FtVideo) => void
+  onToggleSeen: (video: FtVideo) => void
 }
 
 // 16:9 card. The RSS feed only publishes 4:3 hqdefault thumbnails, so we try
 // maxresdefault first and step down through the fallbacks on load failure.
-const FocusTubeCard: React.FC<FocusTubeCardProps> = ({ video, onPlay, onToggleSaved }) => {
+const FocusTubeCard: React.FC<FocusTubeCardProps> = ({ video, onPlay, onToggleSeen }) => {
   const [variant, setVariant] = useState(0)
   const [thumbBroken, setThumbBroken] = useState(false)
+  const [marking, setMarking] = useState(false)
 
   const duration = formatDuration(video.duration)
 
@@ -23,7 +24,7 @@ const FocusTubeCard: React.FC<FocusTubeCardProps> = ({ video, onPlay, onToggleSa
         <button
           type="button"
           onClick={() => onPlay(video)}
-          className="block w-full aspect-video rounded-xl overflow-hidden bg-white/5 border border-white/10 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/70"
+          className="relative block w-full aspect-video overflow-hidden rounded-xl border border-white/[0.07] bg-white/[0.03] transition-all duration-300 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/70 group-hover:border-white/20 group-hover:shadow-[0_20px_50px_-24px_rgba(0,0,0,0.95)]"
           aria-label={`Play ${video.title}`}
         >
           {!thumbBroken ? (
@@ -32,47 +33,59 @@ const FocusTubeCard: React.FC<FocusTubeCardProps> = ({ video, onPlay, onToggleSa
               alt=""
               loading="lazy"
               decoding="async"
-              className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-105"
+              className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-[1.06]"
               onError={() => {
                 if (variant < 3) setVariant((v) => v + 1)
                 else setThumbBroken(true)
               }}
             />
           ) : (
-            <div className="w-full h-full flex items-center justify-center text-white/20 text-xs font-bold uppercase tracking-widest">
+            <div className="flex h-full w-full items-center justify-center text-[10px] font-bold uppercase tracking-widest text-white/20">
               No preview
             </div>
           )}
+          <span
+            aria-hidden
+            className="pointer-events-none absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent opacity-0 transition-opacity duration-300 group-hover:opacity-100"
+          />
+          <span
+            aria-hidden
+            className="pointer-events-none absolute inset-0 flex items-center justify-center opacity-0 transition-opacity duration-300 group-hover:opacity-100"
+          >
+            <span className="flex h-12 w-12 scale-90 items-center justify-center rounded-full bg-primary/90 text-white shadow-[0_10px_30px_-8px_rgba(0,0,0,0.9)] backdrop-blur transition-transform duration-300 group-hover:scale-100">
+              <Play size={20} className="ml-0.5" fill="currentColor" />
+            </span>
+          </span>
         </button>
 
         {video.isLive && (
-          <span className="absolute top-2 left-2 inline-flex items-center gap-1 rounded-md bg-red-600 px-2 py-0.5 text-[10px] font-black uppercase tracking-widest text-white">
-            <Radio size={11} /> Live
+          <span className="absolute top-2 left-2 inline-flex items-center gap-1 rounded-md bg-red-600 px-2 py-1 text-[10px] font-black uppercase tracking-widest text-white shadow-lg">
+            <Radio size={10} /> Live
           </span>
         )}
 
         {!video.isLive && video.isShort && (
-          <span className="absolute top-2 left-2 rounded-md bg-white/15 px-2 py-0.5 text-[10px] font-black uppercase tracking-widest text-white backdrop-blur-sm">
+          <span className="absolute top-2 left-2 rounded-md bg-black/70 px-2 py-1 text-[10px] font-black uppercase tracking-widest text-white backdrop-blur-sm">
             Short
           </span>
         )}
 
         {duration && (
-          <span className="absolute bottom-2 right-2 rounded bg-black/85 px-1.5 py-0.5 text-[11px] font-bold text-white">
+          <span className="absolute bottom-2 right-2 rounded-md bg-black/85 px-1.5 py-0.5 text-[11px] font-bold tabular-nums text-white backdrop-blur-sm">
             {duration}
           </span>
         )}
 
         {video.seen && (
-          <span className="absolute bottom-2 left-2 inline-flex items-center gap-1 rounded bg-black/85 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-emerald-400">
+          <span className="absolute bottom-2 left-2 inline-flex items-center gap-1 rounded-md bg-black/85 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-emerald-400 backdrop-blur-sm">
             <CheckCircle2 size={11} /> Watched
           </span>
         )}
 
         {video.position > 5 && (
-          <span className="absolute inset-x-0 bottom-0 h-0.5 bg-white/15">
+          <span className="absolute inset-x-0 bottom-0 h-1 bg-white/10">
             <span
-              className="block h-full bg-primary"
+              className="block h-full rounded-r-full bg-primary"
               style={{
                 width: `${Math.min(100, video.duration ? (video.position / video.duration) * 100 : 0)}%`,
               }}
@@ -81,35 +94,50 @@ const FocusTubeCard: React.FC<FocusTubeCardProps> = ({ video, onPlay, onToggleSa
         )}
 
         {!video.embeddable && (
-          <div className="absolute inset-0 flex items-center justify-center bg-black/80 px-4 text-center text-[11px] font-bold uppercase tracking-wide text-amber-400">
+          <div className="absolute inset-0 flex items-center justify-center bg-black/80 px-4 text-center text-[11px] font-bold uppercase tracking-wide text-amber-400 backdrop-blur-[2px]">
             Embedding disabled by the creator
           </div>
         )}
       </div>
 
-      <div className="mt-2.5 flex items-start gap-2">
+      <div className="mt-3 flex items-start gap-2">
         <div className="min-w-0 flex-1">
-          <h3 className="text-sm font-bold text-white/90 leading-snug line-clamp-2">
+          <h3 className="line-clamp-2 text-sm font-bold leading-snug text-white/90 transition-colors group-hover:text-white">
             {video.title}
           </h3>
-          <p className="mt-1 text-xs text-white/40 font-semibold truncate">
+          <p className="mt-1.5 truncate text-xs font-semibold text-white/45">
             {video.channelTitle}
           </p>
-          <p className="text-xs text-white/30 font-semibold">
+          <p className="text-[11px] font-semibold text-white/30">
             {[formatRelativeTime(video.publishedAt), formatViews(video.views)].filter(Boolean).join(' · ')}
           </p>
         </div>
 
         <button
           type="button"
-          onClick={() => onToggleSaved(video)}
-          title={video.saved ? 'Remove from saved' : 'Save for later'}
-          aria-label={video.saved ? 'Remove from saved' : 'Save for later'}
-          className={`shrink-0 rounded-lg p-1.5 transition-colors ${
-            video.saved ? 'text-primary' : 'text-white/25 hover:text-white/60 hover:bg-white/5'
+          onClick={() => {
+            if (marking) return
+            setMarking(true)
+            onToggleSeen(video)
+            // The parent reloads the feed (this card usually disappears
+            // underneath when "Unseen only" is on); clear the spinner shortly
+            // after in case the card stays mounted.
+            window.setTimeout(() => setMarking(false), 1200)
+          }}
+          title={video.seen ? 'Mark as unwatched' : 'Mark as watched'}
+          aria-label={video.seen ? 'Mark as unwatched' : 'Mark as watched'}
+          aria-pressed={video.seen}
+          className={`shrink-0 rounded-lg p-1.5 transition-all disabled:cursor-wait ${
+            video.seen
+              ? 'bg-emerald-400/15 text-emerald-300'
+              : 'text-white/20 hover:bg-white/[0.07] hover:text-white/70'
           }`}
         >
-          <Bookmark size={16} fill={video.saved ? 'currentColor' : 'none'} />
+          {marking ? (
+            <Loader2 size={16} className="animate-spin" />
+          ) : (
+            <Check size={16} strokeWidth={video.seen ? 3.5 : 2.5} />
+          )}
         </button>
       </div>
     </div>

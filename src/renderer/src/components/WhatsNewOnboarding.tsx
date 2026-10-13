@@ -89,37 +89,37 @@ const UPDATE_ICONS: Record<UpdateIconKey, { icon: React.ReactNode; tile: string 
 }
 
 export const LATEST_RELEASE: ReleaseNotes = {
-  version: '1.38.0',
-  title: 'YouTube on your terms.',
-  highlight: 'your terms.',
+  version: '1.39.0',
+  title: 'File everything your way.',
+  highlight: 'your way.',
   description:
-    'Meet Focus Tube — a new tab built around channels you pick, with a short tour to show you around.',
-  tourId: 'focus-tube',
+    'The watchlist has ASAP, Weekend, and Someday lanes, titles file into collections from their page, and small fixes keep every save honest.',
+  tourId: null,
   updates: [
     {
-      icon: 'play',
-      title: 'Meet Focus Tube',
-      description: 'A new YouTube tab built around your channels.',
-    },
-    {
       icon: 'layers',
-      title: 'Categories for channels',
-      description: 'File subscriptions into rooms you name and reorder.',
+      title: 'Watchlist lanes',
+      description: "Tap any title's bookmark to file it.",
     },
     {
       icon: 'sparkles',
-      title: 'A tour that shows it',
-      description: 'Hit Continue once and walk the new tab.',
+      title: 'Collections from titles',
+      description: 'File any title without leaving its page.',
     },
     {
       icon: 'play',
-      title: 'Scroll the seek bar',
-      description: 'Roll the wheel over the bar to jump.',
+      title: 'Tick videos watched',
+      description: 'Tap the tick on any Focus Tube card.',
     },
     {
-      icon: 'shield',
-      title: 'Private by design',
-      description: 'No account or key; data stays on this device.',
+      icon: 'fix',
+      title: 'Mini player stays put',
+      description: 'Docked videos survive the Home tab.',
+    },
+    {
+      icon: 'fix',
+      title: 'Hero saves stick',
+      description: 'Continue Watching titles land in Watchlist.',
     },
   ],
 }

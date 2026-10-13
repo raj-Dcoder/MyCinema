@@ -1,3 +1,30 @@
+# MyCinema v1.39.0
+
+File it your way: watchlist lanes, collections from any title page, and a mini player that stays put.
+
+### Watchlist Lanes
+- **ASAP, Weekend, Someday**: The bookmark on any title page now files it into a lane — tonight, the weekend, or the rainy-day stash — instead of one flat list.
+- **Filter The List**: The Watchlist tab filters by lane with live counts and groups everything into Up-next, Weekend, and Someday sections.
+- **Old Saves Have A Home**: Everything saved before this update rests in Someday, so nothing is lost or re-sorted behind your back. Open any title to re-file it into another lane.
+- **Backups Keep Lanes**: Export and import carry each title's lane along with it.
+
+### Collections From Any Title
+- **File Without Leaving**: A new collections button on every title page lists your collections with covers and counts — tap to add or remove, and create a new collection inline without switching tabs.
+- **Streamed Titles Included**: Continue Watching and trending titles file into collections by their catalog identity, not just downloaded files.
+
+### Focus Tube
+- **Tick For Watched**: Each card's bookmark is now a tick that marks the video watched (tap again to undo). Unseen-only feeds drop the card right away and update the counts.
+- **Mini Player Survives Home**: A docked Focus Tube video keeps playing when you visit the Home tab, the way movies already did.
+
+### Reliability
+- **Hero Saves Stick**: Titles saved to the watchlist from Continue Watching now land there with the lane you picked, and the title page reflects what is actually saved.
+- **No More Stray Zero**: Downloaded titles no longer show a stray "0" around the bookmark button.
+
+### Security & Privacy
+- **Local-Only Lanes**: Lane data lives in the app's own local database and travels with backups. This update adds no network requests, no permissions, and no data sharing.
+
+***
+
 # MyCinema v1.38.0
 
 YouTube on your terms: a new Focus Tube tab built around channels you pick, with a short guided tour on first launch.

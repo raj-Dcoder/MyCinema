@@ -250,7 +250,10 @@ const Download: React.FC<DownloadProps> = ({ onShowDetail }) => {
       release_year: releaseYear ? Number(releaseYear) : undefined,
       isExternal: true,
       is_watchlist: true,
-      category
+      category,
+      // Quick-saves without a lane picker rest in the Someday stash — the
+      // Watchlist tab and DetailScreen can re-file them into ASAP/Weekend.
+      priority: 'someday' as const
     }
   }
 

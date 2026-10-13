@@ -74,6 +74,7 @@ export function initDb() {
       is_favorite BOOLEAN DEFAULT 0,
       is_watchlist BOOLEAN DEFAULT 0,
       watchlist_category TEXT DEFAULT 'Watchlist',
+      watchlist_priority TEXT DEFAULT 'someday',
       added_at DATETIME DEFAULT CURRENT_TIMESTAMP
     );
 
@@ -88,6 +89,7 @@ export function initDb() {
       vote_average REAL,
       release_year INTEGER,
       category TEXT DEFAULT 'Watchlist',
+      priority TEXT DEFAULT 'someday',
       added_at DATETIME DEFAULT CURRENT_TIMESTAMP
     );
 
@@ -126,6 +128,9 @@ export function initDb() {
   if (!columnNames.includes('watchlist_category')) {
     db.exec("ALTER TABLE videos ADD COLUMN watchlist_category TEXT DEFAULT 'Watchlist'")
   }
+  if (!columnNames.includes('watchlist_priority')) {
+    db.exec("ALTER TABLE videos ADD COLUMN watchlist_priority TEXT DEFAULT 'someday'")
+  }
   if (!columnNames.includes('is_preferred')) {
     db.exec("ALTER TABLE videos ADD COLUMN is_preferred BOOLEAN DEFAULT 0")
   }
@@ -135,10 +140,21 @@ export function initDb() {
   if (!watchlistColumnNames.includes('category')) {
     db.exec("ALTER TABLE watchlist ADD COLUMN category TEXT DEFAULT 'Watchlist'")
   }
+  if (!watchlistColumnNames.includes('priority')) {
+    db.exec("ALTER TABLE watchlist ADD COLUMN priority TEXT DEFAULT 'someday'")
+  }
 
   if (!columnNames.includes('keywords')) {
     db.exec("ALTER TABLE videos ADD COLUMN keywords TEXT")
   }
+
+  // Backfill any legacy NULL priorities so every saved title has an intent.
+  try {
+    db.exec("UPDATE videos SET watchlist_priority = 'someday' WHERE is_watchlist = 1 AND TRIM(COALESCE(watchlist_priority, '')) = ''")
+  } catch { /* older schema without the column is handled above */ }
+  try {
+    db.exec("UPDATE watchlist SET priority = 'someday' WHERE TRIM(COALESCE(priority, '')) = ''")
+  } catch { /* older schema without the column is handled above */ }
 
   db.exec(`
     CREATE TABLE IF NOT EXISTS progress (
@@ -495,6 +511,19 @@ export function toggleFavorite(id: number) {
   return newValue
 }
 
+// ─── Watchlist intent (ASAP / Weekend / Someday) ────────────────────────────
+// The watchlist is still exactly one inbox ("Watchlist" category). The intent
+// is a separate priority lane stored alongside it so the tab can filter and
+// group without resurrecting custom categories (which live in Collections).
+export type WatchlistPriority = 'asap' | 'weekend' | 'someday'
+
+export function normalizeWatchlistPriority(value: unknown): WatchlistPriority {
+  const v = String(value ?? '').trim().toLowerCase()
+  if (v === 'asap' || v === 'now' || v === 'urgent') return 'asap'
+  if (v === 'weekend' || v === 'week-end' || v === 'this-weekend') return 'weekend'
+  return 'someday'
+}
+
 export function toggleWatchlist(id: number) {
   const current = db.prepare('SELECT is_watchlist FROM videos WHERE id = ?').get(id) as any
   if (!current) return null
@@ -502,28 +531,76 @@ export function toggleWatchlist(id: number) {
   db.prepare(`
     UPDATE videos
     SET is_watchlist = ?,
-        watchlist_category = CASE WHEN ? = 1 THEN COALESCE(watchlist_category, 'Watchlist') ELSE watchlist_category END
+        watchlist_category = CASE WHEN ? = 1 THEN COALESCE(watchlist_category, 'Watchlist') ELSE watchlist_category END,
+        watchlist_priority = CASE
+          WHEN ? = 1 THEN COALESCE(NULLIF(TRIM(watchlist_priority), ''), 'someday')
+          ELSE watchlist_priority
+        END
     WHERE id = ?
-  `).run(newValue, newValue, id)
+  `).run(newValue, newValue, newValue, id)
   return newValue
 }
 
 // The watchlist is exactly one inbox. The category parameter is kept for
 // backwards compatibility but always normalizes to 'Watchlist' — curated
-// lists live in Collections now.
-export function addLocalVideoToWatchlist(id: number, _category: string = 'Watchlist') {
+// lists live in Collections now. Priority selects the ASAP/Weekend/Someday lane.
+export function addLocalVideoToWatchlist(id: number, _category: string = 'Watchlist', priority?: unknown) {
+  const lane = normalizeWatchlistPriority(
+    priority ?? (_category && _category !== 'Watchlist' ? _category : undefined) ?? 'someday'
+  )
   return db.prepare(`
     UPDATE videos
     SET is_watchlist = 1,
-        watchlist_category = 'Watchlist'
+        watchlist_category = 'Watchlist',
+        watchlist_priority = ?
     WHERE id = ?
-  `).run(id)
+  `).run(lane, id)
+}
+
+export function setLocalWatchlistPriority(id: number, priority: unknown) {
+  const lane = normalizeWatchlistPriority(priority)
+  return db.prepare(`
+    UPDATE videos SET watchlist_priority = ? WHERE id = ?
+  `).run(lane, Number(id))
+}
+
+export function setExternalWatchlistPriority(tmdbId: number, priority: unknown) {
+  const lane = normalizeWatchlistPriority(priority)
+  return db.prepare(`
+    UPDATE watchlist SET priority = ? WHERE tmdb_id = ?
+  `).run(lane, Number(tmdbId))
+}
+
+export function setWatchlistPriority(input: { videoId?: number | null; tmdbId?: number | null; isExternal?: boolean; priority: unknown }) {
+  const lane = normalizeWatchlistPriority((input as any)?.priority)
+  const videoId = (input as any)?.videoId != null ? Number((input as any).videoId) : null
+  const tmdbId = (input as any)?.tmdbId != null ? Number((input as any).tmdbId) : null
+  const isExternal = Boolean((input as any)?.isExternal)
+
+  if (isExternal && tmdbId != null) {
+    return setExternalWatchlistPriority(tmdbId, lane)
+  }
+  if (!isExternal && videoId != null) {
+    return setLocalWatchlistPriority(videoId, lane)
+  }
+  // Fallback: try both keys so legacy callers can't strand an intent.
+  if (tmdbId != null) {
+    const res = setExternalWatchlistPriority(tmdbId, lane) as any
+    if (res?.changes > 0) return res
+  }
+  if (videoId != null) {
+    return setLocalWatchlistPriority(videoId, lane)
+  }
+  return { changes: 0 }
 }
 
 export function addToWatchlistExternal(item: any) {
+  const lane = normalizeWatchlistPriority(
+    item?.priority ?? item?.watchlist_priority ?? item?.watchlistPriority ?? 'someday'
+  )
   const stmt = db.prepare(`
-    INSERT INTO watchlist (tmdb_id, title, type, poster_path, backdrop_path, overview, vote_average, release_year, category)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO watchlist (tmdb_id, title, type, poster_path, backdrop_path, overview, vote_average, release_year, category, priority)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(tmdb_id) DO UPDATE SET
       title = excluded.title,
       type = excluded.type,
@@ -532,7 +609,8 @@ export function addToWatchlistExternal(item: any) {
       overview = excluded.overview,
       vote_average = excluded.vote_average,
       release_year = excluded.release_year,
-      category = excluded.category
+      category = excluded.category,
+      priority = excluded.priority
   `)
   return stmt.run(
     item.tmdb_id,
@@ -543,7 +621,8 @@ export function addToWatchlistExternal(item: any) {
     item.overview,
     item.vote_average,
     item.release_year,
-    'Watchlist'
+    'Watchlist',
+    lane
   )
 }
 
@@ -552,13 +631,17 @@ export function removeFromWatchlistExternal(tmdbId: number) {
 }
 
 export function getWatchlist() {
-  const external = db.prepare('SELECT *, 1 as isExternal, 1 as is_watchlist FROM watchlist').all()
+  const external = db.prepare('SELECT *, 1 as isExternal, 1 as is_watchlist FROM watchlist').all() as any[]
   const internal = db.prepare(`
-    SELECT v.*, COALESCE(v.watchlist_category, 'Watchlist') as category, 0 as isExternal
-    FROM videos v 
+    SELECT v.*, COALESCE(v.watchlist_category, 'Watchlist') as category, COALESCE(v.watchlist_priority, 'someday') as priority, 0 as isExternal
+    FROM videos v
     WHERE v.is_watchlist = 1
-  `).all()
-  return [...external, ...internal].sort((a, b) => new Date(b.added_at).getTime() - new Date(a.added_at).getTime())
+  `).all() as any[]
+  const normalizeRow = (row: any) => {
+    const lane = normalizeWatchlistPriority(row?.priority ?? row?.watchlist_priority)
+    return { ...row, priority: lane, watchlist_priority: lane }
+  }
+  return [...external.map(normalizeRow), ...internal.map(normalizeRow)].sort((a, b) => new Date(b.added_at).getTime() - new Date(a.added_at).getTime())
 }
 
 export function getBackupData() {
@@ -569,13 +652,13 @@ export function getBackupData() {
   `).all()
 
   const externalWatchlist = db.prepare(`
-    SELECT tmdb_id, title, type, poster_path, backdrop_path, overview, vote_average, release_year, category, added_at
+    SELECT tmdb_id, title, type, poster_path, backdrop_path, overview, vote_average, release_year, category, COALESCE(priority, 'someday') as priority, added_at
     FROM watchlist
     ORDER BY added_at DESC
   `).all()
 
   const localWatchlist = db.prepare(`
-    SELECT file_path, tmdb_id, title, type, series_name, season, episode, watchlist_category as category, added_at
+    SELECT file_path, tmdb_id, title, type, series_name, season, episode, watchlist_category as category, COALESCE(watchlist_priority, 'someday') as priority, added_at
     FROM videos
     WHERE is_watchlist = 1
     ORDER BY added_at DESC
@@ -656,9 +739,10 @@ export function restoreFollowedSeriesRow(item: any) {
 }
 
 export function importExternalWatchlistItem(item: any) {
+  const lane = normalizeWatchlistPriority(item?.priority ?? item?.watchlist_priority ?? 'someday')
   const stmt = db.prepare(`
-    INSERT INTO watchlist (tmdb_id, title, type, poster_path, backdrop_path, overview, vote_average, release_year, category)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO watchlist (tmdb_id, title, type, poster_path, backdrop_path, overview, vote_average, release_year, category, priority)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(tmdb_id) DO UPDATE SET
       title = excluded.title,
       type = excluded.type,
@@ -667,7 +751,8 @@ export function importExternalWatchlistItem(item: any) {
       overview = excluded.overview,
       vote_average = excluded.vote_average,
       release_year = excluded.release_year,
-      category = excluded.category
+      category = excluded.category,
+      priority = excluded.priority
   `)
 
   return stmt.run(
@@ -679,18 +764,22 @@ export function importExternalWatchlistItem(item: any) {
     item.overview || null,
     item.vote_average || null,
     item.release_year || null,
-    item.category || 'Watchlist'
+    item.category || 'Watchlist',
+    lane
   )
 }
 
 export function restoreLocalWatchlistItem(item: any) {
+  const lane = normalizeWatchlistPriority(item?.priority ?? item?.watchlist_priority ?? 'someday')
+  const category = item.category || 'Watchlist'
   if (item.file_path) {
     const byPath = db.prepare(`
       UPDATE videos
       SET is_watchlist = 1,
-          watchlist_category = ?
+          watchlist_category = ?,
+          watchlist_priority = ?
       WHERE file_path = ?
-    `).run(item.category || 'Watchlist', path.normalize(item.file_path))
+    `).run(category, lane, path.normalize(item.file_path))
 
     if (byPath.changes > 0) return byPath
   }
@@ -699,9 +788,10 @@ export function restoreLocalWatchlistItem(item: any) {
     const byTmdb = db.prepare(`
       UPDATE videos
       SET is_watchlist = 1,
-          watchlist_category = ?
+          watchlist_category = ?,
+          watchlist_priority = ?
       WHERE tmdb_id = ?
-    `).run(item.category || 'Watchlist', item.tmdb_id)
+    `).run(category, lane, item.tmdb_id)
 
     if (byTmdb.changes > 0) return byTmdb
   }
@@ -710,22 +800,24 @@ export function restoreLocalWatchlistItem(item: any) {
     return db.prepare(`
       UPDATE videos
       SET is_watchlist = 1,
-          watchlist_category = ?
+          watchlist_category = ?,
+          watchlist_priority = ?
       WHERE type = 'series'
         AND series_name = ?
         AND COALESCE(season, -1) = COALESCE(?, -1)
         AND COALESCE(episode, -1) = COALESCE(?, -1)
-    `).run(item.category || 'Watchlist', item.series_name, item.season ?? null, item.episode ?? null)
+    `).run(category, lane, item.series_name, item.season ?? null, item.episode ?? null)
   }
 
   if (item.title && item.type) {
     return db.prepare(`
       UPDATE videos
       SET is_watchlist = 1,
-          watchlist_category = ?
+          watchlist_category = ?,
+          watchlist_priority = ?
       WHERE title = ?
         AND type = ?
-    `).run(item.category || 'Watchlist', item.title, item.type)
+    `).run(category, lane, item.title, item.type)
   }
 
   return { changes: 0 }

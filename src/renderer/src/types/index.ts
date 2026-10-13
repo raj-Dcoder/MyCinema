@@ -1,3 +1,5 @@
+export type WatchlistIntent = 'asap' | 'weekend' | 'someday'
+
 export interface Video {
   id: number
   title: string
@@ -29,6 +31,13 @@ export interface Video {
   is_favorite?: boolean
   is_watchlist?: boolean
   category?: string
+  // Watch-later intent lane: ASAP (up next) · Weekend (cozy binge) · Someday (backlog).
+  // External rows use `priority`; local rows use `watchlist_priority`. Both are
+  // normalized into `priority` by getWatchlist — the extras below are aliases
+  // for rows built before normalization (trending cards, restored backups).
+  priority?: WatchlistIntent | string
+  watchlist_priority?: WatchlistIntent | string
+  watchlistPriority?: WatchlistIntent | string
   media_type?: 'movie' | 'tv'
   keywords?: string[]
   streamSourceId?: string

@@ -99,9 +99,10 @@ interface Api {
   onOpenSharedMedia: (callback: (target: { type: 'movie' | 'series'; tmdbId: number; source?: any }) => void) => () => void
   toggleFavorite: (id: number) => Promise<number | null>
   toggleWatchlist: (id: number) => Promise<number | null>
-  addLocalToWatchlist: (id: number, category: string) => Promise<any>
+  addLocalToWatchlist: (id: number, category: string, priority?: string) => Promise<any>
   addToWatchlistExternal: (item: any) => Promise<any>
   removeFromWatchlistExternal: (tmdbId: number) => Promise<any>
+  setWatchlistPriority: (input: { videoId?: number | null; tmdbId?: number | null; isExternal?: boolean; priority: string }) => Promise<any>
   getWatchlist: () => Promise<any[]>
   getFavorites: () => Promise<any[]>
   getCollections: () => Promise<any[]>

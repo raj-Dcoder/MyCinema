@@ -3797,8 +3797,8 @@ ipcMain.handle('toggle-watchlist', (_, id: number) => {
   return db.toggleWatchlist(id)
 })
 
-ipcMain.handle('add-local-to-watchlist', (_, id: number, category: string) => {
-  return db.addLocalVideoToWatchlist(id, category)
+ipcMain.handle('add-local-to-watchlist', (_, id: number, category: string, priority?: unknown) => {
+  return db.addLocalVideoToWatchlist(id, category, priority)
 })
 
 ipcMain.handle('add-to-watchlist-external', (_, item: any) => {
@@ -3807,6 +3807,14 @@ ipcMain.handle('add-to-watchlist-external', (_, item: any) => {
 
 ipcMain.handle('remove-from-watchlist-external', (_, tmdbId: number) => {
   return db.removeFromWatchlistExternal(tmdbId)
+})
+
+ipcMain.handle('set-watchlist-priority', (_, input: { videoId?: number | null; tmdbId?: number | null; isExternal?: boolean; priority: unknown }) => {
+  const result = db.setWatchlistPriority(input || ({} as any))
+  try {
+    BrowserWindow.getAllWindows().forEach(w => w.webContents.send('library-updated'))
+  } catch { /* broadcast is best-effort */ }
+  return result
 })
 
 ipcMain.handle('get-watchlist', () => {

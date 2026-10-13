@@ -71,9 +71,10 @@ const api = {
   },
   toggleFavorite: (id: number) => ipcRenderer.invoke('toggle-favorite', id),
   toggleWatchlist: (id: number) => ipcRenderer.invoke('toggle-watchlist', id),
-  addLocalToWatchlist: (id: number, category: string) => ipcRenderer.invoke('add-local-to-watchlist', id, category),
+  addLocalToWatchlist: (id: number, category: string, priority?: string) => ipcRenderer.invoke('add-local-to-watchlist', id, category, priority),
   addToWatchlistExternal: (item: any) => ipcRenderer.invoke('add-to-watchlist-external', item),
   removeFromWatchlistExternal: (tmdbId: number) => ipcRenderer.invoke('remove-from-watchlist-external', tmdbId),
+  setWatchlistPriority: (input: { videoId?: number | null; tmdbId?: number | null; isExternal?: boolean; priority: string }) => ipcRenderer.invoke('set-watchlist-priority', input),
   getWatchlist: () => ipcRenderer.invoke('get-watchlist'),
   getFavorites: () => ipcRenderer.invoke('get-favorites'),
   // Collections Auto-Curator

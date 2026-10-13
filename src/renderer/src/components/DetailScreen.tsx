@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react'
-import { X, Play, Info, Calendar, Clock, Star, FolderOpen, Film, Music, Subtitles, HardDrive, ChevronDown, ChevronUp, Heart, Bookmark, Share2, Search, Zap, Users, Download, AlertTriangle, Clapperboard, Loader2, ExternalLink, Languages, CheckCircle2, Copy, MessageCircle, Send, Trash2, Bell, BellRing } from 'lucide-react'
-import { Video } from '../types'
+import { X, Play, Info, Calendar, CalendarDays, Clock, Star, FolderOpen, Film, Music, Subtitles, HardDrive, ChevronDown, ChevronUp, Heart, Bookmark, Share2, Search, Zap, Users, Download, AlertTriangle, Clapperboard, Loader2, ExternalLink, Languages, CheckCircle2, Copy, MessageCircle, Send, Trash2, Bell, BellRing, Hourglass } from 'lucide-react'
+import { Video, WatchlistIntent } from '../types'
+import { getWatchlistIntent, normalizeWatchlistIntent, WATCHLIST_INTENT_META } from '../utils/watchlistIntent'
 import { ShareHintGuide, DeleteHintGuide, FollowGuide } from './FeatureGuides'
 import { getTorrentSourceHealthScore, getTorrentSourceSpeedLabel, isHevcSource } from '../utils/torrentSources'
 import { isOnlineProgressEnabled, isNewEpisodeNotifyEnabled, formatResumeTime, formatSeasonEpisode, getTorrentFileQueryIndex, safeGetStreamHistory, safeGetStreamProgress, safeDeleteStreamProgress, safeFollowSeries, safeUnfollowSeries, safeGetFollowedSeries, safeCheckSeriesUpdates, safeMarkFollowedSeen } from '../utils/streamResume'
@@ -178,8 +179,60 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
   const [showAllAudio, setShowAllAudio] = useState(false)
   const [selectedSeason, setSelectedSeason] = useState<number | null>(null)
   const [isFavorite, setIsFavorite] = useState(video.is_favorite)
-  const [isWatchlist, setIsWatchlist] = useState(video.is_watchlist)
+  // Local rows come from SQLite where booleans are 0/1 numbers — coerce to a
+  // real boolean, otherwise `{isWatchlist && ...}` renders a stray "0".
+  const [isWatchlist, setIsWatchlist] = useState(Boolean(video.is_watchlist))
   const [watchlistBusy, setWatchlistBusy] = useState(false)
+  const [watchlistIntent, setWatchlistIntent] = useState<WatchlistIntent | null>(() => getWatchlistIntent(video as any))
+  const [showIntentPicker, setShowIntentPicker] = useState(false)
+  const [intentBusy, setIntentBusy] = useState<WatchlistIntent | null>(null)
+  const [intentRemoving, setIntentRemoving] = useState(false)
+
+  // Keep the bookmark + intent pill in sync when a different title opens.
+  useEffect(() => {
+    setIsFavorite(video.is_favorite)
+    setIsWatchlist(Boolean(video.is_watchlist))
+    setWatchlistIntent(getWatchlistIntent(video as any))
+    setShowIntentPicker(false)
+    setIntentBusy(null)
+    setIntentRemoving(false)
+  }, [video.id, video.tmdb_id, video.is_watchlist])
+
+  // Titles opened from Hero/Trending carry no flags — verify against the DB so
+  // the bookmark reflects what's actually saved (and picks up its lane).
+  useEffect(() => {
+    let cancelled = false
+    const local = getWatchlistIntent(video as any)
+    if ((video.is_watchlist || isWatchlist) && local) {
+      setWatchlistIntent(local)
+      return
+    }
+    const canLookup = Boolean(video.tmdb_id) || (!video.isExternal && video.id > 0)
+    if (!canLookup) return
+    window.api.getWatchlist().then(rows => {
+      if (cancelled) return
+      const match = (rows || []).find((row: any) => {
+        if (video.tmdb_id && Number(row.tmdb_id) === Number(video.tmdb_id) && (row.type === video.type || !row.type)) return true
+        if (!video.isExternal && !video.tmdb_id && Number(row.id) === Number(video.id)) return true
+        return false
+      }) as any
+      if (cancelled) return
+      if (match) {
+        const lane = normalizeWatchlistIntent(match.priority ?? match.watchlist_priority)
+        setIsWatchlist(true)
+        setWatchlistIntent(lane)
+        video.is_watchlist = true
+        ;(video as any).priority = lane
+        ;(video as any).watchlist_priority = lane
+      } else {
+        setIsWatchlist(false)
+        setWatchlistIntent(null)
+        video.is_watchlist = false
+      }
+    }).catch(() => {})
+    return () => { cancelled = true }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [video.id, video.tmdb_id, video.isExternal, video.type])
   // #3: manual follow for new-episode alerts (auto-follow also fires on watch).
   const [isFollowing, setIsFollowing] = useState(false)
   const [followBusy, setFollowBusy] = useState(false)
@@ -364,19 +417,32 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
     video.is_favorite = !!newValue // Sync local object
   }
 
-  const handleAddToWatchlist = async () => {
+  const applyWatchlistState = (intent: WatchlistIntent | null, saved: boolean) => {
+    setIsWatchlist(saved)
+    setWatchlistIntent(intent)
+    video.is_watchlist = saved;
+    (video as any).priority = intent
+    ;(video as any).watchlist_priority = intent
+    video.category = saved ? 'Watchlist' : video.category
+    onWatchlistChange?.()
+  }
+
+  const handleAddToWatchlist = async (intent: WatchlistIntent = 'someday') => {
     setWatchlistBusy(true)
     try {
-      if (video.isExternal) {
-        await window.api.addToWatchlistExternal({ ...video, category: 'Watchlist', is_watchlist: true })
+      if (video.isExternal || video.id < 0) {
+        // Streamed/online cards carry synthetic negative ids with no library
+        // row — file them by TMDB identity, like Home's quick-save does.
+        if (!video.tmdb_id) {
+          console.warn('[DetailScreen] Cannot save to watchlist: no TMDB identity.')
+          return
+        }
+        await window.api.addToWatchlistExternal({ ...video, title: displayTitle, category: 'Watchlist', is_watchlist: true, priority: intent })
       } else {
-        await window.api.addLocalToWatchlist(video.id, 'Watchlist')
+        await window.api.addLocalToWatchlist(video.id, 'Watchlist', intent)
       }
 
-      setIsWatchlist(true)
-      video.is_watchlist = true
-      video.category = 'Watchlist'
-      onWatchlistChange?.()
+      applyWatchlistState(intent, true)
     } catch (err) {
       console.error('[DetailScreen] Watchlist add error:', err)
     } finally {
@@ -384,25 +450,77 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
     }
   }
 
-  const handleToggleWatchlist = async () => {
-    if (video.isExternal) {
-      if (isWatchlist) {
-        await window.api.removeFromWatchlistExternal(video.tmdb_id!)
-        setIsWatchlist(false)
-        video.is_watchlist = false
-        onWatchlistChange?.()
-      } else {
-        await handleAddToWatchlist()
+  // The bookmark never toggles blindly — it opens a small lane menu above the
+  // button so a tap files the title as ASAP / Weekend / Someday.
+  const handleWatchlistButtonClick = () => {
+    if (watchlistBusy || intentBusy || intentRemoving) return
+    setShowIntentPicker(v => !v)
+  }
+
+  const closeIntentMenu = () => {
+    if (watchlistBusy || intentBusy || intentRemoving) return
+    setShowIntentPicker(false)
+  }
+
+  // Keyboard: Esc dismisses, 1/2/3 files into a lane.
+  useEffect(() => {
+    if (!showIntentPicker) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.stopPropagation()
+        closeIntentMenu()
+        return
       }
-    } else {
+      if (watchlistBusy || intentBusy || intentRemoving) return
+      if (e.key === '1') void handleIntentSelect('asap')
+      else if (e.key === '2') void handleIntentSelect('weekend')
+      else if (e.key === '3') void handleIntentSelect('someday')
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [showIntentPicker, watchlistBusy, intentBusy, intentRemoving, isWatchlist, video.id, video.tmdb_id])
+
+  const handleIntentSelect = async (intent: WatchlistIntent) => {
+    if (intentBusy || intentRemoving) return
+    setIntentBusy(intent)
+    try {
       if (isWatchlist) {
-        const newValue = await window.api.toggleWatchlist(video.id)
-        setIsWatchlist(!!newValue)
-        video.is_watchlist = !!newValue // Sync local object
-        onWatchlistChange?.()
+        if (video.isExternal || video.id < 0) {
+          if (!video.tmdb_id) {
+            console.warn('[DetailScreen] Cannot move watchlist lane: no TMDB identity.')
+            return
+          }
+          await window.api.setWatchlistPriority({ tmdbId: video.tmdb_id, isExternal: true, priority: intent })
+        } else {
+          await window.api.setWatchlistPriority({ videoId: video.id, isExternal: false, priority: intent })
+        }
+        applyWatchlistState(intent, true)
       } else {
-        await handleAddToWatchlist()
+        await handleAddToWatchlist(intent)
       }
+      setShowIntentPicker(false)
+    } catch (err) {
+      console.error('[DetailScreen] Watchlist intent error:', err)
+    } finally {
+      setIntentBusy(null)
+    }
+  }
+
+  const handleIntentRemove = async () => {
+    if (intentBusy || intentRemoving) return
+    setIntentRemoving(true)
+    try {
+      if (video.isExternal || video.id < 0) {
+        if (video.tmdb_id) await window.api.removeFromWatchlistExternal(video.tmdb_id)
+      } else {
+        await window.api.toggleWatchlist(video.id)
+      }
+      applyWatchlistState(null, false)
+      setShowIntentPicker(false)
+    } catch (err) {
+      console.error('[DetailScreen] Watchlist remove error:', err)
+    } finally {
+      setIntentRemoving(false)
     }
   }
 
@@ -1598,16 +1716,113 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
                 <div>
                   <p className="text-[10px] font-black uppercase tracking-[0.18em] text-white/35 mb-2">My Library</p>
                   <div className="flex flex-wrap items-center gap-2">
-                    <button
-                      onClick={handleToggleWatchlist}
-                      disabled={watchlistBusy}
-                      className={`p-3.5 rounded-xl border transition-all hover:-translate-y-0.5 active:scale-95 glass-effect ${
-                        isWatchlist ? 'bg-primary/20 border-primary text-primary' : 'bg-white/5 border-white/10 text-white/40 hover:text-white'
-                      } disabled:opacity-50 disabled:cursor-wait`}
-                      title={isWatchlist ? 'Remove from Watchlist' : 'Add to Watchlist'}
-                    >
-                      {watchlistBusy ? <Loader2 size={20} className="animate-spin" /> : <Bookmark size={20} fill={isWatchlist ? "currentColor" : "none"} />}
-                    </button>
+                    <div className="relative">
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={handleWatchlistButtonClick}
+                          disabled={watchlistBusy}
+                          className={`relative p-3.5 rounded-xl border transition-all hover:-translate-y-0.5 active:scale-95 glass-effect ${
+                            isWatchlist
+                              ? watchlistIntent === 'asap'
+                                ? 'bg-red-500/20 border-red-500 text-red-400 shadow-[0_8px_24px_rgba(239,68,68,0.25)]'
+                                : watchlistIntent === 'weekend'
+                                  ? 'bg-violet-500/20 border-violet-400 text-violet-300 shadow-[0_8px_24px_rgba(139,92,246,0.25)]'
+                                  : 'bg-teal-400/15 border-teal-300/60 text-teal-200 shadow-[0_8px_24px_rgba(45,212,191,0.2)]'
+                              : 'bg-white/5 border-white/10 text-white/40 hover:text-white'
+                          } disabled:opacity-50 disabled:cursor-wait`}
+                          title={isWatchlist ? `In Watchlist · ${watchlistIntent ? WATCHLIST_INTENT_META[watchlistIntent].label : ''} — click to change` : 'Save to Watchlist — pick ASAP, Weekend or Someday'}
+                        >
+                          {watchlistBusy ? <Loader2 size={20} className="animate-spin" /> : <Bookmark size={20} fill={isWatchlist ? "currentColor" : "none"} />}
+                          {isWatchlist && watchlistIntent && (
+                            <span className={`absolute -right-1.5 -top-1.5 flex h-6 w-6 items-center justify-center rounded-full ring-2 ring-[#080d16] ${
+                              watchlistIntent === 'asap' ? 'bg-gradient-to-br from-red-500 to-orange-500 text-white'
+                              : watchlistIntent === 'weekend' ? 'bg-gradient-to-br from-violet-500 to-indigo-600 text-white'
+                              : 'bg-gradient-to-br from-teal-400 to-emerald-600 text-white'
+                            }`}>
+                              {watchlistIntent === 'asap' ? <Zap size={12} fill="currentColor" />
+                                : watchlistIntent === 'weekend' ? <CalendarDays size={12} />
+                                : <Hourglass size={12} />}
+                            </span>
+                          )}
+                        </button>
+                        {isWatchlist && watchlistIntent && (
+                          <button
+                            onClick={handleWatchlistButtonClick}
+                            className={`flex h-12 items-center gap-2 rounded-xl border px-3.5 text-[10px] font-black uppercase tracking-[0.14em] transition-all hover:-translate-y-0.5 active:scale-95 glass-effect ${
+                              watchlistIntent === 'asap' ? 'border-red-500/40 bg-red-500/10 text-red-300 hover:bg-red-500/15'
+                              : watchlistIntent === 'weekend' ? 'border-violet-400/40 bg-violet-500/10 text-violet-200 hover:bg-violet-500/15'
+                              : 'border-teal-300/30 bg-teal-400/10 text-teal-200 hover:bg-teal-400/15'
+                            }`}
+                            title="Change when you'll watch this"
+                          >
+                            {watchlistIntent === 'asap' ? <Zap size={13} fill="currentColor" />
+                              : watchlistIntent === 'weekend' ? <CalendarDays size={13} />
+                              : <Hourglass size={13} />}
+                            {WATCHLIST_INTENT_META[watchlistIntent].label}
+                          </button>
+                        )}
+                      </div>
+                      {showIntentPicker && (
+                        <>
+                          <button
+                            aria-label="Close watchlist menu"
+                            onClick={closeIntentMenu}
+                            className="fixed inset-0 z-20 cursor-default bg-transparent"
+                          />
+                          <div
+                            role="menu"
+                            aria-label="Choose watchlist lane"
+                            className="absolute bottom-full left-0 z-30 mb-2.5 w-[248px] rounded-xl border border-white/10 bg-[#121826] p-1 shadow-[0_16px_48px_rgba(0,0,0,0.6)]"
+                          >
+                            {([
+                              { id: 'asap' as WatchlistIntent, label: 'ASAP', sub: 'Watch as soon as possible', icon: <Zap size={14} fill="currentColor" />, tile: 'bg-red-500/15 text-red-400' },
+                              { id: 'weekend' as WatchlistIntent, label: 'Weekend', sub: 'Upcoming weekends', icon: <CalendarDays size={14} />, tile: 'bg-violet-500/15 text-violet-300' },
+                              { id: 'someday' as WatchlistIntent, label: 'Someday', sub: 'When nothing else to watch', icon: <Hourglass size={14} />, tile: 'bg-teal-400/10 text-teal-200' }
+                            ]).map(lane => {
+                              const isCurrent = isWatchlist && watchlistIntent === lane.id
+                              const isLoading = intentBusy === lane.id
+                              return (
+                                <button
+                                  key={lane.id}
+                                  role="menuitem"
+                                  onClick={() => void handleIntentSelect(lane.id)}
+                                  disabled={watchlistBusy || Boolean(intentBusy) || intentRemoving}
+                                  className={`flex w-full items-center gap-2.5 rounded-lg px-2 py-1.5 text-left transition-colors hover:bg-white/[0.06] disabled:cursor-wait disabled:opacity-60 ${isCurrent ? 'bg-white/[0.05]' : ''}`}
+                                >
+                                  <span className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-lg ${lane.tile}`}>
+                                    {isLoading ? <Loader2 size={14} className="animate-spin" /> : lane.icon}
+                                  </span>
+                                  <span className="min-w-0 flex-1">
+                                    <span className="block text-[12px] font-bold leading-tight text-white">{lane.label}</span>
+                                    <span className="block truncate text-[10px] font-medium leading-tight text-white/40">{lane.sub}</span>
+                                  </span>
+                                  {isCurrent && <CheckCircle2 size={14} className="shrink-0 text-white/60" />}
+                                </button>
+                              )
+                            })}
+                            {isWatchlist && (
+                              <>
+                                <div className="mx-2 my-1 border-t border-white/[0.07]" />
+                                <button
+                                  role="menuitem"
+                                  onClick={() => void handleIntentRemove()}
+                                  disabled={watchlistBusy || Boolean(intentBusy) || intentRemoving}
+                                  className="flex w-full items-center gap-2.5 rounded-lg px-2 py-1.5 text-left text-white/45 transition-colors hover:bg-red-500/10 hover:text-red-300 disabled:cursor-wait disabled:opacity-60"
+                                >
+                                  <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-white/[0.04]">
+                                    {intentRemoving ? <Loader2 size={14} className="animate-spin" /> : <Trash2 size={14} />}
+                                  </span>
+                                  <span className="min-w-0 flex-1">
+                                    <span className="block text-[12px] font-bold leading-tight">Remove</span>
+                                    <span className="block truncate text-[10px] font-medium leading-tight opacity-60">Take it off the list</span>
+                                  </span>
+                                </button>
+                              </>
+                            )}
+                          </div>
+                        </>
+                      )}
+                    </div>
                     <button
                       onClick={handleToggleFavorite}
                       className={`p-3.5 rounded-xl border transition-all hover:-translate-y-0.5 active:scale-95 glass-effect ${

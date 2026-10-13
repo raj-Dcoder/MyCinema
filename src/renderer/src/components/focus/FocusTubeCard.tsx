@@ -19,12 +19,12 @@ const FocusTubeCard: React.FC<FocusTubeCardProps> = ({ video, onPlay, onToggleSe
   const duration = formatDuration(video.duration)
 
   return (
-    <div className="group">
+    <div className="group overflow-hidden rounded-2xl border border-white/[0.06] bg-gradient-to-b from-white/[0.035] to-white/[0.015] transition duration-300 hover:-translate-y-0.5 hover:border-white/[0.13] hover:shadow-[0_18px_44px_-28px_rgba(0,0,0,0.95)]">
       <div className="relative">
         <button
           type="button"
           onClick={() => onPlay(video)}
-          className="relative block w-full aspect-video overflow-hidden rounded-xl border border-white/[0.07] bg-white/[0.03] transition-all duration-300 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/70 group-hover:border-white/20 group-hover:shadow-[0_20px_50px_-24px_rgba(0,0,0,0.95)]"
+          className="relative block aspect-video w-full overflow-hidden bg-[#101116] focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/70"
           aria-label={`Play ${video.title}`}
         >
           {!thumbBroken ? (
@@ -100,7 +100,7 @@ const FocusTubeCard: React.FC<FocusTubeCardProps> = ({ video, onPlay, onToggleSe
         )}
       </div>
 
-      <div className="mt-3 flex items-start gap-2">
+      <div className="flex items-start gap-2 px-3.5 pb-3.5 pt-3">
         <div className="min-w-0 flex-1">
           <h3 className="line-clamp-2 text-sm font-bold leading-snug text-white/90 transition-colors group-hover:text-white">
             {video.title}

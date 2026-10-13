@@ -516,46 +516,35 @@ const FocusTube: React.FC = () => {
 
   return (
     <div className="space-y-8">
-      <header className="relative overflow-hidden rounded-3xl border border-white/[0.07] bg-gradient-to-b from-white/[0.06] to-white/[0.015] px-6 py-6">
-        <div
-          aria-hidden
-          className="pointer-events-none absolute -right-16 -top-24 h-64 w-64 rounded-full bg-primary/20 blur-[90px]"
-        />
-        <div
-          aria-hidden
-          className="pointer-events-none absolute -left-20 bottom-[-6rem] h-56 w-56 rounded-full bg-primary/10 blur-[80px]"
-        />
-
-        <div className="relative flex flex-wrap items-start justify-between gap-x-6 gap-y-5">
-          <div className="flex items-center gap-4">
-            <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl border border-primary/25 bg-gradient-to-br from-primary/30 to-primary/5 text-primary shadow-[0_10px_30px_-12px_rgba(229,9,20,0.8)]">
-              <Compass size={28} strokeWidth={2.25} />
+      <header className="relative isolate overflow-hidden rounded-[26px] border border-white/[0.09] bg-gradient-to-br from-[#171820] via-[#0e0f14] to-[#0a0a0d] px-5 py-5 shadow-[0_24px_70px_-44px_rgba(0,0,0,0.95)] sm:px-6 sm:py-5">
+        <div aria-hidden className="absolute -right-16 -top-32 h-72 w-72 rounded-full bg-primary/15 blur-[100px]" />
+        <div aria-hidden className="absolute inset-x-0 bottom-0 h-px bg-gradient-to-r from-primary/55 via-white/[0.08] to-transparent" />
+        <div className="relative flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
+          <div className="flex min-w-0 items-center gap-4">
+            <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl border border-primary/30 bg-gradient-to-br from-primary/30 to-primary/[0.04] text-primary shadow-[inset_0_1px_0_rgba(255,255,255,0.1),0_10px_30px_-16px_rgba(229,9,20,0.9)]">
+              <Compass size={25} strokeWidth={1.9} />
             </div>
             <div className="min-w-0">
-              <h2 className="flex flex-wrap items-center gap-2.5 text-3xl font-black uppercase italic leading-none tracking-tighter text-white sm:text-4xl">
+              <p className="mb-1.5 text-[9px] font-black uppercase tracking-[0.24em] text-primary/90">Your personal video club</p>
+              <h2 className="flex flex-wrap items-center gap-2.5 text-3xl font-black leading-none tracking-tight text-white sm:text-[2.1rem]">
                 Focus Tube
                 <span
                   title="Focus Tube is in beta — some things may still change"
-                  className="not-italic inline-flex items-center rounded-md border border-amber-300/20 bg-amber-400/10 px-2 py-1 text-[9px] font-bold uppercase leading-none tracking-[0.14em] text-amber-200/90"
+                  className="inline-flex items-center rounded-md border border-amber-300/20 bg-amber-400/10 px-2 py-1 text-[9px] font-bold uppercase leading-none tracking-[0.14em] text-amber-200/90"
                 >
                   Beta
                 </span>
               </h2>
-              <p className="mt-2 text-sm font-semibold tracking-wide text-white/40">
+              <p className="mt-2 text-[13px] font-medium text-white/50">
                 {unseenTotal > 0 ? (
-                  <>
-                    <span className="font-black text-primary">{unseenTotal}</span> new video
-                    {unseenTotal === 1 ? '' : 's'} from your channels
-                  </>
-                ) : (
-                  'You are all caught up'
-                )}
+                  <><span className="font-bold text-white/90">{unseenTotal}</span> new {unseenTotal === 1 ? 'video' : 'videos'} ready when you are</>
+                ) : 'A quieter place to catch up with the channels you love'}
               </p>
             </div>
           </div>
 
-          <div className="flex flex-wrap items-center gap-2">
-            <div className="relative">
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center lg:pl-5">
+            <div className="relative flex-1 sm:flex-none">
               <Search size={15} className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-white/30" />
               <input
                 value={search}
@@ -563,7 +552,7 @@ const FocusTube: React.FC = () => {
                 onKeyDown={(event) => { if (event.key === 'Enter') void runSearch() }}
                 placeholder="Search your channels"
                 aria-label="Search videos in your subscriptions"
-                className="h-11 w-56 rounded-xl border border-white/10 bg-black/30 pl-10 pr-9 text-sm font-semibold text-white placeholder:text-white/25 transition-colors hover:border-white/20 focus:border-primary/60 focus:bg-black/40 focus:outline-none focus:ring-4 focus:ring-primary/10"
+                className="h-10 w-full rounded-xl border border-white/10 bg-black/30 pl-10 pr-9 text-sm font-medium text-white placeholder:text-white/25 transition-colors hover:border-white/20 focus:border-primary/60 focus:bg-black/40 focus:outline-none focus:ring-4 focus:ring-primary/10 sm:w-52"
               />
               {search && (
                 <button
@@ -577,31 +566,33 @@ const FocusTube: React.FC = () => {
               )}
             </div>
 
-            <button
-              type="button"
-              data-tour="focustube-channels"
-              onClick={() => setManaging(true)}
-              className="inline-flex h-11 items-center gap-2 rounded-xl border border-white/10 bg-white/5 px-4 text-xs font-black uppercase tracking-widest text-white/70 transition-colors hover:border-white/20 hover:bg-white/10 hover:text-white"
-            >
-              <SlidersHorizontal size={14} /> Channels
-              {totalChannels > 0 && (
-                <span className="rounded-md bg-white/10 px-1.5 py-0.5 text-[10px] tabular-nums text-white/70">
-                  {totalChannels}
-                </span>
-              )}
-            </button>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                data-tour="focustube-channels"
+                onClick={() => setManaging(true)}
+                className="inline-flex h-10 flex-1 items-center justify-center gap-2 rounded-xl border border-white/10 bg-white/5 px-4 text-[11px] font-bold uppercase tracking-wider text-white/70 transition-colors hover:border-white/20 hover:bg-white/10 hover:text-white sm:flex-none"
+              >
+                <SlidersHorizontal size={14} /> Channels
+                {totalChannels > 0 && (
+                  <span className="rounded bg-white/10 px-1.5 py-0.5 text-[10px] tabular-nums text-white/70">
+                    {totalChannels}
+                  </span>
+                )}
+              </button>
 
-            <button
-              type="button"
-              onClick={() => void refresh()}
-              disabled={refreshing}
-              aria-label="Refresh subscriptions"
-              title="Pull the latest uploads"
-              className="inline-flex h-11 items-center gap-2 rounded-xl border border-white/10 bg-white/5 px-4 text-xs font-black uppercase tracking-widest text-white/70 transition-colors hover:border-white/20 hover:bg-white/10 hover:text-white disabled:opacity-40"
-            >
-              <RefreshCw size={14} className={refreshing ? 'animate-spin' : undefined} />
-              {refreshing ? 'Syncing' : 'Refresh'}
-            </button>
+              <button
+                type="button"
+                onClick={() => void refresh()}
+                disabled={refreshing}
+                aria-label="Refresh subscriptions"
+                title="Pull the latest uploads"
+                className="inline-flex h-10 flex-1 items-center justify-center gap-2 rounded-xl border border-white/10 bg-white/5 px-4 text-[11px] font-bold uppercase tracking-wider text-white/70 transition-colors hover:border-white/20 hover:bg-white/10 hover:text-white disabled:opacity-40 sm:flex-none"
+              >
+                <RefreshCw size={14} className={refreshing ? 'animate-spin' : undefined} />
+                {refreshing ? 'Syncing' : 'Refresh'}
+              </button>
+            </div>
           </div>
         </div>
       </header>

@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react'
-import { X, Play, Info, Calendar, CalendarDays, Clock, Star, FolderOpen, Film, Music, Subtitles, HardDrive, ChevronDown, ChevronUp, Heart, Bookmark, Share2, Search, Zap, Users, Download, AlertTriangle, Clapperboard, Loader2, ExternalLink, Languages, CheckCircle2, Copy, MessageCircle, Send, Trash2, Bell, BellRing, Hourglass } from 'lucide-react'
+import { X, Play, Info, Calendar, CalendarDays, Clock, Star, FolderOpen, Film, Music, Subtitles, HardDrive, ChevronDown, ChevronUp, Heart, Bookmark, Share2, Search, Zap, Users, Download, AlertTriangle, Clapperboard, Loader2, ExternalLink, Languages, CheckCircle2, Copy, MessageCircle, Send, Trash2, Bell, BellRing, Hourglass, Layers, Plus } from 'lucide-react'
 import { Video, WatchlistIntent } from '../types'
 import { getWatchlistIntent, normalizeWatchlistIntent, WATCHLIST_INTENT_META } from '../utils/watchlistIntent'
 import { ShareHintGuide, DeleteHintGuide, FollowGuide } from './FeatureGuides'
@@ -187,6 +187,24 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
   const [showIntentPicker, setShowIntentPicker] = useState(false)
   const [intentBusy, setIntentBusy] = useState<WatchlistIntent | null>(null)
   const [intentRemoving, setIntentRemoving] = useState(false)
+  // Collections quick-file: anchored menu above its own button.
+  interface CollectionEntry {
+    id: number
+    name: string
+    memberCount: number
+    cover: string | null
+    matches: { isExternal: boolean; externalId: number | null }[]
+  }
+  const [collections, setCollections] = useState<CollectionEntry[]>([])
+  const [showCollectionMenu, setShowCollectionMenu] = useState(false)
+  const [collectionsLoading, setCollectionsLoading] = useState(false)
+  const [collectionBusyId, setCollectionBusyId] = useState<number | null>(null)
+  const [creatingCollection, setCreatingCollection] = useState(false)
+  const [newCollectionName, setNewCollectionName] = useState('')
+  const [createBusy, setCreateBusy] = useState(false)
+  const [collectionToast, setCollectionToast] = useState<string | null>(null)
+  const collectionReqRef = useRef(0)
+  const collectionToastTimer = useRef<number | null>(null)
 
   // Keep the bookmark + intent pill in sync when a different title opens.
   useEffect(() => {
@@ -196,6 +214,16 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
     setShowIntentPicker(false)
     setIntentBusy(null)
     setIntentRemoving(false)
+    setShowCollectionMenu(false)
+    setCollections([])
+    setCreatingCollection(false)
+    setNewCollectionName('')
+    setCollectionToast(null)
+    collectionReqRef.current += 1
+    if (collectionToastTimer.current) {
+      window.clearTimeout(collectionToastTimer.current)
+      collectionToastTimer.current = null
+    }
   }, [video.id, video.tmdb_id, video.is_watchlist])
 
   // Titles opened from Hero/Trending carry no flags — verify against the DB so
@@ -231,6 +259,12 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
       }
     }).catch(() => {})
     return () => { cancelled = true }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [video.id, video.tmdb_id, video.isExternal, video.type])
+  // Preload collection membership on open so the button badge is correct
+  // immediately — not just after the menu has been opened once.
+  useEffect(() => {
+    void loadCollectionEntries()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [video.id, video.tmdb_id, video.isExternal, video.type])
   // #3: manual follow for new-episode alerts (auto-follow also fires on watch).
@@ -454,6 +488,7 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
   // button so a tap files the title as ASAP / Weekend / Someday.
   const handleWatchlistButtonClick = () => {
     if (watchlistBusy || intentBusy || intentRemoving) return
+    setShowCollectionMenu(false)
     setShowIntentPicker(v => !v)
   }
 
@@ -479,6 +514,19 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [showIntentPicker, watchlistBusy, intentBusy, intentRemoving, isWatchlist, video.id, video.tmdb_id])
+
+  // Keyboard: Esc dismisses the collections menu.
+  useEffect(() => {
+    if (!showCollectionMenu) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.stopPropagation()
+        closeCollectionMenu()
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [showCollectionMenu, collectionBusyId, createBusy])
 
   const handleIntentSelect = async (intent: WatchlistIntent) => {
     if (intentBusy || intentRemoving) return
@@ -523,6 +571,162 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
       setIntentRemoving(false)
     }
   }
+
+  // ─── Collections quick-file ─────────────────────────────────────────────
+  // Same identity rule as the watchlist: real library rows pin by id,
+  // streamed/online cards (synthetic negative ids) file by TMDB identity.
+  const isCollectionExternal = video.isExternal || video.id < 0
+
+  const resolveCollectionCover = (path?: string | null) => {
+    if (!path) return null
+    if (path.startsWith('http') || path.startsWith('media://')) return path
+    return `media://file/${encodeURIComponent(path)}`
+  }
+
+  const flashCollectionToast = (message: string) => {
+    setCollectionToast(message)
+    if (collectionToastTimer.current) window.clearTimeout(collectionToastTimer.current)
+    collectionToastTimer.current = window.setTimeout(() => {
+      setCollectionToast(null)
+      collectionToastTimer.current = null
+    }, 1800)
+  }
+
+  const findCollectionMatches = (members: any[]) => {
+    const matches: { isExternal: boolean; externalId: number | null }[] = []
+    for (const row of members || []) {
+      const rowIsExternal = Boolean(row?.isExternal)
+      if (!isCollectionExternal && !rowIsExternal && Number(row?.id) === Number(video.id)) {
+        matches.push({ isExternal: false, externalId: null })
+        continue
+      }
+      if (video.tmdb_id && Number(row?.tmdb_id) === Number(video.tmdb_id) && (row?.type === video.type || !row?.type)) {
+        matches.push({
+          isExternal: rowIsExternal,
+          externalId: rowIsExternal && row?.collection_external_id != null ? Number(row.collection_external_id) : null
+        })
+      }
+    }
+    return matches
+  }
+
+  const loadCollectionEntries = async () => {
+    const requestId = collectionReqRef.current
+    setCollectionsLoading(true)
+    try {
+      const cols = await window.api.getCollections()
+      const entries = await Promise.all((cols || []).map(async (c: any) => {
+        let members: any[] = []
+        try {
+          members = await window.api.getCollectionMembers(Number(c.id))
+        } catch {
+          members = []
+        }
+        const previews = Array.isArray((c as any)?.preview) ? (c as any).preview : []
+        return {
+          id: Number(c.id),
+          name: String(c.name || 'Untitled'),
+          memberCount: Number((c as any)?.memberCount ?? members.length ?? 0),
+          cover: resolveCollectionCover(previews.find((p: any) => Boolean(p)) || null),
+          matches: findCollectionMatches(members)
+        } as CollectionEntry
+      }))
+      if (collectionReqRef.current !== requestId) return
+      setCollections(entries)
+    } catch (err) {
+      console.error('[DetailScreen] Collections load error:', err)
+    } finally {
+      if (collectionReqRef.current === requestId) setCollectionsLoading(false)
+    }
+  }
+
+  const handleCollectionButtonClick = () => {
+    if (collectionBusyId != null || createBusy) return
+    if (showCollectionMenu) {
+      setShowCollectionMenu(false)
+      return
+    }
+    setShowIntentPicker(false)
+    setShowCollectionMenu(true)
+    if (collections.length === 0) void loadCollectionEntries()
+  }
+
+  const closeCollectionMenu = () => {
+    if (collectionBusyId != null || createBusy) return
+    setShowCollectionMenu(false)
+  }
+
+  const buildCollectionExternalItem = () => ({
+    tmdb_id: video.tmdb_id,
+    title: displayTitle,
+    type: video.type,
+    poster_path: video.poster_path,
+    backdrop_path: (video as any)?.backdrop_path,
+    overview: video.overview,
+    vote_average: video.vote_average,
+    release_year: video.release_year
+  })
+
+  const handleToggleCollection = async (entry: CollectionEntry) => {
+    if (collectionBusyId != null || createBusy) return
+    setCollectionBusyId(entry.id)
+    try {
+      if (entry.matches.length > 0) {
+        for (const m of entry.matches) {
+          if (m.isExternal && m.externalId != null) {
+            await window.api.removeCollectionExternal(m.externalId)
+          } else if (!m.isExternal) {
+            await window.api.unpinCollectionVideo(entry.id, video.id)
+          }
+        }
+        flashCollectionToast(`Removed from ${entry.name}`)
+      } else if (isCollectionExternal) {
+        if (!video.tmdb_id) {
+          console.warn('[DetailScreen] Cannot file into collection: no TMDB identity.')
+          return
+        }
+        await window.api.addCollectionExternal(entry.id, buildCollectionExternalItem())
+        flashCollectionToast(`Saved to ${entry.name}`)
+      } else {
+        await window.api.pinCollectionVideo(entry.id, video.id)
+        flashCollectionToast(`Saved to ${entry.name}`)
+      }
+      await loadCollectionEntries()
+    } catch (err) {
+      console.error('[DetailScreen] Collection toggle error:', err)
+    } finally {
+      setCollectionBusyId(null)
+    }
+  }
+
+  const handleCreateCollection = async () => {
+    const name = newCollectionName.trim()
+    if (!name || createBusy) return
+    setCreateBusy(true)
+    try {
+      const created = await window.api.createCollection({ name })
+      setNewCollectionName('')
+      setCreatingCollection(false)
+      if (created?.id) {
+        if (isCollectionExternal) {
+          if (video.tmdb_id) {
+            await window.api.addCollectionExternal(Number(created.id), buildCollectionExternalItem())
+            flashCollectionToast(`Saved to ${name}`)
+          }
+        } else {
+          await window.api.pinCollectionVideo(Number(created.id), video.id)
+          flashCollectionToast(`Saved to ${name}`)
+        }
+      }
+      await loadCollectionEntries()
+    } catch (err) {
+      console.error('[DetailScreen] Collection create error:', err)
+    } finally {
+      setCreateBusy(false)
+    }
+  }
+
+  const filedCollectionCount = collections.filter(c => c.matches.length > 0).length
 
   const handleSearchSources = async (forceRefresh: boolean = false): Promise<any[]> => {
     if (!isTmdbBacked || !video.tmdb_id || (searching && !forceRefresh)) return []
@@ -1818,6 +2022,150 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
                                   </span>
                                 </button>
                               </>
+                            )}
+                          </div>
+                        </>
+                      )}
+                    </div>
+                    <div className="relative">
+                      <button
+                        onClick={handleCollectionButtonClick}
+                        className={`relative p-3.5 rounded-xl border transition-all hover:-translate-y-0.5 active:scale-95 glass-effect ${
+                          filedCollectionCount > 0
+                            ? 'bg-primary/20 border-primary text-primary'
+                            : 'bg-white/5 border-white/10 text-white/40 hover:text-white'
+                        }`}
+                        title={filedCollectionCount > 0 ? `In ${filedCollectionCount} collection${filedCollectionCount === 1 ? '' : 's'} — click to manage` : 'Add to a collection'}
+                      >
+                        <Layers size={20} />
+                        {filedCollectionCount > 0 && (
+                          <span className="absolute -right-1.5 -top-1.5 flex h-5 min-w-[20px] items-center justify-center rounded-full bg-primary px-1 text-[9px] font-black text-white ring-2 ring-[#080d16]">
+                            {filedCollectionCount}
+                          </span>
+                        )}
+                      </button>
+                      {showCollectionMenu && (
+                        <>
+                          <button
+                            aria-label="Close collections menu"
+                            onClick={closeCollectionMenu}
+                            className="fixed inset-0 z-20 cursor-default bg-transparent"
+                          />
+                          <div
+                            role="menu"
+                            aria-label="Add to collection"
+                            className="absolute bottom-full left-0 z-30 mb-2.5 w-[280px] rounded-xl border border-white/10 bg-[#121826] p-1 shadow-[0_16px_48px_rgba(0,0,0,0.6)]"
+                          >
+                            <p className="px-2.5 pb-1 pt-1.5 text-[9px] font-black uppercase tracking-[0.2em] text-white/35">
+                              Add to collection
+                            </p>
+                            {collectionToast && (
+                              <p className="px-2.5 pb-1 text-center text-[10px] font-bold text-emerald-300">
+                                {collectionToast}
+                              </p>
+                            )}
+                            {collectionsLoading ? (
+                              <div className="space-y-1 p-1">
+                                {[1, 2, 3].map(i => (
+                                  <div key={i} className="flex items-center gap-2.5 rounded-lg px-2 py-1.5">
+                                    <div className="h-8 w-6 shrink-0 animate-pulse rounded bg-white/10" />
+                                    <div className="flex-1 space-y-1.5">
+                                      <div className="h-3 w-2/3 animate-pulse rounded bg-white/10" />
+                                      <div className="h-2 w-1/3 animate-pulse rounded bg-white/10" />
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+                            ) : collections.length === 0 ? (
+                              <p className="px-2.5 pb-2 pt-1 text-[11px] font-medium leading-snug text-white/40">
+                                No collections yet — create your first below.
+                              </p>
+                            ) : (
+                              <div className="max-h-[228px] overflow-y-auto scrollbar-thin">
+                                {collections.map(entry => {
+                                  const isMember = entry.matches.length > 0
+                                  const isLoading = collectionBusyId === entry.id
+                                  return (
+                                    <button
+                                      key={entry.id}
+                                      role="menuitem"
+                                      onClick={() => void handleToggleCollection(entry)}
+                                      disabled={collectionBusyId != null || createBusy}
+                                      title={isMember ? `In ${entry.name} — click to remove` : `Add to ${entry.name}`}
+                                      className={`flex w-full items-center gap-2.5 rounded-lg px-2 py-1.5 text-left transition-colors hover:bg-white/[0.06] disabled:cursor-wait disabled:opacity-60 ${isMember ? 'bg-white/[0.05]' : ''}`}
+                                    >
+                                      {entry.cover ? (
+                                        <img
+                                          src={entry.cover}
+                                          alt=""
+                                          loading="lazy"
+                                          className="h-8 w-6 shrink-0 rounded object-cover ring-1 ring-white/10"
+                                        />
+                                      ) : (
+                                        <span className="flex h-8 w-6 shrink-0 items-center justify-center rounded bg-white/[0.06] text-white/35">
+                                          <Layers size={13} />
+                                        </span>
+                                      )}
+                                      <span className="min-w-0 flex-1">
+                                        <span className="block truncate text-[12px] font-bold leading-tight text-white">{entry.name}</span>
+                                        <span className="block text-[10px] font-medium leading-tight text-white/40">
+                                          {entry.memberCount} title{entry.memberCount === 1 ? '' : 's'}
+                                        </span>
+                                      </span>
+                                      {isLoading
+                                        ? <Loader2 size={14} className="shrink-0 animate-spin text-white/60" />
+                                        : isMember
+                                          ? <CheckCircle2 size={14} className="shrink-0 text-emerald-300" />
+                                          : null}
+                                    </button>
+                                  )
+                                })}
+                              </div>
+                            )}
+                            <div className="mx-2 my-1 border-t border-white/[0.07]" />
+                            {creatingCollection ? (
+                              <div className="flex items-center gap-2 p-1">
+                                <input
+                                  autoFocus
+                                  value={newCollectionName}
+                                  onChange={e => setNewCollectionName(e.target.value)}
+                                  onKeyDown={e => {
+                                    if (e.key === 'Enter') void handleCreateCollection()
+                                    else if (e.key === 'Escape') {
+                                      e.stopPropagation()
+                                      setCreatingCollection(false)
+                                      setNewCollectionName('')
+                                    }
+                                  }}
+                                  placeholder="Collection name…"
+                                  maxLength={60}
+                                  disabled={createBusy}
+                                  className="h-9 min-w-0 flex-1 rounded-lg border border-white/10 bg-black/30 px-2.5 text-[12px] font-semibold text-white outline-none placeholder:text-white/25 focus:border-primary/50 disabled:opacity-60"
+                                />
+                                <button
+                                  onClick={() => void handleCreateCollection()}
+                                  disabled={!newCollectionName.trim() || createBusy}
+                                  title="Create and add this title"
+                                  className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-primary text-white transition-all hover:opacity-90 active:scale-95 disabled:cursor-not-allowed disabled:opacity-40"
+                                >
+                                  {createBusy ? <Loader2 size={15} className="animate-spin" /> : <Plus size={15} strokeWidth={3} />}
+                                </button>
+                              </div>
+                            ) : (
+                              <button
+                                role="menuitem"
+                                onClick={() => setCreatingCollection(true)}
+                                disabled={collectionBusyId != null || createBusy}
+                                className="flex w-full items-center gap-2.5 rounded-lg px-2 py-1.5 text-left text-white/55 transition-colors hover:bg-white/[0.06] hover:text-white disabled:cursor-wait disabled:opacity-60"
+                              >
+                                <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-white/[0.04]">
+                                  <Plus size={14} strokeWidth={2.5} />
+                                </span>
+                                <span className="min-w-0 flex-1">
+                                  <span className="block text-[12px] font-bold leading-tight">New collection…</span>
+                                  <span className="block truncate text-[10px] font-medium leading-tight opacity-60">Create and add this title</span>
+                                </span>
+                              </button>
                             )}
                           </div>
                         </>

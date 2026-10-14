@@ -1,7 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import {
-  ArrowLeft,
   Check,
   ChevronDown,
   ExternalLink,
@@ -127,6 +126,68 @@ function formatCompactCount(n: number | null): string {
 /** Long comments collapse to 6 lines with a show more/less toggle. */
 const LONG_COMMENT_CHARS = 400
 
+/** Deterministic hue from a name so fallback avatars are stable per author. */
+function avatarHue(name: string): number {
+  let h = 0
+  for (let i = 0; i < name.length; i += 1) {
+    h = (h * 31 + name.charCodeAt(i)) % 360
+  }
+  return h
+}
+
+/**
+ * Commenter avatar with a guaranteed fallback.
+ * The Invidious mirrors sometimes return no avatar (or a URL that no longer
+ * loads / is blocked) — previously that left a broken <img> icon. Now any
+ * missing or failed photo falls back to a colored initial so the row never
+ * looks broken.
+ */
+const CommentAvatar: React.FC<{ comment: FtComment }> = ({ comment }) => {
+  const [failed, setFailed] = useState(false)
+  const [loaded, setLoaded] = useState(false)
+  const url = comment.avatarUrl
+  // Reset the load flags when the comment (avatar URL) changes.
+  useEffect(() => {
+    setFailed(false)
+    setLoaded(false)
+  }, [url])
+  const author = comment.author || '?'
+  const initial = author.trim().charAt(0).toUpperCase() || '?'
+  const hue = avatarHue(author)
+  const fallback = (
+    <span
+      aria-hidden
+      title={comment.author}
+      className="flex h-7 w-7 items-center justify-center rounded-full text-[11px] font-black"
+      style={{
+        backgroundColor: `hsl(${hue}, 45%, 26%)`,
+        color: `hsl(${hue}, 90%, 82%)`,
+      }}
+    >
+      {initial}
+    </span>
+  )
+  if (!url || failed) return <span className="shrink-0">{fallback}</span>
+  // Stacked: the initial is always underneath, the photo fades in on top once
+  // it actually loads. A blocked / dead URL therefore never flashes a broken
+  // <img> icon — worst case the initial stays visible.
+  return (
+    <span className="relative h-7 w-7 shrink-0 rounded-full">
+      {fallback}
+      <img
+        src={url}
+        alt=""
+        loading="lazy"
+        referrerPolicy="no-referrer"
+        onLoad={() => setLoaded(true)}
+        onError={() => setFailed(true)}
+        className="absolute inset-0 h-7 w-7 rounded-full bg-transparent object-cover transition-opacity duration-200"
+        style={{ opacity: loaded ? 1 : 0 }}
+      />
+    </span>
+  )
+}
+
 function loadVolume(): { volume: number; muted: boolean } {
   try {
     const volume = Math.min(100, Math.max(0, Number(localStorage.getItem(VOLUME_KEY) ?? 100) || 0))
@@ -214,6 +275,9 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
   const [commentsDisabled, setCommentsDisabled] = useState(false)
   const [commentsSort, setCommentsSort] = useState<'top' | 'new'>('top')
   const [commentsOpen, setCommentsOpen] = useState(true)
+  const [descriptionOpen, setDescriptionOpen] = useState(true)
+  const [segmentsOpen, setSegmentsOpen] = useState(true)
+  const [chaptersOpen, setChaptersOpen] = useState(true)
   const [expandedLong, setExpandedLong] = useState<Record<string, boolean>>({})
   const [commentReplies, setCommentReplies] = useState<Record<string, { items: FtComment[]; continuation: string | null; loading: boolean; open: boolean }>>({})
   const [sponsorSegments, setSponsorSegments] = useState<FtSponsorSegment[]>([])
@@ -536,13 +600,7 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
     const canReply = comment.replyCount > 0 && (comment.replyContinuation || (replyEntry && replyEntry.items.length > 0))
     return (
       <div key={key} className={`flex gap-2.5 ${nested ? '' : 'border-b border-white/5 px-1 py-3'}`}>
-        {comment.avatarUrl ? (
-          <img src={comment.avatarUrl} alt="" loading="lazy" className="h-7 w-7 shrink-0 rounded-full bg-white/10 object-cover" />
-        ) : (
-          <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-white/10 text-[11px] font-black text-white/60">
-            {(comment.author || '?').charAt(0).toUpperCase()}
-          </span>
-        )}
+        <CommentAvatar comment={comment} />
         <div className="min-w-0 flex-1">
           <p className="flex flex-wrap items-baseline gap-x-2">
             <span className="truncate text-xs font-bold text-white/90">{comment.author}</span>
@@ -1249,6 +1307,21 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
     window.api.openWebPopup(watchUrl(video.videoId))
   }, [video.videoId])
 
+  // ── Mouse back button closes the player (same as VideoPlayer/DetailScreen) ─
+  // Mice with a dedicated "back" side button fire mousedown with button === 3.
+  // Without this the press does nothing (or navigates history) while the
+  // fullscreen player takeover is open. preventDefault stops any history nav.
+  useEffect(() => {
+    const onMouseDown = (event: MouseEvent) => {
+      if (event.button === 3) {
+        event.preventDefault()
+        handleClose()
+      }
+    }
+    window.addEventListener('mousedown', onMouseDown)
+    return () => window.removeEventListener('mousedown', onMouseDown)
+  }, [handleClose])
+
   // ── Keyboard ───────────────────────────────────────────────────────────────
   useEffect(() => {
     const exitFullscreenOnly = () => exitVideoFullscreen()
@@ -1481,27 +1554,18 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
                 Icon-only buttons that fade with the bottom bar. Deliberately
                 text-free: the video title/channel already live in the sidebar,
                 and any text here overlaps YouTube's own native title row on
-                pause (avatar + title), which ghosted as double text. */}
+                pause (avatar + title), which ghosted as double text.
+                Single close control lives on the right (the old left back
+                arrow is gone so it never covers the creator avatar). The mini
+                player lives only in the bottom bar — no duplicate up here. */}
             <div
-              className={`pointer-events-none absolute inset-x-0 top-0 z-30 flex items-start justify-between p-3 transition-all duration-200 sm:p-4 ${
+              className={`pointer-events-none absolute inset-x-0 top-0 z-30 flex items-start justify-end p-3 transition-all duration-200 sm:p-4 ${
                 isMinimized ? 'hidden' : ''
               } ${
                 chromeVisible ? 'visible translate-y-0 opacity-100' : 'invisible -translate-y-2 opacity-0'
               }`}
               aria-hidden={!chromeVisible}
             >
-              <button
-                type="button"
-                onClick={handleClose}
-                aria-label="Back"
-                title="Back (Esc)"
-                tabIndex={chromeVisible ? 0 : -1}
-                className={`pointer-events-auto flex h-9 w-9 items-center justify-center rounded-full bg-black/60 text-white/85 backdrop-blur-md transition-all hover:bg-black/85 hover:text-white active:scale-95 ${
-                  chromeVisible ? '' : 'pointer-events-none'
-                }`}
-              >
-                <ArrowLeft size={18} />
-              </button>
               <div className="flex items-center gap-1.5">
                 <button
                   type="button"
@@ -1540,18 +1604,6 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
                   }`}
                 >
                   <ExternalLink size={16} />
-                </button>
-                <button
-                  type="button"
-                  onClick={toggleMinimize}
-                  aria-label="Mini player — dock to corner"
-                  title="Mini player — dock video to the corner and keep browsing"
-                  tabIndex={chromeVisible ? 0 : -1}
-                  className={`pointer-events-auto flex h-9 w-9 items-center justify-center rounded-full bg-black/60 text-white/70 backdrop-blur-md transition-all hover:bg-black/85 hover:text-white active:scale-95 ${
-                    chromeVisible ? '' : 'pointer-events-none'
-                  }`}
-                >
-                  <SquareArrowDownRight size={16} />
                 </button>
                 <button
                   type="button"
@@ -2094,38 +2146,54 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
 
                 {chapters.length > 0 && (
                   <section aria-label="Chapters">
-                    <h5 className="mb-2 flex items-center gap-1.5 text-[11px] font-black uppercase tracking-widest text-white/40">
-                      <ListVideo size={12} /> Chapters
-                    </h5>
-                    <div className="space-y-0.5">
-                      {chapters.map((chapter, index) => (
-                        <button
-                          key={`${chapter.start}-${index}`}
-                          type="button"
-                          onClick={() => handleSeek(chapter.start)}
-                          className={`flex w-full items-center gap-3 px-2 py-2 text-left transition-colors ${
-                            index === activeChapterIndex ? 'bg-primary/15 text-white' : 'text-white/60 hover:bg-white/5 hover:text-white'
-                          }`}
-                        >
-                          <span className={`shrink-0 px-1.5 py-0.5 text-[11px] font-bold tabular-nums ${
-                            index === activeChapterIndex ? 'bg-primary text-white' : 'bg-white/10 text-white/70'
-                          }`}>
-                            {formatChapterTime(chapter.start)}
-                          </span>
-                          <span className="min-w-0 flex-1 truncate text-xs font-semibold">{chapter.title}</span>
-                          {index === activeChapterIndex && <Play size={11} fill="currentColor" className="shrink-0" />}
-                        </button>
-                      ))}
+                    <div className="mb-1">
+                      <button
+                        type="button"
+                        onClick={() => setChaptersOpen((v) => !v)}
+                        aria-expanded={chaptersOpen}
+                        className="flex items-center gap-1.5 text-[11px] font-black uppercase tracking-widest text-white/40 transition-colors hover:text-white/70"
+                      >
+                        <ListVideo size={12} /> Chapters · {chapters.length}
+                        <ChevronDown size={12} className={`transition-transform ${chaptersOpen ? '' : '-rotate-90'}`} />
+                      </button>
                     </div>
+                    {chaptersOpen && (
+                      <div className="space-y-0.5">
+                        {chapters.map((chapter, index) => (
+                          <button
+                            key={`${chapter.start}-${index}`}
+                            type="button"
+                            onClick={() => handleSeek(chapter.start)}
+                            className={`flex w-full items-center gap-3 px-2 py-2 text-left transition-colors ${
+                              index === activeChapterIndex ? 'bg-primary/15 text-white' : 'text-white/60 hover:bg-white/5 hover:text-white'
+                            }`}
+                          >
+                            <span className={`shrink-0 px-1.5 py-0.5 text-[11px] font-bold tabular-nums ${
+                              index === activeChapterIndex ? 'bg-primary text-white' : 'bg-white/10 text-white/70'
+                            }`}>
+                              {formatChapterTime(chapter.start)}
+                            </span>
+                            <span className="min-w-0 flex-1 truncate text-xs font-semibold">{chapter.title}</span>
+                            {index === activeChapterIndex && <Play size={11} fill="currentColor" className="shrink-0" />}
+                          </button>
+                        ))}
+                      </div>
+                    )}
                   </section>
                 )}
 
                 {sponsorSegments.length > 0 && (
                   <section aria-label="In-video segments" className="border border-amber-300/15 bg-amber-300/[0.04] p-3">
                     <div className="flex items-center justify-between gap-2">
-                      <span className="inline-flex items-center gap-1.5 text-[11px] font-black uppercase tracking-widest text-amber-200/90">
-                        <Zap size={12} /> In-video segments
-                      </span>
+                      <button
+                        type="button"
+                        onClick={() => setSegmentsOpen((v) => !v)}
+                        aria-expanded={segmentsOpen}
+                        className="inline-flex items-center gap-1.5 text-[11px] font-black uppercase tracking-widest text-amber-200/90 transition-colors hover:text-amber-100"
+                      >
+                        <Zap size={12} /> In-video segments · {sponsorSegments.length}
+                        <ChevronDown size={12} className={`transition-transform ${segmentsOpen ? '' : '-rotate-90'}`} />
+                      </button>
                       <button
                         type="button"
                         onClick={() => setSkipSponsors((v) => !v)}
@@ -2137,24 +2205,28 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
                         {skipSponsors ? 'Auto-skip on' : 'Auto-skip off'}
                       </button>
                     </div>
-                    <div className="mt-2 space-y-0.5">
-                      {sponsorSegments.map((seg, index) => (
-                        <button
-                          key={`${seg.start}-${seg.end}-${index}`}
-                          type="button"
-                          onClick={() => handleSeek(seg.start)}
-                          className="flex w-full items-center justify-between gap-2 px-2 py-1.5 text-left text-xs font-medium text-white/60 transition-colors hover:bg-white/5 hover:text-white"
-                        >
-                          <span className="truncate">{sponsorLabel(seg.category)}</span>
-                          <span className="shrink-0 tabular-nums text-white/35">
-                            {formatChapterTime(seg.start)} → {formatChapterTime(seg.end)}
-                          </span>
-                        </button>
-                      ))}
-                    </div>
-                    <p className="mt-2 text-[11px] leading-relaxed text-white/30">
-                      Crowd-sourced via SponsorBlock. Baked-in promos YouTube itself never skips.
-                    </p>
+                    {segmentsOpen && (
+                      <>
+                        <div className="mt-2 space-y-0.5">
+                          {sponsorSegments.map((seg, index) => (
+                            <button
+                              key={`${seg.start}-${seg.end}-${index}`}
+                              type="button"
+                              onClick={() => handleSeek(seg.start)}
+                              className="flex w-full items-center justify-between gap-2 px-2 py-1.5 text-left text-xs font-medium text-white/60 transition-colors hover:bg-white/5 hover:text-white"
+                            >
+                              <span className="truncate">{sponsorLabel(seg.category)}</span>
+                              <span className="shrink-0 tabular-nums text-white/35">
+                                {formatChapterTime(seg.start)} → {formatChapterTime(seg.end)}
+                              </span>
+                            </button>
+                          ))}
+                        </div>
+                        <p className="mt-2 text-[11px] leading-relaxed text-white/30">
+                          Crowd-sourced via SponsorBlock. Baked-in promos YouTube itself never skips.
+                        </p>
+                      </>
+                    )}
                   </section>
                 )}
 
@@ -2249,42 +2321,53 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
                 </section>
 
                 <section aria-label="Description">
-                  <h5 className="mb-2 text-[11px] font-black uppercase tracking-widest text-white/40">
-                    About
-                  </h5>
-                  {video.description ? (
-                    <div className="whitespace-pre-wrap break-words text-[13px] leading-relaxed text-white/65">
-                      {descParts.map((part, i) => {
-                        if (part.kind === 'newline') return <br key={i} />
-                        if (part.kind === 'timestamp') {
-                          return (
-                            <button
-                              key={i}
-                              type="button"
-                              onClick={() => handleSeek(part.seconds ?? 0)}
-                              className="font-bold text-sky-300 hover:underline"
-                            >
-                              {part.text}
-                            </button>
-                          )
-                        }
-                        if (part.kind === 'url') {
-                          return (
-                            <a
-                              key={i}
-                              href={part.text}
-                              onClick={(e) => { e.preventDefault(); window.api.openWebPopup(part.text) }}
-                              className="break-all text-sky-300 hover:underline"
-                            >
-                              {part.text}
-                            </a>
-                          )
-                        }
-                        return <span key={i}>{part.text}</span>
-                      })}
-                    </div>
-                  ) : (
-                    <p className="text-[13px] text-white/30">No description available.</p>
+                  <div className="mb-1">
+                    <button
+                      type="button"
+                      onClick={() => setDescriptionOpen((v) => !v)}
+                      aria-expanded={descriptionOpen}
+                      className="flex items-center gap-1.5 text-[11px] font-black uppercase tracking-widest text-white/40 transition-colors hover:text-white/70"
+                    >
+                      <FileText size={12} />
+                      About
+                      <ChevronDown size={12} className={`transition-transform ${descriptionOpen ? '' : '-rotate-90'}`} />
+                    </button>
+                  </div>
+                  {descriptionOpen && (
+                    video.description ? (
+                      <div className="whitespace-pre-wrap break-words text-[13px] leading-relaxed text-white/65">
+                        {descParts.map((part, i) => {
+                          if (part.kind === 'newline') return <br key={i} />
+                          if (part.kind === 'timestamp') {
+                            return (
+                              <button
+                                key={i}
+                                type="button"
+                                onClick={() => handleSeek(part.seconds ?? 0)}
+                                className="font-bold text-sky-300 hover:underline"
+                              >
+                                {part.text}
+                              </button>
+                            )
+                          }
+                          if (part.kind === 'url') {
+                            return (
+                              <a
+                                key={i}
+                                href={part.text}
+                                onClick={(e) => { e.preventDefault(); window.api.openWebPopup(part.text) }}
+                                className="break-all text-sky-300 hover:underline"
+                              >
+                                {part.text}
+                              </a>
+                            )
+                          }
+                          return <span key={i}>{part.text}</span>
+                        })}
+                      </div>
+                    ) : (
+                      <p className="text-[13px] text-white/30">No description available.</p>
+                    )
                   )}
                 </section>
 

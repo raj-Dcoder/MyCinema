@@ -212,6 +212,29 @@ interface Api {
   ftRefreshChannelAvatars: () => Promise<{ checked: number; updated: number } | { error: string }>
   ftSubscribeChannel: (channel: { channelId: string; title: string; handle?: string | null; avatarUrl?: string | null; url?: string | null }, categoryIds: number[]) => Promise<import('./types').FtChannel | { error: string }>
   ftAddChannel: (query: string, categoryIds: number[]) => Promise<import('./types').FtChannel | { error: string }>
+  ftYouTubeImportStatus: () => Promise<import('./types').FtYouTubeImportStatus>
+  ftYouTubeImportConnect: () => Promise<import('./types').FtYouTubeImportLoadResult | { error: string; cancelled?: boolean }>
+  ftYouTubeImportCancel: () => Promise<boolean>
+  ftYouTubeImportSave: (
+    channels: import('./types').FtYouTubeImportChannel[],
+    categoryAssignments: Record<string, number[]>,
+  ) => Promise<{
+    added: string[]
+    alreadyPresent: string[]
+    skipped: string[]
+    createdMemberships: Array<{ channelId: string; categoryId: number }>
+    undoId: string | null
+  } | { error: string }>
+  ftYouTubeImportRefresh: (channelIds: string[], requestId: string) => Promise<{ added: number; failed: string[] }>
+  ftYouTubeImportDisconnect: () => Promise<{ disconnected: boolean; revoked: boolean }>
+  ftYouTubeImportUndo: (undoId: string) => Promise<{
+    removedChannels: number
+    removedChannelIds: string[]
+    removedMemberships: number
+    retainedChannels: string[]
+  } | { error: string }>
+  onFtYouTubeImportProgress: (callback: (progress: { stage: 'authorization' | 'subscriptions'; page?: number; found?: number }) => void) => () => void
+  onFtYouTubeImportRefreshProgress: (callback: (progress: import('./types').FtYouTubeImportRefreshProgress) => void) => () => void
   ftRecordPlayback: (videoId: string, observation: { duration?: number | null; ended?: boolean }) => Promise<{ ok: boolean }>
   ftMarkNotEmbeddable: (videoId: string) => Promise<{ ok: boolean }>
   ftGetSponsorSegments: (videoId: string) => Promise<{ segments: Array<{ category: string; start: number; end: number }> }>

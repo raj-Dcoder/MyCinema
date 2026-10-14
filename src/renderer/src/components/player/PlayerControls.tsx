@@ -5,7 +5,7 @@ import { AudioBoostProfile, AudioBoostIntensity, AUDIO_BOOST_PROFILES, AUDIO_BOO
 import {
   SkipForward as SkipNext, Loader2, Rewind, Pause, Play, FastForward, Volume2, ListVideo, FolderOpen,
   Users, Info, Crop, RectangleHorizontal, Monitor, Sparkles, Zap, Wand2, PictureInPicture2,
-  Minimize, Maximize, Clock, Activity, Magnet
+  Minimize, Maximize, SquareArrowDownRight, Clock, Activity, Magnet
 } from 'lucide-react'
 
 export interface PlayerControlsProps {
@@ -79,6 +79,8 @@ export interface PlayerControlsProps {
   changeSpeed: (rate: number) => void
   togglePictureInPicture: () => void
   toggleFullscreen: () => void
+  toggleMinimize?: () => void
+  isMinimized?: boolean
 
   setSleepTimerEnd: (time: number | null) => void
   setShowStats: (show: boolean) => void
@@ -163,6 +165,8 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
   changeSpeed,
   togglePictureInPicture,
   toggleFullscreen,
+  toggleMinimize,
+  isMinimized,
   setSleepTimerEnd,
   setShowStats
 }) => {
@@ -753,6 +757,16 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
           >
             <PictureInPicture2 size={24} />
           </button>
+
+          {toggleMinimize && (
+            <button
+              onClick={(e) => { e.stopPropagation(); toggleMinimize(); }}
+              className={`transition-colors ${isMinimized ? 'text-primary' : 'text-white hover:text-primary'}`}
+              title={isMinimized ? 'Expand mini player' : 'Mini player — dock video to the corner and keep browsing'}
+            >
+              <SquareArrowDownRight size={22} />
+            </button>
+          )}
 
           <button onClick={(e) => { e.stopPropagation(); toggleFullscreen(); }} className="text-white hover:text-primary transition-colors" title={isAnyFullscreen ? "Exit Fullscreen" : "Fullscreen"}>
             {isAnyFullscreen ? <Minimize size={24} /> : <Maximize size={24} />}

@@ -420,6 +420,135 @@ export function setChannelCategories(channelId: string, categoryIds: number[]): 
   return true
 }
 
+export interface FtImportedChannel {
+  channelId: string
+  title: string
+  handle?: string | null
+  avatarUrl?: string | null
+}
+
+export interface FtImportChannelsResult {
+  added: string[]
+  alreadyPresent: string[]
+  skipped: string[]
+  createdMemberships: Array<{ channelId: string; categoryId: number }>
+}
+
+/**
+ * Persists a reviewed YouTube import in one local transaction. Existing channel
+ * rows are intentionally left untouched, and category writes are additive so
+ * import cannot replace memberships, metadata, feed history, or seen state.
+ */
+export function importChannels(
+  candidates: FtImportedChannel[],
+  categoryAssignments: Record<string, number[]>,
+): FtImportChannelsResult {
+  const db = getRawDb()
+  const result: FtImportChannelsResult = { added: [], alreadyPresent: [], skipped: [], createdMemberships: [] }
+  const unique = new Map<string, FtImportedChannel>()
+  for (const raw of candidates || []) {
+    const channelId = String(raw?.channelId || '').trim()
+    const title = String(raw?.title || '').trim()
+    if (!/^UC[A-Za-z0-9_-]{22}$/.test(channelId) || !title) {
+      if (channelId) result.skipped.push(channelId)
+      continue
+    }
+    if (!unique.has(channelId)) unique.set(channelId, { ...raw, channelId, title })
+  }
+
+  const transaction = db.transaction(() => {
+    let maxPosition = Number((db.prepare('SELECT MAX(position) AS p FROM ft_channels').get() as any)?.p ?? -1)
+    const insertChannel = db.prepare(`
+      INSERT OR IGNORE INTO ft_channels (channel_id, title, handle, avatar_url, url, position)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `)
+    const hasChannel = db.prepare('SELECT 1 FROM ft_channels WHERE channel_id = ?')
+    const insertMembership = db.prepare('INSERT OR IGNORE INTO ft_channel_categories (channel_id, category_id) VALUES (?, ?)')
+    const hasCategory = db.prepare('SELECT 1 FROM ft_categories WHERE id = ?')
+
+    for (const channel of unique.values()) {
+      const channelId = channel.channelId
+      if (hasChannel.get(channelId)) {
+        result.alreadyPresent.push(channelId)
+      } else {
+        const inserted = insertChannel.run(
+          channelId,
+          channel.title,
+          channel.handle ?? null,
+          channel.avatarUrl ?? null,
+          `https://www.youtube.com/channel/${channelId}`,
+          ++maxPosition,
+        )
+        if (inserted.changes) result.added.push(channelId)
+        else result.alreadyPresent.push(channelId)
+      }
+
+      const categories = [...new Set((categoryAssignments?.[channelId] || []).map(Number).filter(Number.isInteger))]
+      for (const categoryId of categories) {
+        if (!hasCategory.get(categoryId)) continue
+        const membership = insertMembership.run(channelId, categoryId)
+        if (membership.changes) result.createdMemberships.push({ channelId, categoryId })
+      }
+    }
+  })
+  transaction()
+  return result
+}
+
+export interface FtUndoImportResult {
+  removedChannels: number
+  removedChannelIds: string[]
+  removedMemberships: number
+  retainedChannels: string[]
+}
+
+/**
+ * Reverts only rows recorded as created by the most recent import. A newly
+ * imported channel is removed only when it has no remaining category
+ * memberships and no user video state, so post-import activity is preserved.
+ */
+export function undoImportedChannels(
+  createdChannelIds: string[],
+  createdMemberships: Array<{ channelId: string; categoryId: number }>,
+): FtUndoImportResult {
+  const db = getRawDb()
+  const result: FtUndoImportResult = { removedChannels: 0, removedChannelIds: [], removedMemberships: 0, retainedChannels: [] }
+  const channelIds = [...new Set((createdChannelIds || []).map((id) => String(id || '').trim()).filter((id) => /^UC[A-Za-z0-9_-]{22}$/.test(id)))]
+  const memberships = [...new Map((createdMemberships || [])
+    .filter((membership) => /^UC[A-Za-z0-9_-]{22}$/.test(String(membership?.channelId || '')) && Number.isInteger(Number(membership?.categoryId)))
+    .map((membership) => [`${membership.channelId}:${Number(membership.categoryId)}`, { channelId: membership.channelId, categoryId: Number(membership.categoryId) }])).values()]
+
+  const transaction = db.transaction(() => {
+    const deleteMembership = db.prepare('DELETE FROM ft_channel_categories WHERE channel_id = ? AND category_id = ?')
+    const hasChannel = db.prepare('SELECT 1 FROM ft_channels WHERE channel_id = ?')
+    const hasMembership = db.prepare('SELECT 1 FROM ft_channel_categories WHERE channel_id = ? LIMIT 1')
+    const hasVideoState = db.prepare(`
+      SELECT 1 FROM ft_videos v
+      JOIN ft_video_state s ON s.video_id = v.video_id
+      WHERE v.channel_id = ? LIMIT 1
+    `)
+    const deleteChannel = db.prepare('DELETE FROM ft_channels WHERE channel_id = ?')
+
+    for (const membership of memberships) {
+      result.removedMemberships += deleteMembership.run(membership.channelId, membership.categoryId).changes
+    }
+    for (const channelId of channelIds) {
+      if (!hasChannel.get(channelId)) continue
+      if (hasMembership.get(channelId) || hasVideoState.get(channelId)) {
+        result.retainedChannels.push(channelId)
+        continue
+      }
+      const deleted = deleteChannel.run(channelId)
+      if (deleted.changes) {
+        result.removedChannels += 1
+        result.removedChannelIds.push(channelId)
+      }
+    }
+  })
+  transaction()
+  return result
+}
+
 export function setChannelLastFetched(channelId: string, error?: string | null): void {
   const db = getRawDb()
   db.prepare('UPDATE ft_channels SET last_fetched = CURRENT_TIMESTAMP, last_error = ? WHERE channel_id = ?')

@@ -89,37 +89,37 @@ const UPDATE_ICONS: Record<UpdateIconKey, { icon: React.ReactNode; tile: string 
 }
 
 export const LATEST_RELEASE: ReleaseNotes = {
-  version: '1.39.0',
-  title: 'File everything your way.',
-  highlight: 'your way.',
+  version: '1.40.0',
+  title: 'Bring YouTube home.',
+  highlight: 'YouTube',
   description:
-    'The watchlist has ASAP, Weekend, and Someday lanes, titles file into collections from their page, and small fixes keep every save honest.',
+    'Connect Google to import subscriptions into Focus Tube, dock movies while you browse, and enjoy a tidier player.',
   tourId: null,
   updates: [
     {
-      icon: 'layers',
-      title: 'Watchlist lanes',
-      description: "Tap any title's bookmark to file it.",
-    },
-    {
-      icon: 'sparkles',
-      title: 'Collections from titles',
-      description: 'File any title without leaving its page.',
+      icon: 'download',
+      title: 'Import subscriptions',
+      description: 'Connect Google and pick channels in Channels.',
     },
     {
       icon: 'play',
-      title: 'Tick videos watched',
-      description: 'Tap the tick on any Focus Tube card.',
+      title: 'Mini player anywhere',
+      description: 'Dock any movie and keep browsing.',
+    },
+    {
+      icon: 'sparkles',
+      title: 'Calmer Focus Tube',
+      description: 'New header and one controls card.',
     },
     {
       icon: 'fix',
-      title: 'Mini player stays put',
-      description: 'Docked videos survive the Home tab.',
+      title: 'Comments stay clean',
+      description: 'Missing avatars show colored initials.',
     },
     {
-      icon: 'fix',
-      title: 'Hero saves stick',
-      description: 'Continue Watching titles land in Watchlist.',
+      icon: 'shield',
+      title: 'Read-only Google link',
+      description: 'Tokens stay encrypted in the app.',
     },
   ],
 }

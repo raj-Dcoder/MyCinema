@@ -1294,6 +1294,13 @@ export interface PollResult {
   failed: string[]
 }
 
+export interface ChannelRefreshResult {
+  channelId: string
+  ok: boolean
+  added: number
+  error?: string
+}
+
 async function withConcurrency<T, R>(
   items: T[],
   limit: number,
@@ -1314,6 +1321,60 @@ async function withConcurrency<T, R>(
   return results
 }
 
+/** Shared feed and Shorts upsert path for polling, imports, and retry. */
+export async function refreshChannelFeed(channelId: string): Promise<ChannelRefreshResult> {
+  const channel = focusTube.getChannel(channelId)
+  if (!channel) return { channelId, ok: false, added: 0, error: 'Channel is no longer in Focus Tube.' }
+  try {
+    const feed = await fetchChannelFeed(channel.channelId)
+    const upsert = focusTube.upsertFeedEntries(channel.channelId, feed.entries)
+    focusTube.setChannelLastFetched(channel.channelId, null)
+
+    // The feed is authoritative for a channel's name; this path only runs for
+    // newly imported channels or normal refreshes, never review metadata.
+    if (feed.title && feed.title !== channel.title) {
+      focusTube.upsertChannel({ channelId: channel.channelId, title: feed.title, url: channel.url })
+    }
+
+    let shortsMarked = 0
+    try {
+      const shortIds = await fetchChannelShorts(channel.channelId)
+      shortsMarked = focusTube.setVideosShort(shortIds)
+    } catch (shortsErr: any) {
+      console.warn(`[FocusTube] Shorts tab failed for ${channel.title}: ${shortsErr?.message}`)
+    }
+    console.log(`[FocusTube] ${channel.title}: +${upsert.inserted} new (${upsert.existing} existing), ${shortsMarked} flagged as Shorts`)
+    return { channelId, ok: true, added: upsert.inserted }
+  } catch (err: any) {
+    const message = err?.message || 'Unknown error'
+    focusTube.setChannelLastFetched(channel.channelId, message)
+    console.warn(`[FocusTube] Feed failed for ${channel.title} (${channel.channelId}): ${message}`)
+    return { channelId, ok: false, added: 0, error: message }
+  }
+}
+
+/**
+ * Refreshes selected channels with bounded concurrency. Feed failures leave the
+ * imported channel in place and are reported per channel for retry.
+ */
+export async function refreshChannels(
+  channelIds: string[],
+  onProgress?: (progress: { completed: number; total: number; result: ChannelRefreshResult }) => void,
+): Promise<{ added: number; failed: string[] }> {
+  const ids = [...new Set((channelIds || []).map((id) => String(id || '').trim()).filter(Boolean))]
+  let completed = 0
+  let added = 0
+  const failed: string[] = []
+  await withConcurrency(ids, POLL_CONCURRENCY, async (channelId) => {
+    const result = await refreshChannelFeed(channelId)
+    completed += 1
+    added += result.added
+    if (!result.ok) failed.push(channelId)
+    onProgress?.({ completed, total: ids.length, result })
+  })
+  return { added, failed }
+}
+
 /**
  * Refreshes every due channel and diffs in whatever is new. One channel failing
  * never blocks the others — a dead feed leaves its last_error set and the stack
@@ -1324,40 +1385,13 @@ export async function pollFeeds(options?: { force?: boolean }): Promise<PollResu
   const due = focusTube.getChannelsDueForFetch(FEED_MIN_POLL_MINUTES, force)
   const result: PollResult = { added: 0, channelIds: [], failed: [] }
 
-  if (!due.length) return result
-
   await withConcurrency(due, POLL_CONCURRENCY, async (channel) => {
-    try {
-      const feed = await fetchChannelFeed(channel.channelId)
-      const upsert = focusTube.upsertFeedEntries(channel.channelId, feed.entries)
-      focusTube.setChannelLastFetched(channel.channelId, null)
-
-      if (upsert.inserted > 0) {
-        result.added += upsert.inserted
-        result.channelIds.push(channel.channelId)
-      }
-      // The feed is authoritative for the channel's own name.
-      if (feed.title && feed.title !== channel.title) {
-        focusTube.upsertChannel({ channelId: channel.channelId, title: feed.title, url: channel.url })
-      }
-
-      // Shorts classification rides on the same cycle: one extra page fetch per
-      // channel, failure-isolated so a blocked/broken tab never fails the feed.
-      let shortsMarked = 0
-      try {
-        const shortIds = await fetchChannelShorts(channel.channelId)
-        shortsMarked = focusTube.setVideosShort(shortIds)
-      } catch (shortsErr: any) {
-        console.warn(`[FocusTube] Shorts tab failed for ${channel.title}: ${shortsErr?.message}`)
-      }
-
-      console.log(`[FocusTube] ${channel.title}: +${upsert.inserted} new (${upsert.existing} existing), ${shortsMarked} flagged as Shorts`)
-    } catch (err: any) {
-      const message = err?.message || 'Unknown error'
-      focusTube.setChannelLastFetched(channel.channelId, message)
-      result.failed.push(channel.channelId)
-      console.warn(`[FocusTube] Feed failed for ${channel.title} (${channel.channelId}): ${message}`)
+    const refreshed = await refreshChannelFeed(channel.channelId)
+    if (refreshed.added > 0) {
+      result.added += refreshed.added
+      result.channelIds.push(channel.channelId)
     }
+    if (!refreshed.ok) result.failed.push(channel.channelId)
   })
 
   return result

@@ -232,6 +232,27 @@ const api = {
   ftSubscribeChannel: (channel: { channelId: string; title: string; handle?: string | null; avatarUrl?: string | null; url?: string | null }, categoryIds: number[]) =>
     ipcRenderer.invoke('ft-subscribe-channel', { channel, categoryIds }),
   ftAddChannel: (query: string, categoryIds: number[]) => ipcRenderer.invoke('ft-add-channel', { query, categoryIds }),
+  ftYouTubeImportStatus: () => ipcRenderer.invoke('ft-youtube-import-status'),
+  ftYouTubeImportConnect: () => ipcRenderer.invoke('ft-youtube-import-connect'),
+  ftYouTubeImportCancel: () => ipcRenderer.invoke('ft-youtube-import-cancel'),
+  ftYouTubeImportSave: (
+    channels: import('../renderer/src/types').FtYouTubeImportChannel[],
+    categoryAssignments: Record<string, number[]>,
+  ) => ipcRenderer.invoke('ft-youtube-import-save', { channels, categoryAssignments }),
+  ftYouTubeImportRefresh: (channelIds: string[], requestId: string) =>
+    ipcRenderer.invoke('ft-youtube-import-refresh', { channelIds, requestId }),
+  ftYouTubeImportDisconnect: () => ipcRenderer.invoke('ft-youtube-import-disconnect'),
+  ftYouTubeImportUndo: (undoId: string) => ipcRenderer.invoke('ft-youtube-import-undo', undoId),
+  onFtYouTubeImportProgress: (callback: (progress: { stage: 'authorization' | 'subscriptions'; page?: number; found?: number }) => void) => {
+    const handler = (_event: any, progress: { stage: 'authorization' | 'subscriptions'; page?: number; found?: number }) => callback(progress)
+    ipcRenderer.on('ft-youtube-import-progress', handler)
+    return () => ipcRenderer.removeListener('ft-youtube-import-progress', handler)
+  },
+  onFtYouTubeImportRefreshProgress: (callback: (progress: import('../renderer/src/types').FtYouTubeImportRefreshProgress) => void) => {
+    const handler = (_event: any, progress: import('../renderer/src/types').FtYouTubeImportRefreshProgress) => callback(progress)
+    ipcRenderer.on('ft-youtube-import-refresh-progress', handler)
+    return () => ipcRenderer.removeListener('ft-youtube-import-refresh-progress', handler)
+  },
   ftRecordPlayback: (videoId: string, observation: { duration?: number | null; ended?: boolean }) =>
     ipcRenderer.invoke('ft-record-playback', { videoId, ...observation }),
   ftMarkNotEmbeddable: (videoId: string) => ipcRenderer.invoke('ft-mark-not-embeddable', videoId),

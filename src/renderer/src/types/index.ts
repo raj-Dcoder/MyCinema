@@ -92,6 +92,39 @@ export interface FtChannel {
   categoryIds: number[]
 }
 
+export interface FtYouTubeImportChannel {
+  channelId: string
+  title: string
+  handle: null
+  avatarUrl: string | null
+}
+
+export interface FtYouTubeImportStatus {
+  configured: boolean
+  secureStorage: boolean
+  connected: boolean
+  hasSavedCredentials?: boolean
+  error?: string
+}
+
+export interface FtYouTubeImportLoadResult {
+  channels: FtYouTubeImportChannel[]
+  complete: boolean
+  pages: number
+  error?: string
+  cancelled?: boolean
+}
+
+export interface FtYouTubeImportRefreshProgress {
+  requestId: string
+  completed: number
+  total: number
+  channelId: string
+  ok: boolean
+  added: number
+  error?: string
+}
+
 export interface FtVideo {
   videoId: string
   channelId: string

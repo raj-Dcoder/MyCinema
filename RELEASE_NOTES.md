@@ -1,3 +1,40 @@
+# MyCinema v1.40.0
+
+Bring your YouTube subscriptions into Focus Tube, dock the movie player while you browse, and enjoy a tidier Focus Tube.
+
+### YouTube Subscription Import
+- **Import From Google**: The Channels manager has an Import YouTube button that opens the system browser to connect a Google account and lists every subscribed channel.
+- **Review Before Saving**: The import screen shows logos, search, 50-per-page paging, and checkboxes — nothing is added until you confirm the selection.
+- **File Into Categories**: Assign channels to categories before saving, or bulk-file the whole selection at once.
+- **Undo Keeps You Safe**: The summary screen offers Undo for the last import, removing only channels and memberships that import created while keeping anything you watched or re-filed since.
+- **Refresh With Progress**: Newly saved channels pull their latest uploads with per-channel progress, and failures stay in place with a retry instead of blocking the rest.
+- **Setup Guide Included**: `docs/FOCUS_TUBE_GOOGLE_OAUTH.md` documents the Desktop-app client ID (`MAIN_VITE_FOCUS_TUBE_GOOGLE_CLIENT_ID`), test-user, quota, and secure-storage troubleshooting.
+
+### Mini Player For Movies & Shows
+- **Dock And Keep Browsing**: The player toolbar has a mini-player button that shrinks the same video into a bottom-right corner dock so playback continues while you browse MyCinema.
+- **Quiet While Playing**: The dock controls fade after ~2.5s idle while playing and return on hover or tap, with a slim seek strip that stays visible for glanceable progress.
+- **Escape Restores**: Pressing Escape in the dock expands back to the full player; the top bar stays hidden in dock mode since the dock has its own title and close controls.
+
+### Focus Tube Polish
+- **Calmer Header**: The Focus Tube header is rebuilt with a compact title block, live unseen count, and responsive search, Channels, and Refresh controls.
+- **One Card For Controls**: Categories and stack filters (Shorts, seen, mark-all-seen) now live in a single card with a unified stack count line.
+- **Comments That Never Break**: Comment avatars fall back to a stable colored initial when a photo is missing or fails to load, instead of a broken image icon.
+- **Tidy Sidebar**: Description, Chapters, and sponsor-segment panels collapse individually with counts, so long pages stay scannable.
+- **Single Close Control**: The Focus Tube player keeps one close button on the right; the duplicate back arrow and top mini-player button are removed.
+- **Mouse-Back Closes**: Pressing the mouse side/back button closes the Focus Tube player, matching VideoPlayer and DetailScreen.
+
+### Reliability
+- **Shared Feed Refresh**: Polling, imports, and retries use one feed-plus-Shorts upsert path with bounded concurrency, so one dead feed records its error without stalling the others.
+- **Safe Local Saves**: Imports run in one local transaction, validate channel IDs, add memberships without replacing existing ones, and leave existing channel rows untouched.
+
+### Security & Privacy
+- **Read-Only Google Access**: Focus Tube requests only the `youtube.readonly` scope through a Desktop-app OAuth flow with PKCE, loopback callback, and state validation — no write scope and no client secret in the app.
+- **Tokens Stay In Main**: Google credentials are encrypted with Electron `safeStorage` in the app user-data folder and never cross the context bridge; only reviewed channel metadata and progress counts reach the UI, and import refuses to save when no secure store is available.
+- **Disconnect Revokes**: Disconnecting removes the saved credentials and attempts a Google revocation.
+- **Local-Only Library Data**: Imported channels, memberships, and feed history live in the app's own local database exactly like manually added channels.
+
+***
+
 # MyCinema v1.39.0
 
 File it your way: watchlist lanes, collections from any title page, and a mini player that stays put.

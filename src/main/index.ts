@@ -5,6 +5,7 @@ import * as db from './db'
 import * as collections from './collections'
 import * as focusTube from './focusTube'
 import * as focusTubeFeed from './focusTubeFeed'
+import * as focusTubeYouTubeImport from './focusTubeYouTubeImport'
 import * as sponsorBlock from './sponsorBlock'
 import { scanFolder, getEmbeddedSubtitles, getEmbeddedAudio } from './scanner'
 import * as tmdb from './tmdb'
@@ -7230,6 +7231,105 @@ ipcMain.handle('ft-refresh-avatars', async () => {
   } catch (err: any) {
     console.error('[FocusTube] Avatar refresh failed:', err?.message)
     return { error: err?.message || 'Avatar refresh failed' }
+  }
+})
+
+// Google OAuth and YouTube API calls stay in the main process. Only reviewed
+// channel metadata and progress counts cross the context bridge; tokens never do.
+ipcMain.handle('ft-youtube-import-status', async () => focusTubeYouTubeImport.getStatus())
+
+ipcMain.handle('ft-youtube-import-connect', async () => {
+  try {
+    return await focusTubeYouTubeImport.connectAndList((progress) => {
+      for (const window of BrowserWindow.getAllWindows()) {
+        if (!window.isDestroyed()) window.webContents.send('ft-youtube-import-progress', progress)
+      }
+    })
+  } catch (err: any) {
+    console.error('[FocusTube] YouTube import connection failed:', err?.message || 'Unknown error')
+    return { error: err?.message || 'Could not connect to Google.' }
+  }
+})
+
+ipcMain.handle('ft-youtube-import-cancel', () => focusTubeYouTubeImport.cancel())
+
+const youtubeImportUndoSnapshots = new Map<string, {
+  channelIds: string[]
+  memberships: Array<{ channelId: string; categoryId: number }>
+}>()
+
+ipcMain.handle('ft-youtube-import-disconnect', async () => {
+  try {
+    return await focusTubeYouTubeImport.disconnect()
+  } catch (err: any) {
+    console.error('[FocusTube] Google disconnect cleanup failed:', err?.message || 'Unknown error')
+    return { disconnected: false, revoked: false, error: 'Could not remove the saved Google credentials.' }
+  }
+})
+
+ipcMain.handle('ft-youtube-import-save', (_event, input: {
+  channels: focusTube.FtImportedChannel[]
+  categoryAssignments: Record<string, number[]>
+}) => {
+  try {
+    const result = focusTube.importChannels(
+      Array.isArray(input?.channels) ? input.channels : [],
+      input?.categoryAssignments && typeof input.categoryAssignments === 'object' ? input.categoryAssignments : {},
+    )
+    const undoId = result.added.length || result.createdMemberships.length ? crypto.randomUUID() : null
+    if (undoId) {
+      youtubeImportUndoSnapshots.set(undoId, { channelIds: result.added, memberships: result.createdMemberships })
+      while (youtubeImportUndoSnapshots.size > 20) {
+        const oldestId = youtubeImportUndoSnapshots.keys().next().value
+        if (!oldestId) break
+        youtubeImportUndoSnapshots.delete(oldestId)
+      }
+    }
+    return { ...result, undoId }
+  } catch (err: any) {
+    console.error('[FocusTube] Local YouTube import save failed:', err?.message || 'Unknown error')
+    return { error: err?.message || 'Could not save the selected channels.' }
+  }
+})
+
+ipcMain.handle('ft-youtube-import-undo', (_event, undoId: string) => {
+  const snapshot = youtubeImportUndoSnapshots.get(String(undoId || ''))
+  if (!snapshot) return { error: 'This import is no longer available to undo.' }
+  try {
+    const result = focusTube.undoImportedChannels(snapshot.channelIds, snapshot.memberships)
+    youtubeImportUndoSnapshots.delete(String(undoId))
+    return result
+  } catch (err: any) {
+    console.error('[FocusTube] YouTube import undo failed:', err?.message || 'Unknown error')
+    return { error: err?.message || 'Could not undo the import.' }
+  }
+})
+
+ipcMain.handle('ft-youtube-import-refresh', async (_event, input: { channelIds?: string[]; requestId?: string }) => {
+  const channelIds = Array.isArray(input?.channelIds)
+    ? [...new Set(input.channelIds.map((id) => String(id || '').trim()).filter((id) => /^UC[A-Za-z0-9_-]{22}$/.test(id)))].slice(0, 10_000)
+    : []
+  const requestId = typeof input?.requestId === 'string' ? input.requestId.slice(0, 100) : ''
+  try {
+    const result = await focusTubeFeed.refreshChannels(channelIds, ({ completed, total, result: item }) => {
+      for (const window of BrowserWindow.getAllWindows()) {
+        if (window.isDestroyed()) continue
+        window.webContents.send('ft-youtube-import-refresh-progress', {
+          requestId,
+          completed,
+          total,
+          channelId: item.channelId,
+          ok: item.ok,
+          added: item.added,
+          error: item.error,
+        })
+        if (item.ok) broadcastFeedUpdated({ added: item.added, channelIds: [item.channelId] })
+      }
+    })
+    return result
+  } catch (err: any) {
+    console.error('[FocusTube] Imported feed refresh failed:', err?.message || 'Unknown error')
+    return { added: 0, failed: channelIds }
   }
 })
 

@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState, useMemo } from 'react'
-import { Play, Pause, Rewind, FastForward, X, Maximize, Minimize, Volume2, VolumeX, Subtitles, Music, SkipForward as SkipNext, ArrowLeft, MessageSquareText, AlertTriangle, Check, Monitor, RectangleHorizontal, Crop, FolderOpen, Info, Film, HardDrive, ChevronDown, ChevronUp, ListVideo, Users, Search, Globe, Loader2, Download, RotateCcw, Zap, Sparkles, Wand2, PictureInPicture2, Mic, MicOff, Magnet } from 'lucide-react'
+import { Play, Pause, Rewind, FastForward, X, Maximize, Minimize, Maximize2, Volume2, VolumeX, Subtitles, Music, SkipForward as SkipNext, ArrowLeft, MessageSquareText, AlertTriangle, Check, Monitor, RectangleHorizontal, Crop, FolderOpen, Info, Film, HardDrive, ChevronDown, ChevronUp, ListVideo, Users, Search, Globe, Loader2, Download, RotateCcw, Zap, Sparkles, Wand2, PictureInPicture2, Mic, MicOff, Magnet } from 'lucide-react'
 import { Video } from '../types'
 import { getMediaUnitIdentity, groupMediaVersions } from '../utils/mediaVersions'
 import { getTorrentSourceHealthScore, getTorrentSourceSpeedLabel, isHevcSource } from '../utils/torrentSources'
@@ -355,6 +355,11 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
   const [isWindowFullscreen, setIsWindowFullscreen] = useState(false)
   const [isPiPActive, setIsPiPActive] = useState(false)
   const [isPiPSupported, setIsPiPSupported] = useState(false)
+  // In-app mini player: shrinks the SAME video element into a bottom-right
+  // corner dock so playback continues while the user browses MyCinema.
+  // Unlike OS PiP (a separate window + app minimize), this never leaves the
+  // app and never remounts the video element.
+  const [isMinimized, setIsMinimized] = useState(false)
   // Tracks the "PiP + minimized app" flow: set when we minimize the app for
   // PiP, cleared when PiP closes (back-to-tab / close / toggle-off) so the
   // app is restored exactly once per PiP session.
@@ -2399,7 +2404,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
             resetSubtitleOffset()
           }
           break
-        case 'Escape': onClose(); break
+        case 'Escape': if (isMinimized) { setIsMinimized(false); setShowControls(true) } else { onClose() } break
         case 'KeyI': handleToggleInfoPanel(); break
         case 'Equal':
         case 'NumpadAdd': {
@@ -2492,7 +2497,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
       window.removeEventListener('keyup', handleGlobalKeyUp)
       window.removeEventListener('mousedown', handleGlobalMouseDown)
     }
-  }, [currentVideo, hasNextEpisode, availableSubtitles, playbackRate, isHolding2x, isHoldingRev2x, volume, seekPreview, roomId, voiceEnabled, localPeerId, isHost, isWindowFullscreen])
+  }, [currentVideo, hasNextEpisode, availableSubtitles, playbackRate, isHolding2x, isHoldingRev2x, volume, seekPreview, roomId, voiceEnabled, localPeerId, isHost, isWindowFullscreen, isMinimized])
 
   useEffect(() => {
     if (!('mediaSession' in navigator)) return
@@ -4921,6 +4926,52 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
     }
   }
 
+  // Mini-player chrome auto-fade (YouTube-style): while minimized and playing,
+  // the dock controls fade after ~2.5s idle and return on hover/tap. A slim
+  // seek strip stays visible at all times so progress is glanceable and the
+  // position stays adjustable even when faded.
+  const [miniControlsVisible, setMiniControlsVisible] = useState(true)
+  const miniHideTimerRef = useRef<number>(0)
+  const pokeMini = useCallback(() => {
+    setMiniControlsVisible(true)
+    window.clearTimeout(miniHideTimerRef.current)
+    miniHideTimerRef.current = window.setTimeout(() => {
+      const el = videoRef.current
+      if (el && !el.paused && !el.ended) setMiniControlsVisible(false)
+    }, 2500)
+  }, [])
+  useEffect(() => () => window.clearTimeout(miniHideTimerRef.current), [])
+  useEffect(() => {
+    if (isMinimized) pokeMini()
+    else window.clearTimeout(miniHideTimerRef.current)
+  }, [isMinimized, pokeMini])
+  useEffect(() => {
+    if (isMinimized && !isPlaying) {
+      window.clearTimeout(miniHideTimerRef.current)
+      setMiniControlsVisible(true)
+    }
+  }, [isMinimized, isPlaying])
+
+  // In-app minimize: dock the same video element to the bottom-right corner.
+  // Exits element fullscreen first (a fullscreen element cannot be corner
+  // docked), keeps playback running, and makes the rest of the app clickable
+  // by switching the shell to pointer-events-none (only the dock captures).
+  const toggleMinimize = async () => {
+    if (document.fullscreenElement) {
+      try { await document.exitFullscreen() } catch { /* ignore */ }
+    }
+    setShowEpisodesPanel(false)
+    setShowMagnetsPanel(false)
+    setShowInfoPanel(false)
+    setShowAdvancedMenu(false)
+    setShowSpeedMenu(false)
+    setShowSleepMenu(false)
+    setShowMediaMenu(false)
+    setIsMinimized((v) => !v)
+    setShowControls(true)
+    clearTimeout(window.controlsTimeout)
+  }
+
   const formatTime = (seconds: number) => {
     const hrs = Math.floor(seconds / 3600)
     const mins = Math.floor((seconds % 3600) / 60)
@@ -4966,11 +5017,17 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
     return null
   }, [currentVideo, hasNextEpisode, seriesEpisodes])
 
+  const miniTitle = currentVideo.type === 'series' && (currentVideo as any).series_name
+    ? `${(currentVideo as any).series_name} · S${currentVideo.season} E${currentVideo.episode}`
+    : currentVideo.title
+
   return (
-    <div 
+    <div
       ref={playerShellRef}
       data-fullscreen-gesture-scope="player"
-      className={`fixed inset-0 z-50 bg-black flex flex-col items-center justify-center group overflow-hidden ${!showControls ? 'cursor-none' : ''}`}
+      className={isMinimized
+        ? 'pointer-events-none fixed inset-0 z-[80] bg-transparent group overflow-visible'
+        : `fixed inset-0 z-50 bg-black flex flex-col items-center justify-center group overflow-hidden ${!showControls ? 'cursor-none' : ''}`}
       onMouseMove={(e) => {
         setShowControls(true)
         clearTimeout(window.controlsTimeout)
@@ -4990,12 +5047,16 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
     >
       {nextEpisodeStillUrl && <img src={nextEpisodeStillUrl} style={{ display: 'none' }} alt="" />}
       <div
-        className="relative overflow-hidden bg-black"
-        style={{
-          ...videoSurfaceStyle,
-          transition: `opacity ${crossFade ? '200ms' : '300ms'} ease-in-out`,
-          opacity: crossFade ? 0 : 1
-        }}
+        className={isMinimized
+          ? 'pointer-events-auto fixed bottom-4 right-4 overflow-hidden rounded-xl border border-white/15 bg-black shadow-[0_20px_60px_rgba(0,0,0,0.7)]'
+          : 'relative overflow-hidden bg-black'}
+        style={isMinimized
+          ? { width: 'min(380px, calc(100vw - 2rem))', aspectRatio: '16 / 9', transition: `opacity ${crossFade ? '200ms' : '300ms'} ease-in-out`, opacity: crossFade ? 0 : 1 }
+          : {
+            ...videoSurfaceStyle,
+            transition: `opacity ${crossFade ? '200ms' : '300ms'} ease-in-out`,
+            opacity: crossFade ? 0 : 1
+          }}
       >
         <video
           ref={videoRef}
@@ -5189,6 +5250,93 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
         }}
         >
         </video>
+
+        {/* ── In-app mini-player dock controls (only when minimized) ──
+            Lives INSIDE the corner dock container so it moves with the video.
+            The video element above is never remounted, so playback continues.
+            Full chrome fades after ~2.5s idle while playing (hover/tap brings
+            it back); the slim seek strip at the very bottom stays visible so
+            progress is glanceable and seeking works even when faded. */}
+        {isMinimized && (
+          <div
+            className="absolute inset-x-0 bottom-0 z-40"
+            onMouseMove={pokeMini}
+            onPointerDown={pokeMini}
+          >
+            <div className={`bg-gradient-to-t from-black/90 via-black/50 to-transparent px-2.5 pb-1 pt-8 transition-all duration-200 ${miniControlsVisible ? 'translate-y-0 opacity-100' : 'pointer-events-none translate-y-1 opacity-0'}`}>
+              <div className="mb-1.5 flex items-center gap-1.5">
+                <p className="min-w-0 flex-1 truncate text-[11px] font-bold text-white/90" title={miniTitle}>
+                  {miniTitle}
+                </p>
+                <button
+                  type="button"
+                  onClick={(e) => { e.stopPropagation(); toggleMinimize() }}
+                  title="Expand player"
+                  className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-white/10 text-white/80 backdrop-blur-md transition-colors hover:bg-white/20 hover:text-white"
+                >
+                  <Maximize2 size={12} />
+                </button>
+                <button
+                  type="button"
+                  onClick={(e) => { e.stopPropagation(); onClose() }}
+                  title="Close player"
+                  className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-white/10 text-white/80 backdrop-blur-md transition-colors hover:bg-primary hover:text-white"
+                >
+                  <X size={12} />
+                </button>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={(e) => { e.stopPropagation(); togglePlay() }}
+                  title={isPlaying ? 'Pause' : 'Play'}
+                  className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-white text-black transition-transform hover:scale-105"
+                >
+                  {isPlaying ? <Pause size={14} fill="currentColor" /> : <Play size={14} fill="currentColor" className="ml-0.5" />}
+                </button>
+                <div className="min-w-0 flex-1">
+                  <input
+                    type="range"
+                    min={0}
+                    max={duration || 0}
+                    step={0.1}
+                    value={currentTime}
+                    onChange={(e) => { const t = Number(e.target.value); if (videoRef.current) { videoRef.current.currentTime = t; setCurrentTime(t) } }}
+                    onClick={(e) => e.stopPropagation()}
+                    className="h-1 w-full accent-primary cursor-pointer"
+                    aria-label="Seek"
+                  />
+                  <div className="mt-0.5 flex items-center justify-between text-[10px] font-semibold tabular-nums text-white/60">
+                    <span>{formatTime(currentTime)}</span>
+                    <span>{formatTime(duration)}</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+            {/* Always-visible slim seek strip: full-width hit area with an
+                invisible native slider, so seeking works even when faded. */}
+            <div className="relative flex h-3.5 items-end px-2.5 pb-1.5">
+              <div className="h-1 w-full overflow-hidden rounded-full bg-white/25">
+                <div
+                  className="h-full rounded-full bg-primary"
+                  style={{ width: `${duration > 0 ? Math.min(100, Math.max(0, (currentTime / duration) * 100)) : 0}%` }}
+                />
+              </div>
+              <input
+                type="range"
+                min={0}
+                max={duration || 0}
+                step={0.1}
+                value={currentTime}
+                onChange={(e) => { const t = Number(e.target.value); if (videoRef.current) { videoRef.current.currentTime = t; setCurrentTime(t) } }}
+                onClick={(e) => e.stopPropagation()}
+                onPointerDown={(e) => e.stopPropagation()}
+                className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
+                aria-label="Seek video"
+              />
+            </div>
+          </div>
+        )}
 
         {(effectiveFpsBoostEnabled || effectiveSharpnessEnabled || effectiveVibranceEnabled) && (
           <AIEnhancementRenderer
@@ -5694,8 +5842,8 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
         </div>
       )}
 
-      {/* Unified Top Info Bar */}
-      <div className={`absolute top-0 left-0 right-0 px-10 pt-10 pb-6 flex items-start justify-between transition-opacity duration-300 video-controls z-40 bg-gradient-to-b from-black/80 to-transparent ${showControls ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}>
+      {/* Unified Top Info Bar (hidden in mini-player mode — the dock has its own bar) */}
+      <div className={`absolute top-0 left-0 right-0 px-10 pt-10 pb-6 flex items-start justify-between transition-opacity duration-300 video-controls z-40 bg-gradient-to-b from-black/80 to-transparent ${isMinimized ? 'hidden' : ''} ${showControls ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}>
         <div className="flex items-center space-x-4">
           <button 
             onClick={onClose}
@@ -6068,6 +6216,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
 
       {showStats && <VideoStatsOverlay videoRef={videoRef} />}
 
+      {!isMinimized && (
       <PlayerControls
         showControls={showControls}
         hoverTime={hoverTime}
@@ -6138,9 +6287,12 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
         changeSpeed={changeSpeed}
         togglePictureInPicture={togglePictureInPicture}
         toggleFullscreen={toggleFullscreen}
+        toggleMinimize={toggleMinimize}
+        isMinimized={isMinimized}
         setSleepTimerEnd={setSleepTimerEnd}
         setShowStats={setShowStats}
       />
+      )}
       {/* Hidden Custom Audio Extraction Pipeliner */}
       <audio ref={audioRef} crossOrigin="anonymous" style={{ display: 'none' }} />
       {remoteAudioStreams.map(({ peerId, stream }) => (

@@ -18,7 +18,7 @@ const SITES_PATH = join(ROOT, 'download-sites', 'sites.json')
 const PORTALS = {
   hdmovies: {
     url: 'https://hdhub4u.bi/',
-    domainHints: ['hdhub', 'hdmovie'],
+    domainHints: ['hdhub', 'hub4u', 'hdmovie'],
     portalButtonMatch: 'hdhub|hdmovies'
   },
   catmovies: {
@@ -173,29 +173,108 @@ async function fetchRedirectTarget(url) {
   }
 }
 
-const notPromo = domain => {
+function extractObfuscatedMirrorUrls(html, requiredHints) {
+  const found = []
+  const blobRe = /atob\(\s*["']([^"']+)["']\s*\)/gi
+  let blob
+  while ((blob = blobRe.exec(html)) !== null) {
+    try {
+      const decoded = Buffer.from(blob[1], 'base64').toString('utf8')
+      const urlRe = /https?:\/\/[a-z0-9.-]+\.[a-z]{2,}(?::\d+)?(?:\/[^\s"'<>]*)?/gi
+      let u
+      while ((u = urlRe.exec(decoded)) !== null) {
+        try {
+          const parsed = new URL(u[0])
+          if (parsed.pathname !== '/' && parsed.pathname !== '') continue
+          if (!matchesAnyHint(parsed.host, requiredHints)) continue
+          const domain = normalizeDomain(u[0])
+          if (domain) found.push(domain)
+        } catch { /* not usable */ }
+      }
+    } catch { /* not decodable */ }
+  }
+  return [...new Set(found)]
+}
+
+async function verifyMirrorAlive(domain, timeoutMs = FETCH_TIMEOUT_MS) {
   try {
-    return !matchesAnyHint(new URL(domain).host, DOMAIN_ANTI_HINTS)
-  } catch {
-    return false
+    const controller = new AbortController()
+    const timer = setTimeout(() => controller.abort(), timeoutMs)
+    try {
+      const res = await fetch(domain.replace(/\/+$/, '') + '/', {
+        signal: controller.signal,
+        redirect: 'follow',
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Safari/537.36',
+          Accept: 'text/html,application/xhtml+xml'
+        }
+      })
+      if (!res.ok) return 'unknown'
+      const finalHost = new URL(res.url).host.toLowerCase()
+      const wantHost = new URL(domain).host.toLowerCase()
+      return (finalHost === wantHost || finalHost === `www.${wantHost}` || wantHost === `www.${finalHost}`)
+        ? 'alive'
+        : 'dead'
+    } finally {
+      clearTimeout(timer)
+    }
+  } catch (err) {
+    const code = err?.cause?.code || err?.code
+    if (code === 'ENOTFOUND' || code === 'EAI_AGAIN' || code === 'ECONNREFUSED' || code === 'EHOSTUNREACH') {
+      return 'dead'
+    }
+    return 'unknown'
   }
 }
 
 async function resolveSite(siteId, site) {
   const portalHost = new URL(site.url).host.toLowerCase()
   const html = await fetchText(site.url)
-  // Phase A: direct external mirror anchors (hint-matching first).
-  const direct = rankMirrorCandidates(
-    extractOutboundDomains(html, portalHost).map(normalizeDomain).filter(Boolean),
-    site
-  ).filter(notPromo)
-  if (direct.length > 0) return direct[0]
+  const raw = [
+    // Phase A: direct external anchors + obfuscated JS mirrors…
+    ...extractOutboundDomains(html, portalHost).map(normalizeDomain),
+    ...extractObfuscatedMirrorUrls(html, site.domainHints)
+  ]
   // Phase B: same-host redirect buttons (`?type=X` → 302 → mirror).
   const redirectLinks = extractPortalRedirectLinks(html, site.url, site)
   const targets = await Promise.all(redirectLinks.map(fetchRedirectTarget))
-  const ranked = rankMirrorCandidates(targets.filter(Boolean), site).filter(notPromo)
-  if (ranked.length > 0) return ranked[0]
-  throw new Error('no mirror link found on portal page')
+  raw.push(...targets)
+
+  // Sanitize: dedupe, drop portal/trackers/promo (APK buttons are never mirrors).
+  const seen = new Set()
+  const isIgnored = host => {
+    const lower = host.toLowerCase().replace(/^www\./, '')
+    for (const ignored of IGNORED_HOSTS) {
+      if (lower === ignored || lower.endsWith(`.${ignored}`)) return true
+    }
+    return false
+  }
+  const candidates = rankMirrorCandidates(
+    raw.filter(d => {
+      if (!d || seen.has(d)) return false
+      seen.add(d)
+      try {
+        const host = new URL(d).host.toLowerCase()
+        if (host === portalHost || isIgnored(host)) return false
+        if (matchesAnyHint(host, DOMAIN_ANTI_HINTS)) return false
+        return true
+      } catch {
+        return false
+      }
+    }),
+    site
+  )
+  if (candidates.length === 0) throw new Error('no mirror link found on portal page')
+
+  // Phase C: hand out a mirror that is actually alive right now.
+  let firstUnknown = null
+  for (const candidate of candidates) {
+    const status = await verifyMirrorAlive(candidate)
+    if (status === 'alive') return candidate
+    if (status === 'unknown' && !firstUnknown) firstUnknown = candidate
+  }
+  if (firstUnknown) return firstUnknown
+  throw new Error('mirrors found but none are alive (all bounce to the portal)')
 }
 
 async function main() {

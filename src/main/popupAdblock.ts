@@ -1,4 +1,7 @@
-import { session } from 'electron'
+import { app, session } from 'electron'
+import { promises as fsp } from 'fs'
+import path from 'path'
+import { ElectronBlocker } from '@ghostery/adblocker-electron'
 
 // ─── Lightweight popup adblocker ─────────────────────────────────────────────
 // Same idea as uBlock Origin (block known ad/tracker hosts + hide leftover ad
@@ -75,7 +78,48 @@ const BLOCKED_HOST_SUFFIXES = [
   'counter.yadro.ru',
   'mc.yandex.ru',
   'addthis.com',
-  'sharethis.com'
+  'sharethis.com',
+  // Ad-agency / cloaked hosts seen serving these sites' ad payloads
+  'agl002.online',
+  'cvt-s2.online',
+  'topapii.com',
+  'theapii.org',
+  'suncdn.org',
+  'hub4u.cloud',
+  // Extra popunder / redirect networks
+  'adhese.com',
+  'adorika.com',
+  'admixer.net',
+  'adnami.io',
+  'adplus.co.id',
+  'adskeeper.com',
+  'adsterrahub.com',
+  'bumlam.com',
+  'dable.io',
+  'engageya.com',
+  'gorgeousground.com',
+  'inpagepush.com',
+  'jsecoin.com',
+  'kixer.com',
+  'loxodo.com',
+  'media.net',
+  'native-ads.com',
+  'olesondev.com',
+  'oonel.com',
+  'oplata.cyou',
+  'porngraph.com',
+  'propeller-tracking.com',
+  'realdatingaccess.com',
+  'richpays.com',
+  'smrtb.com',
+  'tacoda.net',
+  'trafficjunky.net',
+  'traffichaus.com',
+  'trafmag.com',
+  'videoadex.com',
+  'voluum.com',
+  'zedo.com',
+  'zemanta.com'
 ]
 
 const BLOCKED_PATH_SNIPPETS = ['/popunder', '/pop-up', 'popads', '/banner-ads/']
@@ -109,12 +153,73 @@ export function isBlockedAdUrl(url: string): boolean {
 export const POPUP_COSMETIC_CSS = `
   ins.adsbygoogle, .adsbygoogle,
   [id^="div-gpt-ad"], [id^="ad-"], [id*="-ad-"],
-  .popup-ad, #popup-ad, .popunder-backdrop,
-  .ad-banner, .ads-banner, .advertisement,
+  .popup-ad, #popup-ad, #popunder, [id*="popunder"], .popunder-backdrop,
+  .ad-banner, .ads-banner, .advertisement, .sticky-ad, .bottom-ad,
+  #interstitial, .interstitial, .overlay-ad, .fullpage-ad,
   [id*="taboola"], .tbl-feed-container,
   [id*="outbrain"], .ob-widget,
-  iframe[src*="ads"], iframe[src*="doubleclick"] { display: none !important; }
+  [class*="sponsored-post"],
+  iframe[src*="ads"], iframe[src*="doubleclick"], iframe[src*="popads"] { display: none !important; }
 `
+
+// ─── Full filter-list engine (EasyList + EasyPrivacy grade) ──────────────────
+// The curated host list below is only the offline fallback. Whenever possible
+// the real engine — tens of thousands of network + cosmetic rules, cached on
+// disk and refreshed every few days — does the blocking instead.
+const ENGINE_CACHE_FILE = 'adblocker-engine.bin'
+const ENGINE_MAX_AGE_MS = 3 * 24 * 60 * 60 * 1000
+
+let enginePromise: Promise<ElectronBlocker | null> | null = null
+
+function getEngineCachePath(): string {
+  return path.join(app.getPath('userData'), ENGINE_CACHE_FILE)
+}
+
+async function loadEngine(): Promise<ElectronBlocker | null> {
+  const cachePath = getEngineCachePath()
+  try {
+    try {
+      const [stat, buf] = await Promise.all([fsp.stat(cachePath), fsp.readFile(cachePath)])
+      const engine = ElectronBlocker.deserialize(
+        new Uint8Array(buf.buffer, buf.byteOffset, buf.byteLength)
+      )
+      console.log('[PopupAdblock] Engine loaded from disk cache')
+      if (Date.now() - stat.mtimeMs > ENGINE_MAX_AGE_MS) {
+        void refreshEngineCache(cachePath)
+      }
+      return engine
+    } catch {
+      /* no usable cache — fetch fresh below */
+    }
+    const fresh = await ElectronBlocker.fromPrebuiltAdsAndTracking(fetch)
+    try {
+      await fsp.mkdir(path.dirname(cachePath), { recursive: true })
+      await fsp.writeFile(cachePath, Buffer.from(fresh.serialize()))
+    } catch {
+      /* cache write is best-effort */
+    }
+    console.log('[PopupAdblock] Engine fetched fresh (ads + tracking lists)')
+    return fresh
+  } catch (err) {
+    console.error('[PopupAdblock] Engine unavailable, host-list fallback active:', err)
+    return null
+  }
+}
+
+async function refreshEngineCache(cachePath: string): Promise<void> {
+  try {
+    const fresh = await ElectronBlocker.fromPrebuiltAdsAndTracking(fetch)
+    await fsp.writeFile(cachePath, Buffer.from(fresh.serialize()))
+    console.log('[PopupAdblock] Engine cache refreshed for next launch')
+  } catch {
+    /* next launch retries */
+  }
+}
+
+function getEngine(): Promise<ElectronBlocker | null> {
+  if (!enginePromise) enginePromise = loadEngine()
+  return enginePromise
+}
 
 const wiredSessions = new WeakSet<Electron.Session>()
 
@@ -124,15 +229,29 @@ export function registerPopupAdblock(target?: Electron.Session): void {
   if (wiredSessions.has(ses)) return
   wiredSessions.add(ses)
 
+  // Layer 1 (always on): curated host list — works offline from first launch.
   ses.webRequest.onBeforeRequest({ urls: ['http://*/*', 'https://*/*'] }, (details, callback) => {
     // Never block the page itself — only its ad sub-resources. Main-frame
-    // navigations always pass so site flows can't break.
+    // navigations always pass here (the navigation guards below handle those),
+    // so site flows can't break.
     if (details.resourceType !== 'mainFrame' && isBlockedAdUrl(details.url)) {
       callback({ cancel: true })
       return
     }
     callback({})
   })
+
+  // Layer 2 (when available): full EasyList-grade engine on the same session.
+  void getEngine()
+    .then(engine => {
+      if (engine) {
+        engine.enableBlockingInSession(ses)
+        console.log('[PopupAdblock] Full filter engine active on popup session')
+      }
+    })
+    .catch(() => {
+      /* fallback layer already active */
+    })
 }
 
 export function getPopupSession(): Electron.Session {

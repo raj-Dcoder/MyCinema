@@ -3,6 +3,7 @@ import { FolderOpen, Trash2, Plus, HardDrive, AlertTriangle, Check, X as CloseIc
 import ProfilePictureModal from '../components/ProfilePictureModal'
 import { SUBTITLE_STYLE_KEY, SUBTITLE_FONT_SIZE_KEY, SUBTITLE_POSITION_KEY, type SubtitleStyle } from '../components/player/SubtitleOverlay'
 import { ONLINE_PROGRESS_STORAGE_KEY, setOnlineProgressEnabledLocal, NOTIFY_NEW_EPISODES_KEY, setNewEpisodeNotifyLocal } from '../utils/streamResume'
+import { cleanIpcError } from '../utils/ipcError'
 
 const Settings: React.FC = () => {
   const [folders, setFolders] = useState<any[]>([])
@@ -79,7 +80,26 @@ const Settings: React.FC = () => {
       setDownloadSiteMessage('Saved. Detail screen will use your link.')
       await fetchDownloadSites()
     } catch (err: any) {
-      setDownloadSiteMessage(err?.message || 'Could not save that link.')
+      setDownloadSiteMessage(cleanIpcError(err, 'Could not save that link.'))
+    } finally {
+      setDownloadSiteBusyId(null)
+    }
+  }
+
+  const handleRefreshDownloadSiteDomain = async (siteId: string) => {
+    if (downloadSiteBusyId) return
+    setDownloadSiteBusyId(siteId)
+    setDownloadSiteMessage(null)
+    try {
+      const result = await (window as any).api.refreshDownloadSiteDomain(siteId)
+      setDownloadSiteMessage(
+        result?.stale
+          ? `Live link verify nahi hua — ${result.domain} khola jayega (stale).`
+          : `Fresh link mil gaya: ${result.domain}`
+      )
+      await fetchDownloadSites()
+    } catch (err: any) {
+      setDownloadSiteMessage(cleanIpcError(err, 'Refresh failed. Try again later.'))
     } finally {
       setDownloadSiteBusyId(null)
     }
@@ -672,6 +692,15 @@ const Settings: React.FC = () => {
                       className={`${compactButtonClass} border border-white/10 bg-white/5 text-white hover:bg-white/10`}
                     >
                       <span>{downloadSiteBusyId === site.id ? 'Saving…' : 'Save'}</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => void handleRefreshDownloadSiteDomain(site.id)}
+                      disabled={downloadSiteBusyId === site.id}
+                      className={`${compactButtonClass} border border-white/10 bg-transparent text-white/50 hover:text-white hover:bg-white/5`}
+                      title="Re-check the live link right now"
+                    >
+                      <span>{downloadSiteBusyId === site.id ? 'Checking…' : 'Refresh'}</span>
                     </button>
                     {(site.domain || site.manual) && (
                       <button

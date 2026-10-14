@@ -23,6 +23,7 @@
   "description": "A cinematic desktop media library and player for movies, series, trailers, subtitles, discovery, and local playback.",
   "dependencies": {
     "@fontsource/poppins": "^5.2.7",
+    "@ghostery/adblocker-electron": "^2.20.1",
     "better-sqlite3": "^12.8.0",
     "clsx": "^2.1.1",
     "dotenv": "^17.3.1",

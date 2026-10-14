@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react'
 import hdMoviesLogo from '../assets/site-logos/hdmovies.svg'
 import catMoviesLogo from '../assets/site-logos/catmovies.svg'
+import { cleanIpcError } from '../utils/ipcError'
 import { X, Play, Info, Calendar, CalendarDays, Clock, Star, FolderOpen, Film, Music, Subtitles, HardDrive, ChevronDown, ChevronUp, Heart, Bookmark, Share2, Search, Zap, Users, Download, AlertTriangle, Clapperboard, Loader2, ExternalLink, Languages, CheckCircle2, Copy, MessageCircle, Send, Trash2, Bell, BellRing, Hourglass, Layers, Plus } from 'lucide-react'
 import { Video, WatchlistIntent } from '../types'
 import { getWatchlistIntent, normalizeWatchlistIntent, WATCHLIST_INTENT_META } from '../utils/watchlistIntent'
@@ -350,6 +351,7 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
   // searched page in the in-app popup — same mechanism as Moctale.
   const [resolvingSiteId, setResolvingSiteId] = useState<string | null>(null)
   const [downloadSiteError, setDownloadSiteError] = useState<string | null>(null)
+  const [downloadSiteNotice, setDownloadSiteNotice] = useState<string | null>(null)
   // Online resume (#1): source-agnostic position for the primary identity.
   // #2: per-episode online map for the series episode list.
   const [streamResume, setStreamResume] = useState<{ position: number; duration: number } | null>(null)
@@ -1179,8 +1181,12 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
     const searchTitle = video.type === 'series' && video.series_name ? video.series_name : video.title
     setResolvingSiteId(siteId)
     setDownloadSiteError(null)
+    setDownloadSiteNotice(null)
     try {
       const resolved = await window.api.resolveDownloadSiteUrl(siteId, searchTitle, video.release_year ?? null)
+      if (resolved?.stale) {
+        setDownloadSiteNotice('Latest link verify nahi hua — backup link khola hai. Agar galat page khule to Settings → Download Sites → Refresh dabao.')
+      }
       window.dispatchEvent(new CustomEvent('web-popup-opened'))
       setIsWebPopupOpen(true)
       const clearBlurOnFocus = () => {
@@ -1192,7 +1198,7 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
       await window.api.openWebPopup(resolved.searchUrl, `${searchTitle} — ${siteName}`)
     } catch (err: any) {
       console.error('[DetailScreen] Download site resolve failed:', err)
-      setDownloadSiteError(err?.message || 'Could not find a working link right now. Try again later.')
+      setDownloadSiteError(cleanIpcError(err, 'Could not find a working link right now. Try again later.'))
     } finally {
       setResolvingSiteId(null)
     }
@@ -2354,6 +2360,9 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
               </div>
               {downloadSiteError && (
                 <p className="mt-2 text-[11px] font-semibold text-red-400">{downloadSiteError}</p>
+              )}
+              {downloadSiteNotice && (
+                <p className="mt-2 text-[11px] font-semibold text-amber-400">{downloadSiteNotice}</p>
               )}
             </div>
 

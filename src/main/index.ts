@@ -2026,6 +2026,16 @@ ipcMain.handle('open-web-popup', (event, url: string, title?: string) => {
     return { action: 'deny' }
   })
 
+  // Ad hijacks that steer the page itself (script redirects, link shortener
+  // chains landing on ad networks) are stopped. Legit download hosts are not
+  // on the block list, so real flows pass through untouched.
+  popup.webContents.on('will-redirect', (event, url) => {
+    if (isBlockedAdUrl(url)) event.preventDefault()
+  })
+  popup.webContents.on('will-navigate', (event, url) => {
+    if (isBlockedAdUrl(url)) event.preventDefault()
+  })
+
   // Handle hardware/mouse back buttons
   popup.on('app-command', (e, cmd) => {
     if (cmd === 'browser-backward' && popup.webContents.canGoBack()) {
@@ -2057,6 +2067,10 @@ ipcMain.handle('set-download-site-domain', (_event, siteId: string, domain: stri
 ipcMain.handle('reset-download-site-domain', (_event, siteId: string) => {
   downloadSites.resetDownloadSiteDomain(siteId)
   return true
+})
+
+ipcMain.handle('refresh-download-site-domain', (_event, siteId: string) => {
+  return downloadSites.refreshDownloadSiteDomain(siteId)
 })
 
 ipcMain.handle('set-focus-tube-enabled', (event, enabled: boolean) => {

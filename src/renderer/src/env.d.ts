@@ -185,6 +185,14 @@ interface Api {
   }>
   setDownloadSiteDomain: (siteId: string, domain: string) => Promise<{ domain: string; updatedAt: string; manual: boolean }>
   resetDownloadSiteDomain: (siteId: string) => Promise<boolean>
+  refreshDownloadSiteDomain: (siteId: string) => Promise<{
+    siteId: string
+    domain: string
+    searchUrl: string
+    source: 'portal' | 'portal-fallback' | 'manual' | 'cache' | 'remote'
+    updatedAt: string | null
+    stale: boolean
+  }>
   toggleFullscreen: () => Promise<boolean>
   isFullscreen: () => Promise<boolean>
   closeWindow: () => Promise<void>

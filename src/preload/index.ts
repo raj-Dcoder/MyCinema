@@ -171,6 +171,8 @@ const api = {
     ipcRenderer.invoke('set-download-site-domain', siteId, domain),
   resetDownloadSiteDomain: (siteId: string) =>
     ipcRenderer.invoke('reset-download-site-domain', siteId),
+  refreshDownloadSiteDomain: (siteId: string) =>
+    ipcRenderer.invoke('refresh-download-site-domain', siteId),
   toggleFullscreen: () => ipcRenderer.invoke('window-toggle-fullscreen'),
   isFullscreen: () => ipcRenderer.invoke('window-is-fullscreen'),
   closeWindow: () => ipcRenderer.invoke('window-close'),

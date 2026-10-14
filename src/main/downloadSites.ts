@@ -38,7 +38,7 @@ export const DOWNLOAD_SITES: DownloadSiteConfig[] = [
     portalUrl: 'https://hdhub4u.bi/',
     searchTemplate: '/?s={query}',
     accent: '#f43f5e',
-    domainHints: ['hdhub', 'hdmovie'],
+    domainHints: ['hdhub', 'hub4u', 'hdmovie'],
     portalButtonMatch: 'hdhub|hdmovies'
   },
   {
@@ -46,7 +46,8 @@ export const DOWNLOAD_SITES: DownloadSiteConfig[] = [
     name: 'Cat Movies HD',
     shortLabel: 'CAT',
     portalUrl: 'https://katworld.net/',
-    searchTemplate: '/?s={query}',
+    // Verified live: /search?q= returns real results, /?s= is ignored.
+    searchTemplate: '/search?q={query}',
     accent: '#22d3ee',
     domainHints: ['katmovie'],
     portalButtonMatch: 'katmoviehd'
@@ -75,10 +76,14 @@ interface DownloadSiteCacheEntry {
   updatedAt: string
   manual: boolean
   source: 'portal' | 'portal-fallback' | 'manual' | 'cache' | 'remote'
+  /** False when the domain was never liveness-checked (network error at resolve). */
+  verified: boolean
 }
 
 function getCachePath(): string {
-  return path.join(app.getPath('userData'), 'download-sites.json')
+  // v2: entries are liveness-verified mirrors only. v1 could hold promo pages
+  // (e.g. an APK site) or dead mirrors, so it is deliberately abandoned.
+  return path.join(app.getPath('userData'), 'download-sites-v2.json')
 }
 
 function loadCache(): Record<string, DownloadSiteCacheEntry> {
@@ -220,6 +225,81 @@ function extractPortalRedirectLinks(html: string, portalUrl: string, config: Dow
   return found.slice(0, 6)
 }
 
+/**
+ * Portals obfuscate the live mirror in base64 JS blobs (e.g. the "View Full
+ * Site" button target). Decode every blob and harvest any URLs inside.
+ */
+function extractObfuscatedMirrorUrls(html: string, requiredHints: string[]): string[] {
+  const found: string[] = []
+  const blobRe = /atob\(\s*["']([^"']+)["']\s*\)/gi
+  let blob: RegExpExecArray | null
+  while ((blob = blobRe.exec(html)) !== null) {
+    try {
+      const decoded = Buffer.from(blob[1], 'base64').toString('utf8')
+      const urlRe = /https?:\/\/[a-z0-9.-]+\.[a-z]{2,}(?::\d+)?(?:\/[^\s"'<>]*)?/gi
+      let u: RegExpExecArray | null
+      while ((u = urlRe.exec(decoded)) !== null) {
+        try {
+          const parsed = new URL(u[0])
+          // API/helper endpoints (…/host, …/v2/…) are infrastructure, not the
+          // site — only root URLs carrying a brand hint count as mirrors.
+          if (parsed.pathname !== '/' && parsed.pathname !== '') continue
+          if (!matchesAnyHint(parsed.host, requiredHints)) continue
+          const domain = normalizeDomain(u[0])
+          if (domain) found.push(domain)
+        } catch {
+          /* not a usable URL */
+        }
+      }
+    } catch {
+      /* not a decodable blob */
+    }
+  }
+  return [...new Set(found)]
+}
+
+type MirrorLiveness = 'alive' | 'dead' | 'unknown'
+
+/**
+ * alive = loads and stays on its own host. dead = bounces elsewhere (usually
+ * back to the portal — a parked/killed mirror). unknown = network error or a
+ * bot-wall status; the in-app browser may still load it, so it stays usable.
+ */
+async function verifyMirrorAlive(domain: string, timeoutMs: number): Promise<MirrorLiveness> {
+  try {
+    const controller = new AbortController()
+    const timer = setTimeout(() => controller.abort(), timeoutMs)
+    try {
+      const res = await fetch(`${domain.replace(/\/+$/, '')}/`, {
+        signal: controller.signal,
+        redirect: 'follow',
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Safari/537.36',
+          Accept: 'text/html,application/xhtml+xml'
+        }
+      })
+      if (!res.ok) return 'unknown'
+      const finalHost = new URL(res.url).host.toLowerCase()
+      const wantHost = new URL(domain).host.toLowerCase()
+      const same =
+        finalHost === wantHost ||
+        finalHost === `www.${wantHost}` ||
+        wantHost === `www.${finalHost}`
+      return same ? 'alive' : 'dead'
+    } finally {
+      clearTimeout(timer)
+    }
+  } catch (err) {
+    // Dead DNS / refused port = dead mirror. Timeouts and bot-walls stay
+    // 'unknown' — the in-app browser may still load them.
+    const code = (err as any)?.cause?.code || (err as any)?.code
+    if (code === 'ENOTFOUND' || code === 'EAI_AGAIN' || code === 'ECONNREFUSED' || code === 'EHOSTUNREACH') {
+      return 'dead'
+    }
+    return 'unknown'
+  }
+}
+
 /** Follow one redirect button without chasing it — the Location IS the mirror. */
 async function fetchRedirectTarget(url: string, timeoutMs: number): Promise<string | null> {
   const controller = new AbortController()
@@ -321,12 +401,18 @@ function isRemoteFresh(entry: RemoteSiteEntry | undefined): boolean {
   return Number.isFinite(age) && age >= 0 && age < REMOTE_MAX_AGE_MS
 }
 
-function rememberResolvedDomain(siteId: string, domain: string, source: DownloadSiteCacheEntry['source']): DownloadSiteCacheEntry {
+function rememberResolvedDomain(
+  siteId: string,
+  domain: string,
+  source: DownloadSiteCacheEntry['source'],
+  verified = true
+): DownloadSiteCacheEntry {
   const entry: DownloadSiteCacheEntry = {
     domain,
     updatedAt: new Date().toISOString(),
     manual: false,
-    source
+    source,
+    verified
   }
   saveCache({ ...loadCache(), [siteId]: entry })
   return entry
@@ -340,8 +426,9 @@ function isFresh(entry: DownloadSiteCacheEntry | undefined): boolean {
 
 /**
  * Resolve a site's live domain: manual override wins, then fresh cache, then
- * the portal page, then stale cache, then the portal's own search as a last
- * resort so the click never dead-ends.
+ * GitHub-hosted links, then a live portal scrape (mirrors are liveness-checked
+ * — dead ones bouncing to the portal are skipped), then stale cache, then the
+ * portal's own search as a last resort so the click never dead-ends.
  */
 export async function resolveDownloadSiteUrl(
   siteId: string,
@@ -368,7 +455,14 @@ export async function resolveDownloadSiteUrl(
     }
   }
 
-  if (!options.forceRefresh && cached?.domain && isFresh(cached)) {
+  // Unverified cache entries get one quick re-check; a mirror that has since
+  // died falls through to remote/scrape instead of opening a dead page.
+  let useCached = !options.forceRefresh && Boolean(cached?.domain) && isFresh(cached)
+  if (useCached && cached && cached.verified === false) {
+    const liveness = await verifyMirrorAlive(cached.domain, 5000)
+    if (liveness === 'dead') useCached = false
+  }
+  if (useCached && cached?.domain) {
     return {
       siteId,
       domain: cached.domain,
@@ -387,76 +481,107 @@ export async function resolveDownloadSiteUrl(
     portalHost = ''
   }
 
-  const scrapePortal = async (): Promise<string> => {
-    const html = await fetchText(config.portalUrl, FETCH_TIMEOUT_MS)
-    // Phase A: direct external mirror anchors (hint-matching first).
-    const direct = rankMirrorCandidates(
-      extractOutboundDomains(html, portalHost)
-        .map(normalizeDomain)
-        .filter((d): d is string => Boolean(d)),
-      config
-    )
-    // Promo links only count if nothing else exists — a lone APK button must
-    // not beat the redirect-button pass below.
-    const nonPromo = direct.filter(domain => {
-      try {
-        return !matchesAnyHint(new URL(domain).host, DOMAIN_ANTI_HINTS)
-      } catch {
-        return false
-      }
-    })
-    if (nonPromo.length > 0) return nonPromo[0]
+  const NO_LIVE_MIRROR = 'NO_LIVE_MIRROR'
 
+  const scrapePortal = async (): Promise<{ domain: string; verified: boolean }> => {
+    const html = await fetchText(config.portalUrl, FETCH_TIMEOUT_MS)
+    const rawCandidates: Array<string | null> = [
+      // Phase A: direct external mirror anchors…
+      ...extractOutboundDomains(html, portalHost).map(normalizeDomain),
+      // …plus mirrors hidden in obfuscated JS (base64 "View Full Site" links).
+      ...extractObfuscatedMirrorUrls(html, config.domainHints)
+    ]
     // Phase B: same-host redirect buttons (`?type=X` → 302 → mirror).
     const redirectLinks = extractPortalRedirectLinks(html, config.portalUrl, config)
     const targets = await Promise.all(
       redirectLinks.map(link => fetchRedirectTarget(link, FETCH_TIMEOUT_MS))
     )
-    const ranked = rankMirrorCandidates(
-      targets.filter((t): t is string => Boolean(t)),
+    rawCandidates.push(...targets)
+
+    // Sanitize: dedupe, drop the portal itself, trackers, and promo/app links
+    // (an APK button is never a mirror — it must never win).
+    const seen = new Set<string>()
+    const candidates = rankMirrorCandidates(
+      rawCandidates.filter((d): d is string => {
+        if (!d || seen.has(d)) return false
+        seen.add(d)
+        try {
+          const host = new URL(d).host.toLowerCase()
+          if (host === portalHost || isIgnoredHost(host)) return false
+          if (matchesAnyHint(host, DOMAIN_ANTI_HINTS)) return false
+          return true
+        } catch {
+          return false
+        }
+      }),
       config
-    ).filter(domain => {
-      try {
-        return !matchesAnyHint(new URL(domain).host, DOMAIN_ANTI_HINTS)
-      } catch {
-        return false
-      }
-    })
-    if (ranked.length > 0) return ranked[0]
-    if (direct.length > 0) return direct[0]
-    throw new Error('No mirror link found on portal page')
+    )
+    if (candidates.length === 0) throw new Error('No mirror link found on portal page')
+
+    // Phase C: only hand out a mirror that is actually alive right now.
+    let firstUnknown: string | null = null
+    for (const candidate of candidates) {
+      const status = await verifyMirrorAlive(candidate, FETCH_TIMEOUT_MS)
+      if (status === 'alive') return { domain: candidate, verified: true }
+      if (status === 'unknown' && !firstUnknown) firstUnknown = candidate
+      // 'dead' (bounces to the portal etc.) → try the next candidate.
+    }
+    if (firstUnknown) return { domain: firstUnknown, verified: false }
+    const err: any = new Error('NO_LIVE_MIRROR')
+    err.code = NO_LIVE_MIRROR
+    throw err
   }
 
-  // 3. GitHub-hosted links (refreshed by Action every 6h). Fresh remote wins
-  // outright — no portal hit needed, and it works even where portals are ISP
-  // blocked. A stale remote is only a fallback after a live scrape attempt.
+  const noLiveMirrorError = () =>
+    new Error('Is site ka koi working link abhi live nahi lag raha. Thodi der baad retry karo ya dusri site try karo.')
+
+  // 3. GitHub-hosted links (refreshed by Action every 6h). A fresh remote is
+  // quick-verified first — a mirror that died since the last Action run falls
+  // through to a live scrape instead of opening a dead page.
   if (!options.forceRefresh) {
     const remote = await fetchRemoteDomains()
     const remoteEntry = remote?.sites[siteId]
     if (remoteEntry && isRemoteFresh(remoteEntry)) {
-      const entry = rememberResolvedDomain(siteId, remoteEntry.domain, 'remote')
-      return {
-        siteId,
-        domain: remoteEntry.domain,
-        searchUrl: buildSearchUrl(remoteEntry.domain, config.searchTemplate, cleanTitle, year),
-        source: 'remote',
-        updatedAt: entry.updatedAt,
-        stale: false
+      const liveness = await verifyMirrorAlive(remoteEntry.domain, 5000)
+      if (liveness !== 'dead') {
+        const entry = rememberResolvedDomain(siteId, remoteEntry.domain, 'remote', liveness === 'alive')
+        return {
+          siteId,
+          domain: remoteEntry.domain,
+          searchUrl: buildSearchUrl(remoteEntry.domain, config.searchTemplate, cleanTitle, year),
+          source: 'remote',
+          updatedAt: entry.updatedAt,
+          stale: false
+        }
       }
-    }
-    if (remoteEntry) {
+      console.warn(`[DownloadSites] Remote mirror dead for ${siteId}, scraping portal…`)
+    } else if (remoteEntry) {
       try {
-        const live = await scrapePortal()
-        const entry = rememberResolvedDomain(siteId, live, 'portal')
+        const { domain: live, verified } = await scrapePortal()
+        const entry = rememberResolvedDomain(siteId, live, 'portal', verified)
         return {
           siteId,
           domain: live,
           searchUrl: buildSearchUrl(live, config.searchTemplate, cleanTitle, year),
           source: 'portal',
           updatedAt: entry.updatedAt,
-          stale: false
+          stale: !verified
         }
       } catch (err) {
+        if ((err as any)?.code === NO_LIVE_MIRROR) {
+          const liveness = await verifyMirrorAlive(remoteEntry.domain, 5000)
+          if (liveness !== 'dead') {
+            return {
+              siteId,
+              domain: remoteEntry.domain,
+              searchUrl: buildSearchUrl(remoteEntry.domain, config.searchTemplate, cleanTitle, year),
+              source: 'remote',
+              updatedAt: remoteEntry.checkedAt,
+              stale: true
+            }
+          }
+          throw noLiveMirrorError()
+        }
         console.error(`[DownloadSites] Portal resolve failed for ${siteId}, using stale remote:`, err)
         return {
           siteId,
@@ -472,17 +597,18 @@ export async function resolveDownloadSiteUrl(
 
   // 4. No usable remote — scrape the portal live.
   try {
-    const live = await scrapePortal()
-    const entry = rememberResolvedDomain(siteId, live, 'portal')
+    const { domain: live, verified } = await scrapePortal()
+    const entry = rememberResolvedDomain(siteId, live, 'portal', verified)
     return {
       siteId,
       domain: live,
       searchUrl: buildSearchUrl(live, config.searchTemplate, cleanTitle, year),
       source: 'portal',
       updatedAt: entry.updatedAt,
-      stale: false
+      stale: !verified
     }
   } catch (err) {
+    if ((err as any)?.code === NO_LIVE_MIRROR) throw noLiveMirrorError()
     console.error(`[DownloadSites] Portal resolve failed for ${siteId}:`, err)
   }
 
@@ -507,7 +633,22 @@ export async function resolveDownloadSiteUrl(
       stale: true
     }
   }
-  throw new Error('Could not resolve a working link for this site right now')
+  throw noLiveMirrorError()
+}
+
+/**
+ * Force a fresh resolution (used by the Settings Refresh button): drops any
+ * auto-resolved cache entry — manual overrides are kept — and resolves again.
+ */
+export async function refreshDownloadSiteDomain(siteId: string): Promise<DownloadSiteResolveResult> {
+  const config = getConfig(siteId)
+  if (!config) throw new Error(`Unknown download site: ${siteId}`)
+  const cache = loadCache()
+  if (cache[siteId] && !cache[siteId].manual) {
+    delete cache[siteId]
+    saveCache(cache)
+  }
+  return resolveDownloadSiteUrl(siteId, config.name, '')
 }
 
 export interface DownloadSiteStatus extends DownloadSiteResolveResult {
@@ -554,7 +695,8 @@ export function setDownloadSiteDomain(siteId: string, domain: string): DownloadS
     domain: normalized,
     updatedAt: new Date().toISOString(),
     manual: true,
-    source: 'manual'
+    source: 'manual',
+    verified: true
   }
   saveCache({ ...loadCache(), [siteId]: entry })
   return entry

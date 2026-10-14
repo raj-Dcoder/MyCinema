@@ -2,6 +2,23 @@
 // Pure presentation helpers. Kept out of the page so the card, the player and
 // the empty states format values identically.
 
+/** Tailwind dot classes per category colour, shared by the feed pills and the
+ *  channel manager so a category looks identical wherever it is listed. */
+export const CATEGORY_DOT: Record<string, string> = {
+  red: 'bg-red-500',
+  blue: 'bg-blue-500',
+  emerald: 'bg-emerald-500',
+  amber: 'bg-amber-500',
+  violet: 'bg-violet-500',
+  cyan: 'bg-cyan-500',
+  rose: 'bg-rose-500',
+  lime: 'bg-lime-500',
+}
+
+export function categoryDot(color: string | null | undefined): string {
+  return CATEGORY_DOT[color || ''] || CATEGORY_DOT.red
+}
+
 export function formatDuration(seconds: number | null): string {
   if (seconds === null || !Number.isFinite(seconds) || seconds <= 0) return ''
   const total = Math.round(seconds)

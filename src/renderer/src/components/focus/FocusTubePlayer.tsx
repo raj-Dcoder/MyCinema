@@ -10,10 +10,12 @@ import {
   ListVideo,
   Loader2,
   Maximize,
+  Maximize2,
   MessageSquare,
   Minimize,
   Minus,
   MonitorPlay,
+  SquareArrowDownRight,
   Pause,
   Play,
   Plus,
@@ -231,6 +233,12 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
   const [settingsTab, setSettingsTab] = useState<'speed' | 'quality'>('speed')
   const [isFullscreen, setIsFullscreen] = useState(false)
   const [scrubTime, setScrubTime] = useState<number | null>(null)
+  // In-app mini player: docks the SAME iframe to the bottom-right corner so
+  // playback continues while the user browses MyCinema. Unlike OS PiP this
+  // never leaves the app and never remounts the iframe (no restart).
+  const [isMinimized, setIsMinimized] = useState(false)
+  const isMinimizedRef = useRef(false)
+  isMinimizedRef.current = isMinimized
 
   const stateRef = useRef<number | null>(null)
   const timeRef = useRef(startSeconds)
@@ -984,6 +992,20 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
     })
   }, [pokeBottom, syncFsState])
 
+  // In-app minimize: dock to the bottom-right corner, keep the SAME iframe
+  // mounted (no restart), exit element fullscreen first, and let the rest of
+  // the app receive clicks (root becomes pointer-events-none; only the dock
+  // captures). Escape expands instead of closing while minimized (see key
+  // handler below).
+  const toggleMinimize = useCallback(() => {
+    if (document.fullscreenElement) {
+      void document.exitFullscreen().catch(() => {})
+    }
+    setShowSettings(false)
+    setIsMinimized((v) => !v)
+    pokeBottom()
+  }, [pokeBottom])
+
   // ── Commands ───────────────────────────────────────────────────────────────
   const togglePlay = useCallback(() => {
     pokeBottom()
@@ -1236,7 +1258,10 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
       // When the embed itself holds focus, its own shortcuts (space, arrows)
       // do the same job — handling them here as well would double-toggle.
       if (document.activeElement?.tagName === 'IFRAME') {
-        if (event.key === 'Escape' && !exitFullscreenOnly()) handleClose()
+        if (event.key === 'Escape' && !exitFullscreenOnly()) {
+          if (isMinimizedRef.current) setIsMinimized(false)
+          else handleClose()
+        }
         return
       }
       if (event.code === 'Space') {
@@ -1307,6 +1332,7 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
           break
         case 'Escape':
           if (showSettings) { setShowSettings(false); break }
+          if (isMinimized) { setIsMinimized(false); break }
           if (!exitFullscreenOnly()) handleClose()
           break
         default:
@@ -1338,7 +1364,7 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
       document.removeEventListener('keydown', onKey)
       document.removeEventListener('keyup', onKeyUp)
     }
-  }, [togglePlay, handleSeek, handleVolume, toggleMute, toggleCaptions, toggleFullscreen, handleClose, handleManualNext, exitVideoFullscreen, volume, showSettings, nudgeSpeed, enterHold2x, exitHold2x])
+  }, [togglePlay, handleSeek, handleVolume, toggleMute, toggleCaptions, toggleFullscreen, handleClose, handleManualNext, exitVideoFullscreen, volume, showSettings, nudgeSpeed, enterHold2x, exitHold2x, isMinimized])
 
   // Either the flag already said so, or the embed told us mid-flight.
   if (!video.embeddable || refused) {
@@ -1392,18 +1418,27 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
     // handler from firing while interacting with this player.
     <div
       data-fullscreen-gesture-scope="player"
-      className="fixed inset-0 z-[70] m-0 flex flex-col bg-black p-0 text-white select-none overflow-hidden">
+      className={isMinimized
+        ? 'pointer-events-none fixed inset-0 z-[70] m-0 bg-transparent p-0 text-white select-none'
+        : 'fixed inset-0 z-[70] m-0 flex flex-col bg-black p-0 text-white select-none overflow-hidden'}>
       {/* Body: stable two columns on desktop, stacked on mobile. */}
-      <div className="flex min-h-0 flex-1 flex-col overflow-y-auto lg:flex-row lg:overflow-hidden">
+      <div className={isMinimized
+        ? 'contents'
+        : 'flex min-h-0 flex-1 flex-col overflow-y-auto lg:flex-row lg:overflow-hidden'}>
 
         {/* ── MAIN VIDEO AREA ─────────────────────────────────────────── */}
-        <div className="flex w-full shrink-0 flex-col bg-black lg:h-full lg:min-h-0 lg:w-auto lg:min-w-0 lg:flex-1">
-          {/* Stage: full-bleed black. Mobile = 16:9 strip; desktop = fills. */}
+        <div className={isMinimized
+          ? 'contents'
+          : 'flex w-full shrink-0 flex-col bg-black lg:h-full lg:min-h-0 lg:w-auto lg:min-w-0 lg:flex-1'}>
+          {/* Stage: full-bleed black. Mobile = 16:9 strip; desktop = fills.
+              Minimized: corner dock — same iframe, just repositioned. */}
           <div
             ref={shellRef}
-            className={`relative aspect-video w-full shrink-0 bg-black lg:aspect-auto lg:h-full lg:min-h-0 lg:w-full lg:flex-1 ${
-              isPlaying && !chromeVisible ? 'cursor-none' : ''
-            }`}
+            className={isMinimized
+              ? 'pointer-events-auto fixed bottom-4 right-4 z-[80] aspect-video w-[min(380px,calc(100vw-2rem))] overflow-hidden rounded-xl border border-white/15 bg-black shadow-[0_20px_60px_rgba(0,0,0,0.7)]'
+              : `relative aspect-video w-full shrink-0 bg-black lg:aspect-auto lg:h-full lg:min-h-0 lg:w-full lg:flex-1 ${
+                isPlaying && !chromeVisible ? 'cursor-none' : ''
+              }`}
             onMouseMove={pokeBottom}
             onMouseEnter={handlePointerEnter}
             onMouseLeave={handlePointerLeave}
@@ -1449,6 +1484,8 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
                 pause (avatar + title), which ghosted as double text. */}
             <div
               className={`pointer-events-none absolute inset-x-0 top-0 z-30 flex items-start justify-between p-3 transition-all duration-200 sm:p-4 ${
+                isMinimized ? 'hidden' : ''
+              } ${
                 chromeVisible ? 'visible translate-y-0 opacity-100' : 'invisible -translate-y-2 opacity-0'
               }`}
               aria-hidden={!chromeVisible}
@@ -1506,6 +1543,18 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
                 </button>
                 <button
                   type="button"
+                  onClick={toggleMinimize}
+                  aria-label="Mini player — dock to corner"
+                  title="Mini player — dock video to the corner and keep browsing"
+                  tabIndex={chromeVisible ? 0 : -1}
+                  className={`pointer-events-auto flex h-9 w-9 items-center justify-center rounded-full bg-black/60 text-white/70 backdrop-blur-md transition-all hover:bg-black/85 hover:text-white active:scale-95 ${
+                    chromeVisible ? '' : 'pointer-events-none'
+                  }`}
+                >
+                  <SquareArrowDownRight size={16} />
+                </button>
+                <button
+                  type="button"
                   onClick={handleClose}
                   aria-label="Close player"
                   title="Close (Esc)"
@@ -1518,6 +1567,102 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
                 </button>
               </div>
             </div>
+
+            {/* ── MINI-PLAYER DOCK BAR (only when minimized) ──
+                Same iframe keeps playing underneath; this bar moves with it.
+                Follows the same chrome visibility as the full player: fades
+                after ~2.5s idle while playing, returns on hover/tap. The slim
+                seek strip at the very bottom stays visible so progress is
+                glanceable and seeking works even when faded. */}
+            {isMinimized && (
+              <div className="absolute inset-x-0 bottom-0 z-40">
+                <div className={`bg-gradient-to-t from-black/90 via-black/50 to-transparent px-2.5 pb-1 pt-8 transition-all duration-200 ${chromeVisible ? 'translate-y-0 opacity-100' : 'pointer-events-none translate-y-1 opacity-0'}`}>
+                  <div className="mb-1.5 flex items-center gap-1.5">
+                    <p className="min-w-0 flex-1 truncate text-[11px] font-bold text-white/90" title={video.title}>
+                      {video.title}
+                    </p>
+                    <button
+                      type="button"
+                      onClick={toggleMinimize}
+                      title="Expand player"
+                      aria-label="Expand player"
+                      className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-white/10 text-white/80 backdrop-blur-md transition-colors hover:bg-white/20 hover:text-white"
+                    >
+                      <Maximize2 size={12} />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleClose}
+                      title="Close player"
+                      aria-label="Close player"
+                      className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-white/10 text-white/80 backdrop-blur-md transition-colors hover:bg-primary hover:text-white"
+                    >
+                      <X size={12} />
+                    </button>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={togglePlay}
+                      title={isPlaying ? 'Pause' : 'Play'}
+                      aria-label={isPlaying ? 'Pause' : 'Play'}
+                      className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-white text-black transition-transform hover:scale-105"
+                    >
+                      {isPlaying ? <Pause size={14} fill="currentColor" /> : <Play size={14} fill="currentColor" className="ml-0.5" />}
+                    </button>
+                    <div className="min-w-0 flex-1">
+                      <input
+                        type="range"
+                        min={0}
+                        max={duration ?? 0}
+                        step={0.1}
+                        value={displayTime}
+                        onPointerDown={() => { scrubbingRef.current = true }}
+                        onChange={(e) => setScrubTime(Number(e.target.value))}
+                        onPointerUp={(e) => {
+                          const t = Number((e.target as HTMLInputElement).value)
+                          scrubbingRef.current = false
+                          setScrubTime(null)
+                          handleSeek(t)
+                        }}
+                        onClick={(e) => e.stopPropagation()}
+                        className="h-1 w-full cursor-pointer accent-primary"
+                        aria-label="Seek video"
+                      />
+                      <div className="mt-0.5 flex items-center justify-between text-[10px] font-semibold tabular-nums text-white/60">
+                        <span>{formatChapterTime(displayTime)}</span>
+                        <span>{duration !== null && duration > 0 ? formatChapterTime(duration) : '--:--'}</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+                {/* Always-visible slim seek strip: full-width hit area with an
+                    invisible native slider, so seeking works even when faded. */}
+                <div className="relative flex h-3.5 items-end px-2.5 pb-1.5">
+                  <div className="h-1 w-full overflow-hidden rounded-full bg-white/25">
+                    <div className="h-full rounded-full bg-primary" style={{ width: `${progressRatio * 100}%` }} />
+                  </div>
+                  <input
+                    type="range"
+                    min={0}
+                    max={duration ?? 0}
+                    step={0.1}
+                    value={displayTime}
+                    onPointerDown={() => { scrubbingRef.current = true }}
+                    onChange={(e) => setScrubTime(Number(e.target.value))}
+                    onPointerUp={(e) => {
+                      const t = Number((e.target as HTMLInputElement).value)
+                      scrubbingRef.current = false
+                      setScrubTime(null)
+                      handleSeek(t)
+                    }}
+                    onClick={(e) => e.stopPropagation()}
+                    className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
+                    aria-label="Seek video"
+                  />
+                </div>
+              </div>
+            )}
 
             {/* ── CENTER STATE OVERLAYS (absolute, never in flow) ── */}
             {!started && !errorText && (
@@ -1721,9 +1866,11 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
               </>
             )}
 
-            {/* ── BOTTOM OVERLAY (always mounted; fades only) ── */}
+            {/* ── BOTTOM OVERLAY (always mounted; fades only; hidden in mini mode) ── */}
             <div
               className={`pointer-events-none absolute inset-x-0 bottom-0 z-30 bg-gradient-to-t from-black/90 via-black/50 to-transparent px-3 pb-2 pt-10 transition-all duration-200 sm:px-4 ${
+                isMinimized ? 'hidden' : ''
+              } ${
                 bottomVisible ? 'translate-y-0 opacity-100' : 'translate-y-2 opacity-0'
               }`}
               aria-hidden={!bottomVisible}
@@ -1889,6 +2036,16 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
                 >
                   {fsActive ? <Minimize size={18} /> : <Maximize size={18} />}
                 </button>
+                <button
+                  type="button"
+                  onClick={toggleMinimize}
+                  aria-label="Mini player — dock to corner"
+                  title="Mini player — dock video to the corner and keep browsing"
+                  tabIndex={bottomVisible ? 0 : -1}
+                  className="p-2 text-white/80 transition-colors hover:text-white"
+                >
+                  <SquareArrowDownRight size={18} />
+                </button>
               </div>
             </div>
 
@@ -1912,7 +2069,8 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
           </div>
         </div>
 
-        {/* ── SIDEBAR (visible by default; fixed width on desktop) ────────── */}
+        {/* ── SIDEBAR (visible by default; fixed width on desktop; hidden in mini mode) ────────── */}
+        {isMinimized ? null : (
         <aside className="flex w-full shrink-0 flex-col border-t border-white/10 bg-[#0b0b0b] lg:h-full lg:min-h-0 lg:w-[360px] lg:border-l lg:border-t-0 xl:w-[400px]">
           {/* Panel header — fixed height, so content changes never resize video. */}
           <div className="flex shrink-0 items-center gap-1.5 p-3">
@@ -2138,6 +2296,7 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
               </div>
           </div>
         </aside>
+        )}
       </div>
     </div>,
     document.body,

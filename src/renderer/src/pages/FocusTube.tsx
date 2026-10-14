@@ -515,7 +515,7 @@ const FocusTube: React.FC = () => {
   }, [activeCategoryId, loadFeed, search])
 
   return (
-    <div className="space-y-8">
+    <div className="space-y-5">
       <header className="relative isolate overflow-hidden rounded-[26px] border border-white/[0.09] bg-gradient-to-br from-[#171820] via-[#0e0f14] to-[#0a0a0d] px-5 py-5 shadow-[0_24px_70px_-44px_rgba(0,0,0,0.95)] sm:px-6 sm:py-5">
         <div aria-hidden className="absolute -right-16 -top-32 h-72 w-72 rounded-full bg-primary/15 blur-[100px]" />
         <div aria-hidden className="absolute inset-x-0 bottom-0 h-px bg-gradient-to-r from-primary/55 via-white/[0.08] to-transparent" />
@@ -597,11 +597,12 @@ const FocusTube: React.FC = () => {
         </div>
       </header>
 
-      {/* Category pills — the core control. */}
-      <div
-        data-tour="focustube-categories"
-        className="flex flex-wrap items-center gap-2 rounded-2xl border border-white/[0.07] bg-white/[0.02] p-2"
-      >
+      {/* Controls — categories + stack filters in one card. */}
+      <div className="rounded-2xl border border-white/[0.07] bg-white/[0.02]">
+        <div
+          data-tour="focustube-categories"
+          className="flex flex-wrap items-center gap-2 p-2.5"
+        >
         <button
           type="button"
           onClick={() => void selectCategory(null)}
@@ -826,59 +827,33 @@ const FocusTube: React.FC = () => {
             </button>
           </div>
         )}
-      </div>
-
-      {dragId != null && (() => {
-        const dragged = categories.find((c) => c.id === dragId)
-        if (!dragged) return null
-        return (
-          <div
-            ref={ghostRef}
-            className="pointer-events-none fixed left-0 top-0 z-[90] inline-flex cursor-grabbing items-center gap-2 rounded-xl border border-primary/50 bg-[#141a26]/95 px-4 py-2 text-xs font-black uppercase tracking-widest text-white shadow-[0_18px_40px_-12px_rgba(0,0,0,0.9)] backdrop-blur will-change-transform"
-          >
-            <GripVertical size={12} className="text-white/40" />
-            <span className={`h-2 w-2 rounded-full ${categoryDot(dragged.color)}`} />
-            {dragged.name}
-          </div>
-        )
-      })()}
-
-      {/* Stack header */}
-      <div
-        data-tour="focustube-feed"
-        className="flex flex-wrap items-center justify-between gap-x-4 gap-y-3 rounded-2xl border border-white/[0.07] bg-white/[0.02] px-4 py-3"
-      >
-        <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-2">
-          <span className="inline-flex items-center gap-2 text-sm font-black uppercase italic tracking-wider text-white">
-            <Sparkles size={15} className="text-primary" />
-            {videos.length} in the stack
-          </span>
-          <span className="hidden h-4 w-px bg-white/10 sm:block" aria-hidden />
-          <span className="text-xs font-semibold text-white/35">
-            newest first
-            {activeCategory
-              ? ` · from ${activeCategory.channelCount ?? 0} channel${(activeCategory.channelCount ?? 0) === 1 ? '' : 's'} in ${activeCategory.name}`
-              : totalChannels > 0 ? ` · from ${totalChannels} channel${totalChannels === 1 ? '' : 's'}` : ''}
-          </span>
-          {(activeCategory || totalChannels > 0) && (
-            <button
-              type="button"
-              onClick={() => setManaging(true)}
-              title={activeCategory ? `See channels subscribed in ${activeCategory.name}` : 'See all subscribed channels'}
-              className="inline-flex items-center gap-1.5 rounded-lg border border-white/10 bg-white/[0.04] px-2.5 py-1.5 text-[10px] font-black uppercase tracking-widest text-white/50 transition-colors hover:bg-white/10 hover:text-white"
-            >
-              <Users size={11} />
-              {activeCategory ? `View ${activeCategory.name} channels` : 'View channels'}
-            </button>
-          )}
         </div>
 
-        <div className="flex items-center gap-1.5">
+        {/* Stack filters — second row of the same card. */}
+        <div
+          data-tour="focustube-feed"
+          className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2 border-t border-white/[0.06] px-3 py-2.5"
+        >
+          <div className="flex min-w-0 flex-wrap items-center gap-x-2.5 gap-y-1">
+            <span className="inline-flex items-center gap-1.5 text-[13px] font-bold text-white">
+              <Sparkles size={14} className="text-primary" />
+              {videos.length} in the stack
+            </span>
+            <span className="hidden h-4 w-px bg-white/10 sm:block" aria-hidden />
+            <span className="text-xs font-medium text-white/40">
+              newest first
+              {activeCategory
+                ? ` · ${activeCategory.channelCount ?? 0} channel${(activeCategory.channelCount ?? 0) === 1 ? '' : 's'} in ${activeCategory.name}`
+                : totalChannels > 0 ? ` · ${totalChannels} channel${totalChannels === 1 ? '' : 's'}` : ''}
+            </span>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-1">
           <button
             type="button"
             onClick={toggleShorts}
             title={hideShorts ? 'Show Shorts' : 'Hide Shorts'}
-            className={`inline-flex items-center gap-1.5 rounded-lg border px-3 py-2 text-[11px] font-black uppercase tracking-widest transition-colors ${
+            className={`inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-2 text-[11px] font-bold uppercase tracking-wider transition-colors ${
               hideShorts
                 ? 'border-primary/50 bg-primary/15 text-white'
                 : 'border-transparent text-white/40 hover:bg-white/[0.06] hover:text-white'
@@ -891,7 +866,7 @@ const FocusTube: React.FC = () => {
             type="button"
             onClick={() => { setIncludeSeen((value) => !value); void loadFeed(activeCategoryId, { includeSeen: !includeSeen }) }}
             title="Include videos you have already watched"
-            className={`inline-flex items-center gap-1.5 rounded-lg border px-3 py-2 text-[11px] font-black uppercase tracking-widest transition-colors ${
+            className={`inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-2 text-[11px] font-bold uppercase tracking-wider transition-colors ${
               includeSeen
                 ? 'border-white/20 bg-white/10 text-white'
                 : 'border-transparent text-white/40 hover:bg-white/[0.06] hover:text-white'
@@ -904,13 +879,29 @@ const FocusTube: React.FC = () => {
             type="button"
             onClick={() => void handleMarkAllSeen()}
             title="Mark every video in this view as watched"
-            className="inline-flex items-center gap-1.5 rounded-lg border border-transparent px-3 py-2 text-[11px] font-black uppercase tracking-widest text-white/40 transition-colors hover:bg-white/[0.06] hover:text-white"
+            className="inline-flex items-center gap-1.5 rounded-lg border border-transparent px-2.5 py-2 text-[11px] font-bold uppercase tracking-wider text-white/40 transition-colors hover:bg-white/[0.06] hover:text-white"
           >
             <CheckCheck size={14} className="opacity-70" />
             Mark all seen
           </button>
+          </div>
         </div>
       </div>
+
+      {dragId != null && (() => {
+        const dragged = categories.find((c) => c.id === dragId)
+        if (!dragged) return null
+        return (
+          <div
+            ref={ghostRef}
+            className="pointer-events-none fixed left-0 top-0 z-[90] inline-flex cursor-grabbing items-center gap-2 rounded-xl border border-primary/50 bg-[#141a26]/95 px-4 py-2 text-xs font-bold uppercase tracking-wider text-white shadow-[0_18px_40px_-12px_rgba(0,0,0,0.9)] backdrop-blur will-change-transform"
+          >
+            <GripVertical size={12} className="text-white/40" />
+            <span className={`h-2 w-2 rounded-full ${categoryDot(dragged.color)}`} />
+            {dragged.name}
+          </div>
+        )
+      })()}
 
       {loading ? (
         <div className="grid grid-cols-2 gap-x-5 gap-y-8 md:grid-cols-3 lg:grid-cols-4">

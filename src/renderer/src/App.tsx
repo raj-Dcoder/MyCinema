@@ -334,7 +334,9 @@ const App: React.FC = () => {
         setPlayingVideo(null)
         setSelectedVideo(null)
         setActiveTab('collections')
-        setSharedCollectionFocus({ id: result.id, nonce: Date.now() })
+        if (typeof result.id === 'number') {
+          setSharedCollectionFocus({ id: result.id, nonce: Date.now() })
+        }
       } catch (err) {
         console.error('[DeepLink] Failed to open shared collection:', err)
       }
@@ -396,6 +398,20 @@ const App: React.FC = () => {
       cleanupOpenExternal()
     }
   }, [])
+
+  // ─── Download Tab Indicators ───────────────────────────────────────────────
+  const dlActiveDownloads = activeDownloads.filter(
+    d => d.status === 'downloading' || d.status === 'connecting'
+  )
+  const dlActiveCount = dlActiveDownloads.length
+  const dlQueuedCount = activeDownloads.filter(d => d.status === 'queued').length
+  const dlTotalActive = dlActiveCount + dlQueuedCount
+  // Average progress of all actively-downloading items
+  const dlAvgProgress = dlActiveCount > 0
+    ? dlActiveDownloads.reduce((s, d) => s + Math.max(0, Math.min(100, Number(d.progress || 0))), 0) / dlActiveCount
+    : 0
+  // Top download for speed label
+  const dlTopDownload = dlActiveDownloads[0]
 
   const navItems = [
     { id: 'home' as const,     label: 'Home',         icon: <HomeIcon size={20} /> },
@@ -656,39 +672,119 @@ const App: React.FC = () => {
         <div className="flex-1 overflow-y-auto scrollbar-hide px-4 space-y-8">
           {/* Main Nav */}
           <nav className="space-y-1">
-            {navItems.map(item => (
-              <button
-                key={item.id}
-                data-tour={item.id === 'focustube' ? 'sidebar-focustube' : undefined}
-                onClick={() => navigateToTab(item.id)}
-                className={`relative w-full flex items-center h-12 rounded-xl transition-colors duration-200 group ${
-                  activeTab === item.id ? 'bg-primary/10 text-primary' : 'text-white/40 hover:bg-white/5 hover:text-white'
-                }`}
-              >
-                <div className="w-12 h-full flex flex-col items-center justify-center flex-shrink-0 text-current relative">
-                  <span className="flex items-center justify-center leading-none">{item.icon}</span>
-                  {'badge' in item && (item as { badge?: string }).badge && !isSidebarExpanded && (
-                    <span
-                      title={`${item.label} is in beta`}
-                      className="mt-[3px] inline-flex items-center justify-center rounded border border-amber-300/25 bg-amber-400/15 px-[3px] py-px text-[6px] font-bold uppercase leading-none tracking-[0.08em] text-amber-200/90"
-                    >
-                      {(item as { badge?: string }).badge}
-                    </span>
-                  )}
-                </div>
-                <div className={`absolute left-12 whitespace-nowrap text-sm font-bold transition-all duration-300 flex items-center ${isSidebarExpanded ? 'opacity-100 translate-x-0' : 'opacity-0 -translate-x-2 pointer-events-none'}`}>
-                  {item.label}
-                  {'badge' in item && (item as { badge?: string }).badge && (
-                    <span
-                      title={`${item.label} is in beta — some things may still change`}
-                      className="ml-1.5 inline-flex items-center rounded border border-amber-300/20 bg-amber-400/10 px-1 py-[1px] text-[8px] font-bold uppercase leading-none tracking-[0.08em] text-amber-200/90"
-                    >
-                      {(item as { badge?: string }).badge}
-                    </span>
-                  )}
-                </div>
-              </button>
-            ))}
+            {navItems.map(item => {
+              const isDownloadTab = item.id === 'download'
+              const showDlIndicator = isDownloadTab && dlTotalActive > 0
+              // SVG ring constants
+              const ringR = 13
+              const ringC = 2 * Math.PI * ringR
+
+              return (
+                <button
+                  key={item.id}
+                  data-tour={item.id === 'focustube' ? 'sidebar-focustube' : undefined}
+                  onClick={() => navigateToTab(item.id)}
+                  className={`relative w-full flex items-center rounded-xl transition-colors duration-200 group ${
+                    showDlIndicator && isSidebarExpanded ? 'h-auto py-2' : 'h-12'
+                  } ${
+                    activeTab === item.id ? 'bg-primary/10 text-primary' : 'text-white/40 hover:bg-white/5 hover:text-white'
+                  }`}
+                >
+                  <div className="w-12 h-12 flex flex-col items-center justify-center flex-shrink-0 text-current relative">
+                    {/* Progress ring around icon when downloads are active */}
+                    {showDlIndicator ? (
+                      <span className="relative flex items-center justify-center" style={{ width: 30, height: 30 }}>
+                        {/* Background track */}
+                        <svg
+                          width="30" height="30"
+                          className="absolute inset-0 -rotate-90"
+                          viewBox="0 0 30 30"
+                          style={{ overflow: 'visible' }}
+                        >
+                          <circle cx="15" cy="15" r={ringR} fill="none" stroke="rgba(255,255,255,0.08)" strokeWidth="2" />
+                          <circle
+                            cx="15" cy="15" r={ringR}
+                            fill="none"
+                            stroke={activeTab === item.id ? 'var(--color-primary, #e50914)' : 'rgba(34,211,238,0.7)'}
+                            strokeWidth="2"
+                            strokeLinecap="round"
+                            strokeDasharray={ringC}
+                            strokeDashoffset={ringC * (1 - dlAvgProgress / 100)}
+                            className="transition-all duration-500"
+                          />
+                        </svg>
+                        <span className="relative z-10 flex items-center justify-center" style={{ width: 20, height: 20 }}>
+                          {item.icon}
+                        </span>
+                        {/* Count badge */}
+                        <span
+                          className="absolute -top-1.5 -right-1.5 flex h-[14px] min-w-[14px] items-center justify-center rounded-full bg-cyan-400 px-[3px] text-[8px] font-black text-black leading-none shadow-[0_0_6px_rgba(34,211,238,0.6)]"
+                        >
+                          {dlTotalActive}
+                        </span>
+                      </span>
+                    ) : (
+                      <>
+                        <span className="flex items-center justify-center leading-none">{item.icon}</span>
+                        {'badge' in item && (item as { badge?: string }).badge && !isSidebarExpanded && (
+                          <span
+                            title={`${item.label} is in beta`}
+                            className="mt-[3px] inline-flex items-center justify-center rounded border border-amber-300/25 bg-amber-400/15 px-[3px] py-px text-[6px] font-bold uppercase leading-none tracking-[0.08em] text-amber-200/90"
+                          >
+                            {(item as { badge?: string }).badge}
+                          </span>
+                        )}
+                      </>
+                    )}
+                  </div>
+                  <div className={`absolute left-12 right-3 transition-all duration-300 ${
+                    isSidebarExpanded ? 'opacity-100 translate-x-0' : 'opacity-0 -translate-x-2 pointer-events-none'
+                  }`}>
+                    <div className="flex items-center gap-1.5">
+                      <span className="whitespace-nowrap text-sm font-bold">{item.label}</span>
+                      {'badge' in item && (item as { badge?: string }).badge && (
+                        <span
+                          title={`${item.label} is in beta — some things may still change`}
+                          className="inline-flex items-center rounded border border-amber-300/20 bg-amber-400/10 px-1 py-[1px] text-[8px] font-bold uppercase leading-none tracking-[0.08em] text-amber-200/90"
+                        >
+                          {(item as { badge?: string }).badge}
+                        </span>
+                      )}
+                      {/* Inline download status when sidebar is expanded */}
+                      {showDlIndicator && (
+                        <span className="ml-auto flex items-center gap-1 shrink-0">
+                          <span className="h-1.5 w-1.5 rounded-full bg-cyan-400 animate-pulse" />
+                          <span className="text-[10px] font-bold text-cyan-400">
+                            {dlActiveCount > 0 ? `${Math.round(dlAvgProgress)}%` : `${dlQueuedCount} queued`}
+                          </span>
+                        </span>
+                      )}
+                    </div>
+                    {/* Progress bar — only when downloads active */}
+                    {showDlIndicator && (
+                      <div className="mt-1.5 space-y-1">
+                        <div className="h-[3px] w-full overflow-hidden rounded-full bg-white/8">
+                          <div
+                            className="h-full rounded-full transition-all duration-500 bg-gradient-to-r from-cyan-400 to-primary"
+                            style={{ width: `${dlAvgProgress}%` }}
+                          />
+                        </div>
+                        {dlTopDownload?.downloadSpeed && dlTopDownload.downloadSpeed !== '0 B/s' && (
+                          <p className="text-[9px] font-semibold text-white/35 leading-none">
+                            {dlTopDownload.downloadSpeed}{dlActiveCount > 1 ? ` · ${dlActiveCount} active` : ''}{dlQueuedCount > 0 ? ` · ${dlQueuedCount} queued` : ''}
+                          </p>
+                        )}
+                        {(dlTopDownload?.downloadSpeed === '0 B/s' || !dlTopDownload?.downloadSpeed) && (
+                          <p className="text-[9px] font-semibold text-white/35 leading-none">
+                            {dlActiveCount > 0 ? `${dlActiveCount} downloading` : ''}{dlQueuedCount > 0 ? `${dlActiveCount > 0 ? ' · ' : ''}${dlQueuedCount} queued` : ''}
+                          </p>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                </button>
+              )
+            })}
           </nav>
 
           {/* Library Section */}

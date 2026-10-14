@@ -41,6 +41,65 @@ const Settings: React.FC = () => {
   const [subtitlePosition, setSubtitlePosition] = useState(() => {
     return parseInt(localStorage.getItem(SUBTITLE_POSITION_KEY) || '0', 10)
   })
+  // Web download sites — manual domain override when auto-resolve fails.
+  interface DownloadSiteStatus {
+    id: string
+    name: string
+    shortLabel: string
+    portalUrl: string
+    accent: string
+    domain: string | null
+    updatedAt: string | null
+    manual: boolean
+    stale: boolean
+  }
+  const [downloadSites, setDownloadSites] = useState<DownloadSiteStatus[]>([])
+  const [downloadSiteDrafts, setDownloadSiteDrafts] = useState<Record<string, string>>({})
+  const [downloadSiteBusyId, setDownloadSiteBusyId] = useState<string | null>(null)
+  const [downloadSiteMessage, setDownloadSiteMessage] = useState<string | null>(null)
+
+  const fetchDownloadSites = async () => {
+    try {
+      const api = (window as any)?.api
+      if (typeof api?.getDownloadSites !== 'function') return // stale preload
+      const sites = await api.getDownloadSites()
+      setDownloadSites(sites || [])
+    } catch (err) {
+      console.error('Failed to load download sites:', err)
+    }
+  }
+
+  const handleSaveDownloadSiteDomain = async (siteId: string) => {
+    const draft = (downloadSiteDrafts[siteId] || '').trim()
+    if (!draft || downloadSiteBusyId) return
+    setDownloadSiteBusyId(siteId)
+    setDownloadSiteMessage(null)
+    try {
+      await (window as any).api.setDownloadSiteDomain(siteId, draft)
+      setDownloadSiteMessage('Saved. Detail screen will use your link.')
+      await fetchDownloadSites()
+    } catch (err: any) {
+      setDownloadSiteMessage(err?.message || 'Could not save that link.')
+    } finally {
+      setDownloadSiteBusyId(null)
+    }
+  }
+
+  const handleResetDownloadSiteDomain = async (siteId: string) => {
+    if (downloadSiteBusyId) return
+    setDownloadSiteBusyId(siteId)
+    setDownloadSiteMessage(null)
+    try {
+      await (window as any).api.resetDownloadSiteDomain(siteId)
+      setDownloadSiteDrafts(prev => ({ ...prev, [siteId]: '' }))
+      setDownloadSiteMessage('Reset. App will auto-find the latest link again.')
+      await fetchDownloadSites()
+    } catch (err) {
+      console.error('Failed to reset download site:', err)
+    } finally {
+      setDownloadSiteBusyId(null)
+    }
+  }
 
   const fetchFolders = async () => {
     const f = await window.api.getFolders()
@@ -76,6 +135,7 @@ const Settings: React.FC = () => {
 
   useEffect(() => {
     fetchFolders()
+    fetchDownloadSites()
     window.api.getAppSettings().then(settings => {
       setLaunchFullscreen(settings.launchFullscreen)
       if (typeof settings.rememberOnlineProgress === 'boolean') {
@@ -566,6 +626,70 @@ const Settings: React.FC = () => {
                 </button>
               </div>
             ))}
+          </div>
+        </section>
+
+        <section>
+          <h3 className={sectionTitleClass}>Download Sites</h3>
+          <div className={`${panelClass} p-6 space-y-4`}>
+            <p className="max-w-2xl text-xs font-medium leading-5 text-white/30">
+              Detail screen cards auto-find the latest working link. If auto-find fails, paste the current site link here manually.
+            </p>
+            {downloadSiteMessage && (
+              <p className="text-[11px] font-bold text-primary">{downloadSiteMessage}</p>
+            )}
+            <div className="grid grid-cols-1 gap-3">
+              {downloadSites.map(site => (
+                <div key={site.id} className="flex flex-col gap-3 rounded-2xl border border-white/10 bg-black/20 p-4 md:flex-row md:items-center">
+                  <div className="flex min-w-0 flex-1 items-center gap-3">
+                    <div
+                      className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-xl text-[11px] font-black"
+                      style={{ backgroundColor: `${site.accent}1a`, color: site.accent }}
+                    >
+                      {site.shortLabel}
+                    </div>
+                    <div className="min-w-0">
+                      <p className="text-xs font-black text-white">{site.name}</p>
+                      <p className="truncate text-[11px] font-medium text-white/35" title={site.domain || site.portalUrl}>
+                        {site.domain ? `${site.domain}${site.manual ? ' · manual' : site.stale ? ' · needs refresh' : ' · auto'}` : 'No link yet — opens on first use'}
+                      </p>
+                    </div>
+                  </div>
+                  <div className="flex flex-1 flex-col gap-2 sm:flex-row">
+                    <input
+                      type="text"
+                      value={downloadSiteDrafts[site.id] ?? ''}
+                      onChange={e => setDownloadSiteDrafts(prev => ({ ...prev, [site.id]: e.target.value }))}
+                      onKeyDown={e => { if (e.key === 'Enter') void handleSaveDownloadSiteDomain(site.id) }}
+                      placeholder="https://current-mirror.example"
+                      disabled={downloadSiteBusyId === site.id}
+                      className="h-9 min-w-0 flex-1 rounded-lg border border-white/10 bg-black/30 px-2.5 text-[12px] font-semibold text-white outline-none placeholder:text-white/25 focus:border-primary/50 disabled:opacity-60"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => void handleSaveDownloadSiteDomain(site.id)}
+                      disabled={!((downloadSiteDrafts[site.id] || '').trim()) || downloadSiteBusyId === site.id}
+                      className={`${compactButtonClass} border border-white/10 bg-white/5 text-white hover:bg-white/10`}
+                    >
+                      <span>{downloadSiteBusyId === site.id ? 'Saving…' : 'Save'}</span>
+                    </button>
+                    {(site.domain || site.manual) && (
+                      <button
+                        type="button"
+                        onClick={() => void handleResetDownloadSiteDomain(site.id)}
+                        disabled={downloadSiteBusyId === site.id}
+                        className={`${compactButtonClass} border border-white/10 bg-transparent text-white/50 hover:text-white hover:bg-white/5`}
+                      >
+                        <span>Auto</span>
+                      </button>
+                    )}
+                  </div>
+                </div>
+              ))}
+              {downloadSites.length === 0 && (
+                <p className="text-[11px] font-bold text-white/30">Loading sites…</p>
+              )}
+            </div>
           </div>
         </section>
 

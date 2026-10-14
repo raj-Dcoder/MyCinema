@@ -1,4 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react'
+import hdMoviesLogo from '../assets/site-logos/hdmovies.svg'
+import catMoviesLogo from '../assets/site-logos/catmovies.svg'
 import { X, Play, Info, Calendar, CalendarDays, Clock, Star, FolderOpen, Film, Music, Subtitles, HardDrive, ChevronDown, ChevronUp, Heart, Bookmark, Share2, Search, Zap, Users, Download, AlertTriangle, Clapperboard, Loader2, ExternalLink, Languages, CheckCircle2, Copy, MessageCircle, Send, Trash2, Bell, BellRing, Hourglass, Layers, Plus } from 'lucide-react'
 import { Video, WatchlistIntent } from '../types'
 import { getWatchlistIntent, normalizeWatchlistIntent, WATCHLIST_INTENT_META } from '../utils/watchlistIntent'
@@ -344,6 +346,10 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
   const [expandedOverview, setExpandedOverview] = useState(false)
   const [tmdbKeywords, setTmdbKeywords] = useState<string[]>([])
   const [isWebPopupOpen, setIsWebPopupOpen] = useState(false)
+  // Web download sites (portal-resolved mirrors). Only resolves + opens a
+  // searched page in the in-app popup — same mechanism as Moctale.
+  const [resolvingSiteId, setResolvingSiteId] = useState<string | null>(null)
+  const [downloadSiteError, setDownloadSiteError] = useState<string | null>(null)
   // Online resume (#1): source-agnostic position for the primary identity.
   // #2: per-episode online map for the series episode list.
   const [streamResume, setStreamResume] = useState<{ position: number; duration: number } | null>(null)
@@ -1166,6 +1172,30 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
     }
     window.addEventListener('focus', clearBlurOnFocus)
     window.api.openWebPopup(getMoctaleUrl(video), `${title} — Moctale`)
+  }
+
+  const handleOpenDownloadSite = async (siteId: 'hdmovies' | 'catmovies', siteName: string) => {
+    if (resolvingSiteId) return
+    const searchTitle = video.type === 'series' && video.series_name ? video.series_name : video.title
+    setResolvingSiteId(siteId)
+    setDownloadSiteError(null)
+    try {
+      const resolved = await window.api.resolveDownloadSiteUrl(siteId, searchTitle, video.release_year ?? null)
+      window.dispatchEvent(new CustomEvent('web-popup-opened'))
+      setIsWebPopupOpen(true)
+      const clearBlurOnFocus = () => {
+        window.dispatchEvent(new CustomEvent('web-popup-closed'))
+        setIsWebPopupOpen(false)
+        window.removeEventListener('focus', clearBlurOnFocus)
+      }
+      window.addEventListener('focus', clearBlurOnFocus)
+      await window.api.openWebPopup(resolved.searchUrl, `${searchTitle} — ${siteName}`)
+    } catch (err: any) {
+      console.error('[DetailScreen] Download site resolve failed:', err)
+      setDownloadSiteError(err?.message || 'Could not find a working link right now. Try again later.')
+    } finally {
+      setResolvingSiteId(null)
+    }
   }
 
   const handleOpenGoogleSearch = () => {
@@ -2287,6 +2317,44 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
                   </div>
                 </div>
               </div>
+            </div>
+
+            {/* Web Download — portal-resolved mirrors, opened searched in-app */}
+            <div className="mt-4">
+              <p className="text-[10px] font-black uppercase tracking-[0.18em] text-white/35 mb-2">Download</p>
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  onClick={() => void handleOpenDownloadSite('hdmovies', 'HD Movies Hub')}
+                  disabled={resolvingSiteId !== null}
+                  className="flex h-12 items-center gap-2.5 px-3 bg-white/5 border border-white/10 rounded-xl text-white/45 hover:text-white hover:border-rose-500/30 hover:bg-rose-600/10 transition-all hover:-translate-y-0.5 active:scale-95 glass-effect disabled:opacity-60 disabled:cursor-wait"
+                  title="Search this title on HD Movies Hub (latest working link)"
+                >
+                  {resolvingSiteId === 'hdmovies'
+                    ? <Loader2 size={18} className="animate-spin" />
+                    : <img src={hdMoviesLogo} alt="HD Movies Hub" className="h-7 w-7 rounded-lg" />}
+                  <span className="text-left leading-tight">
+                    <span className="block text-[10px] font-black uppercase tracking-widest">HD Movies Hub</span>
+                    <span className="block text-[9px] font-medium text-white/30">Searched page opens in-app</span>
+                  </span>
+                </button>
+                <button
+                  onClick={() => void handleOpenDownloadSite('catmovies', 'Cat Movies HD')}
+                  disabled={resolvingSiteId !== null}
+                  className="flex h-12 items-center gap-2.5 px-3 bg-white/5 border border-white/10 rounded-xl text-white/45 hover:text-white hover:border-cyan-500/30 hover:bg-cyan-600/10 transition-all hover:-translate-y-0.5 active:scale-95 glass-effect disabled:opacity-60 disabled:cursor-wait"
+                  title="Search this title on Cat Movies HD (latest working link)"
+                >
+                  {resolvingSiteId === 'catmovies'
+                    ? <Loader2 size={18} className="animate-spin" />
+                    : <img src={catMoviesLogo} alt="Cat Movies HD" className="h-7 w-7 rounded-lg" />}
+                  <span className="text-left leading-tight">
+                    <span className="block text-[10px] font-black uppercase tracking-widest">Cat Movies HD</span>
+                    <span className="block text-[9px] font-medium text-white/30">Searched page opens in-app</span>
+                  </span>
+                </button>
+              </div>
+              {downloadSiteError && (
+                <p className="mt-2 text-[11px] font-semibold text-red-400">{downloadSiteError}</p>
+              )}
             </div>
 
             {/* Share Modal */}

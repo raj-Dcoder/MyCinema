@@ -164,6 +164,27 @@ interface Api {
   clearPipThumbar: () => Promise<void>
   onThumbarCommand: (callback: (command: string) => void) => () => void
   openWebPopup: (url: string, title?: string) => Promise<boolean>
+  getDownloadSites: () => Promise<Array<{
+    id: string
+    name: string
+    shortLabel: string
+    portalUrl: string
+    accent: string
+    domain: string | null
+    updatedAt: string | null
+    manual: boolean
+    stale: boolean
+  }>>
+  resolveDownloadSiteUrl: (siteId: string, title: string, year?: string | number | null) => Promise<{
+    siteId: string
+    domain: string
+    searchUrl: string
+    source: 'portal' | 'portal-fallback' | 'manual' | 'cache' | 'remote'
+    updatedAt: string | null
+    stale: boolean
+  }>
+  setDownloadSiteDomain: (siteId: string, domain: string) => Promise<{ domain: string; updatedAt: string; manual: boolean }>
+  resetDownloadSiteDomain: (siteId: string) => Promise<boolean>
   toggleFullscreen: () => Promise<boolean>
   isFullscreen: () => Promise<boolean>
   closeWindow: () => Promise<void>

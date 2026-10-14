@@ -164,6 +164,13 @@ const api = {
     return () => ipcRenderer.removeListener('thumbar-command', handler)
   },
   openWebPopup: (url: string, title?: string) => ipcRenderer.invoke('open-web-popup', url, title),
+  getDownloadSites: () => ipcRenderer.invoke('get-download-sites'),
+  resolveDownloadSiteUrl: (siteId: string, title: string, year?: string | number | null) =>
+    ipcRenderer.invoke('resolve-download-site-url', siteId, title, year),
+  setDownloadSiteDomain: (siteId: string, domain: string) =>
+    ipcRenderer.invoke('set-download-site-domain', siteId, domain),
+  resetDownloadSiteDomain: (siteId: string) =>
+    ipcRenderer.invoke('reset-download-site-domain', siteId),
   toggleFullscreen: () => ipcRenderer.invoke('window-toggle-fullscreen'),
   isFullscreen: () => ipcRenderer.invoke('window-is-fullscreen'),
   closeWindow: () => ipcRenderer.invoke('window-close'),

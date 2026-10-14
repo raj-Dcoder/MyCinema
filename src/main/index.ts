@@ -7,6 +7,8 @@ import * as focusTube from './focusTube'
 import * as focusTubeFeed from './focusTubeFeed'
 import * as focusTubeYouTubeImport from './focusTubeYouTubeImport'
 import * as sponsorBlock from './sponsorBlock'
+import * as downloadSites from './downloadSites'
+import { POPUP_PARTITION, POPUP_COSMETIC_CSS, isBlockedAdUrl, registerPopupAdblock } from './popupAdblock'
 import { scanFolder, getEmbeddedSubtitles, getEmbeddedAudio } from './scanner'
 import * as tmdb from './tmdb'
 import fs from 'fs'
@@ -1942,9 +1944,15 @@ ipcMain.handle('open-web-popup', (event, url: string, title?: string) => {
     backgroundColor: '#0f172a',
     webPreferences: {
       nodeIntegration: false,
-      contextIsolation: true
+      contextIsolation: true,
+      // Dedicated partition: the popup adblocker only touches this session,
+      // never the main window (YouTube embeds, TMDB, streaming stay intact).
+      partition: POPUP_PARTITION
     }
   })
+
+  // Lightweight uBlock-style filtering for the popup only.
+  registerPopupAdblock(popup.webContents.session)
 
   const updateBackButton = () => {
     if (popup.webContents.canGoBack()) {
@@ -2002,6 +2010,7 @@ ipcMain.handle('open-web-popup', (event, url: string, title?: string) => {
       ::-webkit-scrollbar-track { background: transparent; }
       ::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.2); border-radius: 4px; }
       ::-webkit-scrollbar-thumb:hover { background: rgba(255, 255, 255, 0.3); }
+      ${POPUP_COSMETIC_CSS}
     `).catch(() => {})
     updateBackButton()
   })
@@ -2011,6 +2020,8 @@ ipcMain.handle('open-web-popup', (event, url: string, title?: string) => {
 
   // Force links that would open in a new window to open in the current popup instead
   popup.webContents.setWindowOpenHandler(({ url }) => {
+    // Ad popunders die silently instead of hijacking the popup.
+    if (isBlockedAdUrl(url)) return { action: 'deny' }
     popup.loadURL(url)
     return { action: 'deny' }
   })
@@ -2024,6 +2035,27 @@ ipcMain.handle('open-web-popup', (event, url: string, title?: string) => {
 
   popup.loadURL(url)
   popup.once('ready-to-show', () => popup.show())
+  return true
+})
+
+// ─── Download sites (portal-resolved mirrors + search deep-links) ───────────
+// Domains rotate/ban often, so the renderer never hardcodes one: it asks main
+// to resolve the live domain from the site's portal page (cached 12h), with a
+// manual Settings override as backup.
+ipcMain.handle('get-download-sites', () => {
+  return downloadSites.getDownloadSitesStatus()
+})
+
+ipcMain.handle('resolve-download-site-url', async (_event, siteId: string, title: string, year?: string | number | null) => {
+  return downloadSites.resolveDownloadSiteUrl(siteId, title, year)
+})
+
+ipcMain.handle('set-download-site-domain', (_event, siteId: string, domain: string) => {
+  return downloadSites.setDownloadSiteDomain(siteId, domain)
+})
+
+ipcMain.handle('reset-download-site-domain', (_event, siteId: string) => {
+  downloadSites.resetDownloadSiteDomain(siteId)
   return true
 })
 

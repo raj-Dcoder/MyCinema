@@ -1,0 +1,13 @@
+{
+  "updatedAt": "2026-10-14T00:00:00.000Z",
+  "sites": {
+    "hdmovies": {
+      "domain": "https://hdhub4u.bi",
+      "checkedAt": "2026-10-14T00:00:00.000Z"
+    },
+    "catmovies": {
+      "domain": "https://katworld.net",
+      "checkedAt": "2026-10-14T00:00:00.000Z"
+    }
+  }
+}

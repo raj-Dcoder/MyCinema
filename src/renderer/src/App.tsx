@@ -117,14 +117,21 @@ const App: React.FC = () => {
     return tab === 'home' ? homeScrollRef.current : activePageScrollRef.current
   }
 
-  const navigateToTab = (tab: AppTab) => {
+  const navigateToTab = useCallback((tab: AppTab) => {
+    if (tab === activeTabRef.current) {
+      if (tab === 'home') {
+        homeScrollRef.current?.scrollTo({ top: 0, behavior: 'smooth' })
+      }
+      return
+    }
+
     const currentScroller = getScrollElement(activeTabRef.current)
     if (currentScroller) {
       tabScrollPositionsRef.current[activeTabRef.current] = currentScroller.scrollTop
     }
 
     setActiveTab(tab)
-  }
+  }, [])
 
   useLayoutEffect(() => {
     activeTabRef.current = activeTab
@@ -299,6 +306,17 @@ const App: React.FC = () => {
       setActiveDownloads(prev => {
         const index = prev.findIndex(download => download.id === data.id)
         if (index === -1) return [data, ...prev]
+        const current = prev[index]
+        const currentPct = Math.round(current.progress || 0)
+        const nextPct = Math.round(data.progress || 0)
+        if (
+          currentPct === nextPct &&
+          current.status === data.status &&
+          current.downloadSpeed === data.downloadSpeed &&
+          current.timeRemaining === data.timeRemaining
+        ) {
+          return prev
+        }
         const next = [...prev]
         next[index] = { ...next[index], ...data }
         return next
@@ -465,7 +483,7 @@ const App: React.FC = () => {
     { id: 'favorites' as const, label: 'Favorites',    icon: <Heart size={20} /> },
   ]
 
-  const handlePlayVideo = (video: Video) => {
+  const handlePlayVideo = useCallback((video: Video) => {
     if (video.streamSourceId) {
       const previousStreamId = activeTempStreamRef.current
       // Switching to a different temp stream (e.g. next episode's magnet):
@@ -476,7 +494,7 @@ const App: React.FC = () => {
       activeTempStreamRef.current = video.streamSourceId
     }
     setPlayingVideo(video)
-  }
+  }, [])
 
   const handleStartUpdateDownload = async () => {
     setUpdateState(prev => ({ ...prev, status: 'downloading', percent: 0 }))
@@ -1036,14 +1054,18 @@ const App: React.FC = () => {
               {activeTab === 'settings' && <SettingsPage />}
             </div>
         </div>
-        {activeTab === 'home' && (
-          <div
-            ref={homeScrollRef}
-            className="absolute inset-0 overflow-y-auto scrollbar-hide pt-6 pb-14"
-          >
-            <Home onPlay={handlePlayVideo} onShowDetail={setSelectedVideo} onNavigate={navigateToTab} refreshKey={homeRefreshKey} />
-          </div>
-        )}
+        <div
+          ref={homeScrollRef}
+          className={`absolute inset-0 overflow-y-auto scrollbar-hide pt-6 pb-14 ${activeTab === 'home' ? '' : 'hidden'}`}
+        >
+          <Home
+            isActive={activeTab === 'home'}
+            onPlay={handlePlayVideo}
+            onShowDetail={setSelectedVideo}
+            onNavigate={navigateToTab}
+            refreshKey={homeRefreshKey}
+          />
+        </div>
       </main>
 
       {shouldShowDownloadTray && (

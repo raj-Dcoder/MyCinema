@@ -1252,4 +1252,4 @@ const TitlePicker: React.FC<{
   )
 }
 
-export default Collections
+export default React.memo(Collections)

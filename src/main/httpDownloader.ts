@@ -24,6 +24,7 @@ export interface HttpDownloadItem {
   fileStream?: fs.WriteStream
   errorMessage?: string
   tmdbId?: number
+  progressTimer?: NodeJS.Timeout
 }
 
 // Active in-flight HTTP downloads keyed by ID
@@ -33,8 +34,15 @@ const activeHttpDownloads = new Map<string, HttpDownloadItem>()
 type ProgressBroadcaster = (id: string, torrentLike: any, status: string, errorMessage?: string) => void
 let progressBroadcaster: ProgressBroadcaster | null = null
 
+type HttpCompleteCallback = (item: HttpDownloadItem) => void
+let httpCompleteCallback: HttpCompleteCallback | null = null
+
 export function registerHttpProgressBroadcaster(fn: ProgressBroadcaster): void {
   progressBroadcaster = fn
+}
+
+export function registerHttpCompleteCallback(fn: HttpCompleteCallback): void {
+  httpCompleteCallback = fn
 }
 
 export function isHttpDownload(id: string): boolean {
@@ -214,12 +222,27 @@ async function runDownloadStream(item: HttpDownloadItem, redirectCount = 0): Pro
 
       res.on('data', (chunk: Buffer) => {
         item.downloadedBytes += chunk.length
-        calculateSpeedAndEta(item)
       })
 
       res.pipe(fileStream)
 
+      const cleanupTimer = () => {
+        if (item.progressTimer) {
+          clearInterval(item.progressTimer)
+          item.progressTimer = undefined
+        }
+      }
+
+      item.progressTimer = setInterval(() => {
+        if (item.status !== 'downloading' || abortController.signal.aborted) {
+          cleanupTimer()
+          return
+        }
+        calculateSpeedAndEta(item)
+      }, 1000)
+
       fileStream.on('finish', () => {
+        cleanupTimer()
         fileStream.close(() => {
           if (item.status === 'downloading') {
             // Rename from .part to final file
@@ -237,6 +260,13 @@ async function runDownloadStream(item: HttpDownloadItem, redirectCount = 0): Pro
             item.timeRemaining = 0
             notifyProgress(item, 'done')
             console.log(`[HttpDownloader] Download completed successfully: ${item.savePath}`)
+            if (httpCompleteCallback) {
+              try {
+                httpCompleteCallback(item)
+              } catch (cbErr) {
+                console.error('[HttpDownloader] Complete callback error:', cbErr)
+              }
+            }
             activeHttpDownloads.delete(item.id)
             resolve()
           } else {
@@ -246,11 +276,16 @@ async function runDownloadStream(item: HttpDownloadItem, redirectCount = 0): Pro
       })
 
       fileStream.on('error', (err) => {
+        cleanupTimer()
         reject(err)
       })
     })
 
     req.on('error', (err: any) => {
+      if (item.progressTimer) {
+        clearInterval(item.progressTimer)
+        item.progressTimer = undefined
+      }
       if (abortController.signal.aborted) {
         // Normal abort on pause / cancel
         resolve()
@@ -268,29 +303,24 @@ function existingOrSum(existing: number, fromHeader: number, status?: number): n
   return fromHeader
 }
 
-let lastBroadcastTime = 0
 function calculateSpeedAndEta(item: HttpDownloadItem): void {
   const now = Date.now()
   const elapsedSec = (now - item.lastTime) / 1000
+  if (elapsedSec <= 0) return
 
-  if (elapsedSec >= 0.8) {
-    const bytesDelta = item.downloadedBytes - item.lastBytes
-    item.speed = Math.max(0, bytesDelta / elapsedSec)
-    item.lastBytes = item.downloadedBytes
-    item.lastTime = now
+  const bytesDelta = item.downloadedBytes - item.lastBytes
+  item.speed = Math.max(0, bytesDelta / elapsedSec)
+  item.lastBytes = item.downloadedBytes
+  item.lastTime = now
 
-    if (item.totalBytes > 0 && item.speed > 0) {
-      const remainingBytes = Math.max(0, item.totalBytes - item.downloadedBytes)
-      item.timeRemaining = (remainingBytes / item.speed) * 1000 // ms
-    } else {
-      item.timeRemaining = 0
-    }
-
-    if (now - lastBroadcastTime >= 800) {
-      lastBroadcastTime = now
-      notifyProgress(item, 'downloading')
-    }
+  if (item.totalBytes > 0 && item.speed > 0) {
+    const remainingBytes = Math.max(0, item.totalBytes - item.downloadedBytes)
+    item.timeRemaining = (remainingBytes / item.speed) * 1000 // ms
+  } else {
+    item.timeRemaining = 0
   }
+
+  notifyProgress(item, 'downloading')
 }
 
 function notifyProgress(item: HttpDownloadItem, status: string, errorMessage?: string): void {
@@ -306,6 +336,7 @@ function notifyProgress(item: HttpDownloadItem, status: string, errorMessage?: s
       length: item.totalBytes,
       downloaded: item.downloadedBytes,
       name: item.fileName,
+      path: item.savePath,
       _myCinemaTitle: item.title,
       _myCinemaName: item.fileName
     },
@@ -332,6 +363,10 @@ export function pauseHttpDownload(id: string): boolean {
   item.status = 'paused'
   item.speed = 0
   item.timeRemaining = 0
+  if (item.progressTimer) {
+    clearInterval(item.progressTimer)
+    item.progressTimer = undefined
+  }
   if (item.abortController) {
     item.abortController.abort()
   }
@@ -401,6 +436,10 @@ export function cancelHttpDownload(id: string, deleteFile = false): boolean {
   const item = activeHttpDownloads.get(id)
   if (item) {
     item.status = 'paused'
+    if (item.progressTimer) {
+      clearInterval(item.progressTimer)
+      item.progressTimer = undefined
+    }
     if (item.abortController) item.abortController.abort()
     if (item.fileStream) item.fileStream.close()
     if (deleteFile) {

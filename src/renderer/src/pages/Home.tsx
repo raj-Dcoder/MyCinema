@@ -13,6 +13,7 @@ interface HomeProps {
   onShowDetail: (video: Video) => void
   onNavigate: (tab: 'movies' | 'series' | 'history' | 'settings') => void
   refreshKey: number
+  isActive?: boolean
 }
 
 const TRENDING_RAIL_LIMIT = 10
@@ -501,7 +502,7 @@ const SectionHeader: React.FC<{
   )
 }
 
-const Home: React.FC<HomeProps> = ({ onPlay, onShowDetail, onNavigate, refreshKey }) => {
+const Home: React.FC<HomeProps> = ({ onPlay, onShowDetail, onNavigate, refreshKey, isActive = true }) => {
   const initialSnapshotRef = useRef<HomeSnapshot | null>(readHomeSnapshot())
   const [continueWatching, setContinueWatching] = useState<Video[]>(() => initialSnapshotRef.current?.continueWatching || [])
   const [recentMovies, setRecentMovies] = useState<Video[]>(() => initialSnapshotRef.current?.recentMovies || [])
@@ -560,6 +561,7 @@ const Home: React.FC<HomeProps> = ({ onPlay, onShowDetail, onNavigate, refreshKe
   const suppressContentClickUntilRef = useRef(0)
   const didRunInitialRefreshRef = useRef(false)
   const discoveryTimersRef = useRef<number[]>([])
+  const lastDiscoveryFetchTimeRef = useRef<number>(0)
 
   const refresh = (fetcher: () => Promise<any[]>, setter: (data: any[]) => void) => async () => {
     try {
@@ -676,7 +678,14 @@ const Home: React.FC<HomeProps> = ({ onPlay, onShowDetail, onNavigate, refreshKe
     }
   }, [])
 
-  const fetchDiscoveryData = useCallback(async () => {
+  const fetchDiscoveryData = useCallback(async (force = false) => {
+    const DISCOVERY_CACHE_TTL_MS = 20 * 60 * 1000 // 20 minutes
+    const isCacheFresh = (Date.now() - lastDiscoveryFetchTimeRef.current) < DISCOVERY_CACHE_TTL_MS
+    if (!force && isCacheFresh && (trendingMovies.length > 0 || trendingSeries.length > 0)) {
+      return
+    }
+    lastDiscoveryFetchTimeRef.current = Date.now()
+
     discoveryTimersRef.current.forEach(clearTimeout)
     discoveryTimersRef.current = []
 
@@ -1345,6 +1354,7 @@ const Home: React.FC<HomeProps> = ({ onPlay, onShowDetail, onNavigate, refreshKe
                   onPlay={handlePlayFromHome}
                   onShowDetail={handleShowDetailFromHome}
                   resumingKey={resumingOnlineKey}
+                  isActive={isActive}
                 />
                 {hasContinueWatching && (
                   <button
@@ -1759,4 +1769,4 @@ const Home: React.FC<HomeProps> = ({ onPlay, onShowDetail, onNavigate, refreshKe
   )
 }
 
-export default Home
+export default React.memo(Home)

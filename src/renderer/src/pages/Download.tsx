@@ -48,6 +48,7 @@ interface ActiveDownload {
   size: string
   downloaded: string
   tmdbId?: number
+  downloadPath?: string
   errorMessage?: string
   addedAt?: string
   // Monotonic FIFO position from the main process (queue ordering).
@@ -898,6 +899,32 @@ const Download: React.FC<DownloadProps> = ({ onShowDetail }) => {
                 )}
                 
                 <button
+                  onClick={async () => {
+                    const targetPath = dlItem?.downloadPath
+                    setDownloadToRemove(null)
+                    if (targetPath) {
+                      const opened = await window.api.openFolder(targetPath)
+                      if (!opened) {
+                        await window.api.openDownloadsFolder()
+                      }
+                    } else {
+                      await window.api.openDownloadsFolder()
+                    }
+                  }}
+                  className="flex items-center gap-3 px-3 py-2.5 rounded-lg hover:bg-white/5 text-left transition-colors group"
+                >
+                  <div className="w-8 h-8 rounded-lg bg-white/5 flex items-center justify-center text-muted group-hover:text-primary transition-colors">
+                    <FolderOpen size={16} />
+                  </div>
+                  <div className="flex flex-col">
+                    <span className="text-xs font-bold text-text">Show in folder</span>
+                    <span className="text-[10px] text-muted">Open file location</span>
+                  </div>
+                </button>
+
+                <div className="h-px bg-white/5 mx-2" />
+
+                <button
                   onClick={() => handleRemoveDownload(downloadToRemove, false)}
                   className="flex items-center gap-3 px-3 py-2.5 rounded-lg hover:bg-white/5 text-left transition-colors group"
                 >
@@ -1731,4 +1758,4 @@ const Download: React.FC<DownloadProps> = ({ onShowDetail }) => {
   )
 }
 
-export default Download
+export default React.memo(Download)

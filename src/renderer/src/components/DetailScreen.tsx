@@ -415,7 +415,6 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
   const [startingSourceMagnet, setStartingSourceMagnet] = useState<string | null>(null)
   const [startedSourceMagnet, setStartedSourceMagnet] = useState<string | null>(null)
   const [startingStreamMagnet, setStartingStreamMagnet] = useState<string | null>(null)
-  const [startingTorrentStream, setStartingTorrentStream] = useState(false)
   const [torrentStreamError, setTorrentStreamError] = useState<string | null>(null)
   const [activeDownloads, setActiveDownloads] = useState<ActiveDownload[]>([])
   const [sourceSearchStatus, setSourceSearchStatus] = useState({ found: 0, completed: 0, total: 0, cached: false, done: false })
@@ -448,8 +447,6 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
   })
   const downloadProgress = Math.max(0, Math.min(100, Number(matchingDownload?.progress || 0)))
   const roundedDownloadProgress = Math.round(downloadProgress)
-  const isDownloadPaused = matchingDownload?.status === 'paused'
-  const isDownloadConnecting = matchingDownload?.status === 'connecting' || matchingDownload?.status === 'pending'
   const isDownloadComplete = matchingDownload?.status === 'completed' || matchingDownload?.status === 'done' || downloadProgress >= 100
   const isDownloadActive = Boolean(matchingDownload && !isDownloadComplete)
 
@@ -861,7 +858,25 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
       if (!data?.id) return
       setActiveDownloads(prev => {
         const index = prev.findIndex(download => download.id === data.id)
-        if (index === -1) return [data, ...prev]
+        if (index === -1) {
+          const isRelevant = Boolean(
+            (video.tmdb_id && data.tmdbId === video.tmdb_id) ||
+            (data.title && normalizedDisplayTitle && normalizeMatchText(data.title).includes(normalizedDisplayTitle))
+          )
+          if (!isRelevant) return prev
+          return [data, ...prev]
+        }
+        const current = prev[index]
+        const currentPct = Math.round(current.progress || 0)
+        const nextPct = Math.round(data.progress || 0)
+        if (
+          currentPct === nextPct &&
+          current.status === data.status &&
+          current.downloadSpeed === data.downloadSpeed &&
+          current.timeRemaining === data.timeRemaining
+        ) {
+          return prev
+        }
         const next = [...prev]
         next[index] = { ...next[index], ...data }
         return next
@@ -995,84 +1010,9 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
     }
   }
 
-  const handleResumeDownload = async () => {
-    if (!matchingDownload?.id) return
-    const nextStatus = matchingDownload.status === 'paused' ? 'downloading' : 'paused'
-    setActiveDownloads(prev => prev.map(download => (
-      download.id === matchingDownload.id ? { ...download, status: nextStatus } : download
-    )))
-    try {
-      await window.api.pauseResumeTorrent(matchingDownload.id)
-    } catch (err) {
-      console.error('[DetailScreen] Resume download failed:', err)
-      window.api.getActiveDownloads()
-        .then((downloads: ActiveDownload[]) => setActiveDownloads(downloads || []))
-        .catch(refreshErr => console.error('[DetailScreen] Failed to refresh downloads:', refreshErr))
-    }
-  }
-
-  const prepareAndPlayStream = async (downloadId: string, season?: number, episode?: number) => {
-    setTorrentStreamError(null)
-    setStartingTorrentStream(true)
-    try {
-      const result = await window.api.prepareTorrentStream(downloadId)
-      if (!result?.url) {
-        setTorrentStreamError(getTorrentStreamErrorMessage(result?.error))
-        return
-      }
-
-      onPlay({
-        ...video,
-        id: -Math.abs(Date.now()),
-        title: displayTitle,
-        season: season,
-        episode: episode,
-        file_path: result.url,
-        duration: 0,
-        isExternal: false,
-        logo_path: video.logo_path || resolvedLogoPath || undefined,
-        sourceMagnet: activeDownloads.find(d => d.id === downloadId)?.magnet,
-        fileIndex: getTorrentFileQueryIndex(result.url) ?? undefined,
-        fetchedSources: sources.length > 0 ? sources : undefined
-      })
-    } catch (err: any) {
-      setTorrentStreamError(getTorrentStreamErrorMessage(err?.message))
-    } finally {
-      setStartingTorrentStream(false)
-    }
-  }
-
-  const handlePlayTorrentStream = async () => {
-    if (!matchingDownload?.id || isDownloadPaused || isDownloadConnecting) return
-    await prepareAndPlayStream(matchingDownload.id)
-  }
-
-  const handlePlayEpisodeStream = async (downloadId: string, season: number, episode: number) => {
-    await prepareAndPlayStream(downloadId, season, episode)
-  }
-
   const handlePlaySource = async (source: any) => {
-    const sourceInfoHash = getMagnetInfoHash(source.magnet)
-    const existingDownload = activeDownloads.find(download => (
-      download.status !== 'error' && download.status !== 'completed' && download.status !== 'done'
-      && sourceInfoHash && getMagnetInfoHash(download.magnet) === sourceInfoHash
-    ))
-    if (existingDownload?.id) {
-      if (existingDownload.status === 'paused') {
-        try {
-          await window.api.pauseResumeTorrent(existingDownload.id)
-        } catch (err) {
-          console.error('[DetailScreen] Resume before play failed:', err)
-        }
-      }
-      await prepareAndPlayStream(
-        existingDownload.id,
-        source.parsedSeason ?? video.season,
-        source.parsedEpisode ?? video.episode
-      )
-      return
-    }
-
+    // NOTE: startTempStream reuses an active persistent download by infoHash
+    // on the backend, so there is no separate play-while-downloading path.
     setTorrentStreamError(null)
     setStartingStreamMagnet(source.magnet)
     try {
@@ -1367,7 +1307,6 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
     setShowDownloadOptions(false)
     setStartingSourceMagnet(null)
     setStartedSourceMagnet(null)
-    setStartingTorrentStream(false)
     setTorrentStreamError(null)
 
     if (initialSharedSource?.magnet) {
@@ -1663,14 +1602,6 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
     .map(k => k.split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' '))
     .slice(0, 5)
   const sharePayload = getSharePayload()
-  const downloadPrimaryLabel = isDownloadActive
-    ? isDownloadPaused
-      ? `Resume ${roundedDownloadProgress}%`
-      : isDownloadConnecting
-        ? `Connecting ${roundedDownloadProgress}%`
-        : 'Play'
-    : null
-  const canUseDownloadPrimary = isDownloadActive && !isDownloadComplete && (isDownloadPaused || !isDownloadConnecting)
   const sourceActionLabel = video.type === 'series'
     ? 'Episodes & Sources'
     : isLocalMedia
@@ -1891,14 +1822,12 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
               )}
 
               {isDownloadActive && (
-                <button
-                  onClick={isDownloadPaused ? handleResumeDownload : handlePlayTorrentStream}
-                  disabled={!canUseDownloadPrimary || startingTorrentStream}
-                  className="flex min-h-16 items-center justify-center gap-3 rounded-xl border border-emerald-300/20 bg-emerald-500/15 px-7 text-xs font-black uppercase tracking-[0.12em] text-emerald-200 transition-all hover:-translate-y-0.5 hover:bg-emerald-500/22 active:scale-95 disabled:cursor-not-allowed disabled:opacity-60"
-                >
-                  {startingTorrentStream ? <Loader2 size={20} className="animate-spin" /> : isDownloadPaused ? <Download size={20} /> : <Play fill="currentColor" size={20} />}
-                  {downloadPrimaryLabel}
-                </button>
+                <div className="flex min-h-16 items-center justify-center gap-3 rounded-xl border border-white/10 bg-white/[0.055] px-7 text-xs font-black uppercase tracking-[0.12em] text-white/70">
+                  <Download size={19} className="shrink-0 opacity-70" />
+                  {matchingDownload?.status === 'paused'
+                    ? `Paused • ${roundedDownloadProgress}% — resume from Downloads`
+                    : `Downloading • ${roundedDownloadProgress}%${matchingDownload?.downloadSpeed ? ` / ${matchingDownload.downloadSpeed}` : ''}`}
+                </div>
               )}
 
               {isTmdbBacked && video.tmdb_id && (
@@ -1914,12 +1843,6 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
                   {searching && sources.length === 0 ? <Loader2 size={19} className="animate-spin" /> : <Download size={19} />}
                   {sourceActionLabel}
                 </button>
-              )}
-
-              {isDownloadActive && (
-                <div className="basis-full text-[11px] font-bold text-white/42">
-                  {torrentStreamError || `${roundedDownloadProgress}% downloaded${matchingDownload?.downloadSpeed ? ` / ${matchingDownload.downloadSpeed}` : ''}`}
-                </div>
               )}
 
               {streamResume && !isLocalMedia && (
@@ -2328,39 +2251,6 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
               </div>
             </div>
 
-            {/* Web Download — portal-resolved mirrors, opened searched in-app */}
-            <div className="mt-4">
-              <p className="text-[10px] font-black uppercase tracking-[0.18em] text-white/35 mb-2">Download</p>
-              <div className="flex flex-wrap items-center gap-2">
-                <button
-                  onClick={() => void handleOpenDownloadSite('hdmovies', 'HDHub4u')}
-                  disabled={resolvingSiteId !== null}
-                  className="flex h-12 items-center justify-center px-3 bg-white/5 border border-white/10 rounded-xl hover:border-rose-500/30 hover:bg-rose-600/10 transition-all hover:-translate-y-0.5 active:scale-95 glass-effect disabled:opacity-60 disabled:cursor-wait"
-                  title="Search this title on HDHub4u (latest working link)"
-                >
-                  {resolvingSiteId === 'hdmovies'
-                    ? <Loader2 size={18} className="animate-spin text-white/45" />
-                    : <img src={hdHub4uLogo} alt="HDHub4u" className="h-8 w-auto max-w-[150px] object-contain" />}
-                </button>
-                <button
-                  onClick={() => void handleOpenDownloadSite('catmovies', 'KatMovieHD')}
-                  disabled={resolvingSiteId !== null}
-                  className="flex h-12 items-center justify-center px-3 bg-white/5 border border-white/10 rounded-xl hover:border-cyan-500/30 hover:bg-cyan-600/10 transition-all hover:-translate-y-0.5 active:scale-95 glass-effect disabled:opacity-60 disabled:cursor-wait"
-                  title="Search this title on KatMovieHD (latest working link)"
-                >
-                  {resolvingSiteId === 'catmovies'
-                    ? <Loader2 size={18} className="animate-spin text-white/45" />
-                    : <img src={katMovieHdLogo} alt="KatMovieHD" className="h-8 w-auto max-w-[150px] object-contain" />}
-                </button>
-              </div>
-              {downloadSiteError && (
-                <p className="mt-2 text-[11px] font-semibold text-red-400">{downloadSiteError}</p>
-              )}
-              {downloadSiteNotice && (
-                <p className="mt-2 text-[11px] font-semibold text-amber-400">{downloadSiteNotice}</p>
-              )}
-            </div>
-
             {/* Share Modal */}
             {showShareModal && sharePayload && (
               <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm animate-in fade-in duration-200" onClick={() => setShowShareModal(false)}>
@@ -2737,8 +2627,7 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
                         key={`${ep.season}:${ep.episode}`}
                         onClick={() => {
                           if (ep.localVideo) onPlay(ep.localVideo)
-                          else if (isDownloading && epDownload) handlePlayEpisodeStream(epDownload.id, ep.season, ep.episode)
-                          else if (isMissing) void handleOpenEpisodeSources(ep.season, ep.episode)
+                          else if (isMissing || isDownloading) void handleOpenEpisodeSources(ep.season, ep.episode)
                         }}
                         disabled={isUpcoming}
                         className={`flex min-h-[76px] items-center p-3 rounded-xl transition-all border group text-left relative overflow-hidden ${
@@ -2751,12 +2640,12 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
                       >
                         {isDownloading && (
                           <div 
-                            className="absolute inset-y-0 left-0 bg-green-500/[0.08] z-0 transition-all duration-300"
+                            className="absolute inset-y-0 left-0 bg-white/[0.06] z-0 transition-all duration-300"
                             style={{ width: `${epDownloadProgress}%` }}
                           />
                         )}
                         <div className={`w-32 h-[72px] shrink-0 rounded-lg flex items-center justify-center mr-4 transition-all text-sm font-black italic relative overflow-hidden shadow-md z-10 ${
-                          isCurrentEpisode ? 'bg-red-600 text-white' : isDownloading ? 'bg-green-500/20 text-green-400 border border-green-500/30' : isMissing ? 'bg-primary/15 text-primary' : 'bg-black/40 text-muted group-hover:bg-red-600 group-hover:text-white'
+                          isCurrentEpisode ? 'bg-red-600 text-white' : isMissing ? 'bg-primary/15 text-primary' : 'bg-black/40 text-muted group-hover:bg-red-600 group-hover:text-white'
                         }`}>
                           {ep.stillPath ? (
                             <img src={getArtworkUrl(ep.stillPath, 'w342') || undefined} alt="" className="absolute inset-0 w-full h-full object-cover opacity-80 group-hover:opacity-100 transition-opacity" />
@@ -2774,13 +2663,13 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
                             {ep.title}{ep.versionCount > 1 ? ` • ${ep.versionCount} versions` : ''}
                           </div>
                           <div className={`mt-1 text-[8px] font-black uppercase tracking-widest ${
-                            ep.localVideo ? 'text-emerald-300/70' : isDownloading ? 'text-green-400' : onlineLabel ? (onlineState?.completed ? 'text-emerald-300/70' : 'text-sky-300/80') : isMissing ? 'text-primary/80' : 'text-white/30'
+                            ep.localVideo ? 'text-emerald-300/70' : onlineLabel ? (onlineState?.completed ? 'text-emerald-300/70' : 'text-sky-300/80') : isMissing ? 'text-primary/80' : isDownloading ? 'text-white/50' : 'text-white/30'
                           }`}>
-                            {ep.localVideo ? 'In library' : isDownloading ? `Downloading • ${Math.round(epDownloadProgress)}%` : onlineLabel || (isMissing ? 'Released • choose source' : ep.airDate ? `Upcoming • ${ep.airDate}` : 'Upcoming')}
+                            {ep.localVideo ? 'In library' : isDownloading ? `Saving • ${Math.round(epDownloadProgress)}% — open sources to Stream` : onlineLabel || (isMissing ? 'Released • choose source' : ep.airDate ? `Upcoming • ${ep.airDate}` : 'Upcoming')}
                           </div>
                         </div>
                         <div className={`ml-4 transition-opacity z-10 ${isUpcoming ? 'opacity-40' : 'opacity-0 group-hover:opacity-100'}`}>
-                          {ep.localVideo ? <Play size={16} className="text-red-600" fill="currentColor" /> : isDownloading ? <Play size={16} className="text-green-400 animate-pulse" fill="currentColor" /> : isMissing ? <Download size={16} className="text-primary" /> : <Calendar size={16} className="text-white/40" />}
+                          {ep.localVideo ? <Play size={16} className="text-red-600" fill="currentColor" /> : isMissing || isDownloading ? <Download size={16} className="text-primary" /> : <Calendar size={16} className="text-white/40" />}
                         </div>
                       </button>
                       )
@@ -3311,6 +3200,78 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
                       Try again
                     </button>
                   )}
+                  {/* Web fallback — same handler as before, now at the failure moment */}
+                  <div className="mt-2 w-full max-w-[320px] rounded-xl bg-white/[0.03] px-4 py-3 ring-1 ring-white/[0.07]">
+                    <p className="text-[9px] font-black uppercase tracking-[0.18em] text-white/35">
+                      Still can&apos;t find? Try web
+                    </p>
+                    <div className="mt-2 flex items-center justify-center gap-2">
+                      <button
+                        onClick={() => void handleOpenDownloadSite('hdmovies', 'HDHub4u')}
+                        disabled={resolvingSiteId !== null}
+                        className="flex h-10 flex-1 items-center justify-center px-2 bg-white/5 border border-white/10 rounded-lg hover:border-rose-500/30 hover:bg-rose-600/10 transition-all active:scale-95 disabled:opacity-60 disabled:cursor-wait"
+                        title="Search this title on HDHub4u (latest working link)"
+                      >
+                        {resolvingSiteId === 'hdmovies'
+                          ? <Loader2 size={15} className="animate-spin text-white/45" />
+                          : <img src={hdHub4uLogo} alt="HDHub4u" className="h-6 w-auto max-w-[120px] object-contain" />}
+                      </button>
+                      <button
+                        onClick={() => void handleOpenDownloadSite('catmovies', 'KatMovieHD')}
+                        disabled={resolvingSiteId !== null}
+                        className="flex h-10 flex-1 items-center justify-center px-2 bg-white/5 border border-white/10 rounded-lg hover:border-cyan-500/30 hover:bg-cyan-600/10 transition-all active:scale-95 disabled:opacity-60 disabled:cursor-wait"
+                        title="Search this title on KatMovieHD (latest working link)"
+                      >
+                        {resolvingSiteId === 'catmovies'
+                          ? <Loader2 size={15} className="animate-spin text-white/45" />
+                          : <img src={katMovieHdLogo} alt="KatMovieHD" className="h-6 w-auto max-w-[120px] object-contain" />}
+                      </button>
+                    </div>
+                    {downloadSiteError && (
+                      <p className="mt-2 text-[11px] font-semibold text-red-400">{downloadSiteError}</p>
+                    )}
+                    {downloadSiteNotice && (
+                      <p className="mt-2 text-[11px] font-semibold text-amber-400">{downloadSiteNotice}</p>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+            {/* Sticky web fallback footer — always available without leaving sources */}
+            <div className="shrink-0 border-t border-white/[0.07] bg-[#0C1017] px-4 py-3">
+              <div className="flex items-center gap-2">
+                <p className="shrink-0 text-[9px] font-black uppercase tracking-[0.16em] text-white/35">
+                  Can&apos;t find?
+                </p>
+                <button
+                  onClick={() => void handleOpenDownloadSite('hdmovies', 'HDHub4u')}
+                  disabled={resolvingSiteId !== null}
+                  className="flex h-9 flex-1 items-center justify-center px-2 bg-white/[0.04] border border-white/10 rounded-lg hover:border-rose-500/30 hover:bg-rose-600/10 transition-all active:scale-95 disabled:opacity-60 disabled:cursor-wait"
+                  title="Search this title on HDHub4u (latest working link)"
+                >
+                  {resolvingSiteId === 'hdmovies'
+                    ? <Loader2 size={14} className="animate-spin text-white/45" />
+                    : <img src={hdHub4uLogo} alt="HDHub4u" className="h-5 w-auto max-w-[110px] object-contain" />}
+                </button>
+                <button
+                  onClick={() => void handleOpenDownloadSite('catmovies', 'KatMovieHD')}
+                  disabled={resolvingSiteId !== null}
+                  className="flex h-9 flex-1 items-center justify-center px-2 bg-white/[0.04] border border-white/10 rounded-lg hover:border-cyan-500/30 hover:bg-cyan-600/10 transition-all active:scale-95 disabled:opacity-60 disabled:cursor-wait"
+                  title="Search this title on KatMovieHD (latest working link)"
+                >
+                  {resolvingSiteId === 'catmovies'
+                    ? <Loader2 size={14} className="animate-spin text-white/45" />
+                    : <img src={katMovieHdLogo} alt="KatMovieHD" className="h-5 w-auto max-w-[110px] object-contain" />}
+                </button>
+              </div>
+              {(downloadSiteError || downloadSiteNotice) && (
+                <div className="mt-1.5">
+                  {downloadSiteError && (
+                    <p className="text-[11px] font-semibold text-red-400">{downloadSiteError}</p>
+                  )}
+                  {downloadSiteNotice && (
+                    <p className="text-[11px] font-semibold text-amber-400">{downloadSiteNotice}</p>
+                  )}
                 </div>
               )}
             </div>
@@ -3338,4 +3299,4 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
   )
 }
 
-export default DetailScreen
+export default React.memo(DetailScreen)

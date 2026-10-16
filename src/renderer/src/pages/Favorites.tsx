@@ -69,4 +69,4 @@ const Favorites: React.FC<FavoritesProps> = ({ onPlay, onShowDetail }) => {
   )
 }
 
-export default Favorites
+export default React.memo(Favorites)

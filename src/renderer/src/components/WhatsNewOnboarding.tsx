@@ -90,36 +90,36 @@ const UPDATE_ICONS: Record<UpdateIconKey, { icon: React.ReactNode; tile: string 
 
 export const LATEST_RELEASE: ReleaseNotes = {
   version: '1.40.0',
-  title: 'Bring YouTube home.',
-  highlight: 'YouTube',
+  title: 'Download sites, direct files, and a faster home.',
+  highlight: 'Download sites',
   description:
-    'Connect Google to import subscriptions into Focus Tube, dock movies while you browse, and enjoy a tidier player.',
+    'Browse curated download platforms with built-in ad blocking, capture direct files into custom folders, and enjoy instant tab navigation.',
   tourId: null,
   updates: [
     {
       icon: 'download',
-      title: 'Import subscriptions',
-      description: 'Connect Google and pick channels in Channels.',
-    },
-    {
-      icon: 'play',
-      title: 'Mini player anywhere',
-      description: 'Dock any movie and keep browsing.',
-    },
-    {
-      icon: 'sparkles',
-      title: 'Calmer Focus Tube',
-      description: 'New header and one controls card.',
-    },
-    {
-      icon: 'fix',
-      title: 'Comments stay clean',
-      description: 'Missing avatars show colored initials.',
+      title: 'Curated download sites',
+      description: 'Browse HDHub4u and KatMovieHD with live mirrors.',
     },
     {
       icon: 'shield',
-      title: 'Read-only Google link',
-      description: 'Tokens stay encrypted in the app.',
+      title: 'Ad & popup blocker',
+      description: 'Automatic blocker keeps browsing clean and safe.',
+    },
+    {
+      icon: 'sparkles',
+      title: 'Zero-lag navigation',
+      description: 'Instant Home tab switching even during fast downloads.',
+    },
+    {
+      icon: 'layers',
+      title: 'Custom download folder',
+      description: 'Pick any drive with automatic library indexing.',
+    },
+    {
+      icon: 'play',
+      title: 'YouTube & mini player',
+      description: 'Import Focus Tube channels and dock video playback.',
     },
   ],
 }

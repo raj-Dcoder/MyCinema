@@ -89,4 +89,4 @@ const History: React.FC<HistoryProps> = ({ onPlay, onShowDetail }) => {
   )
 }
 
-export default History
+export default React.memo(History)

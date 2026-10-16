@@ -710,6 +710,13 @@ function createWindow(): void {
     return { action: 'deny' }
   })
 
+  mainWindow.webContents.on('will-navigate', (event, navUrl) => {
+    if (navUrl.startsWith('magnet:')) {
+      event.preventDefault()
+      void handleStartTorrentDownload(navUrl)
+    }
+  })
+
   // Mirror renderer console output into the main-process terminal so UI
   // errors are visible without opening DevTools.
   mainWindow.webContents.on('console-message', (_event, level, message, line, sourceId) => {
@@ -1804,6 +1811,115 @@ const showAppSaveDialog = (options: any) => {
 // app.whenReady() once the database is up.
 let focusTubePollTimer: NodeJS.Timeout | null = null
 
+// ─── Active Popup Windows Registry & Notification Banner ────────────────────
+const activePopupWindows = new Set<BrowserWindow>()
+
+function getDownloadAddedBannerScript(fileName: string, isPopup: boolean): string {
+  const safeName = JSON.stringify(fileName || 'Download')
+  const safeCaption = JSON.stringify(
+    isPopup
+      ? 'Downloading in background • Safe to close window'
+      : 'Downloading in background • Check the Downloads tab'
+  )
+  return `
+    (() => {
+      try {
+        const fileName = ${safeName};
+        const caption = ${safeCaption};
+        const render = () => {
+          if (!document.body) {
+            setTimeout(render, 80);
+            return;
+          }
+          let banner = document.getElementById('mycinema-added-banner');
+          if (!banner) {
+            banner = document.createElement('div');
+            banner.id = 'mycinema-added-banner';
+            Object.assign(banner.style, {
+              position: 'fixed',
+              top: '24px',
+              left: '50%',
+              transform: 'translateX(-50%) translateY(-10px)',
+              zIndex: '2147483647',
+              padding: '14px 24px',
+              backgroundColor: 'rgba(15, 23, 42, 0.95)',
+              backdropFilter: 'blur(16px)',
+              webkitBackdropFilter: 'blur(16px)',
+              border: '1px solid #06b6d4',
+              borderRadius: '16px',
+              color: '#ffffff',
+              boxShadow: '0 12px 36px rgba(0, 0, 0, 0.75), 0 0 24px rgba(6, 182, 212, 0.3)',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '14px',
+              fontFamily: 'system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+              pointerEvents: 'none',
+              transition: 'opacity 0.3s ease, transform 0.3s cubic-bezier(0.16, 1, 0.3, 1)',
+              opacity: '0',
+              maxWidth: '90vw'
+            });
+            document.body.appendChild(banner);
+            requestAnimationFrame(() => {
+              if (banner) {
+                banner.style.opacity = '1';
+                banner.style.transform = 'translateX(-50%) translateY(0)';
+              }
+            });
+          } else {
+            banner.style.opacity = '1';
+            banner.style.transform = 'translateX(-50%) translateY(0)';
+          }
+          banner.innerHTML = \`
+            <div style="width:36px;height:36px;border-radius:50%;background:rgba(6,182,212,0.2);display:flex;align-items:center;justify-content:center;color:#22d3ee;font-size:18px;flex-shrink:0;">📥</div>
+            <div style="min-width:0;">
+              <div style="font-size:13px;font-weight:700;color:#22d3ee;letter-spacing:0.02em;">Added to MyCinema Downloads!</div>
+              <div id="mycinema-added-banner-name" style="font-size:11px;color:#cbd5e1;margin-top:2px;max-width:340px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"></div>
+              <div style="font-size:10px;color:#94a3b8;margin-top:3px;">\${caption}</div>
+            </div>
+          \`;
+          const nameEl = document.getElementById('mycinema-added-banner-name');
+          if (nameEl) {
+            nameEl.textContent = fileName;
+          }
+          if (banner.__dismissTimer) clearTimeout(banner.__dismissTimer);
+          banner.__dismissTimer = setTimeout(() => {
+            if (banner && banner.parentNode) {
+              banner.style.opacity = '0';
+              banner.style.transform = 'translateX(-50%) translateY(-10px)';
+              setTimeout(() => {
+                if (banner && banner.parentNode) banner.parentNode.removeChild(banner);
+              }, 350);
+            }
+          }, 7000);
+        };
+        render();
+      } catch (e) {
+        console.error('[MyCinema Banner] Render error:', e);
+      }
+    })();
+  `
+}
+
+function notifyDownloadAdded(fileName: string, triggeringWc?: Electron.WebContents | null): void {
+  // Only inject the in-page download banner into popup browser windows (not into the main React UI)
+  for (const win of activePopupWindows) {
+    if (win.isDestroyed()) continue
+    const script = getDownloadAddedBannerScript(fileName, true)
+    try {
+      win.webContents.executeJavaScript(script).catch(() => {})
+    } catch {}
+  }
+
+  if (triggeringWc && !triggeringWc.isDestroyed()) {
+    const ownerWin = BrowserWindow.fromWebContents(triggeringWc)
+    if (ownerWin && activePopupWindows.has(ownerWin)) {
+      try {
+        triggeringWc.executeJavaScript(getDownloadAddedBannerScript(fileName, true)).catch(() => {})
+      } catch {}
+    }
+  }
+}
+
 app.whenReady().then(() => {
   // Purge any stale temporary stream folders left over from previous ungraceful exits
   purgeStaleTempStreamFolder()
@@ -1837,12 +1953,16 @@ app.whenReady().then(() => {
   // Attach default session download handler to catch file downloads from any window
   if (!(session.defaultSession as any).__downloadHandlerAttached) {
     (session.defaultSession as any).__downloadHandlerAttached = true
-    session.defaultSession.on('will-download', (_event, item) => {
+    session.defaultSession.on('will-download', (_event, item, webContents) => {
       const downloadUrl = item.getURL()
       const fileName = item.getFilename()
       const totalBytes = item.getTotalBytes()
       item.cancel()
       console.log(`[DefaultSession Download] Intercepted "${fileName}", routing to MyCinema Downloads: ${downloadUrl}`)
+
+      // Show instant notification feedback
+      notifyDownloadAdded(fileName, webContents)
+
       httpDownloader.startHttpDownload({
         url: downloadUrl,
         fileName,
@@ -1851,6 +1971,7 @@ app.whenReady().then(() => {
         BrowserWindow.getAllWindows().forEach(w => {
           if (!w.isDestroyed()) w.webContents.send('downloads-changed')
         })
+        notifyDownloadAdded(fileName, webContents)
       }).catch(err => {
         console.error('[DefaultSession Download] Failed to start HTTP download:', err)
       })
@@ -1860,6 +1981,14 @@ app.whenReady().then(() => {
   // Attach file-system watchers for all already-saved folders
   const savedFolders = db.getFolders() as any[]
   savedFolders.forEach(f => attachFolderWatcher(f.path))
+  try {
+    const downloadFolder = getDownloadPath()
+    if (downloadFolder && fs.existsSync(downloadFolder)) {
+      attachFolderWatcher(downloadFolder)
+    }
+  } catch (err) {
+    console.warn('[Watcher] Failed to watch download folder:', err)
+  }
 
   app.on('browser-window-created', (_, window) => {
     optimizer.watchWindowShortcuts(window)
@@ -2038,12 +2167,17 @@ const POPUP_ANTI_AD_SCRIPT = `(() => {
     if (window.__mycinema_anti_ad_installed) return;
     window.__mycinema_anti_ad_installed = true;
 
-    // 1. Defuse popunder window.open spawners
+    // 1. Defuse popunder window.open spawners & intercept magnet window.open
     const _origOpen = window.open;
     window.open = function(url, target, features) {
       if (!url) return null;
       try {
-        const u = new URL(String(url), window.location.href);
+        const strUrl = String(url).trim();
+        if (strUrl.toLowerCase().startsWith('magnet:')) {
+          window.location.href = 'mycinema-action://magnet?url=' + encodeURIComponent(strUrl);
+          return null;
+        }
+        const u = new URL(strUrl, window.location.href);
         const host = u.hostname.toLowerCase().replace(/^www\\./, '');
         // Block if popunder geometry is specified (ad popunder fingerprint)
         if (features && /width=|height=|top=|left=|toolbar=|menubar=/i.test(features)) {
@@ -2076,6 +2210,20 @@ const POPUP_ANTI_AD_SCRIPT = `(() => {
       });
     } catch (e) {}
 
+    // 3. Intercept clicks on magnet links anywhere on the page
+    document.addEventListener('click', (e) => {
+      try {
+        const anchor = e.target && e.target.closest ? e.target.closest('a') : null;
+        if (!anchor) return;
+        const href = anchor.getAttribute('href') || anchor.href || '';
+        if (typeof href === 'string' && href.trim().toLowerCase().startsWith('magnet:')) {
+          e.preventDefault();
+          e.stopPropagation();
+          window.location.href = 'mycinema-action://magnet?url=' + encodeURIComponent(href.trim());
+        }
+      } catch (err) {}
+    }, true);
+
     // 3. Remove transparent / full-screen clickjack overlays and ad banners
     const defuseOverlays = () => {
       try {
@@ -2094,10 +2242,10 @@ const POPUP_ANTI_AD_SCRIPT = `(() => {
           try { el.remove(); } catch (e) {}
         });
 
-        // Scan for invisible full-page click interceptor layers
-        const elements = document.querySelectorAll('div, a, span');
+        // Scan for invisible full-page click interceptor layers (top-level elements only)
+        const elements = document.querySelectorAll('body > div, body > a, body > span, [style*="z-index"], [style*="position: fixed"]');
         for (const el of elements) {
-          if (el.id === 'mycinema-back-btn') continue;
+          if (el.id === 'mycinema-back-btn' || el.id === 'mycinema-popup-toolbar' || el.id === 'mycinema-download-hud' || el.id === 'mycinema-added-banner') continue;
           const style = window.getComputedStyle(el);
           if (style.position === 'fixed' || style.position === 'absolute') {
             const z = parseInt(style.zIndex, 10);
@@ -2119,7 +2267,7 @@ const POPUP_ANTI_AD_SCRIPT = `(() => {
     };
 
     defuseOverlays();
-    setInterval(defuseOverlays, 800);
+    setInterval(defuseOverlays, 2500);
   } catch (e) {}
 })()`;
 
@@ -2288,6 +2436,11 @@ ipcMain.handle('open-web-popup', (event, url: string, title?: string, autoSearch
     }
   })
 
+  activePopupWindows.add(popup)
+  popup.on('closed', () => {
+    activePopupWindows.delete(popup)
+  })
+
   // Clean User-Agent so mediator verification and DDoS protection pages treat the popup like standard Chrome
   const popupSession = popup.webContents.session
   try {
@@ -2302,7 +2455,7 @@ ipcMain.handle('open-web-popup', (event, url: string, title?: string, autoSearch
   // Automatic file download handler: route all web downloads into MyCinema's resilient background Downloads manager
   if (!(popupSession as any).__downloadHandlerAttached) {
     (popupSession as any).__downloadHandlerAttached = true
-    popupSession.on('will-download', (_event, item) => {
+    popupSession.on('will-download', (_event, item, webContents) => {
       const downloadUrl = item.getURL()
       const fileName = item.getFilename()
       const totalBytes = item.getTotalBytes()
@@ -2311,6 +2464,10 @@ ipcMain.handle('open-web-popup', (event, url: string, title?: string, autoSearch
       item.cancel()
 
       console.log(`[Popup Download] Intercepted "${fileName}", routing to MyCinema Downloads tab: ${downloadUrl}`)
+
+      // Show immediate notification banner in all active popup windows and source webContents
+      notifyDownloadAdded(fileName, webContents)
+
       httpDownloader.startHttpDownload({
         url: downloadUrl,
         fileName,
@@ -2323,14 +2480,8 @@ ipcMain.handle('open-web-popup', (event, url: string, title?: string, autoSearch
           }
         })
 
-        // Show added feedback in the popup window
-        if (!popup.isDestroyed()) {
-          popup.webContents.executeJavaScript(`
-            if (window.__showDownloadAddedBanner) {
-              window.__showDownloadAddedBanner(${JSON.stringify(fileName)});
-            }
-          `).catch(() => {})
-        }
+        // Re-confirm banner in case of any micro-navigation delay
+        notifyDownloadAdded(fileName, webContents)
       }).catch(err => {
         console.error('[Popup Download] Failed to start HTTP download:', err)
       })
@@ -2555,15 +2706,10 @@ ipcMain.handle('open-web-popup', (event, url: string, title?: string, autoSearch
   popup.webContents.setWindowOpenHandler(({ url }) => {
     if (url.startsWith('magnet:')) {
       console.log('[Popup] Intercepted magnet link popup request:', url.slice(0, 80))
+      const magnetName = getMagnetDisplayName(url) || 'Torrent Download'
+      notifyDownloadAdded(magnetName, popup.webContents)
       void handleStartTorrentDownload(url).then(() => {
-        if (!popup.isDestroyed()) {
-          const magnetName = getMagnetDisplayName(url) || 'Torrent Download'
-          popup.webContents.executeJavaScript(`
-            if (window.__showDownloadAddedBanner) {
-              window.__showDownloadAddedBanner(${JSON.stringify(magnetName)});
-            }
-          `).catch(() => {})
-        }
+        notifyDownloadAdded(magnetName, popup.webContents)
       })
       return { action: 'deny' }
     }
@@ -2591,18 +2737,31 @@ ipcMain.handle('open-web-popup', (event, url: string, title?: string, autoSearch
     }
   })
   popup.webContents.on('will-navigate', (event, navUrl) => {
+    if (navUrl.startsWith('mycinema-action://magnet')) {
+      event.preventDefault()
+      try {
+        const u = new URL(navUrl)
+        const magnetUrl = u.searchParams.get('url')
+        if (magnetUrl) {
+          console.log('[Popup] Intercepted mycinema magnet action:', magnetUrl.slice(0, 80))
+          const magnetName = getMagnetDisplayName(magnetUrl) || 'Torrent Download'
+          notifyDownloadAdded(magnetName, popup.webContents)
+          void handleStartTorrentDownload(magnetUrl).then(() => {
+            notifyDownloadAdded(magnetName, popup.webContents)
+          })
+        }
+      } catch (e) {
+        console.error('[Popup] Failed to process mycinema magnet action:', e)
+      }
+      return
+    }
     if (navUrl.startsWith('magnet:')) {
       event.preventDefault()
       console.log('[Popup] Intercepted navigation to magnet link:', navUrl.slice(0, 80))
+      const magnetName = getMagnetDisplayName(navUrl) || 'Torrent Download'
+      notifyDownloadAdded(magnetName, popup.webContents)
       void handleStartTorrentDownload(navUrl).then(() => {
-        if (!popup.isDestroyed()) {
-          const magnetName = getMagnetDisplayName(navUrl) || 'Torrent Download'
-          popup.webContents.executeJavaScript(`
-            if (window.__showDownloadAddedBanner) {
-              window.__showDownloadAddedBanner(${JSON.stringify(magnetName)});
-            }
-          `).catch(() => {})
-        }
+        notifyDownloadAdded(magnetName, popup.webContents)
       })
       return
     }
@@ -2812,10 +2971,17 @@ ipcMain.handle('set-download-dir', async (_, targetPath: string) => {
     throw new Error(`Folder is not writable: ${err.message}`)
   }
 
+  const oldPath = getDownloadPath()
+  const isOldLibraryFolder = (db.getFolders() as any[]).some(f => path.resolve(f.path) === path.resolve(oldPath))
+  if (!isOldLibraryFolder) {
+    detachFolderWatcher(oldPath)
+  }
+
   const defaultPath = path.join(app.getPath('downloads'), 'MyCinema')
   const isCustom = path.resolve(resolved) !== path.resolve(defaultPath)
   const settings = { ...loadAppSettings(), downloadPath: isCustom ? resolved : '' }
   saveAppSettings(settings)
+  attachFolderWatcher(resolved)
 
   const payload = {
     currentPath: isCustom ? resolved : defaultPath,
@@ -2834,6 +3000,12 @@ ipcMain.handle('set-download-dir', async (_, targetPath: string) => {
 })
 
 ipcMain.handle('reset-download-dir', async () => {
+  const oldPath = getDownloadPath()
+  const isOldLibraryFolder = (db.getFolders() as any[]).some(f => path.resolve(f.path) === path.resolve(oldPath))
+  if (!isOldLibraryFolder) {
+    detachFolderWatcher(oldPath)
+  }
+
   const defaultPath = path.join(app.getPath('downloads'), 'MyCinema')
   if (!fs.existsSync(defaultPath)) {
     try { fs.mkdirSync(defaultPath, { recursive: true }) } catch {}
@@ -2841,6 +3013,7 @@ ipcMain.handle('reset-download-dir', async () => {
 
   const settings = { ...loadAppSettings(), downloadPath: '' }
   saveAppSettings(settings)
+  attachFolderWatcher(defaultPath)
 
   const payload = {
     currentPath: defaultPath,
@@ -4243,9 +4416,20 @@ function formatTime(seconds: any): string {
   return `${s}s`
 }
 
+const downloadRecordsCache = new Map<string, any>()
+const downloadLastDbSaveTime = new Map<string, number>()
+
 function broadcastProgress(id: string, torrent: any, status: string, errorMessage?: string): void {
-  // Try to get existing data from DB to avoid UI flickers (0/0 size when pausing/resuming)
-  const existing = db.getDownloads().find((d: any) => d.id === id)
+  // Use memory cache first to avoid synchronous full-table disk SELECT * on every progress tick
+  let existing = downloadRecordsCache.get(id)
+  if (!existing) {
+    try {
+      existing = db.getDownloadById(id)
+      if (existing) downloadRecordsCache.set(id, existing)
+    } catch {
+      existing = null
+    }
+  }
 
   // Calculate new progress percentage
   let newProgress = existing?.progress || 0
@@ -4290,16 +4474,42 @@ function broadcastProgress(id: string, torrent: any, status: string, errorMessag
     downloaded: (torrent.downloaded && torrent.downloaded > 0) 
       ? formatBytes(torrent.downloaded) 
       : (existing?.downloaded || '0 B'),
-    tmdbId: existing?.tmdbId || null
+    tmdbId: existing?.tmdbId || null,
+    downloadPath: (torrent as any).path || (torrent as any)._myCinemaPath || existing?.downloadPath || null
   }
   if (errorMessage) data.errorMessage = errorMessage
-  
-  db.updateDownload(data)
-  BrowserWindow.getAllWindows().forEach(w => w.webContents.send('torrent-progress', data))
+
+  // Keep memory cache updated synchronously so lookups are 0ms
+  downloadRecordsCache.set(id, { ...existing, ...data })
+
+  // Throttle SQLite disk writes:
+  // Write immediately on state changes or completion; throttle progress updates to disk every 5s.
+  const now = Date.now()
+  const lastSave = downloadLastDbSaveTime.get(id) || 0
+  const isStateChange = existing?.status !== displayStatus || displayStatus === 'done' || displayStatus === 'error' || displayStatus === 'paused'
+  if (isStateChange || now - lastSave >= 5000) {
+    downloadLastDbSaveTime.set(id, now)
+    try {
+      db.updateDownload(data)
+    } catch (err) {
+      console.warn('[Downloads] Failed to persist progress to DB:', err)
+    }
+  }
+
+  BrowserWindow.getAllWindows().forEach(w => {
+    if (!w.isDestroyed()) w.webContents.send('torrent-progress', data)
+  })
 }
 
 httpDownloader.registerHttpProgressBroadcaster(broadcastProgress)
 httpDownloader.registerDownloadDirResolver(getDownloadPath)
+httpDownloader.registerHttpCompleteCallback((item) => {
+  void pumpDownloadQueue()
+  const targetDir = path.dirname(item.savePath) || getDownloadPath()
+  void scanFolder(targetDir).catch(err => {
+    console.error('[HttpDownloader] Post-download library scan error:', err)
+  })
+})
 
 // ─── IPC: Search TMDB ────────────────────────────────────────────────────────
 // Read the key from the environment (injected by electron-vite from .env at build time).
@@ -6755,6 +6965,11 @@ async function startWebTorrent(torrentId: string, magnetUrl: string, title: stri
     console.log(`[Torrent] Download complete: ${title}`)
     // A slot just freed up — start the next queued download.
     void pumpDownloadQueue()
+    // Scan download destination to ingest media into library immediately
+    const dlFolder = torrent.path || downloadPath || getDownloadPath()
+    void scanFolder(dlFolder).catch(err => {
+      console.error('[Torrent] Post-download library scan error:', err)
+    })
     // Remember the disk layout so an in-flight video stream can keep reading
     // after the torrent instance is destroyed below.
     if (torrent.path) {
@@ -6831,7 +7046,10 @@ async function handleStartTorrentDownload(
     const existingDownload = db.getDownloads().find((download: any) => (
       download.magnet === enrichedMagnetUrl && download.status !== 'error'
     ))
-    if (existingDownload) return existingDownload.id
+    if (existingDownload) {
+      notifyDownloadAdded(existingDownload.name || existingDownload.title || 'Torrent Download')
+      return existingDownload.id
+    }
 
     const torrentId = crypto.randomUUID()
     const magnetDisplayName = getMagnetDisplayName(enrichedMagnetUrl)
@@ -6839,6 +7057,9 @@ async function handleStartTorrentDownload(
     const displayName = name || magnetDisplayName || finalTitle
     const downloadPath = path.join(getDownloadPath(), torrentId)
     
+    // Broadcast notification to all active windows
+    notifyDownloadAdded(displayName)
+
     db.addDownload({
       id: torrentId,
       title: finalTitle,
@@ -6880,7 +7101,9 @@ ipcMain.handle('start-torrent-download', async (_, magnetUrl: string, title?: st
 ipcMain.handle('cancel-torrent-download', async (_, id: string) => {
   try {
     if (httpDownloader.isHttpDownload(id)) {
-      return httpDownloader.pauseHttpDownload(id)
+      const res = httpDownloader.pauseHttpDownload(id)
+      void pumpDownloadQueue()
+      return res
     }
 
     const torrent = activeTorrents.get(id)
@@ -6926,9 +7149,13 @@ ipcMain.handle('pause-resume-torrent', async (_, id: string) => {
     if (httpDownloader.isHttpDownload(id)) {
       const existing = db.getDownloads().find((d: any) => d.id === id)
       if (existing?.status === 'paused' || existing?.status === 'error') {
-        return await httpDownloader.resumeHttpDownload(id)
+        const res = await httpDownloader.resumeHttpDownload(id)
+        void pumpDownloadQueue()
+        return res
       } else {
-        return httpDownloader.pauseHttpDownload(id)
+        const res = httpDownloader.pauseHttpDownload(id)
+        void pumpDownloadQueue()
+        return res
       }
     }
 
@@ -7638,6 +7865,10 @@ ipcMain.handle('remove-download', async (_, id: string, deleteFile: boolean = fa
       httpDownloader.cancelHttpDownload(id, deleteFile)
       db.removeDownloadRow(id)
       BrowserWindow.getAllWindows().forEach(w => w.webContents.send('downloads-changed'))
+      void pumpDownloadQueue()
+      if (deleteFile) {
+        BrowserWindow.getAllWindows().forEach(w => w.webContents.send('library-updated'))
+      }
       return true
     }
 

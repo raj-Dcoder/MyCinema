@@ -9,6 +9,7 @@ interface HeroCarouselProps {
   onPlay: (video: Video) => void
   onShowDetail: (video: Video) => void
   resumingKey?: string | null
+  isActive?: boolean
 }
 
 const getHeroImageUrl = (path?: string | null) => {
@@ -29,7 +30,7 @@ const hasOwnLogoResolution = (logoPaths: Record<string, string | null>, key: str
   Object.prototype.hasOwnProperty.call(logoPaths, key)
 )
 
-const HeroCarousel: React.FC<HeroCarouselProps> = ({ items, onPlay, onShowDetail, resumingKey }) => {
+const HeroCarousel: React.FC<HeroCarouselProps> = ({ items, onPlay, onShowDetail, resumingKey, isActive = true }) => {
   const [currentIndex, setCurrentIndex] = useState(0)
   const [isAutoPlaying, setIsAutoPlaying] = useState(true)
   const [resolvedLogoPaths, setResolvedLogoPaths] = useState<Record<string, string | null>>({})
@@ -37,12 +38,12 @@ const HeroCarousel: React.FC<HeroCarouselProps> = ({ items, onPlay, onShowDetail
   const [slowLogoKeys, setSlowLogoKeys] = useState<Set<string>>(() => new Set())
 
   useEffect(() => {
-    if (!isAutoPlaying || items.length === 0) return
+    if (!isAutoPlaying || !isActive || items.length === 0) return
     const interval = setInterval(() => {
       setCurrentIndex((prev) => (prev + 1) % items.length)
     }, 8000)
     return () => clearInterval(interval)
-  }, [isAutoPlaying, items.length])
+  }, [isAutoPlaying, isActive, items.length])
 
   useEffect(() => {
     const candidateMap = new Map<string, Video>()
@@ -347,4 +348,4 @@ const HeroCarousel: React.FC<HeroCarouselProps> = ({ items, onPlay, onShowDetail
   )
 }
 
-export default HeroCarousel
+export default React.memo(HeroCarousel)

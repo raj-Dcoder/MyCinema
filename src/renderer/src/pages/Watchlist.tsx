@@ -550,4 +550,4 @@ const Watchlist: React.FC<WatchlistProps> = ({ onPlay, onShowDetail, refreshKey 
   )
 }
 
-export default Watchlist
+export default React.memo(Watchlist)

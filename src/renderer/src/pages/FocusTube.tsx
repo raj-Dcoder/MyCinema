@@ -1049,4 +1049,4 @@ const FocusTube: React.FC = () => {
   )
 }
 
-export default FocusTube
+export default React.memo(FocusTube)

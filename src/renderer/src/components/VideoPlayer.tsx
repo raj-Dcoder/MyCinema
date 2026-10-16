@@ -6719,4 +6719,4 @@ const PanelRow: React.FC<{ label: string; value: string | null | undefined }> = 
 }
 // ─────────────────────────────────────────────────────────────────────────────
 
-export default VideoPlayer
+export default React.memo(VideoPlayer)

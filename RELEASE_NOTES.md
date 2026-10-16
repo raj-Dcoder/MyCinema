@@ -1,6 +1,26 @@
 # MyCinema v1.40.0
 
-Bring your YouTube subscriptions into Focus Tube, dock the movie player while you browse, and enjoy a tidier Focus Tube.
+Browse curated download sites with built-in ad blocking, download direct media files to custom folders, navigate instantly with zero background lag, and bring YouTube subscriptions into Focus Tube.
+
+### Curated Web Download Sites
+- **Browse Inside MyCinema**: Access popular media catalogs including HDHub4u and KatMovieHD directly within the app without leaving for external browsers.
+- **Live Mirror Health Checking**: Verified, multi-mirror health checker automatically tests and routes to working live domain mirrors.
+- **Built-in Ad & Pop-up Blocker**: Powered by the EasyList engine and deep DOM popup interception, automatically eliminating deceptive redirect tabs, ad overlays, and malicious scripts.
+- **Streamlined Navigation Bar**: Integrated navigation controls with back/forward, reload, home, external-browser fallback, and live URL inspection.
+
+### Direct File Downloads & Custom Storage
+- **Automatic Download Interceptor**: Catches direct video and archive downloads (.mp4, .mkv, .avi, .zip, etc.) directly into MyCinema's download manager with progress tracking, speed calculation, and pause/resume support.
+- **Custom Download Folder**: Choose any drive or directory on your system with write-permission verification, default path resets, and real-time disk storage gauges.
+- **Show In Folder**: Reveal downloaded files directly in your operating system's file explorer from the 3-dot download menu.
+- **Automatic Library Detection**: Monitors your download destination and automatically scans and indexes completed movies and episodes into your local library.
+- **Unified Download Queue**: Concurrency controls now coordinate both HTTP direct downloads and torrent transfers seamlessly.
+
+### Zero-Lag Engine & Instant Home Navigation
+- **Persistent Home Mounting**: The Home screen stays mounted and ready in memory instead of constantly unmounting, eliminating reload flashes and redundant network requests.
+- **Smart Discovery Cache**: Caches TMDB discovery rows for 20 minutes so switching back and forth between tabs is instantaneous.
+- **Carousel & Background Power Management**: Pauses auto-advancing hero carousels and background timers when tabs are hidden to conserve GPU and CPU.
+- **Throttled SQLite Disk Writes**: Replaced per-chunk disk writes and full-table scans with an in-memory state cache and 5-second throttled flushes, preventing UI freezing during high-speed downloads.
+- **Component Memoization**: Isolated high-frequency download progress events so browsing your library, movies, series, and watchlist remains silky smooth.
 
 ### YouTube Subscription Import
 - **Import From Google**: The Channels manager has an Import YouTube button that opens the system browser to connect a Google account and lists every subscribed channel.
@@ -23,7 +43,8 @@ Bring your YouTube subscriptions into Focus Tube, dock the movie player while yo
 - **Single Close Control**: The Focus Tube player keeps one close button on the right; the duplicate back arrow and top mini-player button are removed.
 - **Mouse-Back Closes**: Pressing the mouse side/back button closes the Focus Tube player, matching VideoPlayer and DetailScreen.
 
-### Reliability
+### Reliability & Performance
+- **Queue Pump On HTTP Events**: Completing, pausing, or removing HTTP downloads automatically advances the queue so queued downloads start immediately.
 - **Shared Feed Refresh**: Polling, imports, and retries use one feed-plus-Shorts upsert path with bounded concurrency, so one dead feed records its error without stalling the others.
 - **Safe Local Saves**: Imports run in one local transaction, validate channel IDs, add memberships without replacing existing ones, and leave existing channel rows untouched.
 

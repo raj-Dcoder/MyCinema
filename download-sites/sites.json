@@ -1,13 +1,13 @@
 {
-  "updatedAt": "2026-10-14T00:00:00.000Z",
+  "updatedAt": "2026-10-14T18:17:12.356Z",
   "sites": {
     "hdmovies": {
-      "domain": "https://hdhub4u.bi",
-      "checkedAt": "2026-10-14T00:00:00.000Z"
+      "domain": "https://new7.hdhub4u.cl",
+      "checkedAt": "2026-10-14T18:17:12.356Z"
     },
     "catmovies": {
-      "domain": "https://katworld.net",
-      "checkedAt": "2026-10-14T00:00:00.000Z"
+      "domain": "https://new.katmoviehd.top",
+      "checkedAt": "2026-10-14T18:17:12.356Z"
     }
   }
 }

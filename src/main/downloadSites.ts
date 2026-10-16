@@ -36,7 +36,7 @@ export const DOWNLOAD_SITES: DownloadSiteConfig[] = [
     name: 'HD Movies Hub',
     shortLabel: 'HD',
     portalUrl: 'https://hdhub4u.bi/',
-    searchTemplate: '/?s={query}',
+    searchTemplate: '/search.html?q={query}',
     accent: '#f43f5e',
     domainHints: ['hdhub', 'hub4u', 'hdmovie'],
     portalButtonMatch: 'hdhub|hdmovies'
@@ -46,8 +46,9 @@ export const DOWNLOAD_SITES: DownloadSiteConfig[] = [
     name: 'Cat Movies HD',
     shortLabel: 'CAT',
     portalUrl: 'https://katworld.net/',
-    // Verified live: /search?q= returns real results, /?s= is ignored.
-    searchTemplate: '/search?q={query}',
+    // SPA with JS-only inline search: URL query params are ignored, so open
+    // the homepage and let the app auto-type the title into its search box.
+    searchTemplate: '/',
     accent: '#22d3ee',
     domainHints: ['katmovie'],
     portalButtonMatch: 'katmoviehd'
@@ -256,6 +257,60 @@ function extractObfuscatedMirrorUrls(html: string, requiredHints: string[]): str
     }
   }
   return [...new Set(found)]
+}
+
+function extractHdhubEndpoints(html: string): string[] {
+  const list = [
+    'https://h4.suncdn.org/host/',
+    'https://points.topapii.com/host/',
+    'https://ml.theapii.org/host/',
+    'https://dns.pingora.fyi/v2/host',
+    'https://cdn.hub4u.cloud/host/'
+  ]
+  const blobRe = /atob\(\s*["']([A-Za-z0-9+/=]+)["']\s*\)/gi
+  let m: RegExpExecArray | null
+  while ((m = blobRe.exec(html)) !== null) {
+    try {
+      const decoded = Buffer.from(m[1], 'base64').toString('utf8')
+      if (/^https?:\/\/[a-z0-9.-]+\/.*host/i.test(decoded)) {
+        list.unshift(decoded)
+      }
+    } catch { /* ignore */ }
+  }
+  return [...new Set(list)]
+}
+
+async function fetchHdhubLiveMirror(html: string, timeoutMs: number): Promise<string | null> {
+  const endpoints = extractHdhubEndpoints(html)
+  const t = new Date()
+  const v = 1e6 * t.getFullYear() + 1e4 * (t.getMonth() + 1) + 100 * t.getDate() + t.getHours() + 1
+  for (const ep of endpoints) {
+    try {
+      const controller = new AbortController()
+      const timer = setTimeout(() => controller.abort(), timeoutMs)
+      const res = await fetch(`${ep}?v=${v}`, {
+        signal: controller.signal,
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Safari/537.36',
+          Accept: 'application/json'
+        }
+      })
+      clearTimeout(timer)
+      if (!res.ok) continue
+      const data: any = await res.json()
+      if (data?.c) {
+        const decoded = Buffer.from(data.c, 'base64').toString('utf8')
+        const norm = normalizeDomain(decoded)
+        if (norm) {
+          const status = await verifyMirrorAlive(norm, timeoutMs)
+          if (status === 'alive' || status === 'unknown') return norm
+        }
+      }
+    } catch {
+      // try next endpoint
+    }
+  }
+  return null
 }
 
 type MirrorLiveness = 'alive' | 'dead' | 'unknown'
@@ -485,6 +540,10 @@ export async function resolveDownloadSiteUrl(
 
   const scrapePortal = async (): Promise<{ domain: string; verified: boolean }> => {
     const html = await fetchText(config.portalUrl, FETCH_TIMEOUT_MS)
+    if (config.id === 'hdmovies') {
+      const live = await fetchHdhubLiveMirror(html, FETCH_TIMEOUT_MS)
+      if (live) return { domain: live, verified: true }
+    }
     const rawCandidates: Array<string | null> = [
       // Phase A: direct external mirror anchors…
       ...extractOutboundDomains(html, portalHost).map(normalizeDomain),

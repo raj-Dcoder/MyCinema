@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react'
-import hdMoviesLogo from '../assets/site-logos/hdmovies.svg'
-import catMoviesLogo from '../assets/site-logos/catmovies.svg'
+import hdHub4uLogo from '../assets/site-logos/hdhub4u.webp'
+import katMovieHdLogo from '../assets/site-logos/katmoviehd.jpg'
 import { cleanIpcError } from '../utils/ipcError'
 import { X, Play, Info, Calendar, CalendarDays, Clock, Star, FolderOpen, Film, Music, Subtitles, HardDrive, ChevronDown, ChevronUp, Heart, Bookmark, Share2, Search, Zap, Users, Download, AlertTriangle, Clapperboard, Loader2, ExternalLink, Languages, CheckCircle2, Copy, MessageCircle, Send, Trash2, Bell, BellRing, Hourglass, Layers, Plus } from 'lucide-react'
 import { Video, WatchlistIntent } from '../types'
@@ -1183,7 +1183,10 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
     setDownloadSiteError(null)
     setDownloadSiteNotice(null)
     try {
-      const resolved = await window.api.resolveDownloadSiteUrl(siteId, searchTitle, video.release_year ?? null)
+      const resolved = await window.api.resolveDownloadSiteUrl(siteId, searchTitle, null)
+      // JS-only sites ignore URL params — the popup types this into the
+      // page's own search box after load (harmless where ?s= already worked).
+      const autoSearch = searchTitle.trim()
       if (resolved?.stale) {
         setDownloadSiteNotice('Latest link verify nahi hua — backup link khola hai. Agar galat page khule to Settings → Download Sites → Refresh dabao.')
       }
@@ -1195,7 +1198,7 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
         window.removeEventListener('focus', clearBlurOnFocus)
       }
       window.addEventListener('focus', clearBlurOnFocus)
-      await window.api.openWebPopup(resolved.searchUrl, `${searchTitle} — ${siteName}`)
+      await window.api.openWebPopup(resolved.searchUrl, `${searchTitle} — ${siteName}`, autoSearch)
     } catch (err: any) {
       console.error('[DetailScreen] Download site resolve failed:', err)
       setDownloadSiteError(cleanIpcError(err, 'Could not find a working link right now. Try again later.'))
@@ -2330,32 +2333,24 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
               <p className="text-[10px] font-black uppercase tracking-[0.18em] text-white/35 mb-2">Download</p>
               <div className="flex flex-wrap items-center gap-2">
                 <button
-                  onClick={() => void handleOpenDownloadSite('hdmovies', 'HD Movies Hub')}
+                  onClick={() => void handleOpenDownloadSite('hdmovies', 'HDHub4u')}
                   disabled={resolvingSiteId !== null}
-                  className="flex h-12 items-center gap-2.5 px-3 bg-white/5 border border-white/10 rounded-xl text-white/45 hover:text-white hover:border-rose-500/30 hover:bg-rose-600/10 transition-all hover:-translate-y-0.5 active:scale-95 glass-effect disabled:opacity-60 disabled:cursor-wait"
-                  title="Search this title on HD Movies Hub (latest working link)"
+                  className="flex h-12 items-center justify-center px-3 bg-white/5 border border-white/10 rounded-xl hover:border-rose-500/30 hover:bg-rose-600/10 transition-all hover:-translate-y-0.5 active:scale-95 glass-effect disabled:opacity-60 disabled:cursor-wait"
+                  title="Search this title on HDHub4u (latest working link)"
                 >
                   {resolvingSiteId === 'hdmovies'
-                    ? <Loader2 size={18} className="animate-spin" />
-                    : <img src={hdMoviesLogo} alt="HD Movies Hub" className="h-7 w-7 rounded-lg" />}
-                  <span className="text-left leading-tight">
-                    <span className="block text-[10px] font-black uppercase tracking-widest">HD Movies Hub</span>
-                    <span className="block text-[9px] font-medium text-white/30">Searched page opens in-app</span>
-                  </span>
+                    ? <Loader2 size={18} className="animate-spin text-white/45" />
+                    : <img src={hdHub4uLogo} alt="HDHub4u" className="h-8 w-auto max-w-[150px] object-contain" />}
                 </button>
                 <button
-                  onClick={() => void handleOpenDownloadSite('catmovies', 'Cat Movies HD')}
+                  onClick={() => void handleOpenDownloadSite('catmovies', 'KatMovieHD')}
                   disabled={resolvingSiteId !== null}
-                  className="flex h-12 items-center gap-2.5 px-3 bg-white/5 border border-white/10 rounded-xl text-white/45 hover:text-white hover:border-cyan-500/30 hover:bg-cyan-600/10 transition-all hover:-translate-y-0.5 active:scale-95 glass-effect disabled:opacity-60 disabled:cursor-wait"
-                  title="Search this title on Cat Movies HD (latest working link)"
+                  className="flex h-12 items-center justify-center px-3 bg-white/5 border border-white/10 rounded-xl hover:border-cyan-500/30 hover:bg-cyan-600/10 transition-all hover:-translate-y-0.5 active:scale-95 glass-effect disabled:opacity-60 disabled:cursor-wait"
+                  title="Search this title on KatMovieHD (latest working link)"
                 >
                   {resolvingSiteId === 'catmovies'
-                    ? <Loader2 size={18} className="animate-spin" />
-                    : <img src={catMoviesLogo} alt="Cat Movies HD" className="h-7 w-7 rounded-lg" />}
-                  <span className="text-left leading-tight">
-                    <span className="block text-[10px] font-black uppercase tracking-widest">Cat Movies HD</span>
-                    <span className="block text-[9px] font-medium text-white/30">Searched page opens in-app</span>
-                  </span>
+                    ? <Loader2 size={18} className="animate-spin text-white/45" />
+                    : <img src={katMovieHdLogo} alt="KatMovieHD" className="h-8 w-auto max-w-[150px] object-contain" />}
                 </button>
               </div>
               {downloadSiteError && (

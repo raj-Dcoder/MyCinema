@@ -1,7 +1,8 @@
-import { app, session } from 'electron'
+import { app, session, webContents } from 'electron'
 import { promises as fsp } from 'fs'
 import path from 'path'
-import { ElectronBlocker } from '@ghostery/adblocker-electron'
+import { ElectronBlocker, NetworkFilter } from '@ghostery/adblocker-electron'
+import { DOWNLOAD_SITES } from './downloadSites'
 
 // ─── Lightweight popup adblocker ─────────────────────────────────────────────
 // Same idea as uBlock Origin (block known ad/tracker hosts + hide leftover ad
@@ -79,13 +80,19 @@ const BLOCKED_HOST_SUFFIXES = [
   'mc.yandex.ru',
   'addthis.com',
   'sharethis.com',
-  // Ad-agency / cloaked hosts seen serving these sites' ad payloads
+  // Popunder / ad-network hosts observed on download mirrors
+  'adsboosters.xyz',
   'agl002.online',
+  'bonuscaf.com',
+  'onclickalgo.com',
+  'onclickmega.com',
+  'alwingulla.com',
+  'deloplen.com',
+  'bidgear.com',
+  'propush.me',
+  'notix.io',
+  'moraeirrupt.com',
   'cvt-s2.online',
-  'topapii.com',
-  'theapii.org',
-  'suncdn.org',
-  'hub4u.cloud',
   // Extra popunder / redirect networks
   'adhese.com',
   'adorika.com',
@@ -143,10 +150,104 @@ function hasBlockedPath(url: string): boolean {
   return BLOCKED_PATH_SNIPPETS.some(snippet => lower.includes(snippet))
 }
 
+// ─── Strict third-party script policy (download-site pages only) ────────────
+// Ad loaders on these pages rotate random domains (see ly.* hosts) that no
+// list can catch by name. So on mirror/portal pages, third-party <script>s are
+// guilty-until-allowlisted: only big public CDNs pass; the site's own scripts
+// always pass. File hosts and research pages (Moctale etc.) are unaffected —
+// the rule only applies while the page itself is a download-site host.
+const SCRIPT_ALLOWLIST = [
+  'ajax.googleapis.com',
+  'code.jquery.com',
+  'cdnjs.cloudflare.com',
+  'cdn.jsdelivr.net',
+  'unpkg.com',
+  'stackpath.bootstrapcdn.com',
+  'maxcdn.bootstrapcdn.com',
+  'use.fontawesome.com',
+  'fonts.googleapis.com',
+  'fonts.gstatic.com'
+]
+
+function isDownloadSiteHost(host: string): boolean {
+  if (!host) return false
+  const lower = host.toLowerCase().replace(/^www\./, '')
+  for (const site of DOWNLOAD_SITES) {
+    try {
+      const portalHost = new URL(site.portalUrl).host.toLowerCase().replace(/^www\./, '')
+      if (lower === portalHost || lower.endsWith(`.${portalHost}`)) return true
+    } catch {
+      /* ignore */
+    }
+    if (site.domainHints.some(hint => lower.includes(hint.toLowerCase()))) return true
+  }
+  return false
+}
+
+function sameSite(a: string, b: string): boolean {
+  return a === b || a === `www.${b}` || b === `www.${a}`
+}
+
+/** True when a script load should die under the strict policy. */
+export function isStrictScriptBlock(scriptUrl: string, referrer: string): boolean {
+  if (!/^https?:/i.test(scriptUrl)) return false
+  const urlHost = hostnameOf(scriptUrl)
+  const pageHost = hostnameOf(referrer || '').replace(/^www\./, '')
+  if (!pageHost || !isDownloadSiteHost(pageHost)) return false
+  if (sameSite(urlHost, pageHost)) return false
+  if (SCRIPT_ALLOWLIST.some(allowed => urlHost === allowed || urlHost.endsWith(`.${allowed}`))) {
+    return false
+  }
+  return true
+}
+
+// Site-specific network rules the public lists miss (rotating ad-loader hosts
+// observed on these mirrors). Applied to the engine when it loads.
+const CUSTOM_NETWORK_FILTERS = [
+  '||moraeirrupt.com^',
+  '||agl002.online^',
+  '||adsboosters.xyz^',
+  '||bonuscaf.com^',
+  '||onclickalgo.com^',
+  '||deloplen.com^'
+]
+
+function applyCustomEngineFilters(engine: ElectronBlocker): void {
+  try {
+    const parsed = CUSTOM_NETWORK_FILTERS.map(rule => NetworkFilter.parse(rule)).filter(
+      (filter): filter is NetworkFilter => filter !== null
+    )
+    if (parsed.length > 0) {
+      engine.update({ newNetworkFilters: parsed })
+    }
+  } catch (err) {
+    console.error('[PopupAdblock] Custom filters failed (engine lists still active):', err)
+  }
+}
+
 /** True when a URL is ad/tracker noise (used for popups + sub-resources). */
 export function isBlockedAdUrl(url: string): boolean {
   if (!/^https?:/i.test(url)) return false
-  return isBlockedHost(hostnameOf(url)) || hasBlockedPath(url)
+  const host = hostnameOf(url)
+  if (isBlockedHost(host)) return true
+  if (hasBlockedPath(url)) return true
+  const lower = url.toLowerCase()
+  if (
+    (lower.includes('/go/') && (host.includes('bonus') || host.includes('track') || host.includes('click') || host.includes('aff'))) ||
+    host.includes('adsboosters') ||
+    host.includes('agl002') ||
+    host.includes('moraeirrupt') ||
+    host.includes('bonuscaf') ||
+    host.includes('onclickalgo') ||
+    host.includes('onclickmega') ||
+    host.includes('deloplen') ||
+    host.includes('bidgear') ||
+    host.includes('propush') ||
+    host.includes('notix')
+  ) {
+    return true
+  }
+  return false
 }
 
 /** Leftover ad containers / widgets hidden after each page loads. */
@@ -159,7 +260,11 @@ export const POPUP_COSMETIC_CSS = `
   [id*="taboola"], .tbl-feed-container,
   [id*="outbrain"], .ob-widget,
   [class*="sponsored-post"],
-  iframe[src*="ads"], iframe[src*="doubleclick"], iframe[src*="popads"] { display: none !important; }
+  #bb-overlay-x7m4q2, .bb-overlay-x7m4q2,
+  #banner-container, .banner-container,
+  [class*="code-block"], [class*="ai-viewport"],
+  iframe[src*="agl002"], iframe[src*="ads"], iframe[src*="doubleclick"], iframe[src*="popads"],
+  a[href*="bonuscaf"], a[href*="adsboosters"] { display: none !important; pointer-events: none !important; }
 `
 
 // ─── Full filter-list engine (EasyList + EasyPrivacy grade) ──────────────────
@@ -238,6 +343,20 @@ export function registerPopupAdblock(target?: Electron.Session): void {
       callback({ cancel: true })
       return
     }
+    // Strict script policy on download-site pages (kills rotating ad loaders).
+    if (details.resourceType === 'script') {
+      let pageRef = details.referrer
+      if (!pageRef && details.webContentsId) {
+        try {
+          const wc = webContents.fromId(details.webContentsId)
+          if (wc && !wc.isDestroyed()) pageRef = wc.getURL()
+        } catch {}
+      }
+      if (isStrictScriptBlock(details.url, pageRef)) {
+        callback({ cancel: true })
+        return
+      }
+    }
     callback({})
   })
 
@@ -245,6 +364,7 @@ export function registerPopupAdblock(target?: Electron.Session): void {
   void getEngine()
     .then(engine => {
       if (engine) {
+        applyCustomEngineFilters(engine)
         engine.enableBlockingInSession(ses)
         console.log('[PopupAdblock] Full filter engine active on popup session')
       }

@@ -227,9 +227,67 @@ async function verifyMirrorAlive(domain, timeoutMs = FETCH_TIMEOUT_MS) {
   }
 }
 
+function extractHdhubEndpoints(html) {
+  const list = [
+    'https://h4.suncdn.org/host/',
+    'https://points.topapii.com/host/',
+    'https://ml.theapii.org/host/',
+    'https://dns.pingora.fyi/v2/host',
+    'https://cdn.hub4u.cloud/host/'
+  ]
+  const blobRe = /atob\(\s*["']([A-Za-z0-9+/=]+)["']\s*\)/gi
+  let m
+  while ((m = blobRe.exec(html)) !== null) {
+    try {
+      const decoded = Buffer.from(m[1], 'base64').toString('utf8')
+      if (/^https?:\/\/[a-z0-9.-]+\/.*host/i.test(decoded)) {
+        list.unshift(decoded)
+      }
+    } catch { /* ignore */ }
+  }
+  return [...new Set(list)]
+}
+
+async function fetchHdhubLiveMirror(html, timeoutMs) {
+  const endpoints = extractHdhubEndpoints(html)
+  const t = new Date()
+  const v = 1e6 * t.getFullYear() + 1e4 * (t.getMonth() + 1) + 100 * t.getDate() + t.getHours() + 1
+  for (const ep of endpoints) {
+    try {
+      const controller = new AbortController()
+      const timer = setTimeout(() => controller.abort(), timeoutMs)
+      const res = await fetch(`${ep}?v=${v}`, {
+        signal: controller.signal,
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Safari/537.36',
+          Accept: 'application/json'
+        }
+      })
+      clearTimeout(timer)
+      if (!res.ok) continue
+      const data = await res.json()
+      if (data?.c) {
+        const decoded = Buffer.from(data.c, 'base64').toString('utf8')
+        const norm = normalizeDomain(decoded)
+        if (norm) {
+          const status = await verifyMirrorAlive(norm, timeoutMs)
+          if (status === 'alive' || status === 'unknown') return norm
+        }
+      }
+    } catch {
+      // try next
+    }
+  }
+  return null
+}
+
 async function resolveSite(siteId, site) {
   const portalHost = new URL(site.url).host.toLowerCase()
   const html = await fetchText(site.url)
+  if (siteId === 'hdmovies') {
+    const live = await fetchHdhubLiveMirror(html, FETCH_TIMEOUT_MS)
+    if (live) return live
+  }
   const raw = [
     // Phase A: direct external anchors + obfuscated JS mirrors…
     ...extractOutboundDomains(html, portalHost).map(normalizeDomain),

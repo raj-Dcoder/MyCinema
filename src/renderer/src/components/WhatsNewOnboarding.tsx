@@ -89,7 +89,7 @@ const UPDATE_ICONS: Record<UpdateIconKey, { icon: React.ReactNode; tile: string 
 }
 
 export const LATEST_RELEASE: ReleaseNotes = {
-  version: '1.40.0',
+  version: '1.41.0',
   title: 'Download sites, direct files, and a faster home.',
   highlight: 'Download sites',
   description:

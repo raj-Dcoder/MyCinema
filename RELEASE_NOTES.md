@@ -1,6 +1,6 @@
-# MyCinema v1.40.0
+# MyCinema v1.41.0
 
-Browse curated download sites with built-in ad blocking, download direct media files to custom folders, navigate instantly with zero background lag, and bring YouTube subscriptions into Focus Tube.
+Browse curated download sites with built-in ad blocking, download direct media files to custom folders, navigate instantly with zero background lag, and sync downloads directly into your library.
 
 ### Curated Web Download Sites
 - **Browse Inside MyCinema**: Access popular media catalogs including HDHub4u and KatMovieHD directly within the app without leaving for external browsers.
@@ -21,6 +21,20 @@ Browse curated download sites with built-in ad blocking, download direct media f
 - **Carousel & Background Power Management**: Pauses auto-advancing hero carousels and background timers when tabs are hidden to conserve GPU and CPU.
 - **Throttled SQLite Disk Writes**: Replaced per-chunk disk writes and full-table scans with an in-memory state cache and 5-second throttled flushes, preventing UI freezing during high-speed downloads.
 - **Component Memoization**: Isolated high-frequency download progress events so browsing your library, movies, series, and watchlist remains silky smooth.
+
+### Reliability & Performance
+- **Queue Pump On HTTP Events**: Completing, pausing, or removing HTTP downloads automatically advances the queue so queued downloads start immediately.
+- **Watchers On Path Changes**: Changing or resetting your download directory immediately updates file-system watchers to follow the new location.
+
+### Security & Privacy
+- **Ad & Popup Shield**: In-app webviews block third-party advertising networks, cryptominers, tracking scripts, and unwanted pop-up tabs automatically.
+- **Strict Path Traversal Guard**: Download directories and shell reveal operations validate paths against safe library roots.
+
+***
+
+# MyCinema v1.40.0
+
+Bring your YouTube subscriptions into Focus Tube, dock the movie player while you browse, and enjoy a tidier Focus Tube.
 
 ### YouTube Subscription Import
 - **Import From Google**: The Channels manager has an Import YouTube button that opens the system browser to connect a Google account and lists every subscribed channel.

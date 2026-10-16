@@ -155,6 +155,22 @@ interface Api {
     percentUsed: number
     error?: string
   }>
+  getDownloadDir: () => Promise<{
+    currentPath: string
+    defaultPath: string
+    isCustom: boolean
+  }>
+  setDownloadDir: (dirPath: string) => Promise<{
+    currentPath: string
+    defaultPath: string
+    isCustom: boolean
+  }>
+  resetDownloadDir: () => Promise<{
+    currentPath: string
+    defaultPath: string
+    isCustom: boolean
+  }>
+  onDownloadDirChanged?: (callback: (info: { currentPath: string; defaultPath: string; isCustom: boolean }) => void) => () => void
   // OpenSubtitles API
   searchOnlineSubtitles: (params: { query?: string; tmdbId?: number; season?: number; episode?: number; languages?: string; mediaType?: string; videoFilePath?: string }) => Promise<any>
   downloadOnlineSubtitle: (params: { fileId: number; videoFilePath: string; fileName?: string }) => Promise<any>
@@ -163,7 +179,7 @@ interface Api {
   setPipThumbar: (payload: { isPlaying: boolean; icons: { play: string; pause: string; back: string; fwd: string } }) => Promise<void>
   clearPipThumbar: () => Promise<void>
   onThumbarCommand: (callback: (command: string) => void) => () => void
-  openWebPopup: (url: string, title?: string) => Promise<boolean>
+  openWebPopup: (url: string, title?: string, autoSearch?: string) => Promise<boolean>
   getDownloadSites: () => Promise<Array<{
     id: string
     name: string
@@ -197,11 +213,12 @@ interface Api {
   isFullscreen: () => Promise<boolean>
   closeWindow: () => Promise<void>
   onFullscreenChanged: (callback: (isFullscreen: boolean) => void) => () => void
-  getAppSettings: () => Promise<{ launchFullscreen: boolean; rememberOnlineProgress: boolean; notifyNewEpisodes: boolean; focusTubeEnabled: boolean }>
-  setLaunchFullscreen: (launchFullscreen: boolean) => Promise<{ launchFullscreen: boolean; rememberOnlineProgress: boolean; notifyNewEpisodes: boolean }>
-  setRememberOnlineProgress: (enabled: boolean) => Promise<{ launchFullscreen: boolean; rememberOnlineProgress: boolean; notifyNewEpisodes: boolean }>
-  setNotifyNewEpisodes: (enabled: boolean) => Promise<{ launchFullscreen: boolean; rememberOnlineProgress: boolean; notifyNewEpisodes: boolean; focusTubeEnabled: boolean }>
-  setFocusTubeEnabled: (enabled: boolean) => Promise<{ launchFullscreen: boolean; rememberOnlineProgress: boolean; notifyNewEpisodes: boolean; focusTubeEnabled: boolean }>
+  getAppSettings: () => Promise<{ launchFullscreen: boolean; rememberOnlineProgress: boolean; notifyNewEpisodes: boolean; focusTubeEnabled: boolean; showDownloadTray?: boolean; downloadPath?: string }>
+  setLaunchFullscreen: (launchFullscreen: boolean) => Promise<{ launchFullscreen: boolean; rememberOnlineProgress: boolean; notifyNewEpisodes: boolean; focusTubeEnabled: boolean; showDownloadTray?: boolean; downloadPath?: string }>
+  setRememberOnlineProgress: (enabled: boolean) => Promise<{ launchFullscreen: boolean; rememberOnlineProgress: boolean; notifyNewEpisodes: boolean; focusTubeEnabled: boolean; showDownloadTray?: boolean; downloadPath?: string }>
+  setNotifyNewEpisodes: (enabled: boolean) => Promise<{ launchFullscreen: boolean; rememberOnlineProgress: boolean; notifyNewEpisodes: boolean; focusTubeEnabled: boolean; showDownloadTray?: boolean; downloadPath?: string }>
+  setFocusTubeEnabled: (enabled: boolean) => Promise<{ launchFullscreen: boolean; rememberOnlineProgress: boolean; notifyNewEpisodes: boolean; focusTubeEnabled: boolean; showDownloadTray?: boolean; downloadPath?: string }>
+  setShowDownloadTray: (enabled: boolean) => Promise<{ launchFullscreen: boolean; rememberOnlineProgress: boolean; notifyNewEpisodes: boolean; focusTubeEnabled: boolean; showDownloadTray?: boolean; downloadPath?: string }>
   followSeries: (input: { tmdb_id: number; title?: string; poster_path?: string | null; backdrop_path?: string | null; overview?: string | null; season?: number | null; episode?: number | null }) => Promise<{ followed: boolean; isNew?: boolean; hasNewDrop?: boolean; dropSeason?: number; dropEpisode?: number }>
   unfollowSeries: (tmdbId: number) => Promise<{ unfollowed: boolean }>
   getFollowedSeries: () => Promise<any[]>
@@ -213,7 +230,7 @@ interface Api {
   getStreamContinueWatching: () => Promise<any[]>
   getStreamHistory: (limit?: number) => Promise<any[]>
   deleteStreamProgress: (tmdbId: number, mediaType: string, season?: number | null, episode?: number | null) => Promise<any>
-  onAppSettingsChanged: (callback: (settings: { launchFullscreen: boolean; rememberOnlineProgress: boolean; notifyNewEpisodes: boolean; focusTubeEnabled: boolean }) => void) => () => void
+  onAppSettingsChanged: (callback: (settings: { launchFullscreen: boolean; rememberOnlineProgress: boolean; notifyNewEpisodes: boolean; focusTubeEnabled: boolean; showDownloadTray?: boolean; downloadPath?: string }) => void) => () => void
   getTmdbReleaseInfo: (id: number, type: 'movie' | 'series') => Promise<import('./types').TmdbReleaseInfo | null>
 
   // ─── Focus Tube ────────────────────────────────────────────────────────────

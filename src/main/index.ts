@@ -11,6 +11,7 @@ import * as downloadSites from './downloadSites'
 import { POPUP_PARTITION, POPUP_COSMETIC_CSS, isBlockedAdUrl, registerPopupAdblock } from './popupAdblock'
 import { scanFolder, getEmbeddedSubtitles, getEmbeddedAudio } from './scanner'
 import * as tmdb from './tmdb'
+import * as httpDownloader from './httpDownloader'
 import fs from 'fs'
 import crypto from 'crypto'
 import ffmpeg from 'fluent-ffmpeg'
@@ -323,8 +324,10 @@ function isSafeFilePath(inputPath: string): boolean {
     const allowedRoots = [
       // User's registered library folders (dynamically checked each call)
       ...(db.getFolders() as any[]).map((f: any) => path.normalize(f.path).toLowerCase()),
-      // The MyCinema torrent download destination
+      // The MyCinema default download destination
       path.normalize(path.join(app.getPath('downloads'), 'MyCinema')).toLowerCase(),
+      // Configured download destination (custom or default)
+      path.normalize(getDownloadPath()).toLowerCase(),
       // App userData: poster cache, subtitle cache, window state, db
       path.normalize(app.getPath('userData')).toLowerCase(),
       // Temp dir used by subtitle pre-conversion
@@ -555,6 +558,10 @@ type AppSettings = {
   // watch progress and seen state all stay in the database and come straight
   // back when it is switched on again.
   focusTubeEnabled: boolean
+  // Custom directory for all file downloads (magnets, torrents, web downloads)
+  downloadPath?: string
+  // Floating download progress HUD in bottom right corner
+  showDownloadTray?: boolean
 }
 
 const defaultAppSettings: AppSettings = {
@@ -562,7 +569,9 @@ const defaultAppSettings: AppSettings = {
   rememberOnlineProgress: true,
   notifyNewEpisodes: true,
   maxConcurrentDownloads: 0,
-  focusTubeEnabled: true
+  focusTubeEnabled: true,
+  downloadPath: '',
+  showDownloadTray: true
 }
 
 function getAppSettingsPath() {
@@ -580,6 +589,26 @@ function loadAppSettings(): AppSettings {
 
 function saveAppSettings(settings: AppSettings) {
   fs.writeFileSync(getAppSettingsPath(), JSON.stringify(settings))
+}
+
+function getDownloadPath(): string {
+  try {
+    const settings = loadAppSettings()
+    const custom = settings.downloadPath?.trim()
+    if (custom) {
+      if (!fs.existsSync(custom)) {
+        fs.mkdirSync(custom, { recursive: true })
+      }
+      return custom
+    }
+  } catch (err) {
+    console.warn('[Download Path] Failed to access or create custom path, falling back:', err)
+  }
+  const defaultPath = path.join(app.getPath('downloads'), 'MyCinema')
+  if (!fs.existsSync(defaultPath)) {
+    try { fs.mkdirSync(defaultPath, { recursive: true }) } catch {}
+  }
+  return defaultPath
 }
 
 let thirdPartyCookieNoticeShown = false
@@ -652,6 +681,10 @@ function createWindow(): void {
   })
 
   mainWindow.webContents.setWindowOpenHandler((details) => {
+    if (details.url.startsWith('magnet:')) {
+      void handleStartTorrentDownload(details.url)
+      return { action: 'deny' }
+    }
     // Only allow safe external URLs — block javascript:, file:, data: etc.
     if (details.url.startsWith('https://') || details.url.startsWith('http://')) {
       // The YouTube embed raises a sign-in flow when it wants to verify the
@@ -1801,6 +1834,29 @@ app.whenReady().then(() => {
     app.setAsDefaultProtocolClient(APP_PROTOCOL)
   }
 
+  // Attach default session download handler to catch file downloads from any window
+  if (!(session.defaultSession as any).__downloadHandlerAttached) {
+    (session.defaultSession as any).__downloadHandlerAttached = true
+    session.defaultSession.on('will-download', (_event, item) => {
+      const downloadUrl = item.getURL()
+      const fileName = item.getFilename()
+      const totalBytes = item.getTotalBytes()
+      item.cancel()
+      console.log(`[DefaultSession Download] Intercepted "${fileName}", routing to MyCinema Downloads: ${downloadUrl}`)
+      httpDownloader.startHttpDownload({
+        url: downloadUrl,
+        fileName,
+        totalBytes
+      }).then(() => {
+        BrowserWindow.getAllWindows().forEach(w => {
+          if (!w.isDestroyed()) w.webContents.send('downloads-changed')
+        })
+      }).catch(err => {
+        console.error('[DefaultSession Download] Failed to start HTTP download:', err)
+      })
+    })
+  }
+
   // Attach file-system watchers for all already-saved folders
   const savedFolders = db.getFolders() as any[]
   savedFolders.forEach(f => attachFolderWatcher(f.path))
@@ -1931,11 +1987,292 @@ ipcMain.handle('pip-thumbar-clear', (event) => {
   } catch (err) { /* ignore */ }
 })
 
-ipcMain.handle('open-web-popup', (event, url: string, title?: string) => {
+// Types the query into the page's own search box and submits it — for JS-only
+// (SPA) sites whose URL query params are ignored. Runs on first load only,
+// retried a few times while the app hydrates. Harmless on pages that already
+// show server-side results (same query, same page).
+const POPUP_AUTO_SEARCH_FN = `(() => {
+  try {
+    const q = %%QUERY%%;
+    const input = document.querySelector('input[placeholder*="earch" i], input[type="search"], input[name="s"], input[aria-label*="earch" i]');
+    if (!input) return 'no-input';
+    if (input.value === q && input.dataset.mycinemaSearched === '1') return 'already';
+    input.focus();
+    const proto = (window.HTMLInputElement && window.HTMLInputElement.prototype) || Object.getPrototypeOf(input);
+    const setter = proto && Object.getOwnPropertyDescriptor(proto, 'value') && Object.getOwnPropertyDescriptor(proto, 'value').set;
+    if (setter) setter.call(input, q); else input.value = q;
+    input.dataset.mycinemaSearched = '1';
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    input.dispatchEvent(new Event('change', { bubbles: true }));
+    const form = input.closest('form');
+    if (form) { if (form.requestSubmit) form.requestSubmit(); else form.submit(); return 'form-submitted'; }
+    ['keydown', 'keypress', 'keyup'].forEach(t => input.dispatchEvent(new KeyboardEvent(t, { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true, cancelable: true })));
+    const btn = (input.parentElement && input.parentElement.querySelector('button')) || document.querySelector('button[type="submit"]');
+    if (btn) btn.click();
+    return 'submitted';
+  } catch (e) { return 'error'; }
+})()`;
+
+function schedulePopupAutoSearch(popup: BrowserWindow, query: string): void {
+  const script = POPUP_AUTO_SEARCH_FN.replace('%%QUERY%%', JSON.stringify(query))
+  let settled = false
+  const attempt = () => {
+    if (settled || popup.isDestroyed()) return
+    popup.webContents.executeJavaScript(script, true)
+      .then(result => {
+        if (result === 'submitted' || result === 'form-submitted' || result === 'already') {
+          settled = true
+        }
+      })
+      .catch(() => {})
+  }
+  popup.webContents.once('did-finish-load', () => {
+    for (const delay of [800, 2500, 4500]) {
+      setTimeout(attempt, delay)
+    }
+  })
+}
+
+const POPUP_ANTI_AD_SCRIPT = `(() => {
+  try {
+    if (window.__mycinema_anti_ad_installed) return;
+    window.__mycinema_anti_ad_installed = true;
+
+    // 1. Defuse popunder window.open spawners
+    const _origOpen = window.open;
+    window.open = function(url, target, features) {
+      if (!url) return null;
+      try {
+        const u = new URL(String(url), window.location.href);
+        const host = u.hostname.toLowerCase().replace(/^www\\./, '');
+        // Block if popunder geometry is specified (ad popunder fingerprint)
+        if (features && /width=|height=|top=|left=|toolbar=|menubar=/i.test(features)) {
+          console.warn('[MyCinema AdBlock] Blocked window.open popunder features:', features, url);
+          return null;
+        }
+        // Block if host looks like an ad / tracker rotator domain, but allow trusted download & mediator domains
+        const isTrustedHost = /hub|drive|cloud|stream|movie|kat|greenmotors|hblinks|gamerxyt|cryptonewz|fast|storage|drain|file/i.test(host);
+        if (!isTrustedHost && /\b(ad|ads|pop|bet|affiliate|promo|banner|bonus)\b/i.test(host)) {
+          console.warn('[MyCinema AdBlock] Blocked window.open ad domain:', host);
+          return null;
+        }
+        // Legitimate URL (download host, file host, etc.) — let Electron's
+        // setWindowOpenHandler receive it so it can navigate the popup in-place.
+        return _origOpen.call(window, url, target || '_self', features);
+      } catch (e) {
+        return null;
+      }
+    };
+
+    // 2. Prevent malicious back-button hijacking (e.g. bonuscaf onpopstate)
+    try {
+      window.onpopstate = null;
+      Object.defineProperty(window, 'onpopstate', {
+        get: () => null,
+        set: () => {
+          console.warn('[MyCinema AdBlock] Prevented onpopstate back-button hijack attempt');
+        },
+        configurable: true
+      });
+    } catch (e) {}
+
+    // 3. Remove transparent / full-screen clickjack overlays and ad banners
+    const defuseOverlays = () => {
+      try {
+        const winW = window.innerWidth;
+        const winH = window.innerHeight;
+        const adSelectors = [
+          '#bb-overlay-x7m4q2', '.bb-overlay-x7m4q2',
+          '#banner-container', '.banner-container',
+          '.popunder', '#popunder', '[id*="popunder"]',
+          '.ad-banner', '.ads-banner', '.advertisement',
+          'iframe[src*="agl002"]', 'iframe[src*="ads"]',
+          'a[href*="bonuscaf"]', 'a[href*="adsboosters"]',
+          '[class*="code-block"]', '[class*="ai-viewport"]'
+        ];
+        document.querySelectorAll(adSelectors.join(',')).forEach(el => {
+          try { el.remove(); } catch (e) {}
+        });
+
+        // Scan for invisible full-page click interceptor layers
+        const elements = document.querySelectorAll('div, a, span');
+        for (const el of elements) {
+          if (el.id === 'mycinema-back-btn') continue;
+          const style = window.getComputedStyle(el);
+          if (style.position === 'fixed' || style.position === 'absolute') {
+            const z = parseInt(style.zIndex, 10);
+            if (z >= 500) {
+              const w = el.offsetWidth;
+              const h = el.offsetHeight;
+              if (w > winW * 0.7 && h > winH * 0.7) {
+                const op = parseFloat(style.opacity);
+                const bg = style.backgroundColor;
+                if (op < 0.1 || bg === 'transparent' || bg.includes('rgba(0, 0, 0, 0)')) {
+                  console.warn('[MyCinema AdBlock] Removed invisible clickjack overlay');
+                  el.remove();
+                }
+              }
+            }
+          }
+        }
+      } catch (e) {}
+    };
+
+    defuseOverlays();
+    setInterval(defuseOverlays, 800);
+  } catch (e) {}
+})()`;
+
+const TRUSTED_DOWNLOAD_DOMAINS = [
+  // HDHub4u ecosystem (mirrors, mediator pages, link generators, storage)
+  'hdhub',
+  'hub4u',
+  '4khdhub',
+  'greenmotors',
+  'hblinks',
+  'hubdrive',
+  'hubcdn',
+  'hubcloud',
+  'gamerxyt',
+  'cryptonewz',
+  'hdstream4u',
+  'vidaraa',
+  'snvhost',
+
+  // KatmovieHD ecosystem
+  'katmovie',
+  'katmoviehd',
+  'katmovieshd',
+  'katworld',
+  'katdrive',
+  'kmhd',
+  'katlinks',
+
+  // Vegamovies / Dotmovies / Bolly4u / Moviesflix ecosystem
+  'vegamovies',
+  'dotmovies',
+  'bolly4u',
+  'moviesflix',
+  'vcloud',
+  'v-cloud',
+  'vegalinks',
+
+  // Fast direct download CDNs & Cloud Object Storage
+  'cloudflarestorage.com',
+  'r2.cloudflarestorage.com',
+  'pixeldrain.com',
+  'pixeldrain.dev',
+  'pixeldrain',
+  'fuckingfast.net',
+  'fuckingfast.co',
+  'fuckingfast',
+  'fastdl',
+  'gdflix',
+  'gdtot',
+  'gdlink',
+  'filepress',
+  'filelions',
+  'buzzheavier.com',
+  'buzzheavier',
+
+  // Cloud & File Hosting
+  'drive.google.com',
+  'google.com',
+  'mega.nz',
+  'mediafire.com',
+  '1fichier.com',
+  'gofile.io',
+  'krakenfiles.com',
+  'streamtape',
+  'doodstream',
+  'sendcm',
+  'send.cm',
+  'streamwish',
+  'mixdrop',
+  'hxfile',
+  'droplink',
+  'shareus',
+  'technorozen',
+  'rezahub',
+  'bestlinks',
+  'links.hub',
+  'workers.dev',
+  'pages.dev',
+  'terabox.com',
+  'terabox.app',
+  'terabox'
+]
+
+function isTrustedPopupDestination(destUrl: string, currentUrl: string): boolean {
+  try {
+    const dest = new URL(destUrl)
+    const cur = new URL(currentUrl)
+    const destHost = dest.hostname.toLowerCase().replace(/^www\./, '')
+    const curHost = cur.hostname.toLowerCase().replace(/^www\./, '')
+
+    // Never allow known ad/tracker URLs
+    if (isBlockedAdUrl(destUrl)) {
+      return false
+    }
+
+    // 1. Same host or same base domain
+    if (destHost === curHost || destHost.endsWith(`.${curHost}`) || curHost.endsWith(`.${destHost}`)) {
+      return true
+    }
+
+    // 2. Any download site mirror / brand hints (e.g. katmovie, hdhub, hub4u)
+    for (const site of downloadSites.DOWNLOAD_SITES) {
+      if (site.domainHints.some(hint => destHost.includes(hint.toLowerCase()))) return true
+      try {
+        const portalHost = new URL(site.portalUrl).hostname.toLowerCase().replace(/^www\./, '')
+        if (destHost === portalHost || destHost.endsWith(`.${portalHost}`)) return true
+      } catch {}
+    }
+
+    // 3. Trusted download & cloud hosting services
+    if (TRUSTED_DOWNLOAD_DOMAINS.some(trusted => destHost.includes(trusted.toLowerCase()))) {
+      return true
+    }
+
+    // 4. Direct video or archive file downloads (e.g. .mkv, .mp4, .zip)
+    if (/\.(mkv|mp4|avi|webm|mov|m4v|zip|rar|7z|tar|gz|iso)(\?|$)/i.test(dest.pathname + dest.search)) {
+      return true
+    }
+
+    // 5. Common file-sharing & mediator link signatures from legitimate download / mediator pages
+    const pathname = dest.pathname.toLowerCase()
+    const isCurDownloadSite =
+      downloadSites.DOWNLOAD_SITES.some(s => s.domainHints.some(h => curHost.includes(h.toLowerCase()))) ||
+      TRUSTED_DOWNLOAD_DOMAINS.some(t => curHost.includes(t.toLowerCase()))
+
+    if (isCurDownloadSite) {
+      if (
+        pathname.startsWith('/file/') ||
+        pathname.startsWith('/drive/') ||
+        pathname.startsWith('/archives/') ||
+        pathname.startsWith('/download/') ||
+        pathname.startsWith('/homelander/') ||
+        pathname.startsWith('/d/') ||
+        pathname.startsWith('/u/') ||
+        dest.searchParams.has('id') ||
+        dest.searchParams.has('token') ||
+        dest.searchParams.has('host')
+      ) {
+        return true
+      }
+    }
+
+    return false
+  } catch {
+    return false
+  }
+}
+
+ipcMain.handle('open-web-popup', (event, url: string, title?: string, autoSearch?: string) => {
   const parent = BrowserWindow.fromWebContents(event.sender) || BrowserWindow.getAllWindows()[0]
   const popup = new BrowserWindow({
     parent,
-    modal: true,
+    modal: false,
     show: false,
     width: 1000,
     height: 700,
@@ -1951,57 +2288,246 @@ ipcMain.handle('open-web-popup', (event, url: string, title?: string) => {
     }
   })
 
+  // Clean User-Agent so mediator verification and DDoS protection pages treat the popup like standard Chrome
+  const popupSession = popup.webContents.session
+  try {
+    const defaultUa = popupSession.getUserAgent()
+    const cleanUa = defaultUa.replace(/Electron\/\S+\s*/i, '').replace(/MyCinema\/\S+\s*/i, '')
+    popupSession.setUserAgent(cleanUa)
+  } catch {}
+
   // Lightweight uBlock-style filtering for the popup only.
   registerPopupAdblock(popup.webContents.session)
 
+  // Automatic file download handler: route all web downloads into MyCinema's resilient background Downloads manager
+  if (!(popupSession as any).__downloadHandlerAttached) {
+    (popupSession as any).__downloadHandlerAttached = true
+    popupSession.on('will-download', (_event, item) => {
+      const downloadUrl = item.getURL()
+      const fileName = item.getFilename()
+      const totalBytes = item.getTotalBytes()
+
+      // Cancel the fragile Chromium window-bound download so closing the popup doesn't abort it
+      item.cancel()
+
+      console.log(`[Popup Download] Intercepted "${fileName}", routing to MyCinema Downloads tab: ${downloadUrl}`)
+      httpDownloader.startHttpDownload({
+        url: downloadUrl,
+        fileName,
+        totalBytes
+      }).then(() => {
+        // Notify all windows that downloads list updated
+        BrowserWindow.getAllWindows().forEach(w => {
+          if (!w.isDestroyed()) {
+            w.webContents.send('downloads-changed')
+          }
+        })
+
+        // Show added feedback in the popup window
+        if (!popup.isDestroyed()) {
+          popup.webContents.executeJavaScript(`
+            if (window.__showDownloadAddedBanner) {
+              window.__showDownloadAddedBanner(${JSON.stringify(fileName)});
+            }
+          `).catch(() => {})
+        }
+      }).catch(err => {
+        console.error('[Popup Download] Failed to start HTTP download:', err)
+      })
+    })
+  }
+
   const updateBackButton = () => {
-    if (popup.webContents.canGoBack()) {
-      popup.webContents.executeJavaScript(`
-        if (!document.getElementById('mycinema-back-btn')) {
-          const btn = document.createElement('div');
-          btn.id = 'mycinema-back-btn';
-          btn.innerHTML = '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,0.9)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>';
-          Object.assign(btn.style, {
+    const canGoBack = popup.webContents.canGoBack()
+    popup.webContents.executeJavaScript(`
+      (() => {
+        let bar = document.getElementById('mycinema-popup-toolbar');
+        if (!bar) {
+          bar = document.createElement('div');
+          bar.id = 'mycinema-popup-toolbar';
+          Object.assign(bar.style, {
             position: 'fixed',
             bottom: '24px',
             left: '24px',
-            width: '44px',
-            height: '44px',
-            backgroundColor: 'rgba(15, 23, 42, 0.75)',
-            backdropFilter: 'blur(12px)',
-            webkitBackdropFilter: 'blur(12px)',
-            border: '1px solid rgba(255, 255, 255, 0.1)',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '8px',
+            padding: '6px',
+            backgroundColor: 'rgba(15, 23, 42, 0.85)',
+            backdropFilter: 'blur(16px)',
+            webkitBackdropFilter: 'blur(16px)',
+            border: '1px solid rgba(255, 255, 255, 0.15)',
+            borderRadius: '28px',
+            zIndex: '2147483647',
+            boxShadow: '0 8px 32px rgba(0, 0, 0, 0.5)',
+            transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+            fontFamily: 'system-ui, -apple-system, sans-serif'
+          });
+          document.body.appendChild(bar);
+        }
+
+        bar.innerHTML = '';
+
+        // Back button (shown only if previous history exists)
+        if (${canGoBack}) {
+          const backBtn = document.createElement('button');
+          backBtn.title = 'Go back';
+          backBtn.innerHTML = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>';
+          Object.assign(backBtn.style, {
+            width: '36px',
+            height: '36px',
             borderRadius: '50%',
+            border: 'none',
+            background: 'rgba(255, 255, 255, 0.08)',
+            color: '#fff',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
-            cursor: 'pointer',
-            zIndex: '2147483647',
-            boxShadow: '0 8px 24px rgba(0, 0, 0, 0.4)',
-            transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+            cursor: 'pointer'
           });
-          btn.onmouseover = () => { 
-            btn.style.transform = 'scale(1.1) translateY(-2px)'; 
-            btn.style.backgroundColor = 'rgba(15, 23, 42, 0.95)'; 
-            btn.style.borderColor = 'rgba(6, 182, 212, 0.5)'; 
-            btn.style.boxShadow = '0 12px 28px rgba(6, 182, 212, 0.2)'; 
-          };
-          btn.onmouseout = () => { 
-            btn.style.transform = 'scale(1) translateY(0)'; 
-            btn.style.backgroundColor = 'rgba(15, 23, 42, 0.75)'; 
-            btn.style.borderColor = 'rgba(255, 255, 255, 0.1)'; 
-            btn.style.boxShadow = '0 8px 24px rgba(0, 0, 0, 0.4)'; 
-          };
-          btn.onclick = () => window.history.back();
-          document.body.appendChild(btn);
+          backBtn.onclick = () => window.history.back();
+          bar.appendChild(backBtn);
         }
-      `).catch(() => {})
-    } else {
-      popup.webContents.executeJavaScript(`
-        const btn = document.getElementById('mycinema-back-btn');
-        if (btn) btn.remove();
-      `).catch(() => {})
-    }
+
+        // Open in Browser button
+        const openExtBtn = document.createElement('button');
+        openExtBtn.title = 'Open this page in your default browser (Chrome/Edge)';
+        openExtBtn.innerHTML = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg><span style="margin-left:6px;font-size:11px;font-weight:700;letter-spacing:0.04em;">Browser</span>';
+        Object.assign(openExtBtn.style, {
+          height: '36px',
+          padding: '0 12px',
+          borderRadius: '18px',
+          border: '1px solid rgba(6, 182, 212, 0.3)',
+          background: 'rgba(6, 182, 212, 0.15)',
+          color: '#22d3ee',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          cursor: 'pointer'
+        });
+        openExtBtn.onclick = () => {
+          window.location.href = 'mycinema-action://open-external?url=' + encodeURIComponent(window.location.href);
+        };
+        bar.appendChild(openExtBtn);
+
+        // Copy Link button
+        const copyBtn = document.createElement('button');
+        copyBtn.title = 'Copy link';
+        copyBtn.innerHTML = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>';
+        Object.assign(copyBtn.style, {
+          width: '36px',
+          height: '36px',
+          borderRadius: '50%',
+          border: 'none',
+          background: 'rgba(255, 255, 255, 0.08)',
+          color: '#cbd5e1',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          cursor: 'pointer'
+        });
+        copyBtn.onclick = () => {
+          navigator.clipboard.writeText(window.location.href).then(() => {
+            copyBtn.style.color = '#34d399';
+            setTimeout(() => { copyBtn.style.color = '#cbd5e1'; }, 1500);
+          });
+        };
+        bar.appendChild(copyBtn);
+
+        // Download HUD handler
+        if (!window.__downloadHudInstalled) {
+          window.__downloadHudInstalled = true;
+          window.__updateDownloadHud = (name, pct, recv, total) => {
+            let hud = document.getElementById('mycinema-download-hud');
+            if (!hud) {
+              hud = document.createElement('div');
+              hud.id = 'mycinema-download-hud';
+              Object.assign(hud.style, {
+                position: 'fixed',
+                top: '20px',
+                right: '20px',
+                zIndex: '2147483647',
+                padding: '12px 18px',
+                backgroundColor: 'rgba(15, 23, 42, 0.95)',
+                border: '1px solid rgba(6, 182, 212, 0.4)',
+                borderRadius: '14px',
+                color: '#fff',
+                fontFamily: 'system-ui, -apple-system, sans-serif',
+                boxShadow: '0 10px 30px rgba(0,0,0,0.6)',
+                minWidth: '280px'
+              });
+              document.body.appendChild(hud);
+            }
+            const mbRecv = (recv / (1024 * 1024)).toFixed(1);
+            const mbTotal = (total / (1024 * 1024)).toFixed(1);
+            hud.innerHTML = \`
+              <div style="font-size:12px;font-weight:700;color:#22d3ee;margin-bottom:6px;display:flex;justify-content:space-between;">
+                <span>Downloading File</span>
+                <span>\${pct}%</span>
+              </div>
+              <div style="font-size:11px;color:#94a3b8;margin-bottom:8px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:260px;">\${name}</div>
+              <div style="width:100%;height:6px;background:rgba(255,255,255,0.1);border-radius:3px;overflow:hidden;">
+                <div style="width:\${pct}%;height:100%;background:#06b6d4;border-radius:3px;transition:width 0.3s ease;"></div>
+              </div>
+              <div style="font-size:10px;color:#64748b;margin-top:6px;text-align:right;">\${mbRecv} MB / \${mbTotal} MB (Saving to Downloads)</div>
+            \`;
+          };
+
+          window.__downloadDone = (name, path) => {
+            const hud = document.getElementById('mycinema-download-hud');
+            if (hud) {
+              hud.innerHTML = \`
+                <div style="font-size:12px;font-weight:700;color:#34d399;margin-bottom:4px;">Download Complete!</div>
+                <div style="font-size:11px;color:#94a3b8;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:260px;">\${name}</div>
+                <div style="font-size:10px;color:#64748b;margin-top:4px;">Saved to Downloads folder</div>
+              \`;
+              setTimeout(() => { hud.remove(); }, 6000);
+            }
+          };
+
+          window.__showDownloadAddedBanner = (name) => {
+            let banner = document.getElementById('mycinema-added-banner');
+            if (!banner) {
+              banner = document.createElement('div');
+              banner.id = 'mycinema-added-banner';
+              Object.assign(banner.style, {
+                position: 'fixed',
+                top: '24px',
+                left: '50%',
+                transform: 'translateX(-50%)',
+                zIndex: '2147483647',
+                padding: '12px 20px',
+                backgroundColor: 'rgba(15, 23, 42, 0.95)',
+                backdropFilter: 'blur(16px)',
+                webkitBackdropFilter: 'blur(16px)',
+                border: '1px solid #06b6d4',
+                borderRadius: '16px',
+                color: '#fff',
+                boxShadow: '0 12px 36px rgba(0,0,0,0.7)',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '12px',
+                fontFamily: 'system-ui, -apple-system, sans-serif'
+              });
+              document.body.appendChild(banner);
+            }
+            banner.innerHTML = \`
+              <div style="width:32px;height:32px;border-radius:50%;background:rgba(6,182,212,0.2);display:flex;align-items:center;justify-content:center;color:#22d3ee;font-size:16px;">📥</div>
+              <div>
+                <div style="font-size:13px;font-weight:700;color:#22d3ee;">Added to MyCinema Downloads!</div>
+                <div style="font-size:11px;color:#cbd5e1;margin-top:2px;max-width:320px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">\${name}</div>
+                <div style="font-size:10px;color:#64748b;margin-top:3px;">Downloading in background • Safe to close window</div>
+              </div>
+            \`;
+            setTimeout(() => { if (banner) banner.remove(); }, 7000);
+          };
+        }
+      })();
+    `).catch(() => {})
+  }
+
+  const injectAntiAd = () => {
+    popup.webContents.executeJavaScript(POPUP_ANTI_AD_SCRIPT).catch(() => {})
   }
 
   popup.webContents.on('dom-ready', () => {
@@ -2012,28 +2538,87 @@ ipcMain.handle('open-web-popup', (event, url: string, title?: string) => {
       ::-webkit-scrollbar-thumb:hover { background: rgba(255, 255, 255, 0.3); }
       ${POPUP_COSMETIC_CSS}
     `).catch(() => {})
+    injectAntiAd()
     updateBackButton()
   })
 
-  popup.webContents.on('did-navigate-in-page', updateBackButton)
-  popup.webContents.on('did-navigate', updateBackButton)
+  popup.webContents.on('did-navigate-in-page', () => {
+    injectAntiAd()
+    updateBackButton()
+  })
+  popup.webContents.on('did-navigate', () => {
+    injectAntiAd()
+    updateBackButton()
+  })
 
-  // Force links that would open in a new window to open in the current popup instead
+  // Prevent popup window ad hijacking on click (popunders / ad rotators)
   popup.webContents.setWindowOpenHandler(({ url }) => {
-    // Ad popunders die silently instead of hijacking the popup.
-    if (isBlockedAdUrl(url)) return { action: 'deny' }
-    popup.loadURL(url)
+    if (url.startsWith('magnet:')) {
+      console.log('[Popup] Intercepted magnet link popup request:', url.slice(0, 80))
+      void handleStartTorrentDownload(url).then(() => {
+        if (!popup.isDestroyed()) {
+          const magnetName = getMagnetDisplayName(url) || 'Torrent Download'
+          popup.webContents.executeJavaScript(`
+            if (window.__showDownloadAddedBanner) {
+              window.__showDownloadAddedBanner(${JSON.stringify(magnetName)});
+            }
+          `).catch(() => {})
+        }
+      })
+      return { action: 'deny' }
+    }
+    if (isBlockedAdUrl(url)) {
+      console.log('[Popup] Blocked ad window:', url)
+      return { action: 'deny' }
+    }
+    const currentUrl = popup.webContents.getURL() || ''
+    // Only allow new-window navigations to trusted download hosts or the site itself
+    if (isTrustedPopupDestination(url, currentUrl)) {
+      console.log('[Popup] Allowed trusted navigation to:', url)
+      popup.loadURL(url).catch(() => {})
+    } else {
+      console.log('[Popup] Denied untrusted new window (prevented ad navigation):', url)
+    }
     return { action: 'deny' }
   })
 
   // Ad hijacks that steer the page itself (script redirects, link shortener
-  // chains landing on ad networks) are stopped. Legit download hosts are not
-  // on the block list, so real flows pass through untouched.
-  popup.webContents.on('will-redirect', (event, url) => {
-    if (isBlockedAdUrl(url)) event.preventDefault()
+  // chains landing on ad networks) are stopped. Legit download hosts pass through.
+  popup.webContents.on('will-redirect', (event, redirectUrl) => {
+    if (isBlockedAdUrl(redirectUrl)) {
+      console.log('[Popup] Prevented ad redirect to:', redirectUrl)
+      event.preventDefault()
+    }
   })
-  popup.webContents.on('will-navigate', (event, url) => {
-    if (isBlockedAdUrl(url)) event.preventDefault()
+  popup.webContents.on('will-navigate', (event, navUrl) => {
+    if (navUrl.startsWith('magnet:')) {
+      event.preventDefault()
+      console.log('[Popup] Intercepted navigation to magnet link:', navUrl.slice(0, 80))
+      void handleStartTorrentDownload(navUrl).then(() => {
+        if (!popup.isDestroyed()) {
+          const magnetName = getMagnetDisplayName(navUrl) || 'Torrent Download'
+          popup.webContents.executeJavaScript(`
+            if (window.__showDownloadAddedBanner) {
+              window.__showDownloadAddedBanner(${JSON.stringify(magnetName)});
+            }
+          `).catch(() => {})
+        }
+      })
+      return
+    }
+    if (navUrl.startsWith('mycinema-action://open-external')) {
+      event.preventDefault()
+      try {
+        const u = new URL(navUrl)
+        const target = u.searchParams.get('url')
+        if (target) shell.openExternal(target)
+      } catch {}
+      return
+    }
+    if (isBlockedAdUrl(navUrl)) {
+      console.log('[Popup] Prevented ad navigation to:', navUrl)
+      event.preventDefault()
+    }
   })
 
   // Handle hardware/mouse back buttons
@@ -2043,8 +2628,23 @@ ipcMain.handle('open-web-popup', (event, url: string, title?: string) => {
     }
   })
 
+  // Prevent guest pages from trapping the user with `beforeunload` dialogs / close blocking
+  popup.webContents.on('will-prevent-unload', (e) => {
+    e.preventDefault()
+  })
+
+  // Allow closing easily with Escape key
+  popup.webContents.on('before-input-event', (_event, input) => {
+    if (input.key === 'Escape' && input.type === 'keyDown') {
+      popup.close()
+    }
+  })
+
   popup.loadURL(url)
   popup.once('ready-to-show', () => popup.show())
+  if (autoSearch && autoSearch.trim()) {
+    schedulePopupAutoSearch(popup, autoSearch.trim())
+  }
   return true
 })
 
@@ -2141,6 +2741,19 @@ ipcMain.handle('set-notify-new-episodes', (event, notifyNewEpisodes: boolean) =>
   return settings
 })
 
+ipcMain.handle('set-show-download-tray', (_event, enabled: boolean) => {
+  const settings = { ...loadAppSettings(), showDownloadTray: enabled !== false }
+  saveAppSettings(settings)
+
+  BrowserWindow.getAllWindows().forEach(window => {
+    if (!window.isDestroyed()) {
+      window.webContents.send('app-settings-changed', settings)
+    }
+  })
+
+  return settings
+})
+
 ipcMain.handle('get-max-concurrent-downloads', () => {
   return getMaxConcurrentDownloads()
 })
@@ -2162,6 +2775,87 @@ ipcMain.handle('set-max-concurrent-downloads', (_, value: number) => {
   void pumpDownloadQueue()
   setTimeout(() => enforceDownloadConcurrency(), 50)
   return settings.maxConcurrentDownloads
+})
+
+ipcMain.handle('get-download-dir', () => {
+  const defaultPath = path.join(app.getPath('downloads'), 'MyCinema')
+  const currentPath = getDownloadPath()
+  const settings = loadAppSettings()
+  const customPath = (settings.downloadPath || '').trim()
+  return {
+    currentPath,
+    defaultPath,
+    isCustom: Boolean(customPath && path.resolve(customPath) !== path.resolve(defaultPath))
+  }
+})
+
+ipcMain.handle('set-download-dir', async (_, targetPath: string) => {
+  const trimmed = (targetPath || '').trim()
+  if (!trimmed) {
+    throw new Error('Download folder path cannot be empty')
+  }
+  const resolved = path.resolve(trimmed)
+  if (!fs.existsSync(resolved)) {
+    try {
+      fs.mkdirSync(resolved, { recursive: true })
+    } catch (err: any) {
+      throw new Error(`Cannot create folder at "${resolved}": ${err.message}`)
+    }
+  }
+
+  // Verify write permission
+  const testFile = path.join(resolved, `.mycinema-test-${Date.now()}`)
+  try {
+    fs.writeFileSync(testFile, 'test')
+    fs.unlinkSync(testFile)
+  } catch (err: any) {
+    throw new Error(`Folder is not writable: ${err.message}`)
+  }
+
+  const defaultPath = path.join(app.getPath('downloads'), 'MyCinema')
+  const isCustom = path.resolve(resolved) !== path.resolve(defaultPath)
+  const settings = { ...loadAppSettings(), downloadPath: isCustom ? resolved : '' }
+  saveAppSettings(settings)
+
+  const payload = {
+    currentPath: isCustom ? resolved : defaultPath,
+    defaultPath,
+    isCustom
+  }
+
+  BrowserWindow.getAllWindows().forEach(window => {
+    if (!window.isDestroyed()) {
+      window.webContents.send('app-settings-changed', settings)
+      window.webContents.send('download-dir-changed', payload)
+    }
+  })
+
+  return payload
+})
+
+ipcMain.handle('reset-download-dir', async () => {
+  const defaultPath = path.join(app.getPath('downloads'), 'MyCinema')
+  if (!fs.existsSync(defaultPath)) {
+    try { fs.mkdirSync(defaultPath, { recursive: true }) } catch {}
+  }
+
+  const settings = { ...loadAppSettings(), downloadPath: '' }
+  saveAppSettings(settings)
+
+  const payload = {
+    currentPath: defaultPath,
+    defaultPath,
+    isCustom: false
+  }
+
+  BrowserWindow.getAllWindows().forEach(window => {
+    if (!window.isDestroyed()) {
+      window.webContents.send('app-settings-changed', settings)
+      window.webContents.send('download-dir-changed', payload)
+    }
+  })
+
+  return payload
 })
 
 // Assign FIFO positions to rows that predate the queue_order migration.
@@ -2659,9 +3353,12 @@ ipcMain.handle('delete-video-file', async (_, video: any) => {
 
     // Stop any active torrents associated with these files before deleting
     const downloadRoot = getDownloadPath()
+    const defaultDownloadRoot = path.join(app.getPath('downloads'), 'MyCinema')
+    const allowedRoots = [downloadRoot, defaultDownloadRoot].filter(Boolean)
     for (const item of itemsToDelete) {
-      if (item.file_path && isPathInsideRoot(item.file_path, downloadRoot)) {
-        const relative = path.relative(downloadRoot, item.file_path)
+      if (item.file_path && allowedRoots.some(root => isPathInsideRoot(item.file_path, root))) {
+        const root = allowedRoots.find(r => isPathInsideRoot(item.file_path, r))!
+        const relative = path.relative(root, item.file_path)
         const torrentId = relative.split(path.sep)[0]
         if (torrentId) {
           const torrent = activeTorrents.get(torrentId)
@@ -3028,13 +3725,13 @@ ipcMain.handle('open-folder', (_event, filePath: string) => {
 })
 
 ipcMain.handle('open-downloads-folder', () => {
-  const dlPath = path.join(app.getPath('downloads'), 'MyCinema')
+  const dlPath = getDownloadPath()
   if (!fs.existsSync(dlPath)) fs.mkdirSync(dlPath, { recursive: true })
   shell.openPath(dlPath)
 })
 
 ipcMain.handle('get-downloads-storage', async () => {
-  const dlPath = path.join(app.getPath('downloads'), 'MyCinema')
+  const dlPath = getDownloadPath()
   try {
     if (!fs.existsSync(dlPath)) fs.mkdirSync(dlPath, { recursive: true })
     const stats = await fs.promises.statfs(dlPath)
@@ -3513,11 +4210,6 @@ async function getWebTorrentClient(): Promise<any> {
   return webtorrentClient
 }
 
-function getDownloadPath(): string {
-  const dlPath = path.join(app.getPath('downloads'), 'MyCinema')
-  if (!fs.existsSync(dlPath)) fs.mkdirSync(dlPath, { recursive: true })
-  return dlPath
-}
 
 function formatBytes(bytes: any): string {
   // Some provider APIs (notably EZTV's size_bytes) return raw byte counts as
@@ -3605,6 +4297,9 @@ function broadcastProgress(id: string, torrent: any, status: string, errorMessag
   db.updateDownload(data)
   BrowserWindow.getAllWindows().forEach(w => w.webContents.send('torrent-progress', data))
 }
+
+httpDownloader.registerHttpProgressBroadcaster(broadcastProgress)
+httpDownloader.registerDownloadDirResolver(getDownloadPath)
 
 // ─── IPC: Search TMDB ────────────────────────────────────────────────────────
 // Read the key from the environment (injected by electron-vite from .env at build time).
@@ -5974,6 +6669,19 @@ async function pumpDownloadQueue(): Promise<void> {
         try { db.updateDownload({ ...next, status: 'connecting' }) } catch { /* ignore */ }
         continue
       }
+      if (next.magnet?.startsWith('http://') || next.magnet?.startsWith('https://')) {
+        console.log(`[HttpDownloader] Starting queued download: "${next.title}"`)
+        claimedDownloadSlots.add(next.id)
+        try {
+          await httpDownloader.resumeHttpDownload(next.id)
+        } catch (err: any) {
+          console.error(`[HttpDownloader] Queued start failed for "${next.title}":`, err?.message || err)
+        } finally {
+          claimedDownloadSlots.delete(next.id)
+        }
+        continue
+      }
+
       console.log(`[Torrent] Starting queued download: "${next.title}" (${countRunningDownloads()}/${max || '∞'})`)
       // Claim before the await so a concurrent start/pump can't double-start it.
       claimedDownloadSlots.add(next.id)
@@ -6107,11 +6815,17 @@ async function autoResumeDownloads() {
   console.log(`[TorrentQueue] Limit: ${getMaxConcurrentDownloads() || 'Unlimited'} · running: ${countRunningDownloads()} · queued: ${getQueuedDownloads().length}`)
 }
 
-ipcMain.handle('start-torrent-download', async (_, magnetUrl: string, title: string, tmdbId?: number, name?: string, media?: {
-  mediaType?: 'movie' | 'series'
-  season?: number
-  episode?: number
-}) => {
+async function handleStartTorrentDownload(
+  magnetUrl: string,
+  title?: string,
+  tmdbId?: number,
+  name?: string,
+  media?: {
+    mediaType?: 'movie' | 'series'
+    season?: number
+    episode?: number
+  }
+): Promise<string | false> {
   try {
     const enrichedMagnetUrl = enrichMagnetWithTrackers(magnetUrl)
     const existingDownload = db.getDownloads().find((download: any) => (
@@ -6120,12 +6834,14 @@ ipcMain.handle('start-torrent-download', async (_, magnetUrl: string, title: str
     if (existingDownload) return existingDownload.id
 
     const torrentId = crypto.randomUUID()
-    const displayName = name || getMagnetDisplayName(enrichedMagnetUrl) || title
+    const magnetDisplayName = getMagnetDisplayName(enrichedMagnetUrl)
+    const finalTitle = title || magnetDisplayName || 'Torrent Download'
+    const displayName = name || magnetDisplayName || finalTitle
     const downloadPath = path.join(getDownloadPath(), torrentId)
     
     db.addDownload({
       id: torrentId,
-      title,
+      title: finalTitle,
       name: displayName,
       magnet: enrichedMagnetUrl,
       // Park as queued FIRST — the gate starts it if a slot is free. Writing
@@ -6139,17 +6855,34 @@ ipcMain.handle('start-torrent-download', async (_, magnetUrl: string, title: str
       downloadPath
     })
 
-    await startDownloadRespectingQueue(torrentId, enrichedMagnetUrl, title, 0)
+    await startDownloadRespectingQueue(torrentId, enrichedMagnetUrl, finalTitle, 0)
+    BrowserWindow.getAllWindows().forEach(w => {
+      if (!w.isDestroyed()) {
+        w.webContents.send('downloads-changed')
+      }
+    })
     return torrentId
   } catch (err) {
     console.error('[Torrent] Start download error:', err)
     return false
   }
+}
+
+ipcMain.handle('start-torrent-download', async (_, magnetUrl: string, title?: string, tmdbId?: number, name?: string, media?: {
+  mediaType?: 'movie' | 'series'
+  season?: number
+  episode?: number
+}) => {
+  return handleStartTorrentDownload(magnetUrl, title, tmdbId, name, media)
 })
 
 // ─── IPC: Cancel Torrent ─────────────────────────────────────────────────────
 ipcMain.handle('cancel-torrent-download', async (_, id: string) => {
   try {
+    if (httpDownloader.isHttpDownload(id)) {
+      return httpDownloader.pauseHttpDownload(id)
+    }
+
     const torrent = activeTorrents.get(id)
     pausedTorrentIds.add(id)
     clearTorrentProgressInterval(id)
@@ -6190,6 +6923,15 @@ ipcMain.handle('cancel-torrent-download', async (_, id: string) => {
 // ─── IPC: Pause / Resume Torrent ─────────────────────────────────────────────
 ipcMain.handle('pause-resume-torrent', async (_, id: string) => {
   try {
+    if (httpDownloader.isHttpDownload(id)) {
+      const existing = db.getDownloads().find((d: any) => d.id === id)
+      if (existing?.status === 'paused' || existing?.status === 'error') {
+        return await httpDownloader.resumeHttpDownload(id)
+      } else {
+        return httpDownloader.pauseHttpDownload(id)
+      }
+    }
+
     // Dequeue: a queued item goes back to paused (it never started).
     const existing = db.getDownloads().find((d: any) => d.id === id)
     if (existing && existing.status === 'queued') {
@@ -6254,6 +6996,10 @@ ipcMain.handle('pause-resume-torrent', async (_, id: string) => {
 // ─── IPC: Retry Failed Torrent ────────────────────────────────────────────────
 ipcMain.handle('retry-torrent-download', async (_, id: string) => {
   try {
+    if (httpDownloader.isHttpDownload(id)) {
+      return await httpDownloader.resumeHttpDownload(id)
+    }
+
     pausedTorrentIds.delete(id)
     const dbDl = db.getDownloads().find((d: any) => d.id === id)
     if (!dbDl) return false
@@ -6751,6 +7497,8 @@ function getMatchingDownloadedVideos(downloadRoot: string, download: any, tvMeta
 
 function collectDownloadDeleteTargets(id: string, torrent: any, download: any): string[] {
   const downloadRoot = getDownloadPath()
+  const defaultDownloadRoot = path.join(app.getPath('downloads'), 'MyCinema')
+  const allowedRoots = [downloadRoot, defaultDownloadRoot].filter(Boolean)
   const targets = new Set<string>()
   const tvMeta = inferDownloadTvMetadata(torrent, download)
   const isSingleEpisodeDownload = typeof tvMeta.parsedEpisode === 'number' && tvMeta.isSeasonPack === false
@@ -6766,7 +7514,7 @@ function collectDownloadDeleteTargets(id: string, torrent: any, download: any): 
   const addAbsoluteTarget = (candidate?: string | null) => {
     if (!candidate) return
     const resolved = path.resolve(candidate)
-    if (isPathInsideRoot(resolved, downloadRoot) && resolved !== path.resolve(downloadRoot)) {
+    if (allowedRoots.some(r => isPathInsideRoot(resolved, r) && resolved !== path.resolve(r))) {
       targets.add(resolved)
     }
   }
@@ -6847,8 +7595,15 @@ function destroyTorrentForDelete(torrent: any): Promise<void> {
 
 async function hardDeletePaths(pathsToDelete: string[]) {
   const downloadRoot = getDownloadPath()
+  const defaultDownloadRoot = path.join(app.getPath('downloads'), 'MyCinema')
+  const allowedRoots = [downloadRoot, defaultDownloadRoot].filter(Boolean)
+
+  const isSafeDelete = (target: string) => {
+    return allowedRoots.some(root => isPathInsideRoot(target, root) && path.resolve(target) !== path.resolve(root))
+  }
+
   const uniquePaths = Array.from(new Set(pathsToDelete))
-    .filter(target => isPathInsideRoot(target, downloadRoot) && path.resolve(target) !== path.resolve(downloadRoot))
+    .filter(target => isSafeDelete(target))
     .sort((a, b) => b.length - a.length)
 
   for (const target of uniquePaths) {
@@ -6879,6 +7634,13 @@ async function hardDeletePaths(pathsToDelete: string[]) {
 // ─── IPC: Remove Download ────────────────────────────────────────────────────
 ipcMain.handle('remove-download', async (_, id: string, deleteFile: boolean = false) => {
   try {
+    if (httpDownloader.isHttpDownload(id)) {
+      httpDownloader.cancelHttpDownload(id, deleteFile)
+      db.removeDownloadRow(id)
+      BrowserWindow.getAllWindows().forEach(w => w.webContents.send('downloads-changed'))
+      return true
+    }
+
     const torrent = activeTorrents.get(id)
     const download = db.getDownloads().find((d: any) => d.id === id)
     const deleteTargets = deleteFile ? collectDownloadDeleteTargets(id, torrent, download) : []

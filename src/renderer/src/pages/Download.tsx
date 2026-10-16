@@ -349,9 +349,13 @@ const Download: React.FC<DownloadProps> = ({ onShowDetail }) => {
     // Refresh videos every 30 seconds to catch new scans
     const interval = setInterval(fetchVideos, 30000)
     const storageInterval = setInterval(refreshDownloadsStorage, 30000)
+    const unsubDir = window.api.onDownloadDirChanged?.(() => {
+      refreshDownloadsStorage()
+    })
     return () => {
       clearInterval(interval)
       clearInterval(storageInterval)
+      unsubDir?.()
     }
   }, [])
 

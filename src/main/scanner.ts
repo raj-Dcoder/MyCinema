@@ -267,16 +267,29 @@ export async function scanFolder(rootPath: string) {
     // download record to inherit its TMDB ID (prevents metadata mismatch)
     let tmdbIdFromDownload = null
     try {
-      const dlPath = path.normalize(path.join(app.getPath('downloads'), 'MyCinema'))
+      const defaultDlPath = path.normalize(path.join(app.getPath('downloads'), 'MyCinema'))
+      let customDlPath: string | null = null
+      try {
+        const raw = fs.readFileSync(path.join(app.getPath('userData'), 'app-settings.json'), 'utf8')
+        const parsed = JSON.parse(raw)
+        if (parsed.downloadPath && typeof parsed.downloadPath === 'string' && parsed.downloadPath.trim()) {
+          customDlPath = path.normalize(parsed.downloadPath.trim())
+        }
+      } catch {}
+
       const normFilePath = path.normalize(filePath)
-      
-      if (normFilePath.toLowerCase().startsWith(dlPath.toLowerCase())) {
-        const relative = path.relative(dlPath, normFilePath)
-        const torrentName = relative.split(path.sep)[0]
-        const download = getDownloadById(torrentName) || getDownloadByTorrentName(torrentName)
-        if (download && download.tmdb_id) {
-          tmdbIdFromDownload = download.tmdb_id
-          console.log(`[Scanner] Linked file to download: "${torrentName}" -> TMDB ID: ${tmdbIdFromDownload}`)
+      const dlCandidateRoots = [customDlPath, defaultDlPath].filter(Boolean) as string[]
+
+      for (const dlPath of dlCandidateRoots) {
+        if (normFilePath.toLowerCase().startsWith(dlPath.toLowerCase())) {
+          const relative = path.relative(dlPath, normFilePath)
+          const torrentName = relative.split(path.sep)[0]
+          const download = getDownloadById(torrentName) || getDownloadByTorrentName(torrentName)
+          if (download && download.tmdb_id) {
+            tmdbIdFromDownload = download.tmdb_id
+            console.log(`[Scanner] Linked file to download: "${torrentName}" -> TMDB ID: ${tmdbIdFromDownload}`)
+            break
+          }
         }
       }
     } catch (e) {

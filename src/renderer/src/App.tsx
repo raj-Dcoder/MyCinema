@@ -95,6 +95,13 @@ const App: React.FC = () => {
   const [videoControlsVisible, setVideoControlsVisible] = useState(false)
   const [activeDownloads, setActiveDownloads] = useState<ActiveDownload[]>([])
   const [dismissedDownloadTrayIds, setDismissedDownloadTrayIds] = useState<Set<string>>(() => new Set())
+  const [showDownloadTray, setShowDownloadTray] = useState(() => {
+    try {
+      return localStorage.getItem('mycinema_show_download_tray') !== 'false'
+    } catch {
+      return true
+    }
+  })
   const [webPopupOpen, setWebPopupOpen] = useState(false)
   const homeScrollRef = useRef<HTMLDivElement | null>(null)
   const activePageScrollRef = useRef<HTMLDivElement | null>(null)
@@ -234,6 +241,12 @@ const App: React.FC = () => {
     window.api.getAppSettings().then(settings => {
       setLaunchFullscreen(settings.launchFullscreen)
       setFocusTubeEnabled(settings.focusTubeEnabled !== false)
+      if (typeof settings.showDownloadTray === 'boolean') {
+        setShowDownloadTray(settings.showDownloadTray)
+        try {
+          localStorage.setItem('mycinema_show_download_tray', String(settings.showDownloadTray))
+        } catch {}
+      }
       // Keep the renderer's sync online-progress gates aligned with main.
       syncStreamingMirrors(settings)
     }).catch(() => {})
@@ -241,11 +254,31 @@ const App: React.FC = () => {
     return window.api.onAppSettingsChanged(settings => {
       setLaunchFullscreen(settings.launchFullscreen)
       setFocusTubeEnabled(settings.focusTubeEnabled !== false)
+      if (typeof settings.showDownloadTray === 'boolean') {
+        setShowDownloadTray(settings.showDownloadTray)
+        try {
+          localStorage.setItem('mycinema_show_download_tray', String(settings.showDownloadTray))
+        } catch {}
+      }
       if (!settings.launchFullscreen) {
         setShowWindowControls(false)
       }
       syncStreamingMirrors(settings)
     })
+  }, [])
+
+  useEffect(() => {
+    const handleTrayToggle = (e: any) => {
+      if (typeof e?.detail?.enabled === 'boolean') {
+        setShowDownloadTray(e.detail.enabled)
+      } else {
+        try {
+          setShowDownloadTray(localStorage.getItem('mycinema_show_download_tray') !== 'false')
+        } catch {}
+      }
+    }
+    window.addEventListener('mycinema_download_tray_changed', handleTrayToggle)
+    return () => window.removeEventListener('mycinema_download_tray_changed', handleTrayToggle)
   }, [])
 
   useEffect(() => {
@@ -629,7 +662,7 @@ const App: React.FC = () => {
   const trayDownload = visibleDownloads[0]
   const trayProgress = Math.max(0, Math.min(100, Math.round(Number(trayDownload?.progress || 0))))
   const trayTitle = trayDownload ? (trayDownload.name || trayDownload.title || 'Download') : ''
-  const shouldShowDownloadTray = Boolean(trayDownload && activeTab !== 'download' && !playingVideo)
+  const shouldShowDownloadTray = Boolean(showDownloadTray && trayDownload && activeTab !== 'download' && !playingVideo)
 
   return (
     <div

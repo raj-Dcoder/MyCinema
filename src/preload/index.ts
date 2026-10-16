@@ -148,6 +148,14 @@ const api = {
   getSeekPreviewThumbnail: (filePath: string, time: number) => ipcRenderer.invoke('get-seek-preview-thumbnail', filePath, time),
   openDownloadsFolder: () => ipcRenderer.invoke('open-downloads-folder'),
   getDownloadsStorage: () => ipcRenderer.invoke('get-downloads-storage'),
+  getDownloadDir: () => ipcRenderer.invoke('get-download-dir'),
+  setDownloadDir: (dirPath: string) => ipcRenderer.invoke('set-download-dir', dirPath),
+  resetDownloadDir: () => ipcRenderer.invoke('reset-download-dir'),
+  onDownloadDirChanged: (callback: (info: { currentPath: string; defaultPath: string; isCustom: boolean }) => void) => {
+    const handler = (_event: any, info: { currentPath: string; defaultPath: string; isCustom: boolean }) => callback(info)
+    ipcRenderer.on('download-dir-changed', handler)
+    return () => ipcRenderer.removeListener('download-dir-changed', handler)
+  },
   // OpenSubtitles API
   searchOnlineSubtitles: (params: { query?: string; tmdbId?: number; season?: number; episode?: number; languages?: string; mediaType?: string; videoFilePath?: string }) =>
     ipcRenderer.invoke('search-opensubtitles', params),
@@ -163,7 +171,7 @@ const api = {
     ipcRenderer.on('thumbar-command', handler)
     return () => ipcRenderer.removeListener('thumbar-command', handler)
   },
-  openWebPopup: (url: string, title?: string) => ipcRenderer.invoke('open-web-popup', url, title),
+  openWebPopup: (url: string, title?: string, autoSearch?: string) => ipcRenderer.invoke('open-web-popup', url, title, autoSearch),
   getDownloadSites: () => ipcRenderer.invoke('get-download-sites'),
   resolveDownloadSiteUrl: (siteId: string, title: string, year?: string | number | null) =>
     ipcRenderer.invoke('resolve-download-site-url', siteId, title, year),
@@ -189,6 +197,7 @@ const api = {
   updateStreamProgress: (entry: any) => ipcRenderer.send('update-stream-progress', entry),
   getStreamContinueWatching: () => ipcRenderer.invoke('get-stream-continue-watching'),
   getStreamHistory: (limit?: number) => ipcRenderer.invoke('get-stream-history', limit ?? 100),
+  setShowDownloadTray: (enabled: boolean) => ipcRenderer.invoke('set-show-download-tray', enabled),
   setNotifyNewEpisodes: (enabled: boolean) => ipcRenderer.invoke('set-notify-new-episodes', enabled),
   setFocusTubeEnabled: (enabled: boolean) => ipcRenderer.invoke('set-focus-tube-enabled', enabled),
   followSeries: (input: { tmdb_id: number; title?: string; poster_path?: string | null; backdrop_path?: string | null; overview?: string | null; season?: number | null; episode?: number | null }) =>
@@ -200,8 +209,8 @@ const api = {
   checkSeriesUpdates: (tmdbId: number) => ipcRenderer.invoke('check-series-updates', tmdbId),
   deleteStreamProgress: (tmdbId: number, mediaType: string, season?: number | null, episode?: number | null) =>
     ipcRenderer.invoke('delete-stream-progress', tmdbId, mediaType, season ?? null, episode ?? null),
-  onAppSettingsChanged: (callback: (settings: { launchFullscreen: boolean; rememberOnlineProgress: boolean; notifyNewEpisodes: boolean }) => void) => {
-    const handler = (_event: any, settings: { launchFullscreen: boolean; rememberOnlineProgress: boolean; notifyNewEpisodes: boolean }) => callback(settings)
+  onAppSettingsChanged: (callback: (settings: any) => void) => {
+    const handler = (_event: any, settings: any) => callback(settings)
     ipcRenderer.on('app-settings-changed', handler)
     return () => ipcRenderer.removeListener('app-settings-changed', handler)
   },

@@ -118,6 +118,9 @@ const App: React.FC = () => {
   }
 
   const navigateToTab = useCallback((tab: AppTab) => {
+    setSelectedVideo(null)
+    setSharedSource(null)
+
     if (tab === activeTabRef.current) {
       if (tab === 'home') {
         homeScrollRef.current?.scrollTo({ top: 0, behavior: 'smooth' })
@@ -161,7 +164,7 @@ const App: React.FC = () => {
     }
   }, [])
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     localStorage.setItem(SIDEBAR_EXPANDED_STORAGE_KEY, String(isSidebarExpanded))
     document.documentElement.style.setProperty('--sidebar-width', isSidebarExpanded ? '16rem' : '5rem')
   }, [isSidebarExpanded])

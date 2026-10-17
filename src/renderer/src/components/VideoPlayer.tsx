@@ -5027,7 +5027,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
       data-fullscreen-gesture-scope="player"
       className={isMinimized
         ? 'pointer-events-none fixed inset-0 z-[80] bg-transparent group overflow-visible'
-        : `fixed inset-0 z-50 bg-black flex flex-col items-center justify-center group overflow-hidden ${!showControls ? 'cursor-none' : ''}`}
+        : `fixed inset-0 z-[90] bg-black flex flex-col items-center justify-center group overflow-hidden ${!showControls ? 'cursor-none' : ''}`}
       onMouseMove={(e) => {
         setShowControls(true)
         clearTimeout(window.controlsTimeout)

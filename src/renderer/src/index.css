@@ -3,6 +3,10 @@
 @tailwind utilities;
 
 @layer base {
+  :root {
+    --sidebar-width: 5rem;
+  }
+
   html {
     @apply font-sans;
   }

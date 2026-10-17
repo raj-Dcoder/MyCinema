@@ -1,3 +1,31 @@
+# MyCinema v1.42.0
+
+FocusTube redesign with a focused cinema watch theater, symmetrical bento video cards, authentic creator avatars, an ultra-slim category carousel, and in-browser loading progress.
+
+### FocusTube Redesign & Watch Theater
+- **Focused Watch Theater**: Embedded 16:9 widescreen cinema player with custom timeline controls and dedicated room context.
+- **Chronological Up-Next Queue**: A distraction-free right-hand queue strictly showing upcoming subscriptions from the active category — zero algorithmic recommendations.
+- **Persistent Playback On Completion**: The theater stays in place when a video finishes or autoplay is off, giving you full control to pick what to watch next.
+- **Seamless Tab Switching**: Main sidebar stays accessible in windowed theater mode, and switching tabs automatically docks playback into a floating corner mini-player.
+
+### Symmetrical Bento Video Cards
+- **Flawless Grid Symmetry**: Replaced off-axis side buttons with a serene, balanced card layout so every video in the grid shares the same height and alignment.
+- **Centered Hover Quick Actions**: Hovering over any card reveals sleek frosted-glass `▶ Play` and `✓ Watched` pill buttons centered on the thumbnail.
+- **Authentic Creator Avatars**: Expanded image security policies to display true creator channel profile pictures across your entire subscription library.
+- **Single-Line Truncated Titles**: Clean typography with single-line titles and unified channel, view-count, and release-time metadata.
+
+### Feed & Navigation Polish
+- **Ultra-Slim Header**: Compact single-tier navigation bar with smooth horizontal category scrolling and edge gradient fade masks.
+- **Clean Filter Toggles**: High-contrast macOS-style toggle switches for "Shorts" and "Watched" with instant feed filtering.
+- **Popup Browser Progress Bar**: Instant 0ms visual feedback on clicks and a sleek top progress bar for web catalogs and download mirrors.
+- **Detail Screen Alignment**: Movie and series detail pages now start cleanly to the right of the sidebar with smooth sliding transitions on sidebar expand/collapse.
+
+### Security & Privacy
+- **Google User Content Whitelist**: Explicitly scoped `https://*.googleusercontent.com` and `https://*.ggpht.com` in the renderer Content-Security-Policy to safely load creator channel media without weakening general script isolation.
+- **Isolated Browser Popup Scripting**: Progress bar and popup interaction handlers execute entirely within the dedicated web popup partition without touching main window credentials or media storage.
+
+***
+
 # MyCinema v1.41.1
 
 Download sites that open instantly: mirrors are checked faster, blocked DNS is bypassed, and known-good links are pre-warmed at startup.

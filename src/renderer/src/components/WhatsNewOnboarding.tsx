@@ -89,32 +89,32 @@ const UPDATE_ICONS: Record<UpdateIconKey, { icon: React.ReactNode; tile: string 
 }
 
 export const LATEST_RELEASE: ReleaseNotes = {
-  version: '1.41.1',
-  title: 'Download sites that just open.',
-  highlight: 'just open',
+  version: '1.42.0',
+  title: 'A focused, distraction-free watch experience.',
+  highlight: 'watch experience.',
   description:
-    'We made the in-app download sites faster and steadier, so the links behind those buttons are already working when you click them.',
+    'FocusTube now features a dedicated watch theater, symmetrical bento video cards, and an ultra-slim category carousel.',
   tourId: null,
   updates: [
     {
-      icon: 'download',
-      title: 'Site links open instantly',
-      description: 'Verified links are remembered and used without waiting.',
+      icon: 'play',
+      title: 'Focused cinema watch theater',
+      description: 'Widescreen cinema player with chronological upcoming category queue.',
     },
     {
-      icon: 'fix',
-      title: 'Works on blocked networks',
-      description: 'Links resolve even when your provider blocks DNS.',
+      icon: 'layers',
+      title: 'Symmetrical bento video cards',
+      description: 'Balanced cards with clean centered hover controls and real avatars.',
     },
     {
       icon: 'sparkles',
-      title: 'Ready before you click',
-      description: 'Both sites are checked quietly right after launch.',
+      title: 'Ultra-slim category carousel',
+      description: 'Smooth scrolling category bar with quick Shorts and Watched toggles.',
     },
     {
-      icon: 'play',
-      title: 'Lookups always show up',
-      description: 'Search windows now always open, even on slow pages.',
+      icon: 'download',
+      title: 'In-browser top progress bar',
+      description: 'Instant loading feedback when clicking links and download buttons.',
     },
   ],
 }

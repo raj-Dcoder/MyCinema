@@ -1199,6 +1199,36 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
     pokeBottom()
   }, [pokeBottom])
 
+  const autoMinimizedByTabRef = useRef(false)
+
+  // Auto-minimize when navigating away from FocusTube, and auto-restore when returning
+  useEffect(() => {
+    const handleTabChange = (e: any) => {
+      const activeTab = e.detail?.activeTab
+      if (activeTab && activeTab !== 'focustube') {
+        if (!isMinimizedRef.current) {
+          autoMinimizedByTabRef.current = true
+          setIsMinimized(true)
+        }
+      } else if (activeTab === 'focustube') {
+        if (autoMinimizedByTabRef.current) {
+          autoMinimizedByTabRef.current = false
+          setIsMinimized(false)
+        }
+      }
+    }
+
+    window.addEventListener('focustube-tab-changed', handleTabChange)
+    return () => window.removeEventListener('focustube-tab-changed', handleTabChange)
+  }, [])
+
+  const handleExpandFromMini = useCallback(() => {
+    window.dispatchEvent(new CustomEvent('focustube-request-tab', { detail: { tab: 'focustube' } }))
+    autoMinimizedByTabRef.current = false
+    setIsMinimized(false)
+    pokeBottom()
+  }, [pokeBottom])
+
   // ── Commands ───────────────────────────────────────────────────────────────
   const handleSeek = useCallback((seconds: number) => {
     pokeBottom()
@@ -1632,9 +1662,13 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
     // handler from firing while interacting with this player.
     <div
       data-fullscreen-gesture-scope="player"
+      style={!isMinimized && !fsActive ? { left: 'var(--sidebar-width, 5rem)' } : undefined}
       className={isMinimized
         ? 'pointer-events-none fixed inset-0 z-[70] m-0 bg-transparent p-0 text-white select-none'
-        : 'fixed inset-0 z-[70] m-0 flex flex-col bg-[#090a0f] p-0 text-white select-none overflow-hidden'}>
+        : `fixed right-0 top-0 bottom-0 z-[70] m-0 flex flex-col bg-[#090a0f] p-0 text-white select-none overflow-hidden transition-[left] duration-300 ease-in-out ${
+            fsActive ? 'left-0' : ''
+          }`}
+    >
 
       {/* ── TOP THEATER HEADER (hidden in mini mode and native fullscreen) ── */}
       {!isMinimized && !fsActive && (
@@ -1900,12 +1934,16 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
               <div className="absolute inset-x-0 bottom-0 z-40">
                 <div className={`bg-gradient-to-t from-black/90 via-black/50 to-transparent px-2.5 pb-1 pt-8 transition-all duration-200 ${chromeVisible ? 'translate-y-0 opacity-100' : 'pointer-events-none translate-y-1 opacity-0'}`}>
                   <div className="mb-1.5 flex items-center gap-1.5">
-                    <p className="min-w-0 flex-1 truncate text-[11px] font-bold text-white/90" title={video.title}>
+                    <p
+                      onClick={handleExpandFromMini}
+                      className="min-w-0 flex-1 truncate text-[11px] font-bold text-white/90 cursor-pointer hover:text-white transition-colors"
+                      title="Click to expand player"
+                    >
                       {video.title}
                     </p>
                     <button
                       type="button"
-                      onClick={toggleMinimize}
+                      onClick={handleExpandFromMini}
                       title="Expand player"
                       aria-label="Expand player"
                       className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-white/10 text-white/80 backdrop-blur-md transition-colors hover:bg-white/20 hover:text-white"

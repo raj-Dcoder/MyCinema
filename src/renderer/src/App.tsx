@@ -163,7 +163,22 @@ const App: React.FC = () => {
 
   useEffect(() => {
     localStorage.setItem(SIDEBAR_EXPANDED_STORAGE_KEY, String(isSidebarExpanded))
+    document.documentElement.style.setProperty('--sidebar-width', isSidebarExpanded ? '16rem' : '5rem')
   }, [isSidebarExpanded])
+
+  useEffect(() => {
+    window.dispatchEvent(new CustomEvent('focustube-tab-changed', { detail: { activeTab } }))
+  }, [activeTab])
+
+  useEffect(() => {
+    const handleRequestTab = (e: any) => {
+      if (e.detail?.tab) {
+        navigateToTab(e.detail.tab)
+      }
+    }
+    window.addEventListener('focustube-request-tab', handleRequestTab)
+    return () => window.removeEventListener('focustube-request-tab', handleRequestTab)
+  }, [navigateToTab])
 
 
 
@@ -696,7 +711,7 @@ const App: React.FC = () => {
       />
 
       {/* Sidebar */}
-      <div className={`group/sidebar relative bg-white/[0.02] backdrop-blur-2xl flex flex-col border-r border-white/5 transition-[width] duration-300 ease-in-out z-40 ${isSidebarExpanded ? 'w-64' : 'w-20'}`}>
+      <div className={`group/sidebar relative bg-white/[0.02] backdrop-blur-2xl flex flex-col border-r border-white/5 transition-[width] duration-300 ease-in-out z-[85] ${isSidebarExpanded ? 'w-64' : 'w-20'}`}>
         
         {/* Toggle Button */}
         <button

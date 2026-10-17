@@ -2499,7 +2499,7 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
                 {/* Video Views & Upload Date stats row (clearly belongs to the video, not subscriber count) */}
                 <div className="flex flex-wrap items-center gap-2 text-xs font-medium text-white/60">
                   <span className="font-bold text-white">
-                    {video.views ? `${formatViews(video.views)} views` : 'Subscribed upload'}
+                    {video.views ? formatViews(video.views) : 'Subscribed upload'}
                   </span>
                   <span className="text-white/25">•</span>
                   <span>{publishedAgo ? `${publishedAgo} ago` : 'Uploaded'} ({formatPublishedExact(video.publishedAt)})</span>

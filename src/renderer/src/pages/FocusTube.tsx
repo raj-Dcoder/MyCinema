@@ -115,6 +115,20 @@ const FocusTube: React.FC = () => {
   const videosRef = useRef<FtVideo[]>([])
   useEffect(() => { videosRef.current = videos }, [videos])
 
+  const loadFeed = useCallback(async (categoryId: number | null, opts?: { hideShorts?: boolean; includeSeen?: boolean; search?: string }) => {
+    const next = await window.api.ftGetFeed({
+      categoryId,
+      includeSeen: opts?.includeSeen ?? includeSeen,
+      hideShorts: opts?.hideShorts ?? hideShorts,
+      search: opts?.search ?? null,
+      limit: 60,
+    })
+    setVideos(next || [])
+
+    const summary = await window.api.ftGetCategorySummary(categoryId)
+    setLatestPublished(summary?.latestPublished ?? null)
+  }, [hideShorts, includeSeen])
+
   const loadCategories = useCallback(async () => {
     const list = (await window.api.ftListCategories()) || []
     setCategories(list)
@@ -133,20 +147,6 @@ const FocusTube: React.FC = () => {
     }
     return list
   }, [activeCategoryId, loadFeed])
-
-  const loadFeed = useCallback(async (categoryId: number | null, opts?: { hideShorts?: boolean; includeSeen?: boolean; search?: string }) => {
-    const next = await window.api.ftGetFeed({
-      categoryId,
-      includeSeen: opts?.includeSeen ?? includeSeen,
-      hideShorts: opts?.hideShorts ?? hideShorts,
-      search: opts?.search ?? null,
-      limit: 60,
-    })
-    setVideos(next || [])
-
-    const summary = await window.api.ftGetCategorySummary(categoryId)
-    setLatestPublished(summary?.latestPublished ?? null)
-  }, [hideShorts, includeSeen])
 
   // Initial load: default to the first category so the tab never opens empty
   // when the user already has rooms set up.

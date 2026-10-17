@@ -42,6 +42,8 @@ export interface FtVideo {
   videoId: string
   channelId: string
   channelTitle: string
+  channelAvatarUrl?: string | null
+  channelHandle?: string | null
   title: string
   publishedAt: string
   duration: number | null

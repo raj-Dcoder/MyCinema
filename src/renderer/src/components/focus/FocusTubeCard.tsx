@@ -132,7 +132,7 @@ const FocusTubeCard: React.FC<FocusTubeCardProps> = ({ video, onPlay, onToggleSe
             {video.channelTitle}
           </p>
           <p className="mt-0.5 text-[11px] font-medium text-white/35">
-            {video.views ? `${formatViews(video.views)} views • ` : ''}
+            {video.views ? `${formatViews(video.views)} • ` : ''}
             {formatRelativeTime(video.publishedAt)} ago
           </p>
         </div>

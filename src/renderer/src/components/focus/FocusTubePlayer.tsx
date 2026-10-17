@@ -20,6 +20,7 @@ import {
   Pause,
   Play,
   Plus,
+  RotateCcw,
   Search,
   SkipForward,
   Subtitles,
@@ -908,6 +909,7 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
         stateRef.current = state
         setPlayerState(state)
         if (state === STATE_PLAYING) {
+          endedRef.current = false
           setErrorText(null)
           // YouTube can auto-enable captions once playback actually starts
           // (account prefs / auto-captions), even after the onReady unload.
@@ -926,15 +928,15 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
           cbRef.current.onObserved(video.videoId, { ended: true })
           // Autoplay ON + a next unseen video exists: hand off to the queue
           // (the parent marks this video seen and swaps in the next one).
-          // Otherwise keep the historic behaviour: mark seen + close.
           // Preserve the window mode: remember fullscreen so the next video
           // opens in the same mode (fullscreen stays fullscreen).
           ftFullscreenIntent = !!document.fullscreenElement
           if (autoplayNextRef.current && hasNextRef.current) {
             cbRef.current.onAutoAdvance(video.videoId)
           } else {
+            // Keep player open (YouTube-style) so user can pick from the Up Next queue or replay
             cbRef.current.onMarkSeen(video.videoId)
-            cbRef.current.onClose()
+            setBottomVisible(true)
           }
         }
         return
@@ -1198,11 +1200,6 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
   }, [pokeBottom])
 
   // ── Commands ───────────────────────────────────────────────────────────────
-  const togglePlay = useCallback(() => {
-    pokeBottom()
-    withBridge(() => cmd(stateRef.current === STATE_PLAYING ? 'pauseVideo' : 'playVideo', []))
-  }, [cmd, withBridge, pokeBottom])
-
   const handleSeek = useCallback((seconds: number) => {
     pokeBottom()
     const clamped = Math.max(0, seconds)
@@ -1213,6 +1210,16 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
     lastSkipRef.current = null
     withBridge(() => cmd('seekTo', [clamped, true]))
   }, [cmd, withBridge, pokeBottom])
+
+  const togglePlay = useCallback(() => {
+    pokeBottom()
+    if (stateRef.current === STATE_ENDED) {
+      handleSeek(0)
+      withBridge(() => cmd('playVideo', []))
+      return
+    }
+    withBridge(() => cmd(stateRef.current === STATE_PLAYING ? 'pauseVideo' : 'playVideo', []))
+  }, [cmd, withBridge, pokeBottom, handleSeek])
 
   const handleVolume = useCallback((next: number) => {
     const clamped = Math.min(100, Math.max(0, Math.round(next)))
@@ -1412,11 +1419,12 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
 
   const handleMarkWatched = useCallback(() => {
     saveProgress(timeRef.current)
-    ftFullscreenIntent = false
-    exitVideoFullscreen()
-    cbRef.current.onMarkSeen(video.videoId)
-    cbRef.current.onClose()
-  }, [saveProgress, exitVideoFullscreen, video.videoId])
+    if (onToggleSeen) {
+      onToggleSeen(video)
+    } else {
+      cbRef.current.onMarkSeen(video.videoId)
+    }
+  }, [saveProgress, onToggleSeen, video])
 
   // Manual skip: keep the current position (NOT marked seen) and hand the
   // queue to the parent. Disabled when this is the last video in the stack.
@@ -1630,7 +1638,7 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
 
       {/* ── TOP THEATER HEADER (hidden in mini mode and native fullscreen) ── */}
       {!isMinimized && !fsActive && (
-        <header className="flex h-14 shrink-0 items-center justify-between border-b border-white/[0.08] bg-[#0c0d12]/95 px-4 backdrop-blur-md sm:px-6">
+        <header className="relative z-40 flex h-14 shrink-0 items-center justify-between border-b border-white/[0.08] bg-[#0c0d12]/95 px-4 backdrop-blur-md sm:px-6">
           <div className="flex items-center gap-3">
             <button
               type="button"
@@ -1641,7 +1649,7 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
             </button>
 
             {/* Category Dropdown / Badge */}
-            <div className="relative">
+            <div className="relative z-50">
               <button
                 type="button"
                 onClick={() => setCategoryDropdownOpen((v) => !v)}
@@ -1654,33 +1662,47 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
                 )}
               </button>
 
-              {categoryDropdownOpen && categories && categories.length > 0 && (
-                <div className="absolute left-0 top-full z-50 mt-1.5 w-48 rounded-xl border border-white/15 bg-[#14161f] p-1.5 shadow-2xl backdrop-blur-xl">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setCategoryDropdownOpen(false)
-                      if (onSelectCategory) onSelectCategory(null)
-                    }}
-                    className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-xs font-bold text-white hover:bg-white/10"
-                  >
-                    All
-                  </button>
-                  {categories.map((cat) => (
+              {categoryDropdownOpen && (
+                <>
+                  <div
+                    className="fixed inset-0 z-40 cursor-default"
+                    onClick={() => setCategoryDropdownOpen(false)}
+                  />
+                  <div className="absolute left-0 top-full z-50 mt-1.5 w-52 max-h-80 overflow-y-auto rounded-xl border border-white/15 bg-[#14161f] p-1.5 shadow-2xl backdrop-blur-xl">
                     <button
-                      key={cat.id}
                       type="button"
                       onClick={() => {
                         setCategoryDropdownOpen(false)
-                        if (onSelectCategory) onSelectCategory(cat.id)
+                        if (onSelectCategory) onSelectCategory(null)
                       }}
-                      className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-xs font-bold text-white hover:bg-white/10"
+                      className={`flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-xs font-bold transition-colors ${
+                        !categoryName || categoryName === 'All'
+                          ? 'bg-primary/20 text-white font-black'
+                          : 'text-white/80 hover:bg-white/10 hover:text-white'
+                      }`}
                     >
-                      <span className={`h-2 w-2 rounded-full ${categoryDot(cat.color)}`} />
-                      <span className="truncate">{cat.name}</span>
+                      All
                     </button>
-                  ))}
-                </div>
+                    {categories && categories.map((cat) => (
+                      <button
+                        key={cat.id}
+                        type="button"
+                        onClick={() => {
+                          setCategoryDropdownOpen(false)
+                          if (onSelectCategory) onSelectCategory(cat.id)
+                        }}
+                        className={`flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-xs font-bold transition-colors ${
+                          categoryName === cat.name
+                            ? 'bg-primary/20 text-white font-black'
+                            : 'text-white/80 hover:bg-white/10 hover:text-white'
+                        }`}
+                      >
+                        <span className={`h-2 w-2 rounded-full ${categoryDot(cat.color)}`} />
+                        <span className="truncate">{cat.name}</span>
+                      </button>
+                    ))}
+                  </div>
+                </>
               )}
             </div>
           </div>
@@ -1743,7 +1765,7 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
       {/* Body: stable two columns on desktop, stacked on mobile. */}
       <div className={isMinimized
         ? 'contents'
-        : 'flex min-h-0 flex-1 flex-col overflow-y-auto lg:flex-row lg:overflow-hidden'}>
+        : 'relative z-10 flex min-h-0 flex-1 flex-col overflow-y-auto lg:flex-row lg:overflow-hidden'}>
 
         {/* ── MAIN VIDEO AREA ─────────────────────────────────────────── */}
         <div className={isMinimized
@@ -2222,11 +2244,18 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
                 <button
                   type="button"
                   onClick={togglePlay}
-                  aria-label={isPlaying ? 'Pause' : 'Play'}
+                  aria-label={isPlaying ? 'Pause' : playerState === STATE_ENDED ? 'Replay' : 'Play'}
+                  title={isPlaying ? 'Pause (Space)' : playerState === STATE_ENDED ? 'Replay (Space)' : 'Play (Space)'}
                   tabIndex={bottomVisible ? 0 : -1}
                   className="p-2 text-white transition-colors hover:text-white/70"
                 >
-                  {isPlaying ? <Pause size={20} fill="currentColor" /> : <Play size={20} fill="currentColor" />}
+                  {isPlaying ? (
+                    <Pause size={20} fill="currentColor" />
+                  ) : playerState === STATE_ENDED ? (
+                    <RotateCcw size={19} />
+                  ) : (
+                    <Play size={20} fill="currentColor" />
+                  )}
                 </button>
                 <button
                   type="button"

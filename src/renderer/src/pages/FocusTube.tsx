@@ -439,6 +439,7 @@ const FocusTube: React.FC = () => {
   const handleMarkSeen = useCallback(async (videoId: string) => {
     progressCacheRef.current.delete(videoId)
     await window.api.ftSetVideoSeen(videoId, true)
+    setPlaying((prev) => (prev && prev.video.videoId === videoId ? { ...prev, video: { ...prev.video, seen: true } } : prev))
     await loadCategories()
     await loadFeed(activeCategoryId)
   }, [activeCategoryId, loadCategories, loadFeed])
@@ -449,13 +450,6 @@ const FocusTube: React.FC = () => {
   // background so the finished card disappears underneath.
   const handleAutoAdvance = useCallback(async (finishedVideoId: string) => {
     const next = getNextInQueue(finishedVideoId)
-    if (!next) {
-      await handleMarkSeen(finishedVideoId)
-      setPlaying(null)
-      return
-    }
-    const startSeconds = await resolveStartSeconds(next)
-    setPlaying({ video: next, startSeconds })
     progressCacheRef.current.delete(finishedVideoId)
     try {
       await window.api.ftSetVideoSeen(finishedVideoId, true)
@@ -464,7 +458,14 @@ const FocusTube: React.FC = () => {
     } catch (err) {
       console.error('[FocusTube] Auto-advance refresh failed:', err)
     }
-  }, [activeCategoryId, getNextInQueue, handleMarkSeen, loadCategories, loadFeed, resolveStartSeconds])
+    if (!next) {
+      // Reached the end of the queue: update current video seen state, but stay in player
+      setPlaying((prev) => (prev && prev.video.videoId === finishedVideoId ? { ...prev, video: { ...prev.video, seen: true } } : prev))
+      return
+    }
+    const startSeconds = await resolveStartSeconds(next)
+    setPlaying({ video: next, startSeconds })
+  }, [activeCategoryId, getNextInQueue, loadCategories, loadFeed, resolveStartSeconds])
 
   // Manual "Next" path: skip without marking the current video seen.
   // The player saves the current position before calling this.
@@ -490,7 +491,9 @@ const FocusTube: React.FC = () => {
 
   const handleToggleSeen = useCallback(async (video: FtVideo) => {
     progressCacheRef.current.delete(video.videoId)
-    await window.api.ftSetVideoSeen(video.videoId, !video.seen)
+    const nextSeen = !video.seen
+    await window.api.ftSetVideoSeen(video.videoId, nextSeen)
+    setPlaying((prev) => (prev && prev.video.videoId === video.videoId ? { ...prev, video: { ...prev.video, seen: nextSeen } } : prev))
     await loadCategories()
     await loadFeed(activeCategoryId)
   }, [activeCategoryId, loadCategories, loadFeed])

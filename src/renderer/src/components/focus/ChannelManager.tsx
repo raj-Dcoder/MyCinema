@@ -32,6 +32,9 @@ const ChannelAvatar: React.FC<{ title: string; avatarUrl: string | null; sizeCla
   sizeClass = 'h-11 w-11',
 }) => {
   const [failed, setFailed] = useState(false)
+  useEffect(() => {
+    setFailed(false)
+  }, [avatarUrl])
   if (avatarUrl && !failed) {
     return (
       <img

@@ -1,4 +1,4 @@
-import React, { useState } from 'react'
+import React, { useState, useEffect } from 'react'
 import { Check, CheckCircle2, Loader2, Play, Radio } from 'lucide-react'
 import type { FtVideo } from '../../types'
 import { avatarHue, formatDuration, formatRelativeTime, formatViews, thumbnailUrl } from '../../utils/focusTube'
@@ -16,6 +16,10 @@ const FocusTubeCard: React.FC<FocusTubeCardProps> = ({ video, onPlay, onToggleSe
   const [thumbBroken, setThumbBroken] = useState(false)
   const [marking, setMarking] = useState(false)
   const [avatarFailed, setAvatarFailed] = useState(false)
+
+  useEffect(() => {
+    setAvatarFailed(false)
+  }, [video.channelAvatarUrl])
 
   const duration = formatDuration(video.duration)
 

@@ -2435,6 +2435,96 @@ function isTrustedPopupDestination(destUrl: string, currentUrl: string): boolean
   }
 }
 
+const POPUP_LOADING_BAR_SCRIPT = `(() => {
+  try {
+    if (window.__mycinemaLoadingBarInstalled) return;
+    window.__mycinemaLoadingBarInstalled = true;
+
+    let progressTimer = null;
+    let currentProgress = 0;
+
+    function ensureBar() {
+      let bar = document.getElementById('mycinema-top-progress-bar');
+      if (!bar) {
+        bar = document.createElement('div');
+        bar.id = 'mycinema-top-progress-bar';
+        Object.assign(bar.style, {
+          position: 'fixed',
+          top: '0',
+          left: '0',
+          height: '3px',
+          width: '0%',
+          background: 'linear-gradient(90deg, #06b6d4, #e50914, #38bdf8)',
+          boxShadow: '0 0 10px rgba(6, 182, 212, 0.8), 0 0 5px rgba(229, 9, 20, 0.6)',
+          zIndex: '2147483647',
+          pointerEvents: 'none',
+          opacity: '0',
+          transition: 'width 0.25s cubic-bezier(0.1, 0.9, 0.2, 1), opacity 0.3s ease'
+        });
+        (document.body || document.documentElement).appendChild(bar);
+      }
+      return bar;
+    }
+
+    window.__mycinemaStartLoading = function() {
+      try {
+        const bar = ensureBar();
+        if (progressTimer) clearInterval(progressTimer);
+        currentProgress = Math.max(currentProgress, 25);
+        bar.style.transition = 'width 0.25s cubic-bezier(0.1, 0.9, 0.2, 1), opacity 0.2s ease';
+        bar.style.opacity = '1';
+        bar.style.width = currentProgress + '%';
+
+        progressTimer = setInterval(() => {
+          if (currentProgress < 85) {
+            const step = Math.max(1, Math.floor((90 - currentProgress) / 7));
+            currentProgress += step;
+            bar.style.width = currentProgress + '%';
+          }
+        }, 220);
+      } catch {}
+    };
+
+    window.__mycinemaFinishLoading = function() {
+      try {
+        const bar = ensureBar();
+        if (progressTimer) {
+          clearInterval(progressTimer);
+          progressTimer = null;
+        }
+        currentProgress = 100;
+        bar.style.transition = 'width 0.18s ease-out, opacity 0.3s ease 0.18s';
+        bar.style.width = '100%';
+        bar.style.opacity = '0';
+        setTimeout(() => {
+          if (currentProgress === 100) {
+            bar.style.transition = 'none';
+            bar.style.width = '0%';
+            currentProgress = 0;
+          }
+        }, 500);
+      } catch {}
+    };
+
+    // Instant click listener on interactive elements to give zero-latency feedback
+    document.addEventListener('click', (e) => {
+      try {
+        const el = e.target;
+        if (!el || typeof el.closest !== 'function') return;
+        const clickable = el.closest('a, button, input[type="submit"], input[type="button"], [role="button"], form');
+        if (clickable) {
+          window.__mycinemaStartLoading();
+          setTimeout(() => {
+            if (currentProgress > 0 && currentProgress < 100) {
+              window.__mycinemaFinishLoading();
+            }
+          }, 9000);
+        }
+      } catch {}
+    }, true);
+  } catch {}
+})();`
+
 ipcMain.handle('open-web-popup', (event, url: string, title?: string, autoSearch?: string) => {
   const parent = BrowserWindow.fromWebContents(event.sender) || BrowserWindow.getAllWindows()[0]
   const popup = new BrowserWindow({
@@ -2698,7 +2788,20 @@ ipcMain.handle('open-web-popup', (event, url: string, title?: string, autoSearch
 
   const injectAntiAd = () => {
     popup.webContents.executeJavaScript(POPUP_ANTI_AD_SCRIPT).catch(() => {})
+    popup.webContents.executeJavaScript(POPUP_LOADING_BAR_SCRIPT).catch(() => {})
   }
+
+  popup.webContents.on('did-start-loading', () => {
+    popup.webContents.executeJavaScript('if (typeof window.__mycinemaStartLoading === "function") window.__mycinemaStartLoading();').catch(() => {})
+  })
+
+  popup.webContents.on('did-stop-loading', () => {
+    popup.webContents.executeJavaScript('if (typeof window.__mycinemaFinishLoading === "function") window.__mycinemaFinishLoading();').catch(() => {})
+  })
+
+  popup.webContents.on('did-fail-load', () => {
+    popup.webContents.executeJavaScript('if (typeof window.__mycinemaFinishLoading === "function") window.__mycinemaFinishLoading();').catch(() => {})
+  })
 
   popup.webContents.on('dom-ready', () => {
     popup.webContents.insertCSS(`
@@ -2710,6 +2813,7 @@ ipcMain.handle('open-web-popup', (event, url: string, title?: string, autoSearch
     `).catch(() => {})
     injectAntiAd()
     updateBackButton()
+    popup.webContents.executeJavaScript('if (typeof window.__mycinemaFinishLoading === "function") window.__mycinemaFinishLoading();').catch(() => {})
   })
 
   popup.webContents.on('did-navigate-in-page', () => {

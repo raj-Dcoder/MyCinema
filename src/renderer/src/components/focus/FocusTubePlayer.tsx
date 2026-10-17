@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import {
+  ArrowLeft,
   Check,
   ChevronDown,
   ExternalLink,
@@ -12,12 +13,14 @@ import {
   Maximize2,
   MessageSquare,
   Minimize,
+  Minimize2,
   Minus,
   MonitorPlay,
   SquareArrowDownRight,
   Pause,
   Play,
   Plus,
+  Search,
   SkipForward,
   Subtitles,
   ThumbsUp,
@@ -26,8 +29,8 @@ import {
   X,
   Zap,
 } from 'lucide-react'
-import type { FtComment, FtVideo } from '../../types'
-import { embedUrl, formatAgo, formatDuration, formatViews, thumbnailUrl, watchUrl } from '../../utils/focusTube'
+import type { FtCategory, FtComment, FtVideo } from '../../types'
+import { categoryDot, embedUrl, formatAgo, formatDuration, formatViews, thumbnailUrl, watchUrl } from '../../utils/focusTube'
 import {
   parseChapters,
   getActiveChapterIndex,
@@ -51,6 +54,12 @@ interface FocusTubePlayerProps {
   nextTitle: string | null
   onAutoAdvance: (finishedVideoId: string) => void
   onManualNext: (currentVideoId: string) => void
+  categoryName?: string
+  categories?: FtCategory[]
+  onSelectCategory?: (categoryId: number | null) => void
+  queue?: FtVideo[]
+  onSelectVideo?: (video: FtVideo) => void
+  onToggleSeen?: (video: FtVideo) => void
 }
 
 // YouTube player states (see IFrame Player API reference).
@@ -205,32 +214,117 @@ function loadSkipSponsors(): boolean {
   }
 }
 
+const ChannelAvatar: React.FC<{ title: string; avatarUrl?: string | null; sizeClass?: string }> = ({
+  title,
+  avatarUrl,
+  sizeClass = 'h-10 w-10',
+}) => {
+  const [failed, setFailed] = useState(false)
+  if (avatarUrl && !failed) {
+    return (
+      <img
+        src={avatarUrl}
+        alt=""
+        loading="lazy"
+        referrerPolicy="no-referrer"
+        onError={() => setFailed(true)}
+        className={`${sizeClass} shrink-0 rounded-full border border-white/10 bg-white/[0.06] object-cover`}
+      />
+    )
+  }
+  return (
+    <div
+      className={`${sizeClass} flex shrink-0 items-center justify-center rounded-full border border-primary/25 bg-gradient-to-br from-primary/30 to-primary/5 text-xs font-black uppercase text-white shadow-sm`}
+    >
+      {(title || '?').trim().charAt(0) || '?'}
+    </div>
+  )
+}
+
+const QueueCard: React.FC<{
+  video: FtVideo
+  isCurrent: boolean
+  onSelect: (video: FtVideo) => void
+  onToggleSeen: (video: FtVideo) => void
+}> = ({ video, isCurrent, onSelect, onToggleSeen }) => {
+  const [variant, setVariant] = useState(0)
+  const [thumbBroken, setThumbBroken] = useState(false)
+  const duration = formatDuration(video.duration)
+
+  return (
+    <div
+      onClick={() => onSelect(video)}
+      className={`group relative flex items-center gap-3 rounded-xl border p-2 transition-all cursor-pointer select-none ${
+        isCurrent
+          ? 'border-primary/60 bg-primary/10 shadow-[0_4px_20px_-8px_rgba(229,9,20,0.5)]'
+          : 'border-white/[0.06] bg-white/[0.02] hover:border-white/20 hover:bg-white/[0.06]'
+      }`}
+    >
+      <div className="relative aspect-video w-28 shrink-0 overflow-hidden rounded-lg bg-black/60 sm:w-32">
+        {!thumbBroken ? (
+          <img
+            src={thumbnailUrl(video.videoId, variant)}
+            alt=""
+            loading="lazy"
+            className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-105"
+            onError={() => {
+              if (variant < 3) setVariant((v) => v + 1)
+              else setThumbBroken(true)
+            }}
+          />
+        ) : (
+          <div className="flex h-full w-full items-center justify-center text-[9px] font-bold uppercase text-white/30">
+            Preview
+          </div>
+        )}
+        {duration && (
+          <span className="absolute bottom-1 right-1 rounded bg-black/85 px-1 py-0.5 text-[10px] font-bold tabular-nums text-white backdrop-blur-sm">
+            {duration}
+          </span>
+        )}
+        {isCurrent && (
+          <span className="absolute top-1 left-1 flex items-center gap-1 rounded bg-primary px-1.5 py-0.5 text-[9px] font-black uppercase tracking-wider text-white shadow">
+            <Play size={8} fill="currentColor" /> Playing
+          </span>
+        )}
+      </div>
+
+      <div className="min-w-0 flex-1">
+        <h4
+          className={`line-clamp-2 text-xs font-bold leading-snug transition-colors ${
+            isCurrent ? 'text-white' : 'text-white/85 group-hover:text-white'
+          }`}
+          title={video.title}
+        >
+          {video.title}
+        </h4>
+        <p className="mt-1 truncate text-[11px] font-medium text-white/45">
+          {video.channelTitle}
+        </p>
+      </div>
+
+      <button
+        type="button"
+        onClick={(e) => {
+          e.stopPropagation()
+          onToggleSeen(video)
+        }}
+        title={video.seen ? 'Mark as unwatched' : 'Mark as watched'}
+        aria-label={video.seen ? 'Mark as unwatched' : 'Mark as watched'}
+        className={`shrink-0 rounded-lg p-1.5 transition-colors ${
+          video.seen
+            ? 'bg-emerald-500/20 text-emerald-300 hover:bg-emerald-500/30'
+            : 'text-white/30 hover:bg-white/10 hover:text-white'
+        }`}
+      >
+        <Check size={14} strokeWidth={video.seen ? 3 : 2} />
+      </button>
+    </div>
+  )
+}
+
 /**
  * MyCinema's isolated cinema shell around the YouTube embed.
- *
- * LAYOUT CONTRACT (no layout shift, ever):
- * - Root is portalled to document.body as a fixed full-screen column, so no
- *   ancestor transform/filter can shrink it or leave a sliver of the feed
- *   visible: body row holds MAIN VIDEO AREA + SIDEBAR with stable geometry.
- *   Nothing in the sidebar or the tabs changes the video column's box.
- * - The stage is a full-bleed black box; the iframe fills it edge to edge.
- *   Aspect is preserved by the embed itself (letterbox = black on black).
- *   No padding, no card, no rounded container, no ring/shadow around video.
- * - There is NO top title bar: it duplicated YouTube's own native title row
- *   (avatar + title + channel) on pause and ghosted through our translucent
- *   gradient. The video owns the whole stage; only small floating icon
- *   buttons (back / watched / next / open / close) fade in with the bottom
- *   bar on mouse move / tap and hide on idle, YouTube-style.
- * - Bottom controls are an ABSOLUTE overlay inside the stage. It mounts once
- *   and only fades (opacity/translate/visibility) — never unmounts, never
- *   takes part in document flow — so showing/hiding cannot move the video.
- *
- * Isolation contract (unchanged by default):
- * - Single video only: rel=0, no recommendation wall, auto-close on ENDED.
- * - Optional player-only "Auto" queue: when the user turns it ON inside the
- *   player, ENDED advances to the next unseen video in the current stack
- *   instead of closing. OFF (default) keeps the historic close behaviour.
- * - Official embed only — never direct stream extraction.
  */
 const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
   video,
@@ -246,6 +340,12 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
   nextTitle,
   onAutoAdvance,
   onManualNext,
+  categoryName,
+  categories,
+  onSelectCategory,
+  queue,
+  onSelectVideo,
+  onToggleSeen,
 }) => {
   const iframeRef = useRef<HTMLIFrameElement>(null)
   // Stable per-video channel id. (A previous revision read a mutated counter
@@ -303,6 +403,10 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
   const [isMinimized, setIsMinimized] = useState(false)
   const isMinimizedRef = useRef(false)
   isMinimizedRef.current = isMinimized
+
+  const [queueSearch, setQueueSearch] = useState('')
+  const [sidebarTab, setSidebarTab] = useState<'queue' | 'chapters' | 'comments'>('queue')
+  const [categoryDropdownOpen, setCategoryDropdownOpen] = useState(false)
 
   const stateRef = useRef<number | null>(null)
   const timeRef = useRef(startSeconds)
@@ -437,6 +541,35 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
   const saveProgress = useCallback((position: number) => {
     if (position > 3) cbRef.current.onSaveProgress(video.videoId, position)
   }, [video.videoId])
+
+  const queueItems = useMemo(() => {
+    const list = queue && queue.length > 0 ? queue : []
+    if (!queueSearch.trim()) return list
+    const q = queueSearch.trim().toLowerCase()
+    return list.filter((v) => v.title.toLowerCase().includes(q) || v.channelTitle.toLowerCase().includes(q))
+  }, [queue, queueSearch])
+
+  const remainingCount = useMemo(() => {
+    return (queue || []).filter((v) => !v.seen && v.videoId !== video.videoId).length
+  }, [queue, video.videoId])
+
+  const handleToggleQueueSeen = useCallback((v: FtVideo) => {
+    if (onToggleSeen) {
+      onToggleSeen(v)
+    } else {
+      cbRef.current.onMarkSeen(v.videoId)
+    }
+  }, [onToggleSeen])
+
+  const handleSelectQueueVideo = useCallback((v: FtVideo) => {
+    if (v.videoId === video.videoId) return
+    saveProgress(displayTime)
+    if (onSelectVideo) {
+      onSelectVideo(v)
+    } else {
+      cbRef.current.onManualNext(v.videoId)
+    }
+  }, [video.videoId, displayTime, saveProgress, onSelectVideo])
 
   const flashSkipToast = useCallback((text: string) => {
     window.clearTimeout(skipToastTimerRef.current)
@@ -1493,7 +1626,120 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
       data-fullscreen-gesture-scope="player"
       className={isMinimized
         ? 'pointer-events-none fixed inset-0 z-[70] m-0 bg-transparent p-0 text-white select-none'
-        : 'fixed inset-0 z-[70] m-0 flex flex-col bg-black p-0 text-white select-none overflow-hidden'}>
+        : 'fixed inset-0 z-[70] m-0 flex flex-col bg-[#090a0f] p-0 text-white select-none overflow-hidden'}>
+
+      {/* ── TOP THEATER HEADER (hidden in mini mode and native fullscreen) ── */}
+      {!isMinimized && !fsActive && (
+        <header className="flex h-14 shrink-0 items-center justify-between border-b border-white/[0.08] bg-[#0c0d12]/95 px-4 backdrop-blur-md sm:px-6">
+          <div className="flex items-center gap-3">
+            <button
+              type="button"
+              onClick={handleClose}
+              className="inline-flex items-center gap-2 rounded-xl border border-white/10 bg-white/5 px-3 py-1.5 text-xs font-bold text-white/80 transition-colors hover:border-white/20 hover:bg-white/10 hover:text-white"
+            >
+              <ArrowLeft size={14} /> Back to Feed
+            </button>
+
+            {/* Category Dropdown / Badge */}
+            <div className="relative">
+              <button
+                type="button"
+                onClick={() => setCategoryDropdownOpen((v) => !v)}
+                className="inline-flex items-center gap-1.5 rounded-xl border border-primary/40 bg-primary/10 px-3 py-1.5 text-xs font-bold text-primary transition-colors hover:bg-primary/20"
+              >
+                <span className="text-white/50 font-normal">Playing from:</span>
+                <span className="font-black text-white">{categoryName || 'All'}</span>
+                {categories && categories.length > 0 && (
+                  <ChevronDown size={13} className={`transition-transform text-white/60 ${categoryDropdownOpen ? 'rotate-180' : ''}`} />
+                )}
+              </button>
+
+              {categoryDropdownOpen && categories && categories.length > 0 && (
+                <div className="absolute left-0 top-full z-50 mt-1.5 w-48 rounded-xl border border-white/15 bg-[#14161f] p-1.5 shadow-2xl backdrop-blur-xl">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setCategoryDropdownOpen(false)
+                      if (onSelectCategory) onSelectCategory(null)
+                    }}
+                    className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-xs font-bold text-white hover:bg-white/10"
+                  >
+                    All
+                  </button>
+                  {categories.map((cat) => (
+                    <button
+                      key={cat.id}
+                      type="button"
+                      onClick={() => {
+                        setCategoryDropdownOpen(false)
+                        if (onSelectCategory) onSelectCategory(cat.id)
+                      }}
+                      className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-xs font-bold text-white hover:bg-white/10"
+                    >
+                      <span className={`h-2 w-2 rounded-full ${categoryDot(cat.color)}`} />
+                      <span className="truncate">{cat.name}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Search Queue */}
+          <div className="hidden sm:block relative w-64 md:w-80">
+            <Search size={14} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-white/30" />
+            <input
+              type="text"
+              value={queueSearch}
+              onChange={(e) => setQueueSearch(e.target.value)}
+              placeholder="Search queue..."
+              className="h-8 w-full rounded-xl border border-white/10 bg-white/5 pl-9 pr-8 text-xs font-medium text-white placeholder:text-white/30 transition-colors hover:border-white/20 focus:border-primary/60 focus:bg-white/[0.08] focus:outline-none"
+            />
+            {queueSearch && (
+              <button
+                type="button"
+                onClick={() => setQueueSearch('')}
+                className="absolute right-2 top-1/2 -translate-y-1/2 rounded p-1 text-white/30 hover:text-white"
+              >
+                <X size={12} />
+              </button>
+            )}
+          </div>
+
+          {/* Right: Autoplay Next + Minimize to Dock */}
+          <div className="flex items-center gap-3 sm:gap-4">
+            <div className="flex items-center gap-2">
+              <span className="text-xs font-semibold text-white/70">Autoplay Next</span>
+              <button
+                type="button"
+                role="switch"
+                aria-checked={autoplayNext}
+                onClick={handleToggleAutoplay}
+                title={autoplayNext ? 'Autoplay ON: plays next video in queue automatically' : 'Autoplay OFF'}
+                className={`relative h-5 w-9 shrink-0 rounded-full transition-colors ${
+                  autoplayNext ? 'bg-primary' : 'bg-white/20'
+                }`}
+              >
+                <span
+                  className={`absolute top-0.5 h-4 w-4 rounded-full bg-white shadow transition-all ${
+                    autoplayNext ? 'left-[18px]' : 'left-0.5'
+                  }`}
+                />
+              </button>
+            </div>
+
+            <button
+              type="button"
+              onClick={toggleMinimize}
+              title="Minimize to corner dock"
+              className="inline-flex items-center gap-1.5 rounded-xl border border-white/10 bg-white/5 px-3 py-1.5 text-xs font-bold text-white/80 transition-colors hover:border-white/20 hover:bg-white/10 hover:text-white"
+            >
+              <Minimize2 size={13} /> Minimize to Dock
+            </button>
+          </div>
+        </header>
+      )}
+
       {/* Body: stable two columns on desktop, stacked on mobile. */}
       <div className={isMinimized
         ? 'contents'
@@ -1502,16 +1748,20 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
         {/* ── MAIN VIDEO AREA ─────────────────────────────────────────── */}
         <div className={isMinimized
           ? 'contents'
-          : 'flex w-full shrink-0 flex-col bg-black lg:h-full lg:min-h-0 lg:w-auto lg:min-w-0 lg:flex-1'}>
-          {/* Stage: full-bleed black. Mobile = 16:9 strip; desktop = fills.
-              Minimized: corner dock — same iframe, just repositioned. */}
-          <div
-            ref={shellRef}
-            className={isMinimized
-              ? 'pointer-events-auto fixed bottom-4 right-4 z-[80] aspect-video w-[min(380px,calc(100vw-2rem))] overflow-hidden rounded-xl border border-white/15 bg-black shadow-[0_20px_60px_rgba(0,0,0,0.7)]'
-              : `relative aspect-video w-full shrink-0 bg-black lg:aspect-auto lg:h-full lg:min-h-0 lg:w-full lg:flex-1 ${
-                isPlaying && !chromeVisible ? 'cursor-none' : ''
-              }`}
+          : 'flex min-h-0 flex-1 flex-col overflow-y-auto bg-[#0a0b10] p-4 sm:p-6 lg:p-7'}>
+          <div className={isMinimized ? 'contents' : 'relative mx-auto w-full max-w-5xl space-y-4'}>
+            {!isMinimized && (
+              <div aria-hidden className="pointer-events-none absolute -inset-3 rounded-3xl bg-primary/10 blur-2xl opacity-60" />
+            )}
+
+            {/* Stage: 16:9 on theater, full in fullscreen, corner dock when minimized */}
+            <div
+              ref={shellRef}
+              className={isMinimized
+                ? 'pointer-events-auto fixed bottom-4 right-4 z-[80] aspect-video w-[min(380px,calc(100vw-2rem))] overflow-hidden rounded-xl border border-white/15 bg-black shadow-[0_20px_60px_rgba(0,0,0,0.7)]'
+                : `relative aspect-video w-full overflow-hidden rounded-2xl border border-white/10 bg-black shadow-2xl ${
+                  isPlaying && !chromeVisible ? 'cursor-none' : ''
+                }`}
             onMouseMove={pokeBottom}
             onMouseEnter={handlePointerEnter}
             onMouseLeave={handlePointerLeave}
@@ -2119,266 +2369,341 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
               </div>
             )}
           </div>
-        </div>
 
-        {/* ── SIDEBAR (visible by default; fixed width on desktop; hidden in mini mode) ────────── */}
-        {isMinimized ? null : (
-        <aside className="flex w-full shrink-0 flex-col border-t border-white/10 bg-[#0b0b0b] lg:h-full lg:min-h-0 lg:w-[360px] lg:border-l lg:border-t-0 xl:w-[400px]">
-          {/* Panel header — fixed height, so content changes never resize video. */}
-          <div className="flex shrink-0 items-center gap-1.5 p-3">
-            <FileText size={13} className="text-white/40" />
-            <span className="text-[11px] font-black uppercase tracking-widest text-white/60">
-              Description
-            </span>
-          </div>
+          {/* Video Meta Info (Title, Channel, Actions, Sections) below the Player */}
+          {!isMinimized && (
+              <div className="space-y-4 pt-1">
+                <h1 className="text-xl sm:text-2xl font-black text-white leading-tight">
+                  {video.title}
+                </h1>
 
-          {/* Scroll region. Desktop: fills sidebar height. Mobile: natural flow. */}
-          <div className="min-h-0 flex-1 px-4 pb-6 lg:overflow-y-auto">
-            <div className="space-y-5">
-                <div>
-                  <h4 className="text-sm font-bold leading-snug text-white">{video.title}</h4>
-                  <p className="mt-1.5 text-xs font-medium text-white/45">
-                    {[video.channelTitle, formatViews(video.views), publishedAgo ? `${publishedAgo} ago` : null]
-                      .filter(Boolean)
-                      .join(' · ')}
-                  </p>
+                <div className="flex flex-wrap items-center justify-between gap-3 border-b border-white/[0.08] pb-4">
+                  <div className="flex items-center gap-3">
+                    <ChannelAvatar title={video.channelTitle} sizeClass="h-10 w-10" />
+                    <div>
+                      <p className="text-sm font-bold text-white">
+                        {video.channelTitle}
+                      </p>
+                      <p className="text-xs font-semibold text-white/40">
+                        {[publishedAgo ? `${publishedAgo} ago` : null, formatViews(video.views)].filter(Boolean).join(' · ')}
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={handleMarkWatched}
+                      className={`inline-flex items-center gap-2 rounded-xl border px-4 py-2 text-xs font-bold transition-all ${
+                        video.seen
+                          ? 'border-emerald-500/30 bg-emerald-500/15 text-emerald-300'
+                          : 'border-white/10 bg-white/5 text-white hover:border-white/20 hover:bg-white/10'
+                      }`}
+                    >
+                      <Check size={15} strokeWidth={video.seen ? 3 : 2} />
+                      {video.seen ? 'Watched' : 'Mark Watched'}
+                    </button>
+                    {hasNext && (
+                      <button
+                        type="button"
+                        onClick={handleManualNext}
+                        title={nextTitle ? `Next: ${nextTitle}` : 'Next video'}
+                        className="inline-flex items-center gap-2 rounded-xl border border-white/10 bg-white/5 px-3.5 py-2 text-xs font-bold text-white/80 transition-colors hover:border-white/20 hover:bg-white/10 hover:text-white"
+                      >
+                        <SkipForward size={14} /> Next
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      onClick={openOnYouTube}
+                      title="Open on YouTube"
+                      className="inline-flex items-center gap-1.5 rounded-xl border border-white/10 bg-white/5 p-2 text-white/70 transition-colors hover:border-white/20 hover:bg-white/10 hover:text-white"
+                    >
+                      <ExternalLink size={15} />
+                    </button>
+                  </div>
                 </div>
 
-                {chapters.length > 0 && (
-                  <section aria-label="Chapters">
-                    <div className="mb-1">
+                {/* Collapsible Sections (Chapters, Segments, About) */}
+                <div className="space-y-3 pt-1">
+                  {chapters.length > 0 && (
+                    <section aria-label="Chapters" className="rounded-xl border border-white/[0.08] bg-white/[0.02] p-3.5">
                       <button
                         type="button"
                         onClick={() => setChaptersOpen((v) => !v)}
                         aria-expanded={chaptersOpen}
-                        className="flex items-center gap-1.5 text-[11px] font-black uppercase tracking-widest text-white/40 transition-colors hover:text-white/70"
+                        className="flex w-full items-center justify-between text-left text-xs font-black uppercase tracking-wider text-white/70 transition-colors hover:text-white"
                       >
-                        <ListVideo size={12} /> Chapters · {chapters.length}
-                        <ChevronDown size={12} className={`transition-transform ${chaptersOpen ? '' : '-rotate-90'}`} />
-                      </button>
-                    </div>
-                    {chaptersOpen && (
-                      <div className="space-y-0.5">
-                        {chapters.map((chapter, index) => (
-                          <button
-                            key={`${chapter.start}-${index}`}
-                            type="button"
-                            onClick={() => handleSeek(chapter.start)}
-                            className={`flex w-full items-center gap-3 px-2 py-2 text-left transition-colors ${
-                              index === activeChapterIndex ? 'bg-primary/15 text-white' : 'text-white/60 hover:bg-white/5 hover:text-white'
-                            }`}
-                          >
-                            <span className={`shrink-0 px-1.5 py-0.5 text-[11px] font-bold tabular-nums ${
-                              index === activeChapterIndex ? 'bg-primary text-white' : 'bg-white/10 text-white/70'
-                            }`}>
-                              {formatChapterTime(chapter.start)}
+                        <span className="flex items-center gap-2">
+                          <ListVideo size={14} /> Chapters ({chapters.length})
+                          {activeChapterIndex >= 0 && chapters[activeChapterIndex] && (
+                            <span className="text-primary font-bold normal-case text-xs">
+                              · {chapters[activeChapterIndex].title}
                             </span>
-                            <span className="min-w-0 flex-1 truncate text-xs font-semibold">{chapter.title}</span>
-                            {index === activeChapterIndex && <Play size={11} fill="currentColor" className="shrink-0" />}
-                          </button>
-                        ))}
-                      </div>
-                    )}
-                  </section>
-                )}
+                          )}
+                        </span>
+                        <ChevronDown size={14} className={`transition-transform ${chaptersOpen ? '' : '-rotate-90'}`} />
+                      </button>
+                      {chaptersOpen && (
+                        <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-1.5 max-h-60 overflow-y-auto pr-1">
+                          {chapters.map((chapter, index) => (
+                            <button
+                              key={`${chapter.start}-${index}`}
+                              type="button"
+                              onClick={() => handleSeek(chapter.start)}
+                              className={`flex items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-left text-xs transition-colors ${
+                                index === activeChapterIndex
+                                  ? 'bg-primary/20 text-white font-bold border border-primary/40'
+                                  : 'text-white/60 hover:bg-white/5 hover:text-white'
+                              }`}
+                            >
+                              <span className="rounded bg-white/10 px-1.5 py-0.5 text-[10px] font-bold tabular-nums text-white/70">
+                                {formatChapterTime(chapter.start)}
+                              </span>
+                              <span className="min-w-0 flex-1 truncate">{chapter.title}</span>
+                              {index === activeChapterIndex && <Play size={10} fill="currentColor" className="text-primary shrink-0" />}
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </section>
+                  )}
 
-                {sponsorSegments.length > 0 && (
-                  <section aria-label="In-video segments" className="border border-amber-300/15 bg-amber-300/[0.04] p-3">
-                    <div className="flex items-center justify-between gap-2">
-                      <button
-                        type="button"
-                        onClick={() => setSegmentsOpen((v) => !v)}
-                        aria-expanded={segmentsOpen}
-                        className="inline-flex items-center gap-1.5 text-[11px] font-black uppercase tracking-widest text-amber-200/90 transition-colors hover:text-amber-100"
-                      >
-                        <Zap size={12} /> In-video segments · {sponsorSegments.length}
-                        <ChevronDown size={12} className={`transition-transform ${segmentsOpen ? '' : '-rotate-90'}`} />
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setSkipSponsors((v) => !v)}
-                        aria-pressed={skipSponsors}
-                        className={`px-2.5 py-1 text-[10px] font-black uppercase tracking-widest transition-colors ${
-                          skipSponsors ? 'bg-amber-300 text-black' : 'bg-white/10 text-white/60 hover:text-white'
-                        }`}
-                      >
-                        {skipSponsors ? 'Auto-skip on' : 'Auto-skip off'}
-                      </button>
-                    </div>
-                    {segmentsOpen && (
-                      <>
-                        <div className="mt-2 space-y-0.5">
+                  {sponsorSegments.length > 0 && (
+                    <section aria-label="In-video segments" className="rounded-xl border border-amber-300/20 bg-amber-300/[0.04] p-3.5">
+                      <div className="flex items-center justify-between">
+                        <button
+                          type="button"
+                          onClick={() => setSegmentsOpen((v) => !v)}
+                          className="flex items-center gap-2 text-xs font-black uppercase tracking-wider text-amber-200"
+                        >
+                          <Zap size={14} /> SponsorBlock Segments ({sponsorSegments.length})
+                          <ChevronDown size={14} className={`transition-transform ${segmentsOpen ? '' : '-rotate-90'}`} />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setSkipSponsors((v) => !v)}
+                          className={`rounded-lg px-2.5 py-1 text-[10px] font-black uppercase tracking-widest transition-colors ${
+                            skipSponsors ? 'bg-amber-300 text-black' : 'bg-white/10 text-white/60 hover:text-white'
+                          }`}
+                        >
+                          {skipSponsors ? 'Auto-skip on' : 'Auto-skip off'}
+                        </button>
+                      </div>
+                      {segmentsOpen && (
+                        <div className="mt-2 space-y-1">
                           {sponsorSegments.map((seg, index) => (
                             <button
                               key={`${seg.start}-${seg.end}-${index}`}
                               type="button"
                               onClick={() => handleSeek(seg.start)}
-                              className="flex w-full items-center justify-between gap-2 px-2 py-1.5 text-left text-xs font-medium text-white/60 transition-colors hover:bg-white/5 hover:text-white"
+                              className="flex w-full items-center justify-between rounded-lg px-2 py-1 text-left text-xs font-medium text-white/60 hover:bg-white/5 hover:text-white"
                             >
                               <span className="truncate">{sponsorLabel(seg.category)}</span>
-                              <span className="shrink-0 tabular-nums text-white/35">
+                              <span className="shrink-0 tabular-nums text-white/40">
                                 {formatChapterTime(seg.start)} → {formatChapterTime(seg.end)}
                               </span>
                             </button>
                           ))}
                         </div>
-                        <p className="mt-2 text-[11px] leading-relaxed text-white/30">
-                          Crowd-sourced via SponsorBlock. Baked-in promos YouTube itself never skips.
-                        </p>
-                      </>
-                    )}
-                  </section>
-                )}
+                      )}
+                    </section>
+                  )}
 
-                <section aria-label="Comments">
-                  <div className="mb-1 flex items-center gap-1.5">
+                  <section aria-label="Description" className="rounded-xl border border-white/[0.08] bg-white/[0.02] p-3.5">
                     <button
                       type="button"
-                      onClick={() => setCommentsOpen((v) => !v)}
-                      aria-expanded={commentsOpen}
-                      className="flex items-center gap-1.5 text-[11px] font-black uppercase tracking-widest text-white/40 transition-colors hover:text-white/70"
+                      onClick={() => setDescriptionOpen((v) => !v)}
+                      className="flex w-full items-center justify-between text-left text-xs font-black uppercase tracking-wider text-white/70 hover:text-white"
                     >
-                      <MessageSquare size={12} />
-                      Comments{commentsCount !== null ? ` · ${formatCompactCount(commentsCount)}` : ''}
-                      <ChevronDown size={12} className={`transition-transform ${commentsOpen ? '' : '-rotate-90'}`} />
+                      <span className="flex items-center gap-2">
+                        <FileText size={14} /> About / Description
+                      </span>
+                      <ChevronDown size={14} className={`transition-transform ${descriptionOpen ? '' : '-rotate-90'}`} />
                     </button>
-                    <div className="ml-auto flex items-center gap-1">
+                    {descriptionOpen && (
+                      <div className="mt-3 whitespace-pre-wrap break-words text-xs leading-relaxed text-white/70 max-h-72 overflow-y-auto">
+                        {video.description ? (
+                          descParts.map((part, i) => {
+                            if (part.kind === 'newline') return <br key={i} />
+                            if (part.kind === 'timestamp') {
+                              return (
+                                <button
+                                  key={i}
+                                  type="button"
+                                  onClick={() => handleSeek(part.seconds ?? 0)}
+                                  className="font-bold text-sky-400 hover:underline"
+                                >
+                                  {part.text}
+                                </button>
+                              )
+                            }
+                            if (part.kind === 'url') {
+                              return (
+                                <a
+                                  key={i}
+                                  href={part.text}
+                                  onClick={(e) => { e.preventDefault(); window.api.openWebPopup(part.text) }}
+                                  className="break-all text-sky-400 hover:underline"
+                                >
+                                  {part.text}
+                                </a>
+                              )
+                            }
+                            return <span key={i}>{part.text}</span>
+                          })
+                        ) : (
+                          <p className="text-white/30">No description available.</p>
+                        )}
+                      </div>
+                    )}
+                  </section>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* ── SIDEBAR (Up Next in Category Queue & Comments) ── */}
+        {isMinimized ? null : (
+          <aside className="flex w-full shrink-0 flex-col border-t border-white/[0.08] bg-[#0c0d12]/95 lg:h-full lg:min-h-0 lg:w-[380px] lg:border-l lg:border-t-0 xl:w-[420px]">
+            {/* Sidebar Header */}
+            <div className="flex shrink-0 items-center justify-between border-b border-white/[0.08] p-3.5 sm:p-4">
+              <div className="min-w-0">
+                <h3 className="truncate text-sm font-black text-white">
+                  Up Next in {categoryName || 'All'}
+                </h3>
+                <p className="text-[11px] font-semibold text-white/40">
+                  {remainingCount} unseen {remainingCount === 1 ? 'video' : 'videos'} remaining
+                </p>
+              </div>
+
+              {/* Quick Tab Switcher */}
+              <div className="flex items-center gap-1">
+                <button
+                  type="button"
+                  onClick={() => setSidebarTab('queue')}
+                  className={`rounded-lg px-2.5 py-1 text-[11px] font-bold transition-colors ${
+                    sidebarTab === 'queue'
+                      ? 'bg-primary text-white shadow'
+                      : 'text-white/50 hover:bg-white/10 hover:text-white'
+                  }`}
+                >
+                  Queue
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setSidebarTab('comments')}
+                  className={`rounded-lg px-2.5 py-1 text-[11px] font-bold transition-colors ${
+                    sidebarTab === 'comments'
+                      ? 'bg-primary text-white shadow'
+                      : 'text-white/50 hover:bg-white/10 hover:text-white'
+                  }`}
+                >
+                  Comments
+                </button>
+              </div>
+            </div>
+
+            {/* Sidebar Body */}
+            <div className="min-h-0 flex-1 overflow-y-auto p-3 space-y-2">
+              {sidebarTab === 'queue' && (
+                queueItems.length > 0 ? (
+                  queueItems.map((item) => (
+                    <QueueCard
+                      key={item.videoId}
+                      video={item}
+                      isCurrent={item.videoId === video.videoId}
+                      onSelect={handleSelectQueueVideo}
+                      onToggleSeen={handleToggleQueueSeen}
+                    />
+                  ))
+                ) : (
+                  <div className="flex flex-col items-center justify-center py-16 text-center">
+                    <p className="text-xs font-bold text-white/40">
+                      {queueSearch ? `No videos matching “${queueSearch}”` : 'No upcoming videos in this queue'}
+                    </p>
+                  </div>
+                )
+              )}
+
+              {sidebarTab === 'comments' && (
+                <div className="space-y-4">
+                  <div className="flex items-center justify-between pb-2 border-b border-white/[0.06]">
+                    <span className="text-xs font-bold text-white/70">
+                      {commentsCount !== null ? `${formatCompactCount(commentsCount)} Comments` : 'Comments'}
+                    </span>
+                    <div className="flex items-center gap-1">
                       {(['top', 'new'] as const).map((mode) => (
                         <button
                           key={mode}
                           type="button"
                           onClick={() => setCommentsSort(mode)}
-                          aria-pressed={commentsSort === mode}
-                          className={`rounded px-2 py-1 text-[10px] font-black uppercase tracking-widest transition-colors ${
-                            commentsSort === mode ? 'bg-white/10 text-white' : 'text-white/35 hover:text-white/70'
+                          className={`rounded px-2 py-0.5 text-[10px] font-black uppercase tracking-wider ${
+                            commentsSort === mode ? 'bg-white/15 text-white' : 'text-white/35 hover:text-white'
                           }`}
                         >
-                          {mode === 'top' ? 'Top' : 'Newest'}
+                          {mode === 'top' ? 'Top' : 'New'}
                         </button>
                       ))}
                     </div>
                   </div>
-                  {commentsOpen && (
-                    <div>
-                      {commentsLoading ? (
-                        <span className="flex items-center gap-2 px-1 py-3 text-xs font-semibold text-white/40">
-                          <Loader2 size={14} className="animate-spin" /> Loading comments…
-                        </span>
-                      ) : commentsDisabled ? (
-                        <p className="px-1 py-3 text-[13px] text-white/30">Comments are turned off for this video.</p>
-                      ) : commentsError && comments.length === 0 ? (
-                        <div className="px-1 py-3">
-                          <p className="text-[13px] text-white/40">{commentsError}</p>
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setCommentsError(null)
-                              setCommentsLoading(true)
-                              window.api.ftGetComments(video.videoId, { sortBy: commentsSort })
-                                .then((result) => {
-                                  if ('error' in result) {
-                                    setCommentsError(result.error || 'Could not load comments')
-                                  } else if (result.disabled) {
-                                    setCommentsDisabled(true)
-                                  } else {
-                                    setComments(result.comments)
-                                    setCommentsContinuation(result.continuation)
-                                    setCommentsCount(result.commentCount)
-                                  }
-                                })
-                                .catch((err) => setCommentsError(err?.message || 'Could not load comments'))
-                                .finally(() => setCommentsLoading(false))
-                            }}
-                            className="mt-2 rounded-lg bg-white/10 px-3 py-1.5 text-[11px] font-black uppercase tracking-widest text-white hover:bg-white/15"
-                          >
-                            Retry
-                          </button>
-                        </div>
-                      ) : comments.length === 0 ? (
-                        <p className="px-1 py-3 text-[13px] text-white/30">No comments yet.</p>
-                      ) : (
-                        <>
-                          <div>
-                            {comments.map((comment, i) => renderComment(comment, `c${i}-${comment.commentId ?? ''}`))}
-                          </div>
-                          {commentsError && (
-                            <p className="px-1 py-2 text-[11px] text-amber-200/70">{commentsError}</p>
-                          )}
-                          {commentsContinuation && (
-                            <button
-                              type="button"
-                              onClick={loadMoreComments}
-                              disabled={commentsLoadingMore}
-                              className="mt-2 w-full rounded-lg bg-white/5 px-3 py-2 text-[11px] font-black uppercase tracking-widest text-white/60 transition-colors hover:bg-white/10 hover:text-white disabled:opacity-40"
-                            >
-                              {commentsLoadingMore ? 'Loading…' : 'Load more comments'}
-                            </button>
-                          )}
-                        </>
-                      )}
+
+                  {commentsLoading ? (
+                    <span className="flex items-center gap-2 px-1 py-4 text-xs font-semibold text-white/40">
+                      <Loader2 size={14} className="animate-spin" /> Loading comments…
+                    </span>
+                  ) : commentsDisabled ? (
+                    <p className="px-1 py-4 text-xs text-white/30">Comments are turned off for this video.</p>
+                  ) : commentsError && comments.length === 0 ? (
+                    <div className="px-1 py-4">
+                      <p className="text-xs text-white/40">{commentsError}</p>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setCommentsError(null)
+                          setCommentsLoading(true)
+                          window.api.ftGetComments(video.videoId, { sortBy: commentsSort })
+                            .then((result) => {
+                              if ('error' in result) setCommentsError(result.error || 'Could not load comments')
+                              else if (result.disabled) setCommentsDisabled(true)
+                              else {
+                                setComments(result.comments)
+                                setCommentsContinuation(result.continuation)
+                                setCommentsCount(result.commentCount)
+                              }
+                            })
+                            .catch((err) => setCommentsError(err?.message || 'Could not load comments'))
+                            .finally(() => setCommentsLoading(false))
+                        }}
+                        className="mt-2 rounded-lg bg-white/10 px-3 py-1.5 text-[11px] font-bold text-white hover:bg-white/15"
+                      >
+                        Retry
+                      </button>
                     </div>
-                  )}
-                </section>
-
-                <section aria-label="Description">
-                  <div className="mb-1">
-                    <button
-                      type="button"
-                      onClick={() => setDescriptionOpen((v) => !v)}
-                      aria-expanded={descriptionOpen}
-                      className="flex items-center gap-1.5 text-[11px] font-black uppercase tracking-widest text-white/40 transition-colors hover:text-white/70"
-                    >
-                      <FileText size={12} />
-                      About
-                      <ChevronDown size={12} className={`transition-transform ${descriptionOpen ? '' : '-rotate-90'}`} />
-                    </button>
-                  </div>
-                  {descriptionOpen && (
-                    video.description ? (
-                      <div className="whitespace-pre-wrap break-words text-[13px] leading-relaxed text-white/65">
-                        {descParts.map((part, i) => {
-                          if (part.kind === 'newline') return <br key={i} />
-                          if (part.kind === 'timestamp') {
-                            return (
-                              <button
-                                key={i}
-                                type="button"
-                                onClick={() => handleSeek(part.seconds ?? 0)}
-                                className="font-bold text-sky-300 hover:underline"
-                              >
-                                {part.text}
-                              </button>
-                            )
-                          }
-                          if (part.kind === 'url') {
-                            return (
-                              <a
-                                key={i}
-                                href={part.text}
-                                onClick={(e) => { e.preventDefault(); window.api.openWebPopup(part.text) }}
-                                className="break-all text-sky-300 hover:underline"
-                              >
-                                {part.text}
-                              </a>
-                            )
-                          }
-                          return <span key={i}>{part.text}</span>
-                        })}
+                  ) : comments.length === 0 ? (
+                    <p className="px-1 py-4 text-xs text-white/30">No comments yet.</p>
+                  ) : (
+                    <>
+                      <div className="space-y-3">
+                        {comments.map((comment, i) => renderComment(comment, `c${i}-${comment.commentId ?? ''}`))}
                       </div>
-                    ) : (
-                      <p className="text-[13px] text-white/30">No description available.</p>
-                    )
+                      {commentsContinuation && (
+                        <button
+                          type="button"
+                          onClick={loadMoreComments}
+                          disabled={commentsLoadingMore}
+                          className="mt-2 w-full rounded-lg bg-white/5 px-3 py-2 text-xs font-bold text-white/60 hover:bg-white/10 hover:text-white disabled:opacity-40"
+                        >
+                          {commentsLoadingMore ? 'Loading…' : 'Load more comments'}
+                        </button>
+                      )}
+                    </>
                   )}
-                </section>
-
-                <p className="border-t border-white/10 pt-4 text-[11px] leading-relaxed text-white/30">
-                  Isolated playback — never recommends. Closes when the video ends unless Auto is on,
-                  which plays the next unseen video in the stack. N skips forward.
-                  Speed and captions are in the player bar below. Quality is always Auto — YouTube picks it.
-                </p>
-              </div>
-          </div>
-        </aside>
+                </div>
+              )}
+            </div>
+          </aside>
         )}
       </div>
     </div>,

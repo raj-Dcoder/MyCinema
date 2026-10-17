@@ -1032,6 +1032,12 @@ const FocusTube: React.FC = () => {
           key="focustube-player"
           video={playing.video}
           startSeconds={playing.startSeconds}
+          categoryName={activeCategory ? activeCategory.name : 'All'}
+          categories={categories}
+          onSelectCategory={(id) => void selectCategory(id)}
+          queue={playQueue}
+          onSelectVideo={(item) => void handlePlay(item)}
+          onToggleSeen={(item) => void handleToggleSeen(item)}
           onClose={() => setPlaying(null)}
           onMarkSeen={(videoId) => void handleMarkSeen(videoId)}
           onSaveProgress={handleSaveProgress}

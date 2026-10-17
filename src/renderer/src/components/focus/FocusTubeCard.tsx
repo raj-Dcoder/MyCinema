@@ -160,7 +160,7 @@ const FocusTubeCard: React.FC<FocusTubeCardProps> = ({ video, onPlay, onToggleSe
       </div>
 
       {/* ── Info Section (Below Thumbnail) ── */}
-      <div className="flex items-start gap-3 p-3.5">
+      <div className="flex items-center gap-3 p-3.5">
         {/* Creator Channel Avatar */}
         {video.channelAvatarUrl && !avatarFailed ? (
           <img
@@ -169,12 +169,12 @@ const FocusTubeCard: React.FC<FocusTubeCardProps> = ({ video, onPlay, onToggleSe
             loading="lazy"
             referrerPolicy="no-referrer"
             onError={() => setAvatarFailed(true)}
-            className="mt-0.5 h-10 w-10 shrink-0 rounded-full border border-white/10 bg-white/[0.06] object-cover ring-1 ring-white/10"
+            className="h-10 w-10 shrink-0 rounded-full border border-white/10 bg-white/[0.06] object-cover ring-1 ring-white/10"
           />
         ) : (
           <div
             title={video.channelTitle}
-            className="mt-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-xs font-black shadow ring-1 ring-white/10"
+            className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-xs font-black shadow ring-1 ring-white/10"
             style={{
               backgroundColor: `hsl(${avatarHue(video.channelTitle)}, 45%, 26%)`,
               color: `hsl(${avatarHue(video.channelTitle)}, 90%, 82%)`,
@@ -187,7 +187,7 @@ const FocusTubeCard: React.FC<FocusTubeCardProps> = ({ video, onPlay, onToggleSe
         {/* Title and Metadata */}
         <div className="min-w-0 flex-1">
           <h3
-            className="line-clamp-2 text-sm font-bold leading-snug text-white/95 transition-colors group-hover:text-white"
+            className="truncate text-sm font-bold leading-tight text-white/95 transition-colors group-hover:text-white"
             title={video.title}
           >
             {video.title}

@@ -121,11 +121,18 @@ const FocusTube: React.FC = () => {
     try {
       const allChannels = await window.api.ftListChannels(null)
       setTotalChannels((allChannels || []).length)
+      if (allChannels?.some((c) => !c.avatarUrl) && typeof (window.api as any).ftRefreshChannelAvatars === 'function') {
+        void (window.api as any).ftRefreshChannelAvatars().then((done: any) => {
+          if (done?.updated > 0) {
+            void loadFeed(activeCategoryId)
+          }
+        }).catch(() => {})
+      }
     } catch {
       // Total is a nicety for badges; per-category counts already came with list.
     }
     return list
-  }, [])
+  }, [activeCategoryId, loadFeed])
 
   const loadFeed = useCallback(async (categoryId: number | null, opts?: { hideShorts?: boolean; includeSeen?: boolean; search?: string }) => {
     const next = await window.api.ftGetFeed({

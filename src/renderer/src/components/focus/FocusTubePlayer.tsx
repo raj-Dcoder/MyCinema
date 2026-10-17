@@ -31,7 +31,7 @@ import {
   Zap,
 } from 'lucide-react'
 import type { FtCategory, FtComment, FtVideo } from '../../types'
-import { categoryDot, embedUrl, formatAgo, formatDuration, formatViews, thumbnailUrl, watchUrl } from '../../utils/focusTube'
+import { categoryDot, embedUrl, formatAgo, formatDuration, formatPublishedExact, formatViews, thumbnailUrl, watchUrl } from '../../utils/focusTube'
 import {
   parseChapters,
   getActiveChapterIndex,
@@ -2406,13 +2406,20 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
 
                 <div className="flex flex-wrap items-center justify-between gap-3 border-b border-white/[0.08] pb-4">
                   <div className="flex items-center gap-3">
-                    <ChannelAvatar title={video.channelTitle} sizeClass="h-10 w-10" />
+                    <ChannelAvatar title={video.channelTitle} avatarUrl={video.channelAvatarUrl} sizeClass="h-11 w-11" />
                     <div>
-                      <p className="text-sm font-bold text-white">
+                      <p className="text-base font-bold text-white">
                         {video.channelTitle}
                       </p>
-                      <p className="text-xs font-semibold text-white/40">
-                        {[publishedAgo ? `${publishedAgo} ago` : null, formatViews(video.views)].filter(Boolean).join(' · ')}
+                      <p className="flex items-center gap-1.5 text-xs font-semibold text-emerald-400">
+                        <Check size={12} strokeWidth={3} />
+                        <span>Subscribed</span>
+                        {video.channelHandle && (
+                          <>
+                            <span className="text-white/20">•</span>
+                            <span className="text-white/40">@{video.channelHandle.replace(/^@/, '')}</span>
+                          </>
+                        )}
                       </p>
                     </div>
                   </div>
@@ -2449,6 +2456,15 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
                       <ExternalLink size={15} />
                     </button>
                   </div>
+                </div>
+
+                {/* Video Views & Upload Date stats row (clearly belongs to the video, not subscriber count) */}
+                <div className="flex flex-wrap items-center gap-2 text-xs font-medium text-white/60">
+                  <span className="font-bold text-white">
+                    {video.views ? `${formatViews(video.views)} views` : 'Subscribed upload'}
+                  </span>
+                  <span className="text-white/25">•</span>
+                  <span>{publishedAgo ? `${publishedAgo} ago` : 'Uploaded'} ({formatPublishedExact(video.publishedAt)})</span>
                 </div>
 
                 {/* Collapsible Sections (Chapters, Segments, About) */}

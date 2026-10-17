@@ -97,6 +97,8 @@ function toVideo(row: any): FtVideo {
     videoId: String(row.video_id),
     channelId: String(row.channel_id),
     channelTitle: String(row.channel_title || ''),
+    channelAvatarUrl: row.channel_avatar_url ? String(row.channel_avatar_url) : (row.avatar_url ? String(row.avatar_url) : null),
+    channelHandle: row.channel_handle ? String(row.channel_handle) : (row.handle ? String(row.handle) : null),
     title: String(row.title || ''),
     publishedAt: String(row.published_at || ''),
     duration: row.duration === null || row.duration === undefined ? null : Number(row.duration),
@@ -599,7 +601,7 @@ export function getFeed(options: FtFeedOptions): FtVideo[] {
   params.push(limit)
 
   const rows = db.prepare(`
-    SELECT v.*, c.title AS channel_title,
+    SELECT v.*, c.title AS channel_title, c.avatar_url AS channel_avatar_url, c.handle AS channel_handle,
       COALESCE(s.seen, 0) AS seen, s.seen_at, COALESCE(s.saved, 0) AS saved,
       COALESCE(s.position, 0) AS position
     FROM ft_videos v
@@ -616,7 +618,7 @@ export function getFeed(options: FtFeedOptions): FtVideo[] {
 export function getVideo(videoId: string): FtVideo | null {
   const db = getRawDb()
   const row = db.prepare(`
-    SELECT v.*, c.title AS channel_title,
+    SELECT v.*, c.title AS channel_title, c.avatar_url AS channel_avatar_url, c.handle AS channel_handle,
       COALESCE(s.seen, 0) AS seen, s.seen_at, COALESCE(s.saved, 0) AS saved,
       COALESCE(s.position, 0) AS position
     FROM ft_videos v

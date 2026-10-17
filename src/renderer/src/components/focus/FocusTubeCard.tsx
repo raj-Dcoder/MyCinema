@@ -15,6 +15,7 @@ const FocusTubeCard: React.FC<FocusTubeCardProps> = ({ video, onPlay, onToggleSe
   const [variant, setVariant] = useState(0)
   const [thumbBroken, setThumbBroken] = useState(false)
   const [marking, setMarking] = useState(false)
+  const [avatarFailed, setAvatarFailed] = useState(false)
 
   const duration = formatDuration(video.duration)
 
@@ -101,26 +102,38 @@ const FocusTubeCard: React.FC<FocusTubeCardProps> = ({ video, onPlay, onToggleSe
       </div>
 
       <div className="flex items-start gap-2.5 px-3.5 pb-3.5 pt-3">
-        <div
-          title={video.channelTitle}
-          className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-xs font-black shadow ring-1 ring-white/10"
-          style={{
-            backgroundColor: `hsl(${avatarHue(video.channelTitle)}, 45%, 26%)`,
-            color: `hsl(${avatarHue(video.channelTitle)}, 90%, 82%)`,
-          }}
-        >
-          {video.channelTitle?.trim().charAt(0).toUpperCase() || '?'}
-        </div>
+        {video.channelAvatarUrl && !avatarFailed ? (
+          <img
+            src={video.channelAvatarUrl}
+            alt={video.channelTitle}
+            loading="lazy"
+            referrerPolicy="no-referrer"
+            onError={() => setAvatarFailed(true)}
+            className="mt-0.5 h-9 w-9 shrink-0 rounded-full border border-white/10 bg-white/[0.06] object-cover ring-1 ring-white/10"
+          />
+        ) : (
+          <div
+            title={video.channelTitle}
+            className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-xs font-black shadow ring-1 ring-white/10"
+            style={{
+              backgroundColor: `hsl(${avatarHue(video.channelTitle)}, 45%, 26%)`,
+              color: `hsl(${avatarHue(video.channelTitle)}, 90%, 82%)`,
+            }}
+          >
+            {video.channelTitle?.trim().charAt(0).toUpperCase() || '?'}
+          </div>
+        )}
 
         <div className="min-w-0 flex-1">
           <h3 className="line-clamp-2 text-sm font-bold leading-snug text-white/90 transition-colors group-hover:text-white">
             {video.title}
           </h3>
-          <p className="mt-1 truncate text-xs font-semibold text-white/50">
+          <p className="mt-1 truncate text-xs font-semibold text-white/60">
             {video.channelTitle}
           </p>
-          <p className="text-[11px] font-medium text-white/30">
-            {[formatRelativeTime(video.publishedAt), formatViews(video.views)].filter(Boolean).join(' · ')}
+          <p className="mt-0.5 text-[11px] font-medium text-white/35">
+            {video.views ? `${formatViews(video.views)} views • ` : ''}
+            {formatRelativeTime(video.publishedAt)} ago
           </p>
         </div>
 

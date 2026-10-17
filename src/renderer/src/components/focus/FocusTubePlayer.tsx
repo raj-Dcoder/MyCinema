@@ -1822,22 +1822,19 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
               </div>
             )}
 
-            {/* ── FLOATING CORNER CHROME (no title bar) ──
-                Icon-only buttons that fade with the bottom bar. Deliberately
-                text-free: the video title/channel already live in the sidebar,
-                and any text here overlaps YouTube's own native title row on
-                pause (avatar + title), which ghosted as double text.
-                Single close control lives on the right (the old left back
-                arrow is gone so it never covers the creator avatar). The mini
-                player lives only in the bottom bar — no duplicate up here. */}
-            <div
-              className={`pointer-events-none absolute inset-x-0 top-0 z-30 flex items-start justify-end p-3 transition-all duration-200 sm:p-4 ${
-                isMinimized ? 'hidden' : ''
-              } ${
-                chromeVisible ? 'visible translate-y-0 opacity-100' : 'invisible -translate-y-2 opacity-0'
-              }`}
-              aria-hidden={!chromeVisible}
-            >
+            {/* ── FLOATING CORNER CHROME (fullscreen only) ──
+                In normal theater mode, the video stage is kept 100% clean
+                without floating button clutter because all actions (Back,
+                Mark Watched, Next, Open on YouTube) already live in the
+                dedicated top header and metadata row below.
+                These corner buttons only appear in native fullscreen mode. */}
+            {fsActive && !isMinimized && (
+              <div
+                className={`pointer-events-none absolute inset-x-0 top-0 z-30 flex items-start justify-end p-3 transition-all duration-200 sm:p-4 ${
+                  chromeVisible ? 'visible translate-y-0 opacity-100' : 'invisible -translate-y-2 opacity-0'
+                }`}
+                aria-hidden={!chromeVisible}
+              >
               <div className="flex items-center gap-1.5">
                 <button
                   type="button"
@@ -1891,6 +1888,7 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
                 </button>
               </div>
             </div>
+          )}
 
             {/* ── MINI-PLAYER DOCK BAR (only when minimized) ──
                 Same iframe keeps playing underneath; this bar moves with it.

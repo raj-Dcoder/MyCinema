@@ -89,37 +89,32 @@ const UPDATE_ICONS: Record<UpdateIconKey, { icon: React.ReactNode; tile: string 
 }
 
 export const LATEST_RELEASE: ReleaseNotes = {
-  version: '1.41.0',
-  title: 'Download sites, direct files, and a faster home.',
-  highlight: 'Download sites',
+  version: '1.41.1',
+  title: 'Download sites that just open.',
+  highlight: 'just open',
   description:
-    'Browse curated download platforms with built-in ad blocking, capture direct files into custom folders, and enjoy instant tab navigation.',
+    'We made the in-app download sites faster and steadier, so the links behind those buttons are already working when you click them.',
   tourId: null,
   updates: [
     {
       icon: 'download',
-      title: 'Curated download sites',
-      description: 'Browse HDHub4u and KatMovieHD with live mirrors.',
+      title: 'Site links open instantly',
+      description: 'Verified links are remembered and used without waiting.',
     },
     {
-      icon: 'shield',
-      title: 'Ad & popup blocker',
-      description: 'Automatic blocker keeps browsing clean and safe.',
+      icon: 'fix',
+      title: 'Works on blocked networks',
+      description: 'Links resolve even when your provider blocks DNS.',
     },
     {
       icon: 'sparkles',
-      title: 'Zero-lag navigation',
-      description: 'Instant Home tab switching even during fast downloads.',
-    },
-    {
-      icon: 'layers',
-      title: 'Custom download folder',
-      description: 'Pick any drive with automatic library indexing.',
+      title: 'Ready before you click',
+      description: 'Both sites are checked quietly right after launch.',
     },
     {
       icon: 'play',
-      title: 'YouTube & mini player',
-      description: 'Import Focus Tube channels and dock video playback.',
+      title: 'Lookups always show up',
+      description: 'Search windows now always open, even on slow pages.',
     },
   ],
 }

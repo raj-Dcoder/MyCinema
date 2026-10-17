@@ -282,6 +282,17 @@ async function fetchHdhubLiveMirror(html, timeoutMs) {
 }
 
 async function resolveSite(siteId, site) {
+  if (siteId === 'hdmovies') {
+    const live = await fetchHdhubLiveMirror('', FETCH_TIMEOUT_MS)
+    if (live) return live
+  }
+  if (siteId === 'catmovies') {
+    const directTarget = await fetchRedirectTarget(`${site.url}?type=KatmovieHD`)
+    if (directTarget) {
+      const status = await verifyMirrorAlive(directTarget, 5000)
+      if (status !== 'dead') return directTarget
+    }
+  }
   const portalHost = new URL(site.url).host.toLowerCase()
   const html = await fetchText(site.url)
   if (siteId === 'hdmovies') {
@@ -327,9 +338,13 @@ async function resolveSite(siteId, site) {
   // Phase C: hand out a mirror that is actually alive right now.
   let firstUnknown = null
   for (const candidate of candidates) {
-    const status = await verifyMirrorAlive(candidate)
+    const status = await verifyMirrorAlive(candidate, 5000)
     if (status === 'alive') return candidate
-    if (status === 'unknown' && !firstUnknown) firstUnknown = candidate
+    if (status === 'unknown') {
+      if (!firstUnknown) firstUnknown = candidate
+      const host = new URL(candidate).host.toLowerCase()
+      if (matchesAnyHint(host, site.domainHints)) return candidate
+    }
   }
   if (firstUnknown) return firstUnknown
   throw new Error('mirrors found but none are alive (all bounce to the portal)')

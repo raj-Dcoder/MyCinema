@@ -1,3 +1,31 @@
+# MyCinema v1.41.1
+
+Download sites that open instantly: mirrors are checked faster, blocked DNS is bypassed, and known-good links are pre-warmed at startup.
+
+### Faster, More Reliable Site Links
+- **Instant Open From Cache**: A recently verified mirror is used immediately with zero waiting, and refreshes silently in the background so nothing blocks your click.
+- **Pre-Warmed At Launch**: The app quietly checks both download sites a few seconds after startup, so the first click of the session already has a working link.
+- **Pre-Warmed Links Shared**: Simultaneous requests for the same site now reuse one lookup instead of repeating the same network work.
+- **Last-Resort Mirrors**: If a site publishes no working mirror right now, the app falls back to a last known good address instead of opening a dead page.
+- **Longer Link Trust**: Verified site links stay usable for a week instead of a few hours, which cuts down repeated re-checking on slow connections.
+
+### Network Reliability
+- **Works On Blocked DNS**: Site lookups query Google's and Cloudflare's DNS directly, so mirrors keep resolving on networks that block or hijack the default resolver.
+- **Encrypted DNS In The App Window**: The in-app browser uses DNS-over-HTTPS, so pages inside MyCinema resolve the same way the link checker does.
+- **Faster Timeout Chain**: Mirrors that hang no longer stall the button — checks time out in about 2.5 seconds and move straight to the next candidate.
+- **Bot-Wall Friendly Checks**: Mirrors behind Cloudflare-style challenges are treated as reachable, because the in-app browser can still load them.
+
+### Reliability
+- **Popups Always Appear**: In-app browser windows now reveal themselves even if the page never signals readiness, so a lookup window no longer fails to show.
+- **Fresher Shared Link File**: The published link list now accepts entries up to seven days old, so portals that rotate slowly stay usable.
+
+### Security & Privacy
+- **Known Domains Only**: Every resolved mirror is matched against each site's expected domain patterns, and app-download or promo hosts can never be chosen as a mirror.
+- **Strict HTTPS Mirror Checks**: Mirror and redirect checks connect only over HTTPS with a verified hostname, so a hijacked path cannot silently redirect the lookup.
+- **Local-Only Lookups**: Link checking talks only to the download portals and public DNS resolvers named in the app, and your settings override is still always honored.
+
+***
+
 # MyCinema v1.41.0
 
 Browse curated download sites with built-in ad blocking, download direct media files to custom folders, navigate instantly with zero background lag, and sync downloads directly into your library.

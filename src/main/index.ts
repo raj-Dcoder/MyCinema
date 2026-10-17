@@ -1921,6 +1921,25 @@ function notifyDownloadAdded(fileName: string, triggeringWc?: Electron.WebConten
 }
 
 app.whenReady().then(() => {
+  // Configure Chromium DNS-over-HTTPS (DoH) with Google & Cloudflare to bypass ISP blocks on download portals
+  try {
+    app.configureHostResolver({
+      enableBuiltInResolver: true,
+      secureDnsMode: 'automatic',
+      secureDnsServers: [
+        'https://dns.google/dns-query',
+        'https://cloudflare-dns.com/dns-query'
+      ]
+    })
+  } catch (e) {
+    console.warn('[Main] Host resolver DoH setup failed:', e)
+  }
+
+  // Pre-warm download site mirrors in background so button clicks on detail screen are always instant
+  setTimeout(() => {
+    downloadSites.prewarmDownloadSites().catch(() => {})
+  }, 2500)
+
   // Purge any stale temporary stream folders left over from previous ungraceful exits
   purgeStaleTempStreamFolder()
 
@@ -2800,7 +2819,15 @@ ipcMain.handle('open-web-popup', (event, url: string, title?: string, autoSearch
   })
 
   popup.loadURL(url)
-  popup.once('ready-to-show', () => popup.show())
+  let popupShown = false
+  const showPopup = () => {
+    if (!popupShown && !popup.isDestroyed()) {
+      popupShown = true
+      popup.show()
+    }
+  }
+  popup.once('ready-to-show', showPopup)
+  setTimeout(showPopup, 800)
   if (autoSearch && autoSearch.trim()) {
     schedulePopupAutoSearch(popup, autoSearch.trim())
   }

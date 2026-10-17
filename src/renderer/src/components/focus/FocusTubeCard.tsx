@@ -23,89 +23,145 @@ const FocusTubeCard: React.FC<FocusTubeCardProps> = ({ video, onPlay, onToggleSe
 
   const duration = formatDuration(video.duration)
 
-  return (
-    <div className="group relative isolate overflow-hidden rounded-2xl border border-white/[0.06] bg-gradient-to-b from-white/[0.035] to-white/[0.015] transition duration-300 hover:-translate-y-0.5 hover:border-white/[0.13] hover:shadow-[0_18px_44px_-28px_rgba(0,0,0,0.95)]">
-      <div className="relative isolate overflow-hidden rounded-t-2xl">
-        <button
-          type="button"
-          onClick={() => onPlay(video)}
-          className="relative block aspect-video w-full overflow-hidden rounded-t-2xl bg-[#101116] focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/70"
-          aria-label={`Play ${video.title}`}
-        >
-          {!thumbBroken ? (
-            <img
-              src={thumbnailUrl(video.videoId, variant)}
-              alt=""
-              loading="lazy"
-              decoding="async"
-              className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-[1.06]"
-              onError={() => {
-                if (variant < 3) setVariant((v) => v + 1)
-                else setThumbBroken(true)
-              }}
-            />
-          ) : (
-            <div className="flex h-full w-full items-center justify-center text-[10px] font-bold uppercase tracking-widest text-white/20">
-              No preview
-            </div>
-          )}
-          <span
-            aria-hidden
-            className="pointer-events-none absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent opacity-0 transition-opacity duration-300 group-hover:opacity-100"
-          />
-          <span
-            aria-hidden
-            className="pointer-events-none absolute inset-0 flex items-center justify-center opacity-0 transition-opacity duration-300 group-hover:opacity-100"
-          >
-            <span className="flex h-12 w-12 scale-90 items-center justify-center rounded-full bg-primary/90 text-white shadow-[0_10px_30px_-8px_rgba(0,0,0,0.9)] backdrop-blur transition-transform duration-300 group-hover:scale-100">
-              <Play size={20} className="ml-0.5" fill="currentColor" />
-            </span>
-          </span>
-        </button>
+  // Progress percentage (if partially watched or seen)
+  const progressPct = video.position > 5 && video.duration
+    ? Math.min(100, Math.round((video.position / video.duration) * 100))
+    : video.seen
+      ? 100
+      : 0
 
+  const handleToggleWatched = (e: React.MouseEvent) => {
+    e.stopPropagation()
+    if (marking) return
+    setMarking(true)
+    onToggleSeen(video)
+    window.setTimeout(() => setMarking(false), 1200)
+  }
+
+  return (
+    <div
+      onClick={() => onPlay(video)}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault()
+          onPlay(video)
+        }
+      }}
+      tabIndex={0}
+      role="button"
+      aria-label={`Play ${video.title}`}
+      className="group relative isolate flex flex-col overflow-hidden rounded-2xl border border-white/[0.07] bg-[#0c0e14]/75 backdrop-blur-sm cursor-pointer transition-all duration-300 hover:-translate-y-1 hover:border-red-500/60 hover:ring-1 hover:ring-red-500/25 hover:shadow-[0_0_28px_rgba(229,9,20,0.22)] focus:outline-none focus-visible:ring-2 focus-visible:ring-red-500 select-none"
+    >
+      {/* ── 16:9 Thumbnail Area ── */}
+      <div className="relative aspect-video w-full overflow-hidden rounded-t-2xl bg-[#101116]">
+        {!thumbBroken ? (
+          <img
+            src={thumbnailUrl(video.videoId, variant)}
+            alt=""
+            loading="lazy"
+            decoding="async"
+            className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-105"
+            onError={() => {
+              if (variant < 3) setVariant((v) => v + 1)
+              else setThumbBroken(true)
+            }}
+          />
+        ) : (
+          <div className="flex h-full w-full items-center justify-center text-[10px] font-bold uppercase tracking-widest text-white/20">
+            No preview
+          </div>
+        )}
+
+        {/* Live Badge */}
         {video.isLive && (
-          <span className="absolute top-2 left-2 inline-flex items-center gap-1 rounded-md bg-red-600 px-2 py-1 text-[10px] font-black uppercase tracking-widest text-white shadow-lg">
+          <span className="absolute top-2.5 left-2.5 inline-flex items-center gap-1 rounded-md bg-red-600 px-2 py-0.5 text-[10px] font-black uppercase tracking-widest text-white shadow-lg">
             <Radio size={10} /> Live
           </span>
         )}
 
+        {/* Short Badge */}
         {!video.isLive && video.isShort && (
-          <span className="absolute top-2 left-2 rounded-md bg-black/70 px-2 py-1 text-[10px] font-black uppercase tracking-widest text-white backdrop-blur-sm">
+          <span className="absolute top-2.5 left-2.5 rounded-md bg-black/75 border border-white/10 px-2 py-0.5 text-[10px] font-black uppercase tracking-widest text-white backdrop-blur-md">
             Short
           </span>
         )}
 
+        {/* Duration Badge (bottom-right) */}
         {duration && (
-          <span className="absolute bottom-2 right-2 rounded-md bg-black/85 px-1.5 py-0.5 text-[11px] font-bold tabular-nums text-white backdrop-blur-sm">
+          <span className="absolute bottom-2.5 right-2.5 rounded-lg bg-black/75 border border-white/10 px-2 py-0.5 text-[11px] font-semibold tabular-nums tracking-tight text-white/95 backdrop-blur-md shadow-sm">
             {duration}
           </span>
         )}
 
+        {/* Watched Indicator (top-right when idle, if seen) */}
         {video.seen && (
-          <span className="absolute bottom-2 left-2 inline-flex items-center gap-1 rounded-md bg-black/85 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-emerald-400 backdrop-blur-sm">
+          <span className="absolute top-2.5 right-2.5 inline-flex items-center gap-1 rounded-md bg-black/70 border border-white/10 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-emerald-400 backdrop-blur-md transition-opacity duration-200 group-hover:opacity-0">
             <CheckCircle2 size={11} /> Watched
           </span>
         )}
 
-        {video.position > 5 && (
-          <span className="absolute inset-x-0 bottom-0 h-1 bg-white/10">
-            <span
-              className="block h-full rounded-r-full bg-primary"
-              style={{
-                width: `${Math.min(100, video.duration ? (video.position / video.duration) * 100 : 0)}%`,
-              }}
+        {/* Flush Bottom Progress Line */}
+        {progressPct > 0 ? (
+          <div className="absolute inset-x-0 bottom-0 h-1 bg-white/10">
+            <div
+              className="h-full bg-red-600 shadow-[0_0_8px_rgba(229,9,20,0.8)] transition-all duration-300"
+              style={{ width: `${progressPct}%` }}
             />
-          </span>
+          </div>
+        ) : (
+          <div className="absolute inset-x-0 bottom-0 h-[2px] bg-white/[0.04] transition-colors duration-300 group-hover:bg-red-600/70" />
         )}
 
+        {/* Non-embeddable warning */}
         {!video.embeddable && (
-          <div className="absolute inset-0 flex items-center justify-center bg-black/80 px-4 text-center text-[11px] font-bold uppercase tracking-wide text-amber-400 backdrop-blur-[2px]">
-            Embedding disabled by the creator
+          <div className="absolute inset-0 flex items-center justify-center bg-black/85 px-4 text-center text-[11px] font-bold uppercase tracking-wide text-amber-400 backdrop-blur-[2px]">
+            Embedding disabled by creator
           </div>
         )}
+
+        {/* ── Hover Quick-Action Cluster (Centered Frosted Pills) ── */}
+        <div
+          className="absolute inset-0 flex items-center justify-center gap-2.5 bg-black/55 backdrop-blur-[3px] opacity-0 transition-opacity duration-200 group-hover:opacity-100"
+          aria-hidden="true"
+        >
+          {/* Play Button Pill */}
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation()
+              onPlay(video)
+            }}
+            className="inline-flex items-center gap-1.5 rounded-full bg-white px-4 py-2 text-xs font-black text-black shadow-xl transition-all duration-200 hover:scale-105 active:scale-95"
+          >
+            <Play size={13} fill="currentColor" strokeWidth={0} />
+            <span>Play</span>
+          </button>
+
+          {/* Watched Toggle Pill */}
+          <button
+            type="button"
+            onClick={handleToggleWatched}
+            disabled={marking}
+            title={video.seen ? 'Mark as unwatched' : 'Mark as watched'}
+            className={`inline-flex items-center gap-1.5 rounded-full px-3.5 py-2 text-xs font-bold shadow-xl backdrop-blur-md transition-all duration-200 hover:scale-105 active:scale-95 ${
+              video.seen
+                ? 'border border-emerald-400/40 bg-emerald-500/25 text-emerald-200 hover:bg-emerald-500/35'
+                : 'border border-white/20 bg-black/60 text-white hover:bg-white/20'
+            }`}
+          >
+            {marking ? (
+              <Loader2 size={13} className="animate-spin" />
+            ) : (
+              <Check size={13} strokeWidth={video.seen ? 3.5 : 2.5} />
+            )}
+            <span>{video.seen ? 'Watched' : 'Mark Watched'}</span>
+          </button>
+        </div>
       </div>
 
-      <div className="flex items-start gap-2.5 px-3.5 pb-3.5 pt-3">
+      {/* ── Info Section (Below Thumbnail) ── */}
+      <div className="flex items-start gap-3 p-3.5">
+        {/* Creator Channel Avatar */}
         {video.channelAvatarUrl && !avatarFailed ? (
           <img
             src={video.channelAvatarUrl}
@@ -113,12 +169,12 @@ const FocusTubeCard: React.FC<FocusTubeCardProps> = ({ video, onPlay, onToggleSe
             loading="lazy"
             referrerPolicy="no-referrer"
             onError={() => setAvatarFailed(true)}
-            className="mt-0.5 h-9 w-9 shrink-0 rounded-full border border-white/10 bg-white/[0.06] object-cover ring-1 ring-white/10"
+            className="mt-0.5 h-10 w-10 shrink-0 rounded-full border border-white/10 bg-white/[0.06] object-cover ring-1 ring-white/10"
           />
         ) : (
           <div
             title={video.channelTitle}
-            className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-xs font-black shadow ring-1 ring-white/10"
+            className="mt-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-xs font-black shadow ring-1 ring-white/10"
             style={{
               backgroundColor: `hsl(${avatarHue(video.channelTitle)}, 45%, 26%)`,
               color: `hsl(${avatarHue(video.channelTitle)}, 90%, 82%)`,
@@ -128,45 +184,20 @@ const FocusTubeCard: React.FC<FocusTubeCardProps> = ({ video, onPlay, onToggleSe
           </div>
         )}
 
+        {/* Title and Metadata */}
         <div className="min-w-0 flex-1">
-          <h3 className="line-clamp-2 text-sm font-bold leading-snug text-white/90 transition-colors group-hover:text-white">
+          <h3
+            className="line-clamp-2 text-sm font-bold leading-snug text-white/95 transition-colors group-hover:text-white"
+            title={video.title}
+          >
             {video.title}
           </h3>
-          <p className="mt-1 truncate text-xs font-semibold text-white/60">
+          <p className="mt-1 truncate text-xs font-medium text-white/50">
             {video.channelTitle}
-          </p>
-          <p className="mt-0.5 text-[11px] font-medium text-white/35">
-            {video.views ? `${formatViews(video.views)} • ` : ''}
-            {formatRelativeTime(video.publishedAt)} ago
+            {video.views ? ` • ${formatViews(video.views)}` : ''}
+            {video.publishedAt ? ` • ${formatRelativeTime(video.publishedAt)} ago` : ''}
           </p>
         </div>
-
-        <button
-          type="button"
-          onClick={() => {
-            if (marking) return
-            setMarking(true)
-            onToggleSeen(video)
-            // The parent reloads the feed (this card usually disappears
-            // underneath when "Unseen only" is on); clear the spinner shortly
-            // after in case the card stays mounted.
-            window.setTimeout(() => setMarking(false), 1200)
-          }}
-          title={video.seen ? 'Mark as unwatched' : 'Mark as watched'}
-          aria-label={video.seen ? 'Mark as unwatched' : 'Mark as watched'}
-          aria-pressed={video.seen}
-          className={`shrink-0 rounded-lg p-1.5 transition-all disabled:cursor-wait ${
-            video.seen
-              ? 'bg-emerald-400/15 text-emerald-300'
-              : 'text-white/20 hover:bg-white/[0.07] hover:text-white/70'
-          }`}
-        >
-          {marking ? (
-            <Loader2 size={16} className="animate-spin" />
-          ) : (
-            <Check size={16} strokeWidth={video.seen ? 3.5 : 2.5} />
-          )}
-        </button>
       </div>
     </div>
   )

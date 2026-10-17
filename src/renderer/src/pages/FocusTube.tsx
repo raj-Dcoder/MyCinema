@@ -494,27 +494,18 @@ const FocusTube: React.FC = () => {
             <button
               type="button"
               onClick={() => void selectCategory(null)}
-              className={`inline-flex shrink-0 items-center gap-1.5 rounded-xl px-3.5 py-1.5 text-xs font-bold transition-all ${
+              className={`inline-flex shrink-0 items-center rounded-xl px-4 py-1.5 text-xs font-bold transition-all ${
                 activeCategoryId === null
-                  ? 'bg-primary text-white shadow-[0_0_15px_rgba(229,9,20,0.5)]'
-                  : 'border border-white/10 bg-white/5 text-white/60 hover:border-white/20 hover:bg-white/10 hover:text-white'
+                  ? 'bg-primary text-white shadow-[0_0_15px_rgba(229,9,20,0.45)]'
+                  : 'border border-white/10 bg-white/5 text-white/70 hover:border-white/20 hover:bg-white/10 hover:text-white'
               }`}
             >
-              <Layers size={13} />
-              <span>All</span>
-              {unseenTotal > 0 && (
-                <span className={`rounded-full px-1.5 text-[10px] font-black tabular-nums ${
-                  activeCategoryId === null ? 'bg-white/20 text-white' : 'bg-primary/20 text-primary'
-                }`}>
-                  {unseenTotal}
-                </span>
-              )}
+              All
             </button>
 
             {/* Category pills */}
             {categories.map((category) => {
               const isActive = activeCategoryId === category.id
-              const unseen = category.unseenCount || 0
 
               if (editingId === category.id) {
                 return (
@@ -581,7 +572,7 @@ const FocusTube: React.FC = () => {
               }
 
               return (
-                <div key={category.id} className="group/pill relative shrink-0">
+                <div key={category.id} className="relative shrink-0">
                   <button
                     type="button"
                     onClick={() => void selectCategory(category.id)}
@@ -590,34 +581,18 @@ const FocusTube: React.FC = () => {
                       setEditName(category.name)
                       setConfirmDeleteId(null)
                     }}
-                    title={`${category.name} (${unseen} unseen) · Double-click to rename`}
-                    className={`inline-flex items-center gap-2 rounded-xl px-3.5 py-1.5 text-xs font-bold transition-all ${
-                      isActive
-                        ? 'bg-primary text-white shadow-[0_0_15px_rgba(229,9,20,0.5)]'
-                        : 'border border-white/10 bg-white/5 text-white/60 hover:border-white/20 hover:bg-white/10 hover:text-white'
-                    }`}
-                  >
-                    <span className={`h-2 w-2 rounded-full ${isActive ? 'bg-white' : categoryDot(category.color)}`} />
-                    <span className="truncate">{category.name}</span>
-                    {unseen > 0 && (
-                      <span className={`rounded-full px-1.5 text-[10px] font-black tabular-nums ${
-                        isActive ? 'bg-white/20 text-white' : 'bg-primary/20 text-primary'
-                      }`}>
-                        {unseen}
-                      </span>
-                    )}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={(e) => {
-                      e.stopPropagation()
+                    onContextMenu={(e) => {
+                      e.preventDefault()
                       setConfirmDeleteId(category.id)
                     }}
-                    title={`Delete ${category.name}`}
-                    aria-label={`Delete ${category.name}`}
-                    className="absolute -right-1 -top-1 hidden rounded-full border border-white/10 bg-[#161822] p-0.5 text-white/40 shadow-lg hover:border-red-500/40 hover:bg-red-500/20 hover:text-red-400 group-hover/pill:block"
+                    title={`${category.name} · Double-click to rename · Right-click to delete`}
+                    className={`inline-flex items-center rounded-xl px-4 py-1.5 text-xs font-bold transition-all ${
+                      isActive
+                        ? 'bg-primary text-white shadow-[0_0_15px_rgba(229,9,20,0.45)]'
+                        : 'border border-white/10 bg-white/5 text-white/70 hover:border-white/20 hover:bg-white/10 hover:text-white'
+                    }`}
                   >
-                    <X size={10} />
+                    <span className="truncate">{category.name}</span>
                   </button>
                 </div>
               )

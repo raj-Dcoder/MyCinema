@@ -443,11 +443,6 @@ const FocusTube: React.FC = () => {
           >
             <SlidersHorizontal size={13} />
             <span className="hidden sm:inline">Channels</span>
-            {totalChannels > 0 && (
-              <span className="rounded-md bg-white/10 px-1.5 py-0.5 text-[10px] font-bold tabular-nums text-white/80">
-                {totalChannels}
-              </span>
-            )}
           </button>
 
           <button
@@ -465,19 +460,22 @@ const FocusTube: React.FC = () => {
       </header>
 
       {/* ── CATEGORY CAROUSEL & FILTER CONTROLS (Single clean row) ── */}
-      <div className="flex flex-col gap-3 rounded-2xl border border-white/[0.08] bg-[#0c0d14]/70 p-2 sm:p-2.5 lg:flex-row lg:items-center lg:justify-between">
+      <div className="flex flex-col gap-3 py-1 lg:flex-row lg:items-center lg:justify-between">
         {/* Left / Center: Category Carousel with chevrons and overflow */}
         <div data-tour="focustube-categories" className="relative flex min-w-0 flex-1 items-center">
-          {/* Scroll Left Button */}
+          {/* Scroll Left Button & Gradient Fade */}
           {canScrollLeft && (
-            <button
-              type="button"
-              onClick={() => scrollCarousel('left')}
-              aria-label="Scroll categories left"
-              className="absolute -left-1 z-20 flex h-8 w-8 items-center justify-center rounded-full border border-white/15 bg-[#14161f]/95 text-white shadow-xl backdrop-blur transition-all hover:bg-white/20 hover:scale-105 active:scale-95"
-            >
-              <ChevronLeft size={16} />
-            </button>
+            <>
+              <div className="pointer-events-none absolute left-0 top-0 bottom-0 z-10 w-12 bg-gradient-to-r from-[#0c0d14] via-[#0c0d14]/80 to-transparent" />
+              <button
+                type="button"
+                onClick={() => scrollCarousel('left')}
+                aria-label="Scroll categories left"
+                className="absolute left-0 z-20 flex h-7 w-7 items-center justify-center rounded-full border border-white/15 bg-[#14161f]/95 text-white shadow-xl backdrop-blur transition-all hover:scale-105 hover:bg-white/20 active:scale-95"
+              >
+                <ChevronLeft size={15} />
+              </button>
+            </>
           )}
 
           {/* Carousel Scroll Container */}
@@ -485,9 +483,9 @@ const FocusTube: React.FC = () => {
             ref={carouselRef}
             onScroll={checkCarouselScroll}
             onWheel={handleCarouselWheel}
-            className={`flex items-center gap-2 overflow-x-auto no-scrollbar scroll-smooth py-0.5 ${
-              canScrollLeft ? 'pl-7' : ''
-            } ${canScrollRight ? 'pr-7' : ''}`}
+            className={`flex items-center gap-2 overflow-x-auto no-scrollbar scroll-smooth py-1 ${
+              canScrollLeft ? 'pl-8' : ''
+            } ${canScrollRight ? 'pr-8' : ''}`}
             style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}
           >
             {/* "All" category pill */}
@@ -642,37 +640,40 @@ const FocusTube: React.FC = () => {
             )}
           </div>
 
-          {/* Scroll Right Button */}
+          {/* Scroll Right Button & Gradient Fade */}
           {canScrollRight && (
-            <button
-              type="button"
-              onClick={() => scrollCarousel('right')}
-              aria-label="Scroll categories right"
-              className="absolute -right-1 z-20 flex h-8 w-8 items-center justify-center rounded-full border border-white/15 bg-[#14161f]/95 text-white shadow-xl backdrop-blur transition-all hover:bg-white/20 hover:scale-105 active:scale-95"
-            >
-              <ChevronRight size={16} />
-            </button>
+            <>
+              <div className="pointer-events-none absolute right-0 top-0 bottom-0 z-10 w-12 bg-gradient-to-l from-[#0c0d14] via-[#0c0d14]/80 to-transparent" />
+              <button
+                type="button"
+                onClick={() => scrollCarousel('right')}
+                aria-label="Scroll categories right"
+                className="absolute right-0 z-20 flex h-7 w-7 items-center justify-center rounded-full border border-white/15 bg-[#14161f]/95 text-white shadow-xl backdrop-blur transition-all hover:scale-105 hover:bg-white/20 active:scale-95"
+              >
+                <ChevronRight size={15} />
+              </button>
+            </>
           )}
         </div>
 
-        {/* Right side: Modern Toggle Switches (Shorts, Watched, Mark all seen) */}
-        <div data-tour="focustube-feed" className="flex shrink-0 items-center gap-3 self-end border-t border-white/[0.06] pt-2 sm:pt-0 lg:border-t-0">
+        {/* Right side: Modern Toggle Switches (Hide Shorts, Hide Watched, Mark all seen) */}
+        <div data-tour="focustube-feed" className="flex shrink-0 items-center gap-3.5 self-end pt-1 sm:pt-0">
           {/* Hide Shorts Switch */}
           <div className="flex items-center gap-2">
-            <span className="text-[11px] font-bold text-white/60">Shorts</span>
+            <span className="text-[11px] font-bold text-white/60">Hide Shorts</span>
             <button
               type="button"
               role="switch"
-              aria-checked={!hideShorts}
+              aria-checked={hideShorts}
               onClick={toggleShorts}
               title={hideShorts ? 'Shorts are hidden (click to show)' : 'Shorts are visible (click to hide)'}
               className={`relative h-5 w-9 shrink-0 rounded-full transition-colors ${
-                !hideShorts ? 'bg-primary' : 'bg-white/20'
+                hideShorts ? 'bg-primary shadow-[0_0_10px_rgba(229,9,20,0.4)]' : 'bg-white/20'
               }`}
             >
               <span
                 className={`absolute top-0.5 h-4 w-4 rounded-full bg-white shadow transition-all ${
-                  !hideShorts ? 'left-[18px]' : 'left-0.5'
+                  hideShorts ? 'left-[18px]' : 'left-0.5'
                 }`}
               />
             </button>
@@ -682,24 +683,24 @@ const FocusTube: React.FC = () => {
 
           {/* Hide Watched Switch */}
           <div className="flex items-center gap-2">
-            <span className="text-[11px] font-bold text-white/60">Watched</span>
+            <span className="text-[11px] font-bold text-white/60">Hide Watched</span>
             <button
               type="button"
               role="switch"
-              aria-checked={includeSeen}
+              aria-checked={!includeSeen}
               onClick={() => {
                 const next = !includeSeen
                 setIncludeSeen(next)
                 void loadFeed(activeCategoryId, { includeSeen: next })
               }}
-              title={includeSeen ? 'Including watched videos' : 'Unseen videos only'}
+              title={!includeSeen ? 'Watched videos are hidden (click to show)' : 'Watched videos are included (click to hide)'}
               className={`relative h-5 w-9 shrink-0 rounded-full transition-colors ${
-                includeSeen ? 'bg-primary' : 'bg-white/20'
+                !includeSeen ? 'bg-primary shadow-[0_0_10px_rgba(229,9,20,0.4)]' : 'bg-white/20'
               }`}
             >
               <span
                 className={`absolute top-0.5 h-4 w-4 rounded-full bg-white shadow transition-all ${
-                  includeSeen ? 'left-[18px]' : 'left-0.5'
+                  !includeSeen ? 'left-[18px]' : 'left-0.5'
                 }`}
               />
             </button>

@@ -1,7 +1,7 @@
 import React, { useState } from 'react'
 import { Check, CheckCircle2, Loader2, Play, Radio } from 'lucide-react'
 import type { FtVideo } from '../../types'
-import { formatDuration, formatRelativeTime, formatViews, thumbnailUrl } from '../../utils/focusTube'
+import { avatarHue, formatDuration, formatRelativeTime, formatViews, thumbnailUrl } from '../../utils/focusTube'
 
 interface FocusTubeCardProps {
   video: FtVideo
@@ -100,15 +100,26 @@ const FocusTubeCard: React.FC<FocusTubeCardProps> = ({ video, onPlay, onToggleSe
         )}
       </div>
 
-      <div className="flex items-start gap-2 px-3.5 pb-3.5 pt-3">
+      <div className="flex items-start gap-2.5 px-3.5 pb-3.5 pt-3">
+        <div
+          title={video.channelTitle}
+          className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-xs font-black shadow ring-1 ring-white/10"
+          style={{
+            backgroundColor: `hsl(${avatarHue(video.channelTitle)}, 45%, 26%)`,
+            color: `hsl(${avatarHue(video.channelTitle)}, 90%, 82%)`,
+          }}
+        >
+          {video.channelTitle?.trim().charAt(0).toUpperCase() || '?'}
+        </div>
+
         <div className="min-w-0 flex-1">
           <h3 className="line-clamp-2 text-sm font-bold leading-snug text-white/90 transition-colors group-hover:text-white">
             {video.title}
           </h3>
-          <p className="mt-1.5 truncate text-xs font-semibold text-white/45">
+          <p className="mt-1 truncate text-xs font-semibold text-white/50">
             {video.channelTitle}
           </p>
-          <p className="text-[11px] font-semibold text-white/30">
+          <p className="text-[11px] font-medium text-white/30">
             {[formatRelativeTime(video.publishedAt), formatViews(video.views)].filter(Boolean).join(' · ')}
           </p>
         </div>

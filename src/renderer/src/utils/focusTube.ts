@@ -175,3 +175,10 @@ export function embedUrl(videoId: string, startSeconds = 0): string {
   if (startSeconds > 0) params.set('start', String(Math.floor(startSeconds)))
   return `https://www.youtube.com/embed/${videoId}?${params.toString()}`
 }
+
+export function avatarHue(name: string | null | undefined): number {
+  if (!name) return 0
+  let hash = 0
+  for (let i = 0; i < name.length; i++) hash = (hash * 31 + name.charCodeAt(i)) >>> 0
+  return hash % 360
+}

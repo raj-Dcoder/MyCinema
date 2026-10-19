@@ -159,7 +159,7 @@ export const FOCUS_TUBE_EMBED_ORIGIN = 'https://mycinema.app'
  * and the bridge works — which is how FocusTubePlayer tracks progress,
  * duration, end-of-video and keyboard shortcuts.
  */
-export function embedUrl(videoId: string, startSeconds = 0): string {
+export function embedUrl(videoId: string, startSeconds = 0, qualityPreference?: string | null): string {
   const params = new URLSearchParams({
     rel: '0',
     modestbranding: '1',
@@ -173,6 +173,9 @@ export function embedUrl(videoId: string, startSeconds = 0): string {
     widget_referrer: `${FOCUS_TUBE_EMBED_ORIGIN}/`,
   })
   if (startSeconds > 0) params.set('start', String(Math.floor(startSeconds)))
+  if (qualityPreference && qualityPreference !== 'auto') {
+    params.set('vq', qualityPreference)
+  }
   return `https://www.youtube.com/embed/${videoId}?${params.toString()}`
 }
 

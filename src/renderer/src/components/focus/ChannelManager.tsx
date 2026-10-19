@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { AlertCircle, Check, Download, Loader2, Plus, RotateCcw, Search, Trash2, Users, X } from 'lucide-react'
+import { AlertCircle, Check, Download, Loader2, Plus, RotateCcw, Search, Sparkles, Trash2, Users, X } from 'lucide-react'
 import type { FtCategory, FtChannel } from '../../types'
 import { categoryDot, formatRelativeTime } from '../../utils/focusTube'
 import ImportSubscriptions from './ImportSubscriptions'
@@ -133,11 +133,17 @@ const ChannelManager: React.FC<ChannelManagerProps> = ({ categories, initialCate
     setConfirmUnsubId(null)
     setFilterId(next)
   }
-  // New subscriptions land in the tab being viewed when it is a category,
-  // otherwise in the category the manager was opened from.
-  const subscribeTargetId = typeof filterId === 'number'
-    ? filterId
-    : initialCategoryId ?? categories[0]?.id ?? null
+  // Category target state for new subscriptions. Default to current filter or initial category.
+  const [selectedAddCategoryId, setSelectedAddCategoryId] = useState<number | null>(() => {
+    return typeof initialCategoryId === 'number' ? initialCategoryId : (categories[0]?.id ?? null)
+  })
+
+  // When viewing a category tab, sync the target category selector
+  useEffect(() => {
+    if (typeof filterId === 'number') {
+      setSelectedAddCategoryId(filterId)
+    }
+  }, [filterId])
 
   // Debounced search-as-you-type. Stale responses are dropped by sequence so
   // fast typing never flashes another query's options. Guards the bridge
@@ -191,12 +197,12 @@ const ChannelManager: React.FC<ChannelManagerProps> = ({ categories, initialCate
     ).slice(0, 5)
   }, [channels, query])
 
-  const handleSubscribeResult = useCallback(async (result: FtSearchResult) => {
+  const handleSubscribeResult = useCallback(async (result: FtSearchResult, overrideCategoryId?: number | null) => {
     if (subscribedIds.has(result.channelId)) return
     setSubscribingId(result.channelId)
     setAddError(null)
     try {
-      const targetCategoryId = subscribeTargetId
+      const targetCategoryId = overrideCategoryId !== undefined ? overrideCategoryId : selectedAddCategoryId
       const categoryIds = targetCategoryId ? [targetCategoryId] : []
       const channelUrl = `https://www.youtube.com/channel/${result.channelId}`
       // Stale preload without the direct-subscribe bridge falls back to the
@@ -225,7 +231,7 @@ const ChannelManager: React.FC<ChannelManagerProps> = ({ categories, initialCate
     } finally {
       setSubscribingId(null)
     }
-  }, [subscribedIds, subscribeTargetId, load, onChanged])
+  }, [subscribedIds, selectedAddCategoryId, load, onChanged])
 
   const handleAdd = useCallback(async () => {
     const trimmed = query.trim()
@@ -241,7 +247,7 @@ const ChannelManager: React.FC<ChannelManagerProps> = ({ categories, initialCate
     setAdding(true)
     setAddError(null)
     try {
-      const targetCategoryId = subscribeTargetId
+      const targetCategoryId = selectedAddCategoryId
       const result: any = await window.api.ftAddChannel(trimmed, targetCategoryId ? [targetCategoryId] : [])
       if (result?.error) {
         setAddError(result.error)
@@ -255,7 +261,7 @@ const ChannelManager: React.FC<ChannelManagerProps> = ({ categories, initialCate
     } finally {
       setAdding(false)
     }
-  }, [query, results, searching, subscribedIds, handleSubscribeResult, subscribeTargetId, load, onChanged])
+  }, [query, results, searching, subscribedIds, handleSubscribeResult, selectedAddCategoryId, load, onChanged])
 
   // Full unsubscribe: deletes the channel (and its videos) everywhere.
   const handleUnsubscribe = useCallback(async (channelId: string) => {
@@ -321,20 +327,22 @@ const ChannelManager: React.FC<ChannelManagerProps> = ({ categories, initialCate
           </div>
         </div>
 
-        <div className="shrink-0 border-b border-white/[0.07] px-6 py-4">
-          <div className="flex gap-2">
-            <div className="relative flex-1">
-              <Search size={15} className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-white/30" />
+        {/* ── Search & Channel Add UI ── */}
+        <div className="shrink-0 border-b border-white/[0.07] px-6 py-4 bg-white/[0.01]">
+          {/* Main Search Input Group */}
+          <div className="flex gap-2.5">
+            <div className="relative flex-1 group">
+              <Search size={16} className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-white/35 transition-colors group-focus-within:text-primary" />
               <input
                 value={query}
                 onChange={(event) => setQuery(event.target.value)}
                 onKeyDown={(event) => { if (event.key === 'Enter') void handleAdd() }}
-                placeholder="Search channel name, @handle, ID, or paste a URL"
+                placeholder="Search channels by name, @handle, channel ID, or paste URL..."
                 aria-label="Search YouTube channels"
-                className="h-11 w-full rounded-xl border border-white/10 bg-black/30 pl-10 pr-10 text-sm font-semibold text-white placeholder:text-white/25 transition-colors hover:border-white/20 focus:border-primary/60 focus:bg-black/40 focus:outline-none focus:ring-4 focus:ring-primary/10"
+                className="h-11 w-full rounded-xl border border-white/10 bg-black/40 pl-10 pr-10 text-sm font-semibold text-white placeholder:text-white/25 transition-all hover:border-white/20 focus:border-primary/60 focus:bg-black/60 focus:outline-none focus:ring-4 focus:ring-primary/10"
               />
               {searching ? (
-                <Loader2 size={15} className="absolute right-3.5 top-1/2 -translate-y-1/2 animate-spin text-white/40" />
+                <Loader2 size={16} className="absolute right-3.5 top-1/2 -translate-y-1/2 animate-spin text-white/40" />
               ) : query ? (
                 <button
                   type="button"
@@ -346,30 +354,72 @@ const ChannelManager: React.FC<ChannelManagerProps> = ({ categories, initialCate
                 </button>
               ) : null}
             </div>
+
             <button
               type="button"
               onClick={() => void handleAdd()}
               disabled={adding || subscribingId !== null || searching || !query.trim()}
-              title={searching ? 'Resolving your search…' : filterCategory ? `Subscribe into ${filterCategory.name}` : 'Subscribe'}
-              className="inline-flex h-11 shrink-0 items-center gap-2 rounded-xl bg-primary px-5 text-xs font-black uppercase tracking-widest text-white shadow-[0_10px_30px_-12px_rgba(229,9,20,0.9)] transition-colors hover:bg-primary/85 disabled:opacity-40 disabled:shadow-none"
+              title={searching ? 'Resolving your search…' : 'Subscribe to channel'}
+              className="inline-flex h-11 shrink-0 items-center gap-2 rounded-xl bg-primary px-5 text-xs font-black uppercase tracking-widest text-white shadow-[0_10px_30px_-12px_rgba(229,9,20,0.9)] transition-all hover:bg-primary/85 active:scale-95 disabled:opacity-40 disabled:shadow-none"
             >
-              {adding || subscribingId !== null || searching ? <Loader2 size={14} className="animate-spin" /> : <Plus size={14} />}
-              Subscribe
+              {adding || subscribingId !== null || searching ? <Loader2 size={15} className="animate-spin" /> : <Plus size={15} />}
+              <span>Subscribe</span>
             </button>
           </div>
 
-          {/* Search options — logo, name, handle/subs, one click to subscribe. */}
+          {/* Quick Helper Badges & Category Target Selector */}
+          <div className="mt-2.5 flex flex-wrap items-center justify-between gap-2 pt-1 text-xs">
+            {/* Quick format hint chips */}
+            <div className="flex items-center gap-1.5 text-[11px] text-white/40">
+              <span className="font-semibold text-white/30">Quick:</span>
+              <button
+                type="button"
+                onClick={() => setQuery('@')}
+                className="rounded-md border border-white/10 bg-white/5 px-2 py-0.5 text-[10px] font-bold text-white/60 hover:border-primary/40 hover:text-white transition-colors"
+              >
+                @handle
+              </button>
+              <button
+                type="button"
+                onClick={() => setQuery('https://www.youtube.com/@')}
+                className="rounded-md border border-white/10 bg-white/5 px-2 py-0.5 text-[10px] font-bold text-white/60 hover:border-primary/40 hover:text-white transition-colors"
+              >
+                URL
+              </button>
+            </div>
+
+            {/* Target Category Selector */}
+            {categories.length > 0 && (
+              <div className="flex items-center gap-1.5 text-[11px]">
+                <span className="font-semibold text-white/40">File into:</span>
+                <select
+                  value={selectedAddCategoryId ?? ''}
+                  onChange={(e) => setSelectedAddCategoryId(e.target.value ? Number(e.target.value) : null)}
+                  className="rounded-lg border border-white/15 bg-black/60 px-2.5 py-1 text-[11px] font-bold text-white outline-none hover:border-white/30 focus:border-primary transition-colors cursor-pointer"
+                >
+                  <option value="" className="bg-[#14161f] text-white">None (Uncategorized)</option>
+                  {categories.map((cat) => (
+                    <option key={cat.id} value={cat.id} className="bg-[#14161f] text-white">
+                      {cat.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
+          </div>
+
+          {/* Search options / Results */}
           {query.trim().length >= 2 && (
-            <div className="mt-3 overflow-hidden rounded-2xl border border-white/10 bg-black/50 shadow-[0_24px_60px_-20px_rgba(0,0,0,0.9)]">
+            <div className="mt-3 overflow-hidden rounded-2xl border border-white/10 bg-black/60 shadow-[0_24px_60px_-20px_rgba(0,0,0,0.9)] backdrop-blur-md">
               {localMatches.length > 0 && (
                 <div className="border-b border-white/[0.06]">
                   <p className="px-4 pt-3.5 pb-1 text-[10px] font-black uppercase tracking-[0.14em] text-white/30">
-                    In your library — no search needed
+                    Already in your library
                   </p>
                   <ul className="divide-y divide-white/[0.05]">
                     {localMatches.map((channel) => (
                       <li key={channel.channelId} className="flex items-center gap-3 px-4 py-2.5">
-                        <ChannelAvatar title={channel.title} avatarUrl={channel.avatarUrl} sizeClass="h-8 w-8" />
+                        <ChannelAvatar title={channel.title} avatarUrl={channel.avatarUrl} sizeClass="h-9 w-9" />
                         <div className="min-w-0 flex-1">
                           <p className="truncate text-sm font-bold text-white">{channel.title}</p>
                           <p className="truncate text-[11px] font-semibold text-white/40">
@@ -384,10 +434,12 @@ const ChannelManager: React.FC<ChannelManagerProps> = ({ categories, initialCate
                   </ul>
                 </div>
               )}
+
               {searching && results.length === 0 && !searchError ? (
-                <p className="px-4 py-6 text-center text-[11px] font-black uppercase tracking-widest text-white/30">
-                  Searching YouTube…
-                </p>
+                <div className="flex flex-col items-center justify-center py-8">
+                  <Loader2 size={20} className="animate-spin text-primary mb-2" />
+                  <p className="text-xs font-semibold text-white/50">Searching YouTube channels…</p>
+                </div>
               ) : searchError ? (
                 <div className="px-4 py-4">
                   <p className="flex items-center gap-1.5 text-xs font-semibold text-red-400">
@@ -407,18 +459,23 @@ const ChannelManager: React.FC<ChannelManagerProps> = ({ categories, initialCate
                   </div>
                 </div>
               ) : results.length === 0 && localMatches.length === 0 ? (
-                <p className="px-4 py-6 text-center text-[11px] font-black uppercase tracking-widest text-white/30">
-                  No channels found — try the @handle or paste the channel URL
-                </p>
+                <div className="px-4 py-6 text-center">
+                  <p className="text-xs font-semibold text-white/40">
+                    No channels found matching "{query}"
+                  </p>
+                  <p className="mt-1 text-[11px] text-white/25">
+                    Tip: Try entering the exact creator handle (e.g. <span className="font-mono text-white/40">@mkbhd</span>) or paste the channel link.
+                  </p>
+                </div>
               ) : results.length === 0 ? null : (
-                <ul className="max-h-72 divide-y divide-white/[0.05] overflow-y-auto">
+                <ul className="max-h-80 divide-y divide-white/[0.05] overflow-y-auto">
                   {results.map((result) => {
                     const already = subscribedIds.has(result.channelId)
                     const busy = subscribingId === result.channelId
                     return (
                       <li key={result.channelId}>
-                        <div className="group/result flex items-center gap-3 px-4 py-2.5 transition-colors hover:bg-white/[0.04]">
-                          <ChannelAvatar title={result.title} avatarUrl={result.avatarUrl} sizeClass="h-10 w-10" />
+                        <div className="group/result flex items-center gap-3.5 px-4 py-3 transition-colors hover:bg-white/[0.04]">
+                          <ChannelAvatar title={result.title} avatarUrl={result.avatarUrl} sizeClass="h-11 w-11" />
                           <button
                             type="button"
                             onClick={() => void handleSubscribeResult(result)}
@@ -426,16 +483,18 @@ const ChannelManager: React.FC<ChannelManagerProps> = ({ categories, initialCate
                             className="min-w-0 flex-1 text-left"
                             title={already ? 'Already subscribed' : `Subscribe to ${result.title}`}
                           >
-                            <p className="truncate text-sm font-bold text-white">{result.title}</p>
-                            <p className="truncate text-[11px] font-semibold text-white/40">
-                              {[result.handle, result.subscriberText, result.videoCountText].filter(Boolean).join(' · ')}
+                            <p className="truncate text-sm font-bold text-white group-hover/result:text-primary transition-colors">
+                              {result.title}
+                            </p>
+                            <p className="truncate text-[11px] font-semibold text-white/45">
+                              {[result.handle, result.subscriberText, result.videoCountText].filter(Boolean).join(' • ')}
                             </p>
                             {result.descriptionSnippet && (
-                              <p className="truncate text-[11px] text-white/25">{result.descriptionSnippet}</p>
+                              <p className="truncate text-[11px] text-white/30 mt-0.5">{result.descriptionSnippet}</p>
                             )}
                           </button>
                           {already ? (
-                            <span className="inline-flex shrink-0 items-center gap-1 rounded-full border border-emerald-400/20 bg-emerald-400/10 px-2.5 py-1 text-[10px] font-black uppercase tracking-widest text-emerald-300">
+                            <span className="inline-flex shrink-0 items-center gap-1 rounded-full border border-emerald-400/20 bg-emerald-400/10 px-3 py-1 text-[10px] font-black uppercase tracking-widest text-emerald-300">
                               <Check size={11} /> Added
                             </span>
                           ) : (
@@ -443,10 +502,10 @@ const ChannelManager: React.FC<ChannelManagerProps> = ({ categories, initialCate
                               type="button"
                               onClick={() => void handleSubscribeResult(result)}
                               disabled={busy}
-                              className="inline-flex shrink-0 items-center gap-1 rounded-lg bg-primary px-3 py-1.5 text-[10px] font-black uppercase tracking-widest text-white transition-colors hover:bg-primary/85 disabled:opacity-40"
+                              className="inline-flex shrink-0 items-center gap-1.5 rounded-xl bg-primary px-3.5 py-2 text-xs font-bold text-white transition-all hover:bg-primary/85 active:scale-95 disabled:opacity-40 shadow-sm"
                             >
-                              {busy ? <Loader2 size={12} className="animate-spin" /> : <Plus size={12} />}
-                              {busy ? '' : 'Add'}
+                              {busy ? <Loader2 size={13} className="animate-spin" /> : <Plus size={13} />}
+                              <span>{busy ? 'Adding…' : 'Add Channel'}</span>
                             </button>
                           )}
                         </div>
@@ -455,6 +514,19 @@ const ChannelManager: React.FC<ChannelManagerProps> = ({ categories, initialCate
                   })}
                 </ul>
               )}
+            </div>
+          )}
+
+          {/* Clean Guidance Box when Query is Empty */}
+          {query.trim().length === 0 && (
+            <div className="mt-3.5 rounded-2xl border border-white/[0.06] bg-black/20 p-3.5 text-xs">
+              <div className="flex items-center gap-2 font-bold text-white/70 mb-1">
+                <Sparkles size={14} className="text-primary" />
+                <span>Quick Ways to Add Channels</span>
+              </div>
+              <p className="text-[11px] text-white/40 leading-relaxed">
+                Type any creator's name, paste their <code className="text-white/60 bg-white/5 px-1 py-0.5 rounded">@handle</code> (e.g. <span className="text-sky-300">@Veritasium</span>), or paste a full YouTube channel or video URL.
+              </p>
             </div>
           )}
 

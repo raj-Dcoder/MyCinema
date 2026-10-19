@@ -125,6 +125,17 @@ function qualityLabel(id: string): string {
   return QUALITY_OPTIONS.find((q) => q.id === id)?.label ?? id
 }
 
+export const QUALITY_TARGETS: Array<{ id: string; label: string; desc: string }> = [
+  { id: 'auto', label: 'Auto (Recommended)', desc: 'Adaptive quality managed by YouTube based on bandwidth' },
+  { id: 'hd2160', label: '4K Ultra HD', desc: 'Prioritize 2160p resolution' },
+  { id: 'hd1440', label: '1440p Quad HD', desc: 'Crisp 2K resolution' },
+  { id: 'hd1080', label: '1080p Full HD', desc: 'Standard crisp high-definition 1080p' },
+  { id: 'hd720', label: '720p HD', desc: 'Smooth streaming with reduced data usage' },
+  { id: 'medium', label: 'Data Saver (360p / 480p)', desc: 'Lowest bandwidth usage for metered connections' },
+]
+
+export const QUALITY_PREF_KEY = 'mycinema_ft_preferred_quality'
+
 /** Compact like/comment counts: 1234 -> "1.2K". */
 function formatCompactCount(n: number | null): string {
   if (n === null || !Number.isFinite(n)) return ''
@@ -390,10 +401,15 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
   const [speedToast, setSpeedToast] = useState<{ text: string; id: number } | null>(null)
   const [captionsOn, setCaptionsOn] = useState(false)
   const [speed, setSpeed] = useState(1)
-  // Live rendition readout only (getPlaybackQuality / onPlaybackQualityChange).
-  // There is deliberately NO manual selector: YouTube ignores every quality
-  // lever, so quality is always Auto and this just reports what it picked.
+  // Live rendition readout (getPlaybackQuality / onPlaybackQualityChange) + target preference.
   const [actualQuality, setActualQuality] = useState<string | null>(null)
+  const [qualityPref, setQualityPref] = useState<string>(() => {
+    try {
+      return localStorage.getItem(QUALITY_PREF_KEY) || 'auto'
+    } catch {
+      return 'auto'
+    }
+  })
   const [isHolding2x, setIsHolding2x] = useState(false)
   // Two separate menus instead of one generic "settings" gear: speed gets a
   // real panel; quality opens an Auto readout (same tab UI, honest content).
@@ -465,11 +481,11 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
     ? startSeconds
     : 0
 
-  // Keyed ONLY on video/retry.
+  // Keyed on video/retry/quality preference.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const embedSrc = useMemo(
-    () => embedUrl(video.videoId, resumeAt),
-    [video.videoId, iframeKey, resumeAt],
+    () => embedUrl(video.videoId, resumeAt, qualityPref),
+    [video.videoId, iframeKey, resumeAt, qualityPref],
   )
 
   const chapters = useMemo(
@@ -601,6 +617,20 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
       cmd('getPlaybackRate', [])
     })
   }, [cmd, withBridge])
+
+  const handleSelectQualityPref = useCallback((prefId: string) => {
+    setQualityPref(prefId)
+    try {
+      localStorage.setItem(QUALITY_PREF_KEY, prefId)
+    } catch {}
+    withBridge(() => {
+      cmd('setPlaybackQuality', [prefId])
+      cmd('setPlaybackQualityRange', [prefId, prefId])
+    })
+    const label = QUALITY_TARGETS.find((q) => q.id === prefId)?.label || prefId
+    flashSpeedToast(`Target Quality: ${label}`)
+    requestPlaybackInfo()
+  }, [cmd, flashSpeedToast, requestPlaybackInfo, withBridge])
 
   // ── SponsorBlock lookup (one fetch per video, cached in main) ─────────────
   useEffect(() => {
@@ -1665,12 +1695,12 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
     // handler from firing while interacting with this player.
     <div
       data-fullscreen-gesture-scope="player"
-      style={!isMinimized && !fsActive ? { left: 'var(--sidebar-width, 5rem)' } : undefined}
-      className={isMinimized
-        ? 'pointer-events-none fixed inset-0 z-[70] m-0 bg-transparent p-0 text-white select-none'
-        : `fixed right-0 top-0 bottom-0 z-[70] m-0 flex flex-col bg-[#090a0f] p-0 text-white select-none overflow-hidden transition-[left] duration-300 ease-in-out ${
-            fsActive ? 'left-0' : ''
-          }`}
+      style={{ left: fsActive ? '0' : 'var(--sidebar-width, 5rem)' }}
+      className={`fixed right-0 top-0 bottom-0 z-[70] m-0 flex flex-col text-white select-none transition-[left,background-color] duration-300 ease-in-out ${
+        isMinimized
+          ? 'pointer-events-none bg-transparent'
+          : 'bg-[#090a0f] overflow-hidden'
+      }`}
     >
 
       {/* ── TOP THEATER HEADER (hidden in mini mode and native fullscreen) ── */}
@@ -1817,8 +1847,8 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
             <div
               ref={shellRef}
               className={isMinimized
-                ? 'pointer-events-auto fixed bottom-4 right-4 z-[80] aspect-video w-[min(380px,calc(100vw-2rem))] overflow-hidden rounded-xl border border-white/15 bg-black shadow-[0_20px_60px_rgba(0,0,0,0.7)]'
-                : `relative aspect-video w-full overflow-hidden rounded-2xl border border-white/10 bg-black shadow-2xl ${
+                ? 'pointer-events-auto fixed bottom-4 right-4 z-[80] aspect-video w-[min(380px,calc(100vw-2rem))] overflow-hidden rounded-xl border border-white/15 bg-black shadow-[0_20px_60px_rgba(0,0,0,0.7)] transition-all duration-300 ease-out animate-in fade-in zoom-in-95'
+                : `relative aspect-video w-full overflow-hidden rounded-2xl border border-white/10 bg-black shadow-2xl transition-all duration-300 ease-out ${
                   isPlaying && !chromeVisible ? 'cursor-none' : ''
                 }`}
             onMouseMove={pokeBottom}
@@ -2196,19 +2226,45 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
                     </>
                   ) : (
                     <>
-                      <p className="px-1 pb-2 text-[10px] font-black uppercase tracking-widest text-white/40">
-                        Quality · Auto
-                      </p>
-                      <div className="rounded-lg border border-white/10 bg-white/[0.04] px-3 py-2.5">
-                        <p className="text-xs font-black text-white">
-                          {actualQuality ? `Playing at ${qualityLabel(actualQuality)}` : 'Detecting…'}
+                      <div className="flex items-center justify-between px-1 pb-2">
+                        <p className="text-[10px] font-black uppercase tracking-widest text-white/40">
+                          Quality Preference
                         </p>
-                        <p className="mt-1 text-[10px] leading-relaxed text-white/40">
-                          YouTube decides the rendition and ignores manual
-                          switches, so there is no selector here — this just
-                          shows what it picked for your screen and connection.
-                        </p>
+                        <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-500/10 border border-emerald-500/20 px-2 py-0.5 text-[10px] font-bold text-emerald-400">
+                          <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                          {actualQuality ? `Live: ${qualityLabel(actualQuality)}` : 'Detecting…'}
+                        </span>
                       </div>
+
+                      <div className="space-y-1 max-h-56 overflow-y-auto pr-0.5">
+                        {QUALITY_TARGETS.map((target) => {
+                          const isSelected = qualityPref === target.id
+                          return (
+                            <button
+                              key={target.id}
+                              type="button"
+                              onClick={() => handleSelectQualityPref(target.id)}
+                              className={`flex w-full items-center justify-between rounded-lg px-2.5 py-1.5 text-left transition-all ${
+                                isSelected
+                                  ? 'bg-primary text-white font-bold shadow-sm'
+                                  : 'bg-white/[0.04] text-white/70 hover:bg-white/[0.08] hover:text-white'
+                              }`}
+                            >
+                              <div className="min-w-0 pr-2">
+                                <p className="text-xs font-bold leading-tight">{target.label}</p>
+                                <p className={`text-[9px] truncate ${isSelected ? 'text-white/80' : 'text-white/40'}`}>
+                                  {target.desc}
+                                </p>
+                              </div>
+                              {isSelected && <Check size={12} className="shrink-0 text-white" strokeWidth={3} />}
+                            </button>
+                          )
+                        })}
+                      </div>
+
+                      <p className="px-1 pt-2 text-[10px] leading-relaxed text-white/30">
+                        Focus Tube requests your target resolution; YouTube dynamically scales if bandwidth fluctuates.
+                      </p>
                     </>
                   )}
                   <div className="mt-3 flex items-center justify-between gap-2 border-t border-white/10 px-1 pt-3">
@@ -2385,15 +2441,15 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
                 <button
                   type="button"
                   onClick={() => openSettingsTab('quality')}
-                  aria-label="Video quality (auto, decided by YouTube)"
+                  aria-label="Video quality settings"
                   aria-expanded={showSettings && settingsTab === 'quality'}
-                  title={actualQuality ? `Auto · playing at ${qualityLabel(actualQuality)}` : 'Auto · YouTube decides the quality'}
+                  title={actualQuality ? `Quality: ${qualityLabel(actualQuality)} · Target: ${qualityLabel(qualityPref)}` : `Target Quality: ${qualityLabel(qualityPref)}`}
                   tabIndex={bottomVisible ? 0 : -1}
                   className={`flex items-center gap-1 p-2 transition-colors hover:text-white ${showSettings && settingsTab === 'quality' ? 'text-white' : 'text-white/70'}`}
                 >
                   <MonitorPlay size={18} />
                   <span className="hidden text-[11px] font-black min-[420px]:inline">
-                    {actualQuality ? qualityLabel(actualQuality) : 'Auto'}
+                    {actualQuality ? qualityLabel(actualQuality) : (qualityPref !== 'auto' ? qualityLabel(qualityPref) : 'Auto')}
                   </span>
                 </button>
                 <button
@@ -2441,7 +2497,7 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
           {/* Video Meta Info (Title, Channel, Actions, Sections) below the Player */}
           {!isMinimized && (
               <div className="space-y-4 pt-1">
-                <h1 className="text-xl sm:text-2xl font-black text-white leading-tight">
+                <h1 className="text-lg sm:text-xl lg:text-2xl font-bold text-white/95 leading-snug tracking-tight">
                   {video.title}
                 </h1>
 
@@ -2512,22 +2568,29 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
                 <div className="space-y-3 pt-1">
                   {chapters.length > 0 && (
                     <section aria-label="Chapters" className="rounded-xl border border-white/[0.08] bg-white/[0.02] p-3.5">
-                      <button
-                        type="button"
-                        onClick={() => setChaptersOpen((v) => !v)}
-                        aria-expanded={chaptersOpen}
-                        className="flex w-full items-center justify-between text-left text-xs font-black uppercase tracking-wider text-white/70 transition-colors hover:text-white"
-                      >
-                        <span className="flex items-center gap-2">
+                      <div className="flex w-full items-center justify-between">
+                        <button
+                          type="button"
+                          onClick={() => setChaptersOpen((v) => !v)}
+                          aria-expanded={chaptersOpen}
+                          className="flex items-center gap-2 text-left text-xs font-black uppercase tracking-wider text-white/70 transition-colors hover:text-white"
+                        >
                           <ListVideo size={14} /> Chapters ({chapters.length})
                           {activeChapterIndex >= 0 && chapters[activeChapterIndex] && (
                             <span className="text-primary font-bold normal-case text-xs">
                               · {chapters[activeChapterIndex].title}
                             </span>
                           )}
-                        </span>
-                        <ChevronDown size={14} className={`transition-transform ${chaptersOpen ? '' : '-rotate-90'}`} />
-                      </button>
+                          <ChevronDown size={14} className={`transition-transform ${chaptersOpen ? '' : '-rotate-90'}`} />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setSidebarTab('chapters')}
+                          className="text-[10px] font-bold text-primary hover:text-primary/80 transition-colors hover:underline"
+                        >
+                          Sidepanel →
+                        </button>
+                      </div>
                       {chaptersOpen && (
                         <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-1.5 max-h-60 overflow-y-auto pr-1">
                           {chapters.map((chapter, index) => (
@@ -2652,22 +2715,34 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
         {isMinimized ? null : (
           <aside className="flex w-full shrink-0 flex-col border-t border-white/[0.08] bg-[#0c0d12]/95 lg:h-full lg:min-h-0 lg:w-[380px] lg:border-l lg:border-t-0 xl:w-[420px]">
             {/* Sidebar Header */}
-            <div className="flex shrink-0 items-center justify-between border-b border-white/[0.08] p-3.5 sm:p-4">
-              <div className="min-w-0">
+            <div className="flex shrink-0 items-center justify-between border-b border-white/[0.08] p-3 sm:p-3.5 gap-2">
+              <div className="min-w-0 pr-1">
                 <h3 className="truncate text-sm font-black text-white">
-                  Up Next in {categoryName || 'All'}
+                  {sidebarTab === 'queue'
+                    ? `Up Next in ${categoryName || 'All'}`
+                    : sidebarTab === 'chapters'
+                      ? 'Video Chapters'
+                      : 'Discussion'}
                 </h3>
-                <p className="text-[11px] font-semibold text-white/40">
-                  {remainingCount} unseen {remainingCount === 1 ? 'video' : 'videos'} remaining
+                <p className="text-[11px] font-semibold text-white/40 truncate">
+                  {sidebarTab === 'queue'
+                    ? `${remainingCount} unseen ${remainingCount === 1 ? 'video' : 'videos'} remaining`
+                    : sidebarTab === 'chapters'
+                      ? (chapters.length > 0
+                          ? (activeChapterIndex >= 0 && chapters[activeChapterIndex]
+                              ? `Current: ${chapters[activeChapterIndex].title}`
+                              : `${chapters.length} timestamped sections`)
+                          : 'No chapters available')
+                      : (commentsCount !== null ? `${formatCompactCount(commentsCount)} comments` : 'Viewer comments')}
                 </p>
               </div>
 
               {/* Quick Tab Switcher */}
-              <div className="flex items-center gap-1">
+              <div className="flex shrink-0 items-center gap-0.5 bg-white/[0.04] p-0.5 rounded-xl border border-white/[0.08]">
                 <button
                   type="button"
                   onClick={() => setSidebarTab('queue')}
-                  className={`rounded-lg px-2.5 py-1 text-[11px] font-bold transition-colors ${
+                  className={`rounded-lg px-2 py-1 text-[11px] font-bold transition-colors ${
                     sidebarTab === 'queue'
                       ? 'bg-primary text-white shadow'
                       : 'text-white/50 hover:bg-white/10 hover:text-white'
@@ -2677,14 +2752,39 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
                 </button>
                 <button
                   type="button"
+                  onClick={() => setSidebarTab('chapters')}
+                  className={`flex items-center gap-1 rounded-lg px-2 py-1 text-[11px] font-bold transition-colors ${
+                    sidebarTab === 'chapters'
+                      ? 'bg-primary text-white shadow'
+                      : 'text-white/50 hover:bg-white/10 hover:text-white'
+                  }`}
+                >
+                  <span>Chapters</span>
+                  {chapters.length > 0 && (
+                    <span className={`rounded-full px-1.5 py-0.2 text-[9px] font-black ${
+                      sidebarTab === 'chapters' ? 'bg-black/30 text-white' : 'bg-white/10 text-white/60'
+                    }`}>
+                      {chapters.length}
+                    </span>
+                  )}
+                </button>
+                <button
+                  type="button"
                   onClick={() => setSidebarTab('comments')}
-                  className={`rounded-lg px-2.5 py-1 text-[11px] font-bold transition-colors ${
+                  className={`flex items-center gap-1 rounded-lg px-2 py-1 text-[11px] font-bold transition-colors ${
                     sidebarTab === 'comments'
                       ? 'bg-primary text-white shadow'
                       : 'text-white/50 hover:bg-white/10 hover:text-white'
                   }`}
                 >
-                  Comments
+                  <span>Comments</span>
+                  {commentsCount !== null && (
+                    <span className={`rounded-full px-1.5 py-0.2 text-[9px] font-black ${
+                      sidebarTab === 'comments' ? 'bg-black/30 text-white' : 'bg-white/10 text-white/60'
+                    }`}>
+                      {formatCompactCount(commentsCount)}
+                    </span>
+                  )}
                 </button>
               </div>
             </div>
@@ -2706,6 +2806,68 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
                   <div className="flex flex-col items-center justify-center py-16 text-center">
                     <p className="text-xs font-bold text-white/40">
                       {queueSearch ? `No videos matching “${queueSearch}”` : 'No upcoming videos in this queue'}
+                    </p>
+                  </div>
+                )
+              )}
+
+              {sidebarTab === 'chapters' && (
+                chapters.length > 0 ? (
+                  <div className="space-y-1.5">
+                    {chapters.map((chapter, index) => {
+                      const isActive = index === activeChapterIndex
+                      const nextChapter = chapters[index + 1]
+                      const chapterDuration = nextChapter
+                        ? nextChapter.start - chapter.start
+                        : (duration ? duration - chapter.start : null)
+
+                      return (
+                        <button
+                          key={`${chapter.start}-${index}`}
+                          type="button"
+                          onClick={() => handleSeek(chapter.start)}
+                          className={`group/chap flex w-full items-center gap-3 rounded-xl border p-2.5 text-left transition-all ${
+                            isActive
+                              ? 'border-primary/50 bg-primary/15 text-white shadow-lg shadow-primary/10'
+                              : 'border-white/[0.06] bg-white/[0.02] text-white/70 hover:border-white/20 hover:bg-white/[0.06] hover:text-white'
+                          }`}
+                        >
+                          <div className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg transition-colors ${
+                            isActive ? 'bg-primary text-white' : 'bg-white/10 text-white/60 group-hover/chap:bg-white/20 group-hover/chap:text-white'
+                          }`}>
+                            {isActive ? (
+                              <Play size={12} fill="currentColor" className="animate-pulse" />
+                            ) : (
+                              <span className="text-[10px] font-bold tabular-nums">#{index + 1}</span>
+                            )}
+                          </div>
+
+                          <div className="min-w-0 flex-1">
+                            <p className={`truncate text-xs ${isActive ? 'font-black text-white' : 'font-bold'}`}>
+                              {chapter.title}
+                            </p>
+                            <div className="mt-0.5 flex items-center gap-2 text-[10px] font-semibold text-white/40">
+                              <span className="font-mono text-white/70">{formatChapterTime(chapter.start)}</span>
+                              {chapterDuration && chapterDuration > 0 && (
+                                <>
+                                  <span>•</span>
+                                  <span>{formatDuration(chapterDuration)}</span>
+                                </>
+                              )}
+                            </div>
+                          </div>
+                        </button>
+                      )
+                    })}
+                  </div>
+                ) : (
+                  <div className="flex flex-col items-center justify-center py-16 text-center px-4">
+                    <div className="flex h-12 w-12 items-center justify-center rounded-2xl border border-white/10 bg-white/5 text-white/30 mb-3">
+                      <ListVideo size={20} />
+                    </div>
+                    <p className="text-xs font-bold text-white/60">No chapters found</p>
+                    <p className="mt-1 text-[11px] text-white/30 max-w-xs">
+                      This video does not have timestamped chapters in its description.
                     </p>
                   </div>
                 )

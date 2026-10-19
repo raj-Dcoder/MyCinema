@@ -223,9 +223,14 @@ const FocusTube: React.FC = () => {
     [categories],
   )
 
+  // Filter out shorts when hideShorts is enabled so queues and grids strictly honor the preference.
+  const eligibleVideos = useMemo(() => {
+    return videos.filter((video) => (!hideShorts || !video.isShort))
+  }, [videos, hideShorts])
+
   // Split out so a live stream is never buried in the middle of the stack.
-  const liveVideos = useMemo(() => videos.filter((video) => video.isLive), [videos])
-  const restVideos = useMemo(() => videos.filter((video) => !video.isLive), [videos])
+  const liveVideos = useMemo(() => eligibleVideos.filter((video) => video.isLive), [eligibleVideos])
+  const restVideos = useMemo(() => eligibleVideos.filter((video) => !video.isLive), [eligibleVideos])
   // Playback queue = display order (live first, then newest-first rest).
   const playQueue = useMemo(() => [...liveVideos, ...restVideos], [liveVideos, restVideos])
 
@@ -242,13 +247,24 @@ const FocusTube: React.FC = () => {
   }, [])
 
   const getNextInQueue = useCallback((currentVideoId: string): FtVideo | null => {
-    const queue = videosRef.current.length
-      ? [...videosRef.current.filter((v) => v.isLive), ...videosRef.current.filter((v) => !v.isLive)]
-      : playQueue
-    const index = queue.findIndex((video) => video.videoId === currentVideoId)
-    if (index === -1) return queue[0] ?? null
-    return queue[index + 1] ?? null
-  }, [playQueue])
+    const source = videosRef.current.length ? videosRef.current : videos
+    const eligible = source.filter((v) => (!hideShorts || !v.isShort))
+    const queue = [
+      ...eligible.filter((v) => v.isLive),
+      ...eligible.filter((v) => !v.isLive),
+    ]
+    const currentIndex = queue.findIndex((video) => video.videoId === currentVideoId)
+    if (currentIndex !== -1) {
+      for (let i = currentIndex + 1; i < queue.length; i++) {
+        const candidate = queue[i]
+        if (candidate && (!candidate.seen || includeSeen)) {
+          return candidate
+        }
+      }
+      return null
+    }
+    return queue.find((v) => (!v.seen || includeSeen) && v.videoId !== currentVideoId) ?? queue[0] ?? null
+  }, [videos, hideShorts, includeSeen])
 
   const resolveStartSeconds = useCallback(async (video: FtVideo): Promise<number> => {
     const cached = progressCacheRef.current.get(video.videoId)
@@ -299,6 +315,7 @@ const FocusTube: React.FC = () => {
   }, [activeCategoryId, loadCategories, loadFeed])
 
   const handlePlay = useCallback(async (video: FtVideo) => {
+    if (hideShorts && video.isShort) return
     let startSeconds = progressCacheRef.current.get(video.videoId) ?? 0
     if (startSeconds === 0) {
       const progress = await window.api.ftGetProgress(video.videoId)
@@ -306,7 +323,7 @@ const FocusTube: React.FC = () => {
       progressCacheRef.current.set(video.videoId, startSeconds)
     }
     setPlaying({ video, startSeconds })
-  }, [])
+  }, [hideShorts])
 
   const handleMarkSeen = useCallback(async (videoId: string) => {
     progressCacheRef.current.delete(videoId)
@@ -330,23 +347,23 @@ const FocusTube: React.FC = () => {
     } catch (err) {
       console.error('[FocusTube] Auto-advance refresh failed:', err)
     }
-    if (!next) {
+    if (!next || (hideShorts && next.isShort)) {
       // Reached the end of the queue: update current video seen state, but stay in player
       setPlaying((prev) => (prev && prev.video.videoId === finishedVideoId ? { ...prev, video: { ...prev.video, seen: true } } : prev))
       return
     }
     const startSeconds = await resolveStartSeconds(next)
     setPlaying({ video: next, startSeconds })
-  }, [activeCategoryId, getNextInQueue, loadCategories, loadFeed, resolveStartSeconds])
+  }, [activeCategoryId, getNextInQueue, hideShorts, loadCategories, loadFeed, resolveStartSeconds])
 
   // Manual "Next" path: skip without marking the current video seen.
   // The player saves the current position before calling this.
   const handleManualNext = useCallback(async (currentVideoId: string) => {
     const next = getNextInQueue(currentVideoId)
-    if (!next) return
+    if (!next || (hideShorts && next.isShort)) return
     const startSeconds = await resolveStartSeconds(next)
     setPlaying({ video: next, startSeconds })
-  }, [getNextInQueue, resolveStartSeconds])
+  }, [getNextInQueue, hideShorts, resolveStartSeconds])
 
   const nextUpVideo = useMemo(
     () => (playing ? getNextInQueue(playing.video.videoId) : null),
@@ -874,6 +891,7 @@ const FocusTube: React.FC = () => {
           nextTitle={nextUpVideo?.title ?? null}
           onAutoAdvance={(videoId) => void handleAutoAdvance(videoId)}
           onManualNext={(videoId) => void handleManualNext(videoId)}
+          hideShorts={hideShorts}
         />
       )}
     </div>

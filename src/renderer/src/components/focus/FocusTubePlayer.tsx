@@ -61,6 +61,7 @@ interface FocusTubePlayerProps {
   queue?: FtVideo[]
   onSelectVideo?: (video: FtVideo) => void
   onToggleSeen?: (video: FtVideo) => void
+  hideShorts?: boolean
 }
 
 // YouTube player states (see IFrame Player API reference).
@@ -85,6 +86,7 @@ let ftFullscreenIntent = false
 const VOLUME_KEY = 'mycinema_ft_volume'
 const MUTED_KEY = 'mycinema_ft_muted'
 const SKIP_SPONSORS_KEY = 'mycinema_ft_skip_sponsors'
+const SPEED_PREF_KEY = 'mycinema_ft_preferred_speed'
 
 const SPEEDS = [0.5, 0.75, 1, 1.25, 1.5, 2]
 
@@ -102,6 +104,19 @@ const POINTER_HOLD_MS = 450
 function clampSpeed(rate: number): number {
   if (!Number.isFinite(rate)) return 1
   return Math.min(SPEED_MAX, Math.max(SPEED_MIN, Math.round(rate * 10) / 10))
+}
+
+function loadSpeedPref(): number {
+  try {
+    const v = localStorage.getItem(SPEED_PREF_KEY)
+    if (v) {
+      const n = parseFloat(v)
+      if (Number.isFinite(n) && n >= SPEED_MIN && n <= SPEED_MAX) {
+        return clampSpeed(n)
+      }
+    }
+  } catch {}
+  return 1
 }
 
 // YouTube rendition ids (getPlaybackQuality / onPlaybackQualityChange).
@@ -359,6 +374,7 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
   queue,
   onSelectVideo,
   onToggleSeen,
+  hideShorts,
 }) => {
   const iframeRef = useRef<HTMLIFrameElement>(null)
   // Stable per-video channel id. (A previous revision read a mutated counter
@@ -398,7 +414,7 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
   const [skipToast, setSkipToast] = useState<{ text: string; id: number } | null>(null)
   const [speedToast, setSpeedToast] = useState<{ text: string; id: number } | null>(null)
   const [captionsOn, setCaptionsOn] = useState(false)
-  const [speed, setSpeed] = useState(1)
+  const [speed, setSpeed] = useState<number>(() => loadSpeedPref())
   // Live rendition readout (getPlaybackQuality / onPlaybackQualityChange) + target preference.
   const [actualQuality, setActualQuality] = useState<string | null>(null)
   const [qualityPref, setQualityPref] = useState<string>(() => {
@@ -444,10 +460,11 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
   const singleTapTimerRef = useRef<number>(0)
   // Hold-for-2x refs. speedRef mirrors the `speed` state so timer callbacks
   // always restore the rate that was active when the hold began.
-  const speedRef = useRef(1)
+  const speedRef = useRef<number>(speed)
+  speedRef.current = speed
   const spaceHoldTimerRef = useRef<number>(0)
   const holdActiveRef = useRef(false)
-  const holdPrevSpeedRef = useRef(1)
+  const holdPrevSpeedRef = useRef<number>(speed)
   const pointerHoldTimerRef = useRef<number>(0)
   const pointerHoldActiveRef = useRef(false)
   const speedToastTimerRef = useRef<number>(0)
@@ -566,15 +583,18 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
   }, [video.videoId])
 
   const queueItems = useMemo(() => {
-    const list = queue && queue.length > 0 ? queue : []
+    const list = (queue && queue.length > 0 ? queue : []).filter((v) => {
+      if (hideShorts && v.isShort) return false
+      return true
+    })
     if (!queueSearch.trim()) return list
     const q = queueSearch.trim().toLowerCase()
     return list.filter((v) => v.title.toLowerCase().includes(q) || v.channelTitle.toLowerCase().includes(q))
-  }, [queue, queueSearch])
+  }, [queue, queueSearch, hideShorts])
 
   const remainingCount = useMemo(() => {
-    return (queue || []).filter((v) => !v.seen && v.videoId !== video.videoId).length
-  }, [queue, video.videoId])
+    return (queue || []).filter((v) => (!hideShorts || !v.isShort) && !v.seen && v.videoId !== video.videoId).length
+  }, [queue, video.videoId, hideShorts])
 
   const handleToggleQueueSeen = useCallback((v: FtVideo) => {
     if (onToggleSeen) {
@@ -862,18 +882,29 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
   }
 
   // Reset per-video overlay prefs that don't persist across videos.
-  // (Speed resets to 1x; quality is always Auto with a live readout.)
+  // (Speed preference is preserved across videos; quality is Auto with live readout.)
   // Captions always default to OFF for every video.
   // NOTE: the parent keeps ONE stable player instance across Next /
   // auto-advance (no videoId key) so fullscreen survives. That means every
   // piece of per-video UI state must reset here — a remount no longer does
   // it for us.
   useEffect(() => {
+    // If hideShorts is enabled and the current video is a Short, skip it immediately.
+    if (hideShorts && video.isShort) {
+      if (hasNextRef.current) {
+        cbRef.current.onAutoAdvance(video.videoId)
+      } else {
+        cbRef.current.onClose()
+      }
+      return
+    }
+
     setCaptionsOn(false)
     captionsOnRef.current = false
     captionTracksRef.current = []
-    setSpeed(1)
-    speedRef.current = 1
+    const preferredSpeed = loadSpeedPref()
+    setSpeed(preferredSpeed)
+    speedRef.current = preferredSpeed
     setIsHolding2x(false)
     holdActiveRef.current = false
     pointerHoldActiveRef.current = false
@@ -956,6 +987,11 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
         }
         send('getPlaybackQuality', [])
         send('getAvailablePlaybackRates', [])
+        // Assert preferred playback rate if configured
+        const currentSpeed = speedRef.current
+        if (currentSpeed !== 1) {
+          send('setPlaybackRate', [currentSpeed])
+        }
         send('getPlaybackRate', [])
         // Captions OFF by default. cc_load_policy=0 only means "do not force",
         // which is not the same as off — YouTube can still enable them from its
@@ -976,6 +1012,10 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
         if (state === STATE_PLAYING) {
           endedRef.current = false
           setErrorText(null)
+          // Re-assert preferred playback rate on active playback start
+          if (speedRef.current !== 1) {
+            send('setPlaybackRate', [speedRef.current])
+          }
           // Re-assert target quality preference on active playback start
           const targetPref = qualityPrefRef.current
           if (targetPref && targetPref !== 'auto') {
@@ -1012,7 +1052,8 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
           if (autoplayNextRef.current && hasNextRef.current) {
             cbRef.current.onAutoAdvance(video.videoId)
           } else {
-            // Keep player open (YouTube-style) so user can pick from the Up Next queue or replay
+            // Explicitly pause/stop the YouTube iframe so YouTube's own internal autoplay does not play a Short
+            send('pauseVideo', [])
             cbRef.current.onMarkSeen(video.videoId)
             setBottomVisible(true)
           }
@@ -1041,8 +1082,17 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
           && !holdActiveRef.current && !pointerHoldActiveRef.current) {
           const reported = clampSpeed(data.info.playbackRate)
           if (reported !== speedRef.current) {
-            speedRef.current = reported
-            setSpeed(reported)
+            // If YouTube reports 1.0 right after loading but user preferred a different speed,
+            // re-assert our preferred speed instead of letting YouTube reset it to 1.0.
+            if (reported === 1 && speedRef.current !== 1) {
+              send('setPlaybackRate', [speedRef.current])
+            } else {
+              speedRef.current = reported
+              setSpeed(reported)
+              try {
+                localStorage.setItem(SPEED_PREF_KEY, String(reported))
+              } catch {}
+            }
           }
         }
         // The live rendition YouTube picked (Auto). Read-only — reported here
@@ -1383,6 +1433,9 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
     // choice instead of snapping back to the pre-hold rate.
     if (holdActiveRef.current) holdPrevSpeedRef.current = clamped
     setSpeed(clamped)
+    try {
+      localStorage.setItem(SPEED_PREF_KEY, String(clamped))
+    } catch {}
     if (opts?.close !== false) setShowSettings(false)
     pokeBottom()
     withBridge(() => cmd('setPlaybackRate', [clamped]))

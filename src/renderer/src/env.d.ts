@@ -287,6 +287,7 @@ interface Api {
   ftGetComments: (videoId: string, options?: { sortBy?: 'top' | 'new'; continuation?: string | null }) => Promise<{ comments: import('./types').FtComment[]; continuation: string | null; commentCount: number | null; disabled: boolean } | { error: string }>
   ftSetFrameQuality?: (quality: string) => Promise<{ ok: boolean; error?: string }>
   ftGetFrameQuality?: () => Promise<{ quality: string | null }>
+  ftRequestImportAccess: (input: { name: string; email: string }) => Promise<{ ok?: boolean; message?: string; error?: string }>
   onFeedUpdated: (callback: (payload: { added: number; channelIds: string[] }) => void) => () => void
 }
 

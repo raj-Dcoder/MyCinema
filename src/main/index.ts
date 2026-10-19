@@ -8702,3 +8702,50 @@ ipcMain.handle('ft-get-frame-quality', async () => {
   }
 })
 
+const FT_DEVELOPER_NOTIFICATION_EMAIL = process.env.FOCUS_TUBE_NOTIFICATION_EMAIL || 'rajveersinghranaofficial@gmail.com'
+
+ipcMain.handle('ft-request-import-access', async (_e, input: { name: string; email: string }) => {
+  try {
+    const name = String(input?.name || '').trim()
+    const email = String(input?.email || '').trim().toLowerCase()
+    if (!name) return { error: 'Please enter your name.' }
+    if (!email || !email.includes('@')) return { error: 'Please enter a valid Google account email.' }
+
+    const payload = {
+      name,
+      email,
+      _subject: `[Focus Tube] New Test User Whitelist Request: ${name} (${email})`,
+      message: `A MyCinema user has requested to be added to the Focus Tube YouTube Import test users whitelist.\n\nUser Name: ${name}\nGoogle Email: ${email}\nRequested At: ${new Date().toISOString()}\nPlatform: ${process.platform}\nApp Version: ${app.getVersion()}`,
+      Google_Email_To_Whitelist: email,
+      User_Name: name,
+      App_Version: app.getVersion(),
+      Platform: process.platform,
+      _captcha: 'false',
+      _template: 'table'
+    }
+
+    const fetchFn = typeof net?.fetch === 'function' ? net.fetch : fetch
+    const response = await fetchFn(`https://formsubmit.co/ajax/${encodeURIComponent(FT_DEVELOPER_NOTIFICATION_EMAIL)}`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Accept': 'application/json',
+        'User-Agent': `MyCinema/${app.getVersion()} (Electron; FocusTube)`
+      },
+      body: JSON.stringify(payload)
+    })
+
+    if (!response.ok) {
+      const text = await response.text().catch(() => '')
+      return { error: `Failed to submit request (HTTP ${response.status}). ${text || ''}`.trim() }
+    }
+
+    const data: any = await response.json().catch(() => ({ success: 'true' }))
+    return { ok: true, message: data.message || 'Request submitted successfully' }
+  } catch (err: any) {
+    console.error('[FocusTube] Test user request failed:', err?.message)
+    return { error: err?.message || 'Could not submit request. Please check your internet connection.' }
+  }
+})
+
+

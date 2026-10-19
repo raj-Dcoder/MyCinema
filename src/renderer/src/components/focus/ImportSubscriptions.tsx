@@ -10,6 +10,7 @@ import {
   RotateCcw,
   Search,
   ShieldCheck,
+  Sparkles,
   X,
 } from 'lucide-react'
 import type {
@@ -21,6 +22,7 @@ import type {
   FtYouTubeImportStatus,
 } from '../../types'
 import { categoryDot } from '../../utils/focusTube'
+import { RequestTestUserModal } from './RequestTestUserModal'
 
 interface ImportSubscriptionsProps {
   categories: FtCategory[]
@@ -67,6 +69,7 @@ const ImportSubscriptions: React.FC<ImportSubscriptionsProps> = ({ categories, i
   const [status, setStatus] = useState<FtYouTubeImportStatus | null>(null)
   const [statusLoading, setStatusLoading] = useState(true)
   const [loading, setLoading] = useState(false)
+  const [showRegisterModal, setShowRegisterModal] = useState(false)
   const [progress, setProgress] = useState<{ stage: 'authorization' | 'subscriptions'; page?: number; found?: number } | null>(null)
   const [loadResult, setLoadResult] = useState<FtYouTubeImportLoadResult | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -371,14 +374,25 @@ const ImportSubscriptions: React.FC<ImportSubscriptionsProps> = ({ categories, i
                 </p>
               </div>
             </div>
-            <button
-              type="button"
-              onClick={() => { if (loading) void cancelLoad(); onClose() }}
-              aria-label="Close YouTube subscription import"
-              className="shrink-0 rounded-lg p-2 text-white/40 transition-colors hover:bg-white/10 hover:text-white"
-            >
-              <X size={18} />
-            </button>
+            <div className="flex shrink-0 items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setShowRegisterModal(true)}
+                title="Register your Google account for YouTube import access"
+                className="inline-flex items-center gap-1.5 rounded-lg border border-amber-400/25 bg-amber-400/10 px-2.5 py-1.5 text-[10px] font-black uppercase tracking-wider text-amber-300 transition-colors hover:bg-amber-400/20 hover:text-amber-200"
+              >
+                <Sparkles size={12} />
+                <span>Test User Access</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => { if (loading) void cancelLoad(); onClose() }}
+                aria-label="Close YouTube subscription import"
+                className="shrink-0 rounded-lg p-2 text-white/40 transition-colors hover:bg-white/10 hover:text-white"
+              >
+                <X size={18} />
+              </button>
+            </div>
           </div>
         </header>
 
@@ -421,9 +435,21 @@ const ImportSubscriptions: React.FC<ImportSubscriptionsProps> = ({ categories, i
           )}
 
           {error && (
-            <div role="alert" className="mb-4 flex items-start gap-2 rounded-xl border border-red-300/20 bg-red-300/[0.06] px-3.5 py-3 text-xs font-semibold leading-relaxed text-red-200/90">
-              <AlertCircle size={15} className="mt-0.5 shrink-0" />
-              <span>{error}</span>
+            <div role="alert" className="mb-4 flex flex-col gap-2 rounded-xl border border-red-300/20 bg-red-300/[0.06] px-3.5 py-3 text-xs font-semibold leading-relaxed text-red-200/90">
+              <div className="flex items-start gap-2">
+                <AlertCircle size={15} className="mt-0.5 shrink-0" />
+                <span>{error}</span>
+              </div>
+              <div className="mt-1 flex flex-wrap items-center justify-between gap-2 border-t border-red-300/15 pt-2">
+                <span className="text-[11px] text-red-200/80">Need your Google account whitelisted as a test user?</span>
+                <button
+                  type="button"
+                  onClick={() => setShowRegisterModal(true)}
+                  className="rounded-lg bg-red-500/20 border border-red-400/30 px-2.5 py-1 text-[10px] font-black uppercase tracking-wider text-white hover:bg-red-500/30 transition-colors"
+                >
+                  Register Account
+                </button>
+              </div>
             </div>
           )}
 
@@ -445,11 +471,34 @@ const ImportSubscriptions: React.FC<ImportSubscriptionsProps> = ({ categories, i
                   ? 'Load the complete list of channels you follow, review it, and choose what to add.'
                   : 'Connect Google in your system browser. Focus Tube asks only for read access to your YouTube subscription list.'}
               </p>
+
+              {/* 100 Test User Access Program Card */}
+              <div className="mt-5 mb-1 flex flex-col sm:flex-row items-center justify-between gap-3 rounded-2xl border border-amber-400/20 bg-amber-400/[0.04] p-3.5 text-left max-w-lg w-full">
+                <div className="flex items-start gap-3 min-w-0">
+                  <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-amber-400/10 border border-amber-400/20 text-amber-400 mt-0.5">
+                    <Sparkles size={15} />
+                  </div>
+                  <div className="min-w-0">
+                    <p className="text-xs font-black uppercase tracking-wider text-amber-200">100 Test User Access</p>
+                    <p className="text-[11px] font-medium text-amber-200/70 leading-relaxed mt-0.5">
+                      YouTube Import requires Google test user authorization. Register your Google account email to be added to the whitelist.
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowRegisterModal(true)}
+                  className="shrink-0 rounded-xl bg-amber-400/20 hover:bg-amber-400/30 border border-amber-400/30 px-3.5 py-2 text-[10px] font-black uppercase tracking-widest text-amber-200 transition-colors"
+                >
+                  Register
+                </button>
+              </div>
+
               <button
                 type="button"
                 onClick={() => void startLoad()}
                 disabled={statusLoading || !canConnect}
-                className="mt-5 inline-flex h-11 items-center gap-2 rounded-xl bg-primary px-5 text-xs font-black uppercase tracking-widest text-white shadow-[0_10px_30px_-12px_rgba(229,9,20,0.9)] transition-colors hover:bg-primary/85 disabled:cursor-not-allowed disabled:opacity-40 disabled:shadow-none"
+                className="mt-4 inline-flex h-11 items-center gap-2 rounded-xl bg-primary px-5 text-xs font-black uppercase tracking-widest text-white shadow-[0_10px_30px_-12px_rgba(229,9,20,0.9)] transition-colors hover:bg-primary/85 disabled:cursor-not-allowed disabled:opacity-40 disabled:shadow-none"
               >
                 {statusLoading ? <Loader2 size={15} className="animate-spin" /> : <Download size={15} />}
                 {statusLoading ? 'Checking connection…' : startButtonLabel}
@@ -837,6 +886,11 @@ const ImportSubscriptions: React.FC<ImportSubscriptionsProps> = ({ categories, i
           </div>
         </footer>
       </section>
+
+      <RequestTestUserModal
+        isOpen={showRegisterModal}
+        onClose={() => setShowRegisterModal(false)}
+      />
     </div>
   )
 }

@@ -280,6 +280,8 @@ const api = {
     ipcRenderer.invoke('ft-get-comments', { videoId, ...options }),
   ftSetFrameQuality: (quality: string) => ipcRenderer.invoke('ft-set-frame-quality', quality),
   ftGetFrameQuality: () => ipcRenderer.invoke('ft-get-frame-quality'),
+  ftRequestImportAccess: (input: { name: string; email: string }) =>
+    ipcRenderer.invoke('ft-request-import-access', input),
   onFeedUpdated: (callback: (payload: { added: number; channelIds: string[] }) => void) => {
     const handler = (_event: any, payload: { added: number; channelIds: string[] }) => callback(payload)
     ipcRenderer.on('ft-feed-updated', handler)

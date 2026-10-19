@@ -3,6 +3,7 @@ import { AlertCircle, Check, Download, Loader2, Plus, RotateCcw, Search, Sparkle
 import type { FtCategory, FtChannel } from '../../types'
 import { categoryDot, formatRelativeTime } from '../../utils/focusTube'
 import ImportSubscriptions from './ImportSubscriptions'
+import { RequestTestUserModal } from './RequestTestUserModal'
 
 interface ChannelManagerProps {
   categories: FtCategory[]
@@ -62,6 +63,7 @@ const ChannelAvatar: React.FC<{ title: string; avatarUrl: string | null; sizeCla
  */
 const ChannelManager: React.FC<ChannelManagerProps> = ({ categories, initialCategoryId, onClose, onChanged }) => {
   const [showYouTubeImport, setShowYouTubeImport] = useState(false)
+  const [showRegisterModal, setShowRegisterModal] = useState(false)
   const [channels, setChannels] = useState<FtChannel[]>([])
   const [loading, setLoading] = useState(true)
   const [query, setQuery] = useState('')
@@ -305,6 +307,15 @@ const ChannelManager: React.FC<ChannelManagerProps> = ({ categories, initialCate
               </div>
             </div>
             <div className="flex shrink-0 items-center gap-1.5">
+              <button
+                type="button"
+                onClick={() => setShowRegisterModal(true)}
+                title="Register your Google account for YouTube import access (100 Test Users)"
+                className="hidden sm:inline-flex h-9 items-center gap-1.5 rounded-lg border border-amber-400/25 bg-amber-400/10 px-2.5 text-[10px] font-black uppercase tracking-wider text-amber-300 transition-colors hover:bg-amber-400/20 hover:text-amber-200 sm:h-10"
+              >
+                <Sparkles size={13} />
+                <span>Test Access</span>
+              </button>
               <button
                 type="button"
                 onClick={() => setShowYouTubeImport(true)}
@@ -785,6 +796,12 @@ const ChannelManager: React.FC<ChannelManagerProps> = ({ categories, initialCate
           initialCategoryId={initialCategoryId}
           onClose={() => setShowYouTubeImport(false)}
           onImported={() => { void load(); onChanged() }}
+        />
+      )}
+      {showRegisterModal && (
+        <RequestTestUserModal
+          isOpen={showRegisterModal}
+          onClose={() => setShowRegisterModal(false)}
         />
       )}
     </div>

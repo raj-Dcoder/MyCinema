@@ -285,6 +285,8 @@ interface Api {
   ftMarkNotEmbeddable: (videoId: string) => Promise<{ ok: boolean }>
   ftGetSponsorSegments: (videoId: string) => Promise<{ segments: Array<{ category: string; start: number; end: number }> }>
   ftGetComments: (videoId: string, options?: { sortBy?: 'top' | 'new'; continuation?: string | null }) => Promise<{ comments: import('./types').FtComment[]; continuation: string | null; commentCount: number | null; disabled: boolean } | { error: string }>
+  ftSetFrameQuality?: (quality: string) => Promise<{ ok: boolean; error?: string }>
+  ftGetFrameQuality?: () => Promise<{ quality: string | null }>
   onFeedUpdated: (callback: (payload: { added: number; channelIds: string[] }) => void) => () => void
 }
 

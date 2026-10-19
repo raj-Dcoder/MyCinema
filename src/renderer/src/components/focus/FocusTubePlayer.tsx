@@ -105,12 +105,10 @@ function clampSpeed(rate: number): number {
 }
 
 // YouTube rendition ids (getPlaybackQuality / onPlaybackQualityChange).
-// Read-only: YouTube ignores every manual quality lever (setPlaybackQuality is
-// a documented no-op; setPlaybackQualityRange, loadVideoById quality and the
-// `vq` URL param were verified ignored Oct-2026), so these labels only feed
-// the live "playing at" readout. `auto` = YouTube decides, always.
 const QUALITY_OPTIONS: Array<{ id: string; label: string }> = [
   { id: 'auto', label: 'Auto' },
+  { id: 'highres', label: 'Original' },
+  { id: 'hd2880', label: '5K' },
   { id: 'hd2160', label: '2160p 4K' },
   { id: 'hd1440', label: '1440p' },
   { id: 'hd1080', label: '1080p' },
@@ -410,6 +408,8 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
       return 'auto'
     }
   })
+  const qualityPrefRef = useRef(qualityPref)
+  qualityPrefRef.current = qualityPref
   const [isHolding2x, setIsHolding2x] = useState(false)
   // Two separate menus instead of one generic "settings" gear: speed gets a
   // real panel; quality opens an Auto readout (same tab UI, honest content).
@@ -481,11 +481,14 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
     ? startSeconds
     : 0
 
-  // Keyed on video/retry/quality preference.
+  // Keyed on video/retry/resume.
+  // Reads qualityPrefRef.current on initial build so new videos carry &vq=,
+  // but qualityPref is deliberately NOT in the dependency array so changing
+  // the preferred resolution never interrupts or reloads the active iframe.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const embedSrc = useMemo(
-    () => embedUrl(video.videoId, resumeAt, qualityPref),
-    [video.videoId, iframeKey, resumeAt, qualityPref],
+    () => embedUrl(video.videoId, resumeAt, qualityPrefRef.current),
+    [video.videoId, iframeKey, resumeAt],
   )
 
   const chapters = useMemo(
@@ -606,31 +609,55 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
     speedToastTimerRef.current = window.setTimeout(() => setSpeedToast(null), 1400)
   }, [])
 
+  const applyQualityToPlayer = useCallback((prefId: string) => {
+    withBridge(() => {
+      if (prefId === 'auto') {
+        cmd('setPlaybackQualityRange', ['auto', 'auto'])
+        cmd('setPlaybackQuality', ['auto'])
+      } else {
+        cmd('setPlaybackQualityRange', [prefId, prefId])
+        cmd('setPlaybackQuality', [prefId])
+      }
+    })
+    window.api?.ftSetFrameQuality?.(prefId)
+      ?.then(() => {
+        window.api?.ftGetFrameQuality?.()?.then((res) => {
+          if (res?.quality) setActualQuality(res.quality)
+        })
+      })
+      .catch(() => {})
+  }, [cmd, withBridge])
+
   // Ask the embed for its rate capabilities + current rendition. Getters
   // answer via `infoDelivery`, which the bridge handler below folds into
-  // state. Quality is read-only (YouTube ignores every setter), so we only
-  // ever ASK what it picked — never tell it what to play.
+  // state.
   const requestPlaybackInfo = useCallback(() => {
     withBridge(() => {
       cmd('getPlaybackQuality', [])
       cmd('getAvailablePlaybackRates', [])
       cmd('getPlaybackRate', [])
     })
+    window.api?.ftGetFrameQuality?.()?.then((res) => {
+      if (res?.quality) setActualQuality((prev) => (prev === res.quality ? prev : res.quality))
+    }).catch(() => {})
   }, [cmd, withBridge])
 
   const handleSelectQualityPref = useCallback((prefId: string) => {
     setQualityPref(prefId)
+    qualityPrefRef.current = prefId
     try {
       localStorage.setItem(QUALITY_PREF_KEY, prefId)
     } catch {}
-    withBridge(() => {
-      cmd('setPlaybackQuality', [prefId])
-      cmd('setPlaybackQualityRange', [prefId, prefId])
-    })
+    applyQualityToPlayer(prefId)
     const label = QUALITY_TARGETS.find((q) => q.id === prefId)?.label || prefId
     flashSpeedToast(`Target Quality: ${label}`)
-    requestPlaybackInfo()
-  }, [cmd, flashSpeedToast, requestPlaybackInfo, withBridge])
+    window.setTimeout(() => {
+      requestPlaybackInfo()
+    }, 600)
+    window.setTimeout(() => {
+      requestPlaybackInfo()
+    }, 1800)
+  }, [applyQualityToPlayer, flashSpeedToast, requestPlaybackInfo])
 
   // ── SponsorBlock lookup (one fetch per video, cached in main) ─────────────
   useEffect(() => {
@@ -920,8 +947,13 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
         setMuted(volumePref.muted)
         send('getDuration', [])
         send('playVideo', [])
-        // Read back what YouTube picked (Auto, always). Setters are ignored by
-        // YouTube, so nothing is ever asserted — see the module docstring.
+        // Assert preferred quality if configured
+        const targetPref = qualityPrefRef.current
+        if (targetPref && targetPref !== 'auto') {
+          send('setPlaybackQualityRange', [targetPref, targetPref])
+          send('setPlaybackQuality', [targetPref])
+          window.api?.ftSetFrameQuality?.(targetPref).catch(() => {})
+        }
         send('getPlaybackQuality', [])
         send('getAvailablePlaybackRates', [])
         send('getPlaybackRate', [])
@@ -944,6 +976,19 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
         if (state === STATE_PLAYING) {
           endedRef.current = false
           setErrorText(null)
+          // Re-assert target quality preference on active playback start
+          const targetPref = qualityPrefRef.current
+          if (targetPref && targetPref !== 'auto') {
+            send('setPlaybackQualityRange', [targetPref, targetPref])
+            send('setPlaybackQuality', [targetPref])
+            window.api?.ftSetFrameQuality?.(targetPref).catch(() => {})
+            window.setTimeout(() => {
+              send('setPlaybackQualityRange', [targetPref, targetPref])
+              send('setPlaybackQuality', [targetPref])
+              window.api?.ftSetFrameQuality?.(targetPref).catch(() => {})
+              send('getPlaybackQuality', [])
+            }, 600)
+          }
           // YouTube can auto-enable captions once playback actually starts
           // (account prefs / auto-captions), even after the onReady unload.
           // Re-assert OFF here unless the user explicitly turned them on.
@@ -2731,9 +2776,9 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
                       ? (chapters.length > 0
                           ? (activeChapterIndex >= 0 && chapters[activeChapterIndex]
                               ? `Current: ${chapters[activeChapterIndex].title}`
-                              : `${chapters.length} timestamped sections`)
+                              : 'Timestamped sections')
                           : 'No chapters available')
-                      : (commentsCount !== null ? `${formatCompactCount(commentsCount)} comments` : 'Viewer comments')}
+                      : 'Viewer comments'}
                 </p>
               </div>
 
@@ -2753,38 +2798,24 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
                 <button
                   type="button"
                   onClick={() => setSidebarTab('chapters')}
-                  className={`flex items-center gap-1 rounded-lg px-2 py-1 text-[11px] font-bold transition-colors ${
+                  className={`rounded-lg px-2 py-1 text-[11px] font-bold transition-colors ${
                     sidebarTab === 'chapters'
                       ? 'bg-primary text-white shadow'
                       : 'text-white/50 hover:bg-white/10 hover:text-white'
                   }`}
                 >
-                  <span>Chapters</span>
-                  {chapters.length > 0 && (
-                    <span className={`rounded-full px-1.5 py-0.2 text-[9px] font-black ${
-                      sidebarTab === 'chapters' ? 'bg-black/30 text-white' : 'bg-white/10 text-white/60'
-                    }`}>
-                      {chapters.length}
-                    </span>
-                  )}
+                  Chapters
                 </button>
                 <button
                   type="button"
                   onClick={() => setSidebarTab('comments')}
-                  className={`flex items-center gap-1 rounded-lg px-2 py-1 text-[11px] font-bold transition-colors ${
+                  className={`rounded-lg px-2 py-1 text-[11px] font-bold transition-colors ${
                     sidebarTab === 'comments'
                       ? 'bg-primary text-white shadow'
                       : 'text-white/50 hover:bg-white/10 hover:text-white'
                   }`}
                 >
-                  <span>Comments</span>
-                  {commentsCount !== null && (
-                    <span className={`rounded-full px-1.5 py-0.2 text-[9px] font-black ${
-                      sidebarTab === 'comments' ? 'bg-black/30 text-white' : 'bg-white/10 text-white/60'
-                    }`}>
-                      {formatCompactCount(commentsCount)}
-                    </span>
-                  )}
+                  Comments
                 </button>
               </div>
             </div>
@@ -2877,7 +2908,7 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
                 <div className="space-y-4">
                   <div className="flex items-center justify-between pb-2 border-b border-white/[0.06]">
                     <span className="text-xs font-bold text-white/70">
-                      {commentsCount !== null ? `${formatCompactCount(commentsCount)} Comments` : 'Comments'}
+                      Comments
                     </span>
                     <div className="flex items-center gap-1">
                       {(['top', 'new'] as const).map((mode) => (

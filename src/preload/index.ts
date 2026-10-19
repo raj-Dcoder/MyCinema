@@ -278,6 +278,8 @@ const api = {
     ipcRenderer.invoke('ft-get-sponsor-segments', videoId),
   ftGetComments: (videoId: string, options?: { sortBy?: 'top' | 'new'; continuation?: string | null }) =>
     ipcRenderer.invoke('ft-get-comments', { videoId, ...options }),
+  ftSetFrameQuality: (quality: string) => ipcRenderer.invoke('ft-set-frame-quality', quality),
+  ftGetFrameQuality: () => ipcRenderer.invoke('ft-get-frame-quality'),
   onFeedUpdated: (callback: (payload: { added: number; channelIds: string[] }) => void) => {
     const handler = (_event: any, payload: { added: number; channelIds: string[] }) => callback(payload)
     ipcRenderer.on('ft-feed-updated', handler)

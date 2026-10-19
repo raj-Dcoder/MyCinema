@@ -8598,3 +8598,107 @@ ipcMain.handle('ft-get-comments', async (_e, input: { videoId: string; sortBy?: 
     return { error: err?.message || 'Could not load comments' }
   }
 })
+
+function getYouTubeEmbedFrames(): Electron.WebFrameMain[] {
+  const result: Electron.WebFrameMain[] = []
+  const wins = BrowserWindow.getAllWindows()
+  for (const win of wins) {
+    if (win.isDestroyed()) continue
+    const collectFrames = (parent: Electron.WebFrameMain) => {
+      for (const child of parent.frames) {
+        if (/youtube(-nocookie)?\.com\/embed/i.test(child.url)) {
+          result.push(child)
+        }
+        collectFrames(child)
+      }
+    }
+    try {
+      collectFrames(win.webContents.mainFrame)
+    } catch {
+      // ignore
+    }
+  }
+  return result
+}
+
+ipcMain.handle('ft-set-frame-quality', async (_e, quality: string) => {
+  try {
+    const frames = getYouTubeEmbedFrames()
+    let applied = false
+    const script = `
+      (() => {
+        try {
+          const p = document.getElementById('movie_player') || document.querySelector('.html5-video-player');
+          if (!p) return false;
+          const target = ${JSON.stringify(quality)};
+          if (target === 'auto') {
+            if (typeof p.setPlaybackQualityRange === 'function') p.setPlaybackQualityRange('auto', 'auto');
+            if (typeof p.setPlaybackQuality === 'function') p.setPlaybackQuality('auto');
+            return true;
+          }
+          const available = typeof p.getAvailableQualityLevels === 'function' ? p.getAvailableQualityLevels() : [];
+          let chosen = target;
+          if (Array.isArray(available) && available.length > 0 && !available.includes(target)) {
+            const order = ['highres', 'hd2880', 'hd2160', 'hd1440', 'hd1080', 'hd720', 'large', 'medium', 'small', 'tiny'];
+            const targetIdx = order.indexOf(target);
+            if (targetIdx !== -1) {
+              const candidates = order.slice(targetIdx).filter((q) => available.includes(q));
+              chosen = candidates[0] || available[0];
+            } else {
+              chosen = available[0];
+            }
+          }
+          if (typeof p.setPlaybackQualityRange === 'function') {
+            p.setPlaybackQualityRange(chosen, chosen);
+          }
+          if (typeof p.setPlaybackQuality === 'function') {
+            p.setPlaybackQuality(chosen);
+          }
+          return true;
+        } catch (e) {
+          return false;
+        }
+      })()
+    `
+    for (const frame of frames) {
+      try {
+        await frame.executeJavaScript(script)
+        applied = true
+      } catch {
+        // frame execution retry/suppress
+      }
+    }
+    return { ok: applied }
+  } catch (err: any) {
+    return { ok: false, error: err?.message }
+  }
+})
+
+ipcMain.handle('ft-get-frame-quality', async () => {
+  try {
+    const frames = getYouTubeEmbedFrames()
+    for (const frame of frames) {
+      try {
+        const q = await frame.executeJavaScript(`
+          (() => {
+            try {
+              const p = document.getElementById('movie_player') || document.querySelector('.html5-video-player');
+              return p && typeof p.getPlaybackQuality === 'function' ? p.getPlaybackQuality() : null;
+            } catch {
+              return null;
+            }
+          })()
+        `)
+        if (typeof q === 'string' && q) {
+          return { quality: q }
+        }
+      } catch {
+        // ignore
+      }
+    }
+    return { quality: null }
+  } catch {
+    return { quality: null }
+  }
+})
+

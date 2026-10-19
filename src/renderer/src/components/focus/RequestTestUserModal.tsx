@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react'
-import { X, Sparkles, Send, CheckCircle2, AlertCircle, Loader2, Mail, ShieldAlert, Check } from 'lucide-react'
+import { X, Sparkles, Send, CheckCircle2, AlertCircle, Loader2, Mail, ShieldAlert, Check, Copy } from 'lucide-react'
 
 const REGISTRATION_STORAGE_KEY = 'mycinema_ft_test_user_registration'
 
@@ -117,10 +117,12 @@ export const RequestTestUserModal: React.FC<RequestTestUserModalProps> = ({
   const handleCopyEmail = () => {
     const target = existing?.email || email
     if (!target) return
-    navigator.clipboard.writeText(target).then(() => {
-      setCopied(true)
-      setTimeout(() => setCopied(false), 2000)
-    }).catch(() => {})
+    if (navigator?.clipboard?.writeText) {
+      navigator.clipboard.writeText(target).then(() => {
+        setCopied(true)
+        setTimeout(() => setCopied(false), 2000)
+      }).catch(() => {})
+    }
   }
 
   return (
@@ -205,7 +207,7 @@ export const RequestTestUserModal: React.FC<RequestTestUserModalProps> = ({
                   </div>
                   <p className="mt-1 text-xs font-mono font-bold text-white truncate">{existing.email}</p>
                   <p className="mt-0.5 text-[10px] text-white/40">
-                    Registered under <span className="text-white/70 font-semibold">{existing.name}</span> · {existing.submittedAt}
+                    Registered under <span className="text-white/70 font-semibold">{existing.name || 'User'}</span>{existing.submittedAt ? ` · ${existing.submittedAt}` : ''}
                   </p>
                 </div>
               </div>

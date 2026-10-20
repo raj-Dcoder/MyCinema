@@ -89,32 +89,37 @@ const UPDATE_ICONS: Record<UpdateIconKey, { icon: React.ReactNode; tile: string 
 }
 
 export const LATEST_RELEASE: ReleaseNotes = {
-  version: '1.42.0',
-  title: 'A focused, distraction-free watch experience.',
-  highlight: 'watch experience.',
+  version: '1.43.0',
+  title: 'Immersive ambient glow and smart streaming.',
+  highlight: 'ambient glow',
   description:
-    'FocusTube now features a dedicated watch theater, symmetrical bento video cards, and an ultra-slim category carousel.',
+    'Enjoy ambient lighting around the player, stream-adaptive resolutions, feed and queue chronological sorting, and smooth transitions.',
   tourId: null,
   updates: [
     {
+      icon: 'sparkles',
+      title: 'Dynamic ambient lighting glow',
+      description: 'Surrounds the theater with real-time video colors and a glossy finish.',
+    },
+    {
       icon: 'play',
-      title: 'Focused cinema watch theater',
-      description: 'Widescreen cinema player with chronological upcoming category queue.',
+      title: 'Stream-adaptive quality selector',
+      description: 'Shows only resolutions the playing video stream actually supports.',
     },
     {
       icon: 'layers',
-      title: 'Symmetrical bento video cards',
-      description: 'Balanced cards with clean centered hover controls and real avatars.',
+      title: 'Feed and queue date sorting',
+      description: 'Switch between newest and oldest uploads in feeds and queues.',
     },
     {
-      icon: 'sparkles',
-      title: 'Ultra-slim category carousel',
-      description: 'Smooth scrolling category bar with quick Shorts and Watched toggles.',
+      icon: 'fix',
+      title: 'Smooth symmetrical transitions',
+      description: 'Seamless FLIP animations for minimize dock and full-screen view.',
     },
     {
-      icon: 'download',
-      title: 'In-browser top progress bar',
-      description: 'Instant loading feedback when clicking links and download buttons.',
+      icon: 'shield',
+      title: 'Smart continuity and filters',
+      description: 'Maintains playback speed across videos and excludes hidden shorts.',
     },
   ],
 }

@@ -1,3 +1,36 @@
+# MyCinema v1.43.0
+
+Immersive ambient mode with dynamic color glow and glossy finish, stream-adaptive video quality filtering, upload date sorting for feeds and queues, smooth bi-directional FLIP transitions, and smart playback continuity.
+
+### Ambient Mode & Glossy Finish
+- **Dynamic Ambient Lighting**: Soft-colored ambient light bleeds outward from the active video player onto the theater background, dynamically matching real-time scene colors.
+- **Glossy Specular Sheen**: Layered frosted glass highlight for a premium, cinema-grade reflective finish around the video frame.
+- **Temporal Color Smoothing**: Live frames blend continuously with temporal alpha interpolation, creating cinematic cross-fades across scene changes without flickering.
+- **Ambient Mode Toggle**: Dedicated switch in the player settings popup to easily toggle ambient glow on or off with persistent preference.
+
+### Stream-Adaptive Video Quality
+- **Accurate Quality Filtering**: The quality selector now detects the active stream's real capabilities and only displays resolutions the video actually supports (e.g. 1080p-capped videos show up to 1080p, 4K videos show up to 4K).
+- **Graceful Capping Indicators**: When your global quality target exceeds a video's ceiling, the player automatically activates the highest available stream and badges it clearly.
+
+### Feed & Queue Chronological Sorting
+- **Upload Date Ordering**: Switch between "Newest first" and "Oldest first" directly on the subscription feed and in-player queue to binge multi-part series or daily news in proper chronological order.
+- **Persistent Preferences**: Your selected sorting order is saved across sessions and applied to database queries automatically.
+
+### Symmetrical FLIP Transitions & Fullscreen Polish
+- **Bi-Directional Continuity**: Entering and exiting fullscreen or docking into the corner mini-player now follows an exact, reversible FLIP animation curve with zero clipping or jitter.
+- **Clean Fullscreen Takeover**: Elevated fullscreen player layer to strictly cover the main navigation sidebar, ensuring edge-to-edge immersion without sidebar overlap.
+
+### Playback Continuity & Smart Filters
+- **Persistent Playback Speed**: Your custom playback speed (1.25x, 1.5x, 2x, etc.) persists seamlessly across auto-advancing queue videos.
+- **Strict Shorts Filtering**: When shorts are hidden via the feed toggle, they are completely excluded from queue auto-advance and stopped immediately.
+- **In-App Test Access Whitelist**: Frictionless in-app request form for YouTube subscription import access with developer mail forwarding and instant copy fallback.
+
+### Security & Privacy
+- **Isolated Ambient Sampling**: Frame color analysis executes within an ephemeral in-memory canvas inside the embed frame, transmitting only lightweight low-resolution color buffers without exposing video data.
+- **Protected Request Handlers**: Whitelist request submissions are strictly validated and dispatched through a dedicated mailer gateway without persisting user credentials or tokens.
+
+***
+
 # MyCinema v1.42.0
 
 FocusTube redesign with a focused cinema watch theater, symmetrical bento video cards, authentic creator avatars, an ultra-slim category carousel, and in-browser loading progress.

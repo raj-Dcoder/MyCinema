@@ -31,6 +31,7 @@ import {
   VolumeX,
   X,
   Zap,
+  Sparkles,
 } from 'lucide-react'
 import type { FtCategory, FtComment, FtVideo } from '../../types'
 import { categoryDot, embedUrl, formatAgo, formatDuration, formatPublishedExact, formatViews, thumbnailUrl, watchUrl } from '../../utils/focusTube'
@@ -166,6 +167,7 @@ export const QUALITY_TARGETS: Array<{ id: string; label: string; desc: string; w
 ]
 
 export const QUALITY_PREF_KEY = 'mycinema_ft_preferred_quality'
+export const AMBIENT_PREF_KEY = 'mycinema_ft_ambient_mode'
 
 /** Compact like/comment counts: 1234 -> "1.2K". */
 function formatCompactCount(n: number | null): string {
@@ -447,6 +449,30 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
   })
   const qualityPrefRef = useRef(qualityPref)
   qualityPrefRef.current = qualityPref
+
+  const [ambientMode, setAmbientMode] = useState<boolean>(() => {
+    try {
+      const saved = localStorage.getItem(AMBIENT_PREF_KEY)
+      return saved !== null ? saved === 'true' : true
+    } catch {
+      return true
+    }
+  })
+  const ambientModeRef = useRef(ambientMode)
+  ambientModeRef.current = ambientMode
+  const ambientCanvasRef = useRef<HTMLCanvasElement | null>(null)
+  const ambientFsCanvasRef = useRef<HTMLCanvasElement | null>(null)
+  const lastAmbientUrlRef = useRef<string | null>(null)
+
+  const handleToggleAmbient = useCallback(() => {
+    setAmbientMode((prev) => {
+      const next = !prev
+      try {
+        localStorage.setItem(AMBIENT_PREF_KEY, String(next))
+      } catch {}
+      return next
+    })
+  }, [])
 
   const maxDetectedWeight = useMemo(() => {
     let maxW = 0
@@ -783,6 +809,66 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
     } catch { /* ignore */ }
   }, [skipSponsors])
 
+  // ── Ambient Mode: Thumbnail initialization ───────────────────────────────
+  useEffect(() => {
+    if (!ambientMode) return
+    const thumbUrl = video.thumbnail || thumbnailUrl(video.videoId)
+    if (!thumbUrl) return
+
+    const img = new Image()
+    img.crossOrigin = 'anonymous'
+    img.src = thumbUrl
+    img.onload = () => {
+      const canvases = [ambientCanvasRef.current, ambientFsCanvasRef.current]
+      for (const canvas of canvases) {
+        if (!canvas) continue
+        const ctx = canvas.getContext('2d')
+        if (ctx) {
+          ctx.drawImage(img, 0, 0, canvas.width, canvas.height)
+        }
+      }
+    }
+  }, [video.videoId, video.thumbnail, ambientMode])
+
+  // ── Ambient Mode: Live video frame sampling during playback ──────────────
+  useEffect(() => {
+    if (!ambientMode || isMinimized || playerState !== STATE_PLAYING) return
+
+    let active = true
+    const interval = setInterval(async () => {
+      if (!active || stateRef.current !== STATE_PLAYING) return
+      try {
+        const res = await window.api?.ftGetAmbientFrame?.()
+        if (!active || !res?.dataUrl) return
+        if (res.dataUrl === lastAmbientUrlRef.current) return
+        lastAmbientUrlRef.current = res.dataUrl
+
+        const img = new Image()
+        img.onload = () => {
+          if (!active) return
+          const canvases = [ambientCanvasRef.current, ambientFsCanvasRef.current]
+          for (const canvas of canvases) {
+            if (!canvas) continue
+            const ctx = canvas.getContext('2d')
+            if (!ctx) continue
+            // Smooth temporal blend (35% new, 65% existing)
+            ctx.globalAlpha = 0.35
+            ctx.drawImage(img, 0, 0, canvas.width, canvas.height)
+            ctx.globalAlpha = 1.0
+          }
+        }
+        img.src = res.dataUrl
+      } catch {
+        // ignore
+      }
+    }, 250)
+
+    return () => {
+      active = false
+      clearInterval(interval)
+    }
+  }, [ambientMode, isMinimized, playerState])
+
   // ── Comments (keyless via Invidious mirrors, one fetch per video+sort) ────
   useEffect(() => {
     let cancelled = false
@@ -994,6 +1080,7 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
     scrubbingRef.current = false
     setActualQuality(null)
     setAvailableQualities([])
+    lastAmbientUrlRef.current = null
     // Fresh video = fresh metadata. Without this a reused instance would show
     // the previous video's duration / thumbnail / error state for a beat.
     setDuration(video.duration)
@@ -2136,7 +2223,29 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
           ? 'contents'
           : `flex min-h-0 flex-1 flex-col bg-[#0a0b10] p-4 sm:p-6 lg:p-7 ${isTransitioning ? 'overflow-visible' : 'overflow-y-auto'}`}>
           <div className={isMinimized ? 'contents' : 'relative mx-auto w-full max-w-5xl space-y-4'}>
-            {!isMinimized && (
+            {!isMinimized && ambientMode && (
+              <div
+                aria-hidden
+                className="pointer-events-none absolute -inset-6 sm:-inset-10 z-0 overflow-visible transition-opacity duration-700"
+                style={{ opacity: isPlaying ? 0.75 : 0.4 }}
+              >
+                {/* Fallback ambient color layer from thumbnail while live frames load */}
+                <div
+                  className="absolute inset-0 scale-110 sm:scale-120 rounded-3xl bg-cover bg-center filter blur-[55px] sm:blur-[75px] opacity-40 transform-gpu"
+                  style={{ backgroundImage: `url(${video.thumbnail || thumbnailUrl(video.videoId)})` }}
+                />
+                {/* Dynamic live frame ambient canvas */}
+                <canvas
+                  ref={ambientCanvasRef}
+                  width={32}
+                  height={18}
+                  className="absolute inset-0 h-full w-full scale-110 sm:scale-120 transform-gpu rounded-3xl filter blur-[55px] sm:blur-[80px]"
+                />
+                {/* Glossy specular reflection sheen layer for premium finish */}
+                <div className="absolute inset-0 scale-110 sm:scale-120 rounded-3xl bg-gradient-to-b from-white/[0.08] via-transparent to-black/40 filter blur-[35px] pointer-events-none" />
+              </div>
+            )}
+            {!isMinimized && !ambientMode && (
               <div aria-hidden className="pointer-events-none absolute -inset-3 rounded-3xl bg-primary/10 blur-2xl opacity-60 animate-in fade-in duration-300" />
             )}
 
@@ -2617,6 +2726,20 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
                       className={`relative h-5 w-9 shrink-0 rounded-full transition-colors ${skipSponsors ? 'bg-amber-300' : 'bg-white/15'}`}
                     >
                       <span className={`absolute top-0.5 h-4 w-4 rounded-full bg-black transition-all ${skipSponsors ? 'left-[18px]' : 'left-0.5 bg-white/70'}`} />
+                    </button>
+                  </div>
+                  <div className="mt-2.5 flex items-center justify-between gap-2 border-t border-white/10 px-1 pt-2.5">
+                    <span className="inline-flex items-center gap-1.5 text-[11px] font-bold text-white/70">
+                      <Sparkles size={12} className="text-sky-400" /> Ambient Glow
+                    </span>
+                    <button
+                      type="button"
+                      role="switch"
+                      aria-checked={ambientMode}
+                      onClick={handleToggleAmbient}
+                      className={`relative h-5 w-9 shrink-0 rounded-full transition-colors ${ambientMode ? 'bg-sky-400' : 'bg-white/15'}`}
+                    >
+                      <span className={`absolute top-0.5 h-4 w-4 rounded-full bg-black transition-all ${ambientMode ? 'left-[18px]' : 'left-0.5 bg-white/70'}`} />
                     </button>
                   </div>
                 </div>

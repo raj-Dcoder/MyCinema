@@ -8707,6 +8707,45 @@ ipcMain.handle('ft-get-frame-quality', async () => {
   }
 })
 
+ipcMain.handle('ft-get-ambient-frame', async () => {
+  try {
+    const frames = getYouTubeEmbedFrames()
+    for (const frame of frames) {
+      try {
+        const res = await frame.executeJavaScript(`
+          (() => {
+            try {
+              const v = document.querySelector('video') || document.querySelector('.html5-main-video');
+              if (!v || v.readyState < 2 || !v.videoWidth) return null;
+              let canvas = window._ftAmbientCanvas;
+              if (!canvas) {
+                canvas = document.createElement('canvas');
+                canvas.width = 32;
+                canvas.height = 18;
+                window._ftAmbientCanvas = canvas;
+                window._ftAmbientCtx = canvas.getContext('2d', { willReadFrequently: true });
+              }
+              const ctx = window._ftAmbientCtx;
+              ctx.drawImage(v, 0, 0, 32, 18);
+              return canvas.toDataURL('image/jpeg', 0.5);
+            } catch {
+              return null;
+            }
+          })()
+        `)
+        if (typeof res === 'string' && res.startsWith('data:image/')) {
+          return { dataUrl: res }
+        }
+      } catch {
+        // ignore
+      }
+    }
+    return { dataUrl: null }
+  } catch {
+    return { dataUrl: null }
+  }
+})
+
 const FT_DEVELOPER_NOTIFICATION_EMAIL = process.env.FOCUS_TUBE_NOTIFICATION_EMAIL || 'rajveersinghranaofficial@gmail.com'
 
 ipcMain.handle('ft-request-import-access', async (_e, input: { name: string; email: string }) => {

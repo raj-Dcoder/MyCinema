@@ -190,6 +190,8 @@ const api = {
     return () => ipcRenderer.removeListener('window-fullscreen-changed', handler)
   },
   getAppSettings: () => ipcRenderer.invoke('get-app-settings'),
+  setUserProfile: (profile: { userName?: string; profileImage?: string | null }) =>
+    ipcRenderer.invoke('set-user-profile', profile),
   setLaunchFullscreen: (launchFullscreen: boolean) => ipcRenderer.invoke('set-launch-fullscreen', launchFullscreen),
   setRememberOnlineProgress: (enabled: boolean) => ipcRenderer.invoke('set-remember-online-progress', enabled),
   getStreamProgress: (tmdbId: number, mediaType: string, season?: number | null, episode?: number | null) =>

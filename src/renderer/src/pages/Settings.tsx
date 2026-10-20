@@ -221,16 +221,20 @@ const Settings: React.FC = () => {
     setFolders(f)
   }
 
-  const handleSaveName = () => {
+  const handleSaveName = async () => {
     const trimmed = tempName.trim() || 'User'
     setUserName(trimmed)
     localStorage.setItem('mycinema_user_name', trimmed)
     setIsEditingName(false)
-    // Dispatch custom event to notify other components (like Sidebar/Home)
     window.dispatchEvent(new Event('mycinema_name_updated'))
+    try {
+      await window.api.setUserProfile({ userName: trimmed })
+    } catch (err) {
+      console.error('Failed to persist user name:', err)
+    }
   }
 
-  const handleProfileImageChange = (newImage: string | null) => {
+  const handleProfileImageChange = async (newImage: string | null) => {
     setProfileImage(newImage)
     if (newImage) {
       localStorage.setItem('mycinema_profile_image', newImage)
@@ -238,6 +242,15 @@ const Settings: React.FC = () => {
       localStorage.removeItem('mycinema_profile_image')
     }
     window.dispatchEvent(new Event('mycinema_profile_updated'))
+    try {
+      const res = await window.api.setUserProfile({ profileImage: newImage })
+      if (res?.profileImage) {
+        setProfileImage(res.profileImage)
+        localStorage.setItem('mycinema_profile_image', res.profileImage)
+      }
+    } catch (err) {
+      console.error('Failed to persist profile image:', err)
+    }
   }
 
   useEffect(() => {
@@ -264,6 +277,16 @@ const Settings: React.FC = () => {
           localStorage.setItem('mycinema_show_download_tray', String(settings.showDownloadTray))
         } catch {}
       }
+      if (typeof settings?.userName === 'string') {
+        setUserName(settings.userName)
+        setTempName(settings.userName)
+        localStorage.setItem('mycinema_user_name', settings.userName)
+      }
+      if (settings?.profileImage !== undefined) {
+        setProfileImage(settings.profileImage)
+        if (settings.profileImage) localStorage.setItem('mycinema_profile_image', settings.profileImage)
+        else localStorage.removeItem('mycinema_profile_image')
+      }
     })
 
     window.api.getAppSettings().then(settings => {
@@ -284,6 +307,16 @@ const Settings: React.FC = () => {
         try {
           localStorage.setItem('mycinema_show_download_tray', String((settings as any).showDownloadTray))
         } catch {}
+      }
+      if (settings.userName) {
+        setUserName(settings.userName)
+        setTempName(settings.userName)
+        localStorage.setItem('mycinema_user_name', settings.userName)
+      }
+      if (settings.profileImage !== undefined) {
+        setProfileImage(settings.profileImage)
+        if (settings.profileImage) localStorage.setItem('mycinema_profile_image', settings.profileImage)
+        else localStorage.removeItem('mycinema_profile_image')
       }
     }).catch(() => {})
 

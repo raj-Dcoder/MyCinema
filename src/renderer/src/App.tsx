@@ -275,6 +275,47 @@ const App: React.FC = () => {
           localStorage.setItem('mycinema_show_download_tray', String(settings.showDownloadTray))
         } catch {}
       }
+
+      // Sync and migrate user profile
+      let finalName = settings.userName
+      let finalImage = settings.profileImage
+
+      if (!finalName || finalName === 'User') {
+        const localName = localStorage.getItem('mycinema_user_name')
+        if (localName && localName !== 'User') {
+          finalName = localName
+        } else {
+          try {
+            const ftReg = localStorage.getItem('mycinema_ft_test_user_registration')
+            if (ftReg) {
+              const parsed = JSON.parse(ftReg)
+              if (parsed?.name?.trim()) finalName = parsed.name.trim()
+            }
+          } catch {}
+        }
+      }
+
+      if (!finalImage) {
+        const localImage = localStorage.getItem('mycinema_profile_image')
+        if (localImage) finalImage = localImage
+      }
+
+      if (finalName && finalName !== 'User' && finalName !== settings.userName) {
+        window.api.setUserProfile({ userName: finalName, profileImage: finalImage ?? undefined }).catch(() => {})
+      }
+
+      if (finalName) {
+        setUserName(finalName)
+        localStorage.setItem('mycinema_user_name', finalName)
+        window.dispatchEvent(new Event('mycinema_name_updated'))
+      }
+      if (finalImage !== undefined) {
+        setProfileImage(finalImage)
+        if (finalImage) localStorage.setItem('mycinema_profile_image', finalImage)
+        else localStorage.removeItem('mycinema_profile_image')
+        window.dispatchEvent(new Event('mycinema_profile_updated'))
+      }
+
       // Keep the renderer's sync online-progress gates aligned with main.
       syncStreamingMirrors(settings)
     }).catch(() => {})
@@ -287,6 +328,17 @@ const App: React.FC = () => {
         try {
           localStorage.setItem('mycinema_show_download_tray', String(settings.showDownloadTray))
         } catch {}
+      }
+      if (typeof settings.userName === 'string') {
+        setUserName(settings.userName)
+        localStorage.setItem('mycinema_user_name', settings.userName)
+        window.dispatchEvent(new Event('mycinema_name_updated'))
+      }
+      if (settings.profileImage !== undefined) {
+        setProfileImage(settings.profileImage)
+        if (settings.profileImage) localStorage.setItem('mycinema_profile_image', settings.profileImage)
+        else localStorage.removeItem('mycinema_profile_image')
+        window.dispatchEvent(new Event('mycinema_profile_updated'))
       }
       if (!settings.launchFullscreen) {
         setShowWindowControls(false)

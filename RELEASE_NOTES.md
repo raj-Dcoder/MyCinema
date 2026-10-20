@@ -1,3 +1,20 @@
+# MyCinema v1.43.1
+
+Persistent user profile synchronization across dev and production, disk-backed settings storage, and background process lifecycle reliability.
+
+### Profile & Settings Persistence
+- **Disk-Backed User Profiles**: Profile name and avatar changes now save directly to disk settings through the main process, ensuring your customized name and picture persist reliably across app updates, cache clears, and dev/production switches.
+- **Smart Profile Migration**: Automatically restores saved profiles from earlier sessions and whitelist registrations so the app never falls back to a blank user state.
+- **Real-Time Cross-Window Sync**: Updating your username or avatar reflects instantly across all open windows, the navigation sidebar, and the home greeting without needing an app restart.
+
+### Stability & Process Lifecycle
+- **Clean Single-Instance Lifecycle**: Enhanced main-process shutdown handling to ensure no zombie or background processes remain active to hold database locks when the app window closes.
+
+### Security & Privacy
+- **Secure Avatar Storage**: Custom uploaded avatars are validated and stored locally within the protected user data directory, served via privileged media protocol with directory traversal protections.
+
+***
+
 # MyCinema v1.43.0
 
 Immersive ambient mode with dynamic color glow and glossy finish, stream-adaptive video quality filtering, upload date sorting for feeds and queues, smooth bi-directional FLIP transitions, and smart playback continuity.

@@ -89,37 +89,27 @@ const UPDATE_ICONS: Record<UpdateIconKey, { icon: React.ReactNode; tile: string 
 }
 
 export const LATEST_RELEASE: ReleaseNotes = {
-  version: '1.43.0',
-  title: 'Immersive ambient glow and smart streaming.',
-  highlight: 'ambient glow',
+  version: '1.43.1',
+  title: 'Persistent profiles and reliability updates.',
+  highlight: 'Persistent profiles',
   description:
-    'Enjoy ambient lighting around the player, stream-adaptive resolutions, feed and queue chronological sorting, and smooth transitions.',
+    'Your custom profile name and picture now stay permanently saved across updates, cache resets, and all environments.',
   tourId: null,
   updates: [
     {
       icon: 'sparkles',
-      title: 'Dynamic ambient lighting glow',
-      description: 'Surrounds the theater with real-time video colors and a glossy finish.',
-    },
-    {
-      icon: 'play',
-      title: 'Stream-adaptive quality selector',
-      description: 'Shows only resolutions the playing video stream actually supports.',
-    },
-    {
-      icon: 'layers',
-      title: 'Feed and queue date sorting',
-      description: 'Switch between newest and oldest uploads in feeds and queues.',
+      title: 'Disk-backed user profiles',
+      description: 'Your username and avatar persist reliably across app updates and launches.',
     },
     {
       icon: 'fix',
-      title: 'Smooth symmetrical transitions',
-      description: 'Seamless FLIP animations for minimize dock and full-screen view.',
+      title: 'Seamless profile synchronization',
+      description: 'Changes sync live across all screens and the home banner greeting.',
     },
     {
       icon: 'shield',
-      title: 'Smart continuity and filters',
-      description: 'Maintains playback speed across videos and excludes hidden shorts.',
+      title: 'Clean process shutdown',
+      description: 'Prevents zombie background processes from holding database locks.',
     },
   ],
 }

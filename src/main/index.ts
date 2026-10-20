@@ -562,6 +562,9 @@ type AppSettings = {
   downloadPath?: string
   // Floating download progress HUD in bottom right corner
   showDownloadTray?: boolean
+  // User profile
+  userName?: string
+  profileImage?: string | null
 }
 
 const defaultAppSettings: AppSettings = {
@@ -571,7 +574,9 @@ const defaultAppSettings: AppSettings = {
   maxConcurrentDownloads: 0,
   focusTubeEnabled: true,
   downloadPath: '',
-  showDownloadTray: true
+  showDownloadTray: true,
+  userName: 'User',
+  profileImage: null
 }
 
 function getAppSettingsPath() {
@@ -3033,6 +3038,53 @@ ipcMain.handle('set-notify-new-episodes', (event, notifyNewEpisodes: boolean) =>
 
 ipcMain.handle('set-show-download-tray', (_event, enabled: boolean) => {
   const settings = { ...loadAppSettings(), showDownloadTray: enabled !== false }
+  saveAppSettings(settings)
+
+  BrowserWindow.getAllWindows().forEach(window => {
+    if (!window.isDestroyed()) {
+      window.webContents.send('app-settings-changed', settings)
+    }
+  })
+
+  return settings
+})
+
+ipcMain.handle('set-user-profile', (_event, { userName, profileImage }: { userName?: string; profileImage?: string | null }) => {
+  const current = loadAppSettings()
+  let processedImage = current.profileImage
+
+  if (profileImage !== undefined) {
+    if (!profileImage) {
+      processedImage = null
+      try {
+        const avatarPath = join(app.getPath('userData'), 'user-avatar.png')
+        if (fs.existsSync(avatarPath)) fs.unlinkSync(avatarPath)
+      } catch {}
+    } else if (profileImage.startsWith('data:image/')) {
+      try {
+        const match = profileImage.match(/^data:image\/([a-zA-Z0-9]+);base64,(.+)$/)
+        if (match) {
+          const ext = match[1] === 'jpeg' ? 'jpg' : match[1]
+          const avatarPath = join(app.getPath('userData'), `user-avatar.${ext}`)
+          fs.writeFileSync(avatarPath, Buffer.from(match[2], 'base64'))
+          processedImage = `media://file/${avatarPath.replace(/\\/g, '/')}?t=${Date.now()}`
+        } else {
+          processedImage = profileImage
+        }
+      } catch (err) {
+        console.error('[Profile] Failed to save avatar to disk:', err)
+        processedImage = profileImage
+      }
+    } else {
+      processedImage = profileImage
+    }
+  }
+
+  const settings: AppSettings = {
+    ...current,
+    ...(userName !== undefined ? { userName: userName.trim() || 'User' } : {}),
+    ...(profileImage !== undefined ? { profileImage: processedImage } : {})
+  }
   saveAppSettings(settings)
 
   BrowserWindow.getAllWindows().forEach(window => {

@@ -1974,6 +1974,7 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
   // icon or the auto-hide chrome. Otherwise the button shows "exit" while the
   // video is still windowed just because the app launched fullscreen.
   const fsActive = isFullscreen
+  const isFullscreenLayer = fsActive || (isTransitioning && (isFullscreen || prevFullscreenRef.current))
   // Single chrome visibility source: floating corner buttons + bottom bar fade
   // together on idle while playing (YouTube-style), in windowed and
   // fullscreen alike — so the video owns the whole stage while watching.
@@ -1990,7 +1991,9 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
     <div
       data-fullscreen-gesture-scope="player"
       style={{ left: fsActive ? '0' : 'var(--sidebar-width, 5rem)' }}
-      className={`fixed right-0 top-0 bottom-0 z-[70] m-0 flex flex-col text-white select-none transition-[left,background-color] duration-300 ease-in-out ${
+      className={`fixed right-0 top-0 bottom-0 ${
+        isFullscreenLayer ? 'z-[100]' : 'z-[70]'
+      } m-0 flex flex-col text-white select-none transition-[left,background-color] duration-300 ease-in-out ${
         isMinimized
           ? 'pointer-events-none bg-transparent'
           : `bg-[#090a0f] ${isTransitioning ? 'overflow-visible' : 'overflow-hidden'}`

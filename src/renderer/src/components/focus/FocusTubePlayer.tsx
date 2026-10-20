@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import {
   ArrowLeft,
@@ -439,6 +439,9 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
   const [isMinimized, setIsMinimized] = useState(false)
   const isMinimizedRef = useRef(false)
   isMinimizedRef.current = isMinimized
+  const [isTransitioning, setIsTransitioning] = useState(false)
+  const prevRectRef = useRef<DOMRect | null>(null)
+  const activeAnimRef = useRef<Animation | null>(null)
 
   const [queueSearch, setQueueSearch] = useState('')
   const [sidebarTab, setSidebarTab] = useState<'queue' | 'chapters' | 'comments'>('queue')
@@ -1313,19 +1316,112 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
     })
   }, [pokeBottom, syncFsState])
 
-  // In-app minimize: dock to the bottom-right corner, keep the SAME iframe
-  // mounted (no restart), exit element fullscreen first, and let the rest of
-  // the app receive clicks (root becomes pointer-events-none; only the dock
-  // captures). Escape expands instead of closing while minimized (see key
-  // handler below).
-  const toggleMinimize = useCallback(() => {
+  // In-app minimize / expand with GPU-accelerated FLIP (First, Last, Invert, Play) transition.
+  // Measures instantaneous bounding rect before and after state update, running a smooth native
+  // compositor transform animation so the video shell glides seamlessly between theater and corner dock.
+  const transitionToMinimized = useCallback((targetMinimized: boolean) => {
+    if (isMinimizedRef.current === targetMinimized) return
+
     if (document.fullscreenElement) {
       void document.exitFullscreen().catch(() => {})
     }
     setShowSettings(false)
-    setIsMinimized((v) => !v)
+
+    if (shellRef.current) {
+      // Capture the current visual rect in viewport space before DOM state changes
+      prevRectRef.current = shellRef.current.getBoundingClientRect()
+      if (activeAnimRef.current) {
+        try {
+          activeAnimRef.current.cancel()
+        } catch {}
+        activeAnimRef.current = null
+      }
+    }
+
+    setIsTransitioning(true)
+    setIsMinimized(targetMinimized)
+  }, [])
+
+  useLayoutEffect(() => {
+    const prevRect = prevRectRef.current
+    prevRectRef.current = null
+
+    const shell = shellRef.current
+    if (!prevRect || !shell) {
+      setIsTransitioning(false)
+      return
+    }
+
+    const currentRect = shell.getBoundingClientRect()
+
+    if (prevRect.width === 0 || prevRect.height === 0 || currentRect.width === 0 || currentRect.height === 0) {
+      setIsTransitioning(false)
+      return
+    }
+
+    const deltaX = prevRect.left - currentRect.left
+    const deltaY = prevRect.top - currentRect.top
+    const scaleX = prevRect.width / currentRect.width
+    const scaleY = prevRect.height / currentRect.height
+
+    if (Math.abs(deltaX) < 1 && Math.abs(deltaY) < 1 && Math.abs(scaleX - 1) < 0.01 && Math.abs(scaleY - 1) < 0.01) {
+      setIsTransitioning(false)
+      return
+    }
+
+    const duration = 280
+    const easing = 'cubic-bezier(0.16, 1, 0.3, 1)'
+
+    try {
+      const anim = shell.animate(
+        [
+          {
+            transformOrigin: 'top left',
+            transform: `translate3d(${deltaX}px, ${deltaY}px, 0) scale(${scaleX}, ${scaleY})`,
+            borderRadius: isMinimized ? '16px' : '12px',
+          },
+          {
+            transformOrigin: 'top left',
+            transform: 'translate3d(0, 0, 0) scale(1, 1)',
+            borderRadius: isMinimized ? '12px' : '16px',
+          },
+        ],
+        {
+          duration,
+          easing,
+          fill: 'none',
+        },
+      )
+
+      activeAnimRef.current = anim
+
+      const finishHandler = () => {
+        if (activeAnimRef.current === anim) {
+          activeAnimRef.current = null
+          setIsTransitioning(false)
+        }
+      }
+
+      anim.onfinish = finishHandler
+      anim.oncancel = finishHandler
+    } catch {
+      setIsTransitioning(false)
+    }
+
+    return () => {
+      if (activeAnimRef.current) {
+        try {
+          activeAnimRef.current.cancel()
+        } catch {}
+        activeAnimRef.current = null
+      }
+    }
+  }, [isMinimized])
+
+  const toggleMinimize = useCallback(() => {
+    transitionToMinimized(!isMinimizedRef.current)
     pokeBottom()
-  }, [pokeBottom])
+  }, [transitionToMinimized, pokeBottom])
 
   const autoMinimizedByTabRef = useRef(false)
 
@@ -1336,26 +1432,26 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
       if (activeTab && activeTab !== 'focustube') {
         if (!isMinimizedRef.current) {
           autoMinimizedByTabRef.current = true
-          setIsMinimized(true)
+          transitionToMinimized(true)
         }
       } else if (activeTab === 'focustube') {
-        if (autoMinimizedByTabRef.current) {
+        if (autoMinimizedByTabRef.current || isMinimizedRef.current) {
           autoMinimizedByTabRef.current = false
-          setIsMinimized(false)
+          transitionToMinimized(false)
         }
       }
     }
 
     window.addEventListener('focustube-tab-changed', handleTabChange)
     return () => window.removeEventListener('focustube-tab-changed', handleTabChange)
-  }, [])
+  }, [transitionToMinimized])
 
   const handleExpandFromMini = useCallback(() => {
     window.dispatchEvent(new CustomEvent('focustube-request-tab', { detail: { tab: 'focustube' } }))
     autoMinimizedByTabRef.current = false
-    setIsMinimized(false)
+    transitionToMinimized(false)
     pokeBottom()
-  }, [pokeBottom])
+  }, [transitionToMinimized, pokeBottom])
 
   // ── Commands ───────────────────────────────────────────────────────────────
   const handleSeek = useCallback((seconds: number) => {
@@ -1634,7 +1730,7 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
       // do the same job — handling them here as well would double-toggle.
       if (document.activeElement?.tagName === 'IFRAME') {
         if (event.key === 'Escape' && !exitFullscreenOnly()) {
-          if (isMinimizedRef.current) setIsMinimized(false)
+          if (isMinimizedRef.current) transitionToMinimized(false)
           else handleClose()
         }
         return
@@ -1707,7 +1803,7 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
           break
         case 'Escape':
           if (showSettings) { setShowSettings(false); break }
-          if (isMinimized) { setIsMinimized(false); break }
+          if (isMinimized) { transitionToMinimized(false); break }
           if (!exitFullscreenOnly()) handleClose()
           break
         default:
@@ -1739,7 +1835,7 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
       document.removeEventListener('keydown', onKey)
       document.removeEventListener('keyup', onKeyUp)
     }
-  }, [togglePlay, handleSeek, handleVolume, toggleMute, toggleCaptions, toggleFullscreen, handleClose, handleManualNext, exitVideoFullscreen, volume, showSettings, nudgeSpeed, enterHold2x, exitHold2x, isMinimized])
+  }, [togglePlay, handleSeek, handleVolume, toggleMute, toggleCaptions, toggleFullscreen, handleClose, handleManualNext, exitVideoFullscreen, volume, showSettings, nudgeSpeed, enterHold2x, exitHold2x, isMinimized, transitionToMinimized])
 
   // Either the flag already said so, or the embed told us mid-flight.
   if (!video.embeddable || refused) {
@@ -1797,13 +1893,13 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
       className={`fixed right-0 top-0 bottom-0 z-[70] m-0 flex flex-col text-white select-none transition-[left,background-color] duration-300 ease-in-out ${
         isMinimized
           ? 'pointer-events-none bg-transparent'
-          : 'bg-[#090a0f] overflow-hidden'
+          : `bg-[#090a0f] ${isTransitioning ? 'overflow-visible' : 'overflow-hidden'}`
       }`}
     >
 
       {/* ── TOP THEATER HEADER (hidden in mini mode and native fullscreen) ── */}
       {!isMinimized && !fsActive && (
-        <header className="relative z-40 flex h-14 shrink-0 items-center justify-between border-b border-white/[0.08] bg-[#0c0d12]/95 px-4 backdrop-blur-md sm:px-6">
+        <header className="relative z-40 flex h-14 shrink-0 items-center justify-between border-b border-white/[0.08] bg-[#0c0d12]/95 px-4 backdrop-blur-md sm:px-6 animate-in fade-in duration-200">
           <div className="flex items-center gap-3">
             <button
               type="button"
@@ -1930,25 +2026,27 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
       {/* Body: stable two columns on desktop, stacked on mobile. */}
       <div className={isMinimized
         ? 'contents'
-        : 'relative z-10 flex min-h-0 flex-1 flex-col overflow-y-auto lg:flex-row lg:overflow-hidden'}>
+        : `relative z-10 flex min-h-0 flex-1 flex-col ${isTransitioning ? 'overflow-visible' : 'overflow-y-auto lg:overflow-hidden'} lg:flex-row`}>
 
         {/* ── MAIN VIDEO AREA ─────────────────────────────────────────── */}
         <div className={isMinimized
           ? 'contents'
-          : 'flex min-h-0 flex-1 flex-col overflow-y-auto bg-[#0a0b10] p-4 sm:p-6 lg:p-7'}>
+          : `flex min-h-0 flex-1 flex-col bg-[#0a0b10] p-4 sm:p-6 lg:p-7 ${isTransitioning ? 'overflow-visible' : 'overflow-y-auto'}`}>
           <div className={isMinimized ? 'contents' : 'relative mx-auto w-full max-w-5xl space-y-4'}>
             {!isMinimized && (
-              <div aria-hidden className="pointer-events-none absolute -inset-3 rounded-3xl bg-primary/10 blur-2xl opacity-60" />
+              <div aria-hidden className="pointer-events-none absolute -inset-3 rounded-3xl bg-primary/10 blur-2xl opacity-60 animate-in fade-in duration-300" />
             )}
 
             {/* Stage: 16:9 on theater, full in fullscreen, corner dock when minimized */}
             <div
               ref={shellRef}
               className={isMinimized
-                ? 'pointer-events-auto fixed bottom-4 right-4 z-[80] aspect-video w-[min(380px,calc(100vw-2rem))] overflow-hidden rounded-xl border border-white/15 bg-black shadow-[0_20px_60px_rgba(0,0,0,0.7)] transition-all duration-300 ease-out animate-in fade-in zoom-in-95'
-                : `relative aspect-video w-full overflow-hidden rounded-2xl border border-white/10 bg-black shadow-2xl transition-all duration-300 ease-out ${
-                  isPlaying && !chromeVisible ? 'cursor-none' : ''
-                }`}
+                ? `pointer-events-auto fixed bottom-4 right-4 z-[80] aspect-video w-[min(380px,calc(100vw-2rem))] overflow-hidden rounded-xl border border-white/15 bg-black shadow-[0_20px_60px_rgba(0,0,0,0.7)] ${
+                    isTransitioning ? 'will-change-transform' : ''
+                  }`
+                : `relative aspect-video w-full overflow-hidden rounded-2xl border border-white/10 bg-black shadow-2xl ${
+                    isTransitioning ? 'z-[90] will-change-transform' : ''
+                  } ${isPlaying && !chromeVisible ? 'cursor-none' : ''}`}
             onMouseMove={pokeBottom}
             onMouseEnter={handlePointerEnter}
             onMouseLeave={handlePointerLeave}
@@ -2062,7 +2160,7 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
                 seek strip at the very bottom stays visible so progress is
                 glanceable and seeking works even when faded. */}
             {isMinimized && (
-              <div className="absolute inset-x-0 bottom-0 z-40">
+              <div className={`absolute inset-x-0 bottom-0 z-40 transition-opacity duration-200 ${isTransitioning ? 'opacity-0' : 'opacity-100'}`}>
                 <div className={`bg-gradient-to-t from-black/90 via-black/50 to-transparent px-2.5 pb-1 pt-8 transition-all duration-200 ${chromeVisible ? 'translate-y-0 opacity-100' : 'pointer-events-none translate-y-1 opacity-0'}`}>
                   <div className="mb-1.5 flex items-center gap-1.5">
                     <p
@@ -2594,7 +2692,7 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
 
           {/* Video Meta Info (Title, Channel, Actions, Sections) below the Player */}
           {!isMinimized && (
-              <div className="space-y-4 pt-1">
+              <div className="space-y-4 pt-1 animate-in fade-in duration-200">
                 <h1 className="text-lg sm:text-xl lg:text-2xl font-bold text-white/95 leading-snug tracking-tight">
                   {video.title}
                 </h1>
@@ -2811,7 +2909,7 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
 
         {/* ── SIDEBAR (Up Next in Category Queue & Comments) ── */}
         {isMinimized ? null : (
-          <aside className="flex w-full shrink-0 flex-col border-t border-white/[0.08] bg-[#0c0d12]/95 lg:h-full lg:min-h-0 lg:w-[380px] lg:border-l lg:border-t-0 xl:w-[420px]">
+          <aside className="flex w-full shrink-0 flex-col border-t border-white/[0.08] bg-[#0c0d12]/95 lg:h-full lg:min-h-0 lg:w-[380px] lg:border-l lg:border-t-0 xl:w-[420px] animate-in fade-in duration-200">
             {/* Sidebar Header */}
             <div className="flex shrink-0 items-center justify-between border-b border-white/[0.08] p-3 sm:p-3.5 gap-2">
               <div className="min-w-0 pr-1">

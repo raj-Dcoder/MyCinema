@@ -316,6 +316,7 @@ const FocusTube: React.FC = () => {
 
   const handlePlay = useCallback(async (video: FtVideo) => {
     if (hideShorts && video.isShort) return
+    window.dispatchEvent(new CustomEvent('focustube-tab-changed', { detail: { activeTab: 'focustube' } }))
     let startSeconds = progressCacheRef.current.get(video.videoId) ?? 0
     if (startSeconds === 0) {
       const progress = await window.api.ftGetProgress(video.videoId)

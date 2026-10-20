@@ -125,6 +125,9 @@ const App: React.FC = () => {
       if (tab === 'home') {
         homeScrollRef.current?.scrollTo({ top: 0, behavior: 'smooth' })
       }
+      if (tab === 'focustube') {
+        window.dispatchEvent(new CustomEvent('focustube-tab-changed', { detail: { activeTab: 'focustube' } }))
+      }
       return
     }
 

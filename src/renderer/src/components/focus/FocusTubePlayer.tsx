@@ -432,6 +432,8 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
   const [showSettings, setShowSettings] = useState(false)
   const [settingsTab, setSettingsTab] = useState<'speed' | 'quality'>('speed')
   const [isFullscreen, setIsFullscreen] = useState(false)
+  const isFullscreenRef = useRef(false)
+  isFullscreenRef.current = isFullscreen
   const [scrubTime, setScrubTime] = useState<number | null>(null)
   // In-app mini player: docks the SAME iframe to the bottom-right corner so
   // playback continues while the user browses MyCinema. Unlike OS PiP this
@@ -439,6 +441,8 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
   const [isMinimized, setIsMinimized] = useState(false)
   const isMinimizedRef = useRef(false)
   isMinimizedRef.current = isMinimized
+  const prevMinimizedRef = useRef(false)
+  const prevFullscreenRef = useRef(false)
   const [isTransitioning, setIsTransitioning] = useState(false)
   const prevRectRef = useRef<DOMRect | null>(null)
   const activeAnimRef = useRef<Animation | null>(null)
@@ -1240,85 +1244,33 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
   // the app often launches window-fullscreen, and stacking the video element
   // fullscreen on top is legal. Touching the window mode here is what caused
   // "first click exits the app, second click enters video, exit restores app".
-  const syncFsState = useCallback(() => {
-    setIsFullscreen(!!document.fullscreenElement)
-  }, [])
+  // Unified FLIP (First, Last, Invert, Play) transition system for Theater, Mini, and Fullscreen modes.
+  // Captures instantaneous visual geometry in viewport coordinates and morphs the video shell
+  // with GPU-accelerated transforms, providing continuous, fast, and completely symmetrical transitions.
+  const transitionToFullscreen = useCallback((targetFullscreen: boolean) => {
+    if (isFullscreenRef.current === targetFullscreen) return
 
-  // Exits ONLY the video element fullscreen. Never touches the app window -
-  // closing the player or pressing Escape must preserve the app's window mode.
-  // Returns true if anything exited.
-  const exitVideoFullscreen = useCallback(() => {
     if (document.fullscreenElement) {
       void document.exitFullscreen().catch(() => {})
-      return true
     }
-    return false
+    setShowSettings(false)
+
+    if (shellRef.current) {
+      prevRectRef.current = shellRef.current.getBoundingClientRect()
+      prevMinimizedRef.current = isMinimizedRef.current
+      prevFullscreenRef.current = isFullscreenRef.current
+      if (activeAnimRef.current) {
+        try {
+          activeAnimRef.current.cancel()
+        } catch {}
+        activeAnimRef.current = null
+      }
+    }
+
+    setIsTransitioning(true)
+    setIsFullscreen(targetFullscreen)
   }, [])
 
-  useEffect(() => {
-    const onFsChange = () => syncFsState()
-    document.addEventListener('fullscreenchange', onFsChange)
-    syncFsState()
-    return () => {
-      document.removeEventListener('fullscreenchange', onFsChange)
-    }
-  }, [syncFsState])
-
-  useEffect(() => () => {
-    window.clearTimeout(singleTapTimerRef.current)
-    window.clearTimeout(spaceHoldTimerRef.current)
-    window.clearTimeout(pointerHoldTimerRef.current)
-  }, [])
-
-  // -- Fullscreen (video element only) -------------------------------------
-  // Element fullscreen on the stage shell. The app window fullscreen is never
-  // consulted: entering stacks over it, exiting reveals it untouched.
-  // Window IPC is a last-resort fallback only when requestFullscreen is
-  // missing or truly rejects (old webview).
-  //
-  // Debounce: a second toggle within 500ms is swallowed, so an accidental
-  // +double-fire can never enter-then-instantly-exit.
-  const lastFsToggleRef = useRef(0)
-  const toggleFullscreen = useCallback(() => {
-    pokeBottom()
-    const now = Date.now()
-    if (fsToggleInFlightRef.current || now - lastFsToggleRef.current < 500) return
-    lastFsToggleRef.current = now
-    // VIDEO-ONLY: never read or write the app window fullscreen here. The app
-    // often runs window-fullscreen; stacking element fullscreen on top is
-    // legal and exiting must not drop the app out of its window mode.
-    if (document.fullscreenElement) {
-      fsToggleInFlightRef.current = true
-      void document.exitFullscreen().catch(() => {}).finally(() => {
-        fsToggleInFlightRef.current = false
-        window.setTimeout(syncFsState, 100)
-      })
-      return
-    }
-    const shell = shellRef.current
-    if (shell && typeof shell.requestFullscreen === 'function') {
-      fsToggleInFlightRef.current = true
-      void shell.requestFullscreen()
-        .catch(() => {
-          // Fallback only when element fullscreen is unavailable.
-          return window.api.toggleFullscreen().then(() => undefined).catch(() => undefined)
-        })
-        .finally(() => {
-          fsToggleInFlightRef.current = false
-          window.setTimeout(syncFsState, 100)
-        })
-      return
-    }
-    fsToggleInFlightRef.current = true
-    void window.api.toggleFullscreen().catch(() => {}).finally(() => {
-      fsToggleInFlightRef.current = false
-      window.setTimeout(syncFsState, 100)
-    })
-  }, [pokeBottom, syncFsState])
-
-  // In-app minimize / expand with GPU-accelerated FLIP (First, Last, Invert, Play) transition.
-  // Measures instantaneous bounding rect before and after state update, running a smooth native
-  // compositor transform animation so the video shell glides seamlessly between theater and corner dock.
   const transitionToMinimized = useCallback((targetMinimized: boolean) => {
     if (isMinimizedRef.current === targetMinimized) return
 
@@ -1328,8 +1280,9 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
     setShowSettings(false)
 
     if (shellRef.current) {
-      // Capture the current visual rect in viewport space before DOM state changes
       prevRectRef.current = shellRef.current.getBoundingClientRect()
+      prevMinimizedRef.current = isMinimizedRef.current
+      prevFullscreenRef.current = isFullscreenRef.current
       if (activeAnimRef.current) {
         try {
           activeAnimRef.current.cancel()
@@ -1340,6 +1293,47 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
 
     setIsTransitioning(true)
     setIsMinimized(targetMinimized)
+  }, [])
+
+  const toggleFullscreen = useCallback(() => {
+    pokeBottom()
+    if (isMinimizedRef.current) {
+      transitionToMinimized(false)
+      return
+    }
+    transitionToFullscreen(!isFullscreenRef.current)
+  }, [pokeBottom, transitionToFullscreen, transitionToMinimized])
+
+  const exitVideoFullscreen = useCallback(() => {
+    if (isFullscreenRef.current) {
+      transitionToFullscreen(false)
+      return true
+    }
+    if (document.fullscreenElement) {
+      void document.exitFullscreen().catch(() => {})
+      return true
+    }
+    return false
+  }, [transitionToFullscreen])
+
+  useEffect(() => {
+    const onFsChange = () => {
+      if (document.fullscreenElement && !isFullscreenRef.current) {
+        transitionToFullscreen(true)
+      } else if (!document.fullscreenElement && isFullscreenRef.current) {
+        transitionToFullscreen(false)
+      }
+    }
+    document.addEventListener('fullscreenchange', onFsChange)
+    return () => {
+      document.removeEventListener('fullscreenchange', onFsChange)
+    }
+  }, [transitionToFullscreen])
+
+  useEffect(() => () => {
+    window.clearTimeout(singleTapTimerRef.current)
+    window.clearTimeout(spaceHoldTimerRef.current)
+    window.clearTimeout(pointerHoldTimerRef.current)
   }, [])
 
   useLayoutEffect(() => {
@@ -1372,18 +1366,21 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
     const duration = 280
     const easing = 'cubic-bezier(0.16, 1, 0.3, 1)'
 
+    const prevRadius = prevFullscreenRef.current ? '0px' : prevMinimizedRef.current ? '12px' : '16px'
+    const nextRadius = isFullscreen ? '0px' : isMinimized ? '12px' : '16px'
+
     try {
       const anim = shell.animate(
         [
           {
             transformOrigin: 'top left',
             transform: `translate3d(${deltaX}px, ${deltaY}px, 0) scale(${scaleX}, ${scaleY})`,
-            borderRadius: isMinimized ? '16px' : '12px',
+            borderRadius: prevRadius,
           },
           {
             transformOrigin: 'top left',
             transform: 'translate3d(0, 0, 0) scale(1, 1)',
-            borderRadius: isMinimized ? '12px' : '16px',
+            borderRadius: nextRadius,
           },
         ],
         {
@@ -1416,7 +1413,7 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
         activeAnimRef.current = null
       }
     }
-  }, [isMinimized])
+  }, [isMinimized, isFullscreen])
 
   const toggleMinimize = useCallback(() => {
     transitionToMinimized(!isMinimizedRef.current)
@@ -2040,13 +2037,19 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
             {/* Stage: 16:9 on theater, full in fullscreen, corner dock when minimized */}
             <div
               ref={shellRef}
-              className={isMinimized
-                ? `pointer-events-auto fixed bottom-4 right-4 z-[80] aspect-video w-[min(380px,calc(100vw-2rem))] overflow-hidden rounded-xl border border-white/15 bg-black shadow-[0_20px_60px_rgba(0,0,0,0.7)] ${
-                    isTransitioning ? 'will-change-transform' : ''
-                  }`
-                : `relative aspect-video w-full overflow-hidden rounded-2xl border border-white/10 bg-black shadow-2xl ${
-                    isTransitioning ? 'z-[90] will-change-transform' : ''
-                  } ${isPlaying && !chromeVisible ? 'cursor-none' : ''}`}
+              className={
+                isMinimized
+                  ? `pointer-events-auto fixed bottom-4 right-4 z-[80] aspect-video w-[min(380px,calc(100vw-2rem))] overflow-hidden rounded-xl border border-white/15 bg-black shadow-[0_20px_60px_rgba(0,0,0,0.7)] ${
+                      isTransitioning ? 'will-change-transform' : ''
+                    }`
+                  : fsActive
+                    ? `pointer-events-auto fixed inset-0 z-[100] w-full h-full overflow-hidden rounded-none border-0 bg-black shadow-none ${
+                        isTransitioning ? 'will-change-transform' : ''
+                      } ${isPlaying && !chromeVisible ? 'cursor-none' : ''}`
+                    : `relative aspect-video w-full overflow-hidden rounded-2xl border border-white/10 bg-black shadow-2xl ${
+                        isTransitioning ? 'z-[90] will-change-transform' : ''
+                      } ${isPlaying && !chromeVisible ? 'cursor-none' : ''}`
+              }
             onMouseMove={pokeBottom}
             onMouseEnter={handlePointerEnter}
             onMouseLeave={handlePointerLeave}
@@ -2136,6 +2139,18 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
                   }`}
                 >
                   <ExternalLink size={16} />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => transitionToFullscreen(false)}
+                  title="Exit fullscreen (F or Esc)"
+                  aria-label="Exit fullscreen"
+                  tabIndex={chromeVisible ? 0 : -1}
+                  className={`pointer-events-auto flex h-9 w-9 items-center justify-center rounded-full bg-black/60 text-white/70 backdrop-blur-md transition-all hover:bg-black/85 hover:text-white active:scale-95 ${
+                    chromeVisible ? '' : 'pointer-events-none'
+                  }`}
+                >
+                  <Minimize size={17} />
                 </button>
                 <button
                   type="button"
@@ -2691,7 +2706,7 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
           </div>
 
           {/* Video Meta Info (Title, Channel, Actions, Sections) below the Player */}
-          {!isMinimized && (
+          {!isMinimized && !fsActive && (
               <div className="space-y-4 pt-1 animate-in fade-in duration-200">
                 <h1 className="text-lg sm:text-xl lg:text-2xl font-bold text-white/95 leading-snug tracking-tight">
                   {video.title}
@@ -2908,7 +2923,7 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
         </div>
 
         {/* ── SIDEBAR (Up Next in Category Queue & Comments) ── */}
-        {isMinimized ? null : (
+        {isMinimized || fsActive ? null : (
           <aside className="flex w-full shrink-0 flex-col border-t border-white/[0.08] bg-[#0c0d12]/95 lg:h-full lg:min-h-0 lg:w-[380px] lg:border-l lg:border-t-0 xl:w-[420px] animate-in fade-in duration-200">
             {/* Sidebar Header */}
             <div className="flex shrink-0 items-center justify-between border-b border-white/[0.08] p-3 sm:p-3.5 gap-2">

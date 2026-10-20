@@ -8283,6 +8283,7 @@ ipcMain.handle('ft-get-feed', (_e, options?: Partial<{
   hideShorts: boolean
   limit: number
   search: string | null
+  sortOrder: 'newest' | 'oldest'
 }>) => ftGuard('getFeed', () => focusTube.getFeed({
   categoryId: options?.categoryId ?? null,
   includeSeen: options?.includeSeen ?? false,
@@ -8290,6 +8291,7 @@ ipcMain.handle('ft-get-feed', (_e, options?: Partial<{
   hideShorts: options?.hideShorts ?? false,
   limit: options?.limit ?? 60,
   search: options?.search ?? null,
+  sortOrder: options?.sortOrder ?? 'newest',
 })))
 
 ipcMain.handle('ft-get-video', (_e, videoId: string) =>

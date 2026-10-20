@@ -1,7 +1,9 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import {
+  ArrowDownWideNarrow,
   ArrowLeft,
+  ArrowUpNarrowWide,
   Check,
   ChevronDown,
   ExternalLink,
@@ -62,6 +64,8 @@ interface FocusTubePlayerProps {
   onSelectVideo?: (video: FtVideo) => void
   onToggleSeen?: (video: FtVideo) => void
   hideShorts?: boolean
+  sortOrder?: 'newest' | 'oldest'
+  onToggleSortOrder?: (order: 'newest' | 'oldest') => void
 }
 
 // YouTube player states (see IFrame Player API reference).
@@ -375,6 +379,8 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
   onSelectVideo,
   onToggleSeen,
   hideShorts,
+  sortOrder = 'newest',
+  onToggleSortOrder,
 }) => {
   const iframeRef = useRef<HTMLIFrameElement>(null)
   // Stable per-video channel id. (A previous revision read a mutated counter
@@ -594,10 +600,16 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
       if (hideShorts && v.isShort) return false
       return true
     })
-    if (!queueSearch.trim()) return list
+    const live = list.filter((v) => v.isLive)
+    const rest = list.filter((v) => !v.isLive).sort((a, b) => {
+      const diff = new Date(a.publishedAt).getTime() - new Date(b.publishedAt).getTime()
+      return sortOrder === 'oldest' ? diff : -diff
+    })
+    const sorted = [...live, ...rest]
+    if (!queueSearch.trim()) return sorted
     const q = queueSearch.trim().toLowerCase()
-    return list.filter((v) => v.title.toLowerCase().includes(q) || v.channelTitle.toLowerCase().includes(q))
-  }, [queue, queueSearch, hideShorts])
+    return sorted.filter((v) => v.title.toLowerCase().includes(q) || v.channelTitle.toLowerCase().includes(q))
+  }, [queue, queueSearch, hideShorts, sortOrder])
 
   const remainingCount = useMemo(() => {
     return (queue || []).filter((v) => (!hideShorts || !v.isShort) && !v.seen && v.videoId !== video.videoId).length
@@ -2989,23 +3001,58 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
             {/* Sidebar Body */}
             <div className="min-h-0 flex-1 overflow-y-auto p-3 space-y-2">
               {sidebarTab === 'queue' && (
-                queueItems.length > 0 ? (
-                  queueItems.map((item) => (
-                    <QueueCard
-                      key={item.videoId}
-                      video={item}
-                      isCurrent={item.videoId === video.videoId}
-                      onSelect={handleSelectQueueVideo}
-                      onToggleSeen={handleToggleQueueSeen}
-                    />
-                  ))
-                ) : (
-                  <div className="flex flex-col items-center justify-center py-16 text-center">
-                    <p className="text-xs font-bold text-white/40">
-                      {queueSearch ? `No videos matching “${queueSearch}”` : 'No upcoming videos in this queue'}
-                    </p>
+                <>
+                  <div className="flex items-center justify-between pb-2 mb-1 border-b border-white/[0.06]">
+                    <span className="text-[11px] font-bold text-white/50">
+                      Upload Order
+                    </span>
+                    <div className="flex items-center gap-0.5 bg-white/[0.04] p-0.5 rounded-lg border border-white/[0.08]">
+                      <button
+                        type="button"
+                        onClick={() => onToggleSortOrder ? onToggleSortOrder('newest') : null}
+                        title="Queue order: Newest uploads first"
+                        className={`flex items-center gap-1 rounded-md px-2 py-0.5 text-[10px] font-bold transition-all ${
+                          sortOrder === 'newest'
+                            ? 'bg-primary text-white shadow'
+                            : 'text-white/40 hover:bg-white/5 hover:text-white'
+                        }`}
+                      >
+                        <ArrowDownWideNarrow size={11} />
+                        <span>Newest</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => onToggleSortOrder ? onToggleSortOrder('oldest') : null}
+                        title="Queue order: Oldest uploads first (chronological order)"
+                        className={`flex items-center gap-1 rounded-md px-2 py-0.5 text-[10px] font-bold transition-all ${
+                          sortOrder === 'oldest'
+                            ? 'bg-primary text-white shadow'
+                            : 'text-white/40 hover:bg-white/5 hover:text-white'
+                        }`}
+                      >
+                        <ArrowUpNarrowWide size={11} />
+                        <span>Oldest</span>
+                      </button>
+                    </div>
                   </div>
-                )
+                  {queueItems.length > 0 ? (
+                    queueItems.map((item) => (
+                      <QueueCard
+                        key={item.videoId}
+                        video={item}
+                        isCurrent={item.videoId === video.videoId}
+                        onSelect={handleSelectQueueVideo}
+                        onToggleSeen={handleToggleQueueSeen}
+                      />
+                    ))
+                  ) : (
+                    <div className="flex flex-col items-center justify-center py-16 text-center">
+                      <p className="text-xs font-bold text-white/40">
+                        {queueSearch ? `No videos matching “${queueSearch}”` : 'No upcoming videos in this queue'}
+                      </p>
+                    </div>
+                  )}
+                </>
               )}
 
               {sidebarTab === 'chapters' && (

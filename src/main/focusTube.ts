@@ -66,6 +66,7 @@ export interface FtFeedOptions {
   hideShorts: boolean
   limit: number
   search: string | null
+  sortOrder?: 'newest' | 'oldest'
 }
 
 function toCategory(row: any): FtCategory {
@@ -602,6 +603,8 @@ export function getFeed(options: FtFeedOptions): FtVideo[] {
   const limit = Math.min(Math.max(Number(options.limit) || 60, 1), 200)
   params.push(limit)
 
+  const sortDir = options.sortOrder === 'oldest' ? 'ASC' : 'DESC'
+
   const rows = db.prepare(`
     SELECT v.*, c.title AS channel_title, c.avatar_url AS channel_avatar_url, c.handle AS channel_handle,
       COALESCE(s.seen, 0) AS seen, s.seen_at, COALESCE(s.saved, 0) AS saved,
@@ -610,7 +613,7 @@ export function getFeed(options: FtFeedOptions): FtVideo[] {
     JOIN ft_channels c ON c.channel_id = v.channel_id
     LEFT JOIN ft_video_state s ON s.video_id = v.video_id
     ${where.length ? `WHERE ${where.join(' AND ')}` : ''}
-    ORDER BY v.is_live DESC, v.published_at DESC
+    ORDER BY v.is_live DESC, v.published_at ${sortDir}
     LIMIT ?
   `).all(...params) as any[]
 

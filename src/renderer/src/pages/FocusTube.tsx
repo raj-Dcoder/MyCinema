@@ -1,5 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
+  ArrowDownWideNarrow,
+  ArrowUpNarrowWide,
   Check,
   CheckCheck,
   ChevronLeft,
@@ -21,6 +23,7 @@ import { categoryDot, formatAgo, formatPublishedExact } from '../utils/focusTube
 
 const HIDE_SHORTS_KEY = 'mycinema_ft_hide_shorts'
 const AUTOPLAY_NEXT_KEY = 'mycinema_ft_autoplay_next'
+const SORT_ORDER_KEY = 'mycinema_ft_sort_order'
 
 const FocusTube: React.FC = () => {
   const [categories, setCategories] = useState<FtCategory[]>([])
@@ -29,6 +32,14 @@ const FocusTube: React.FC = () => {
   const [latestPublished, setLatestPublished] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
+
+  const [sortOrder, setSortOrder] = useState<'newest' | 'oldest'>(() => {
+    try {
+      return localStorage.getItem(SORT_ORDER_KEY) === 'oldest' ? 'oldest' : 'newest'
+    } catch {
+      return 'newest'
+    }
+  })
 
   const [hideShorts, setHideShorts] = useState(() => {
     try {
@@ -115,19 +126,29 @@ const FocusTube: React.FC = () => {
   const videosRef = useRef<FtVideo[]>([])
   useEffect(() => { videosRef.current = videos }, [videos])
 
-  const loadFeed = useCallback(async (categoryId: number | null, opts?: { hideShorts?: boolean; includeSeen?: boolean; search?: string }) => {
+  const loadFeed = useCallback(async (categoryId: number | null, opts?: { hideShorts?: boolean; includeSeen?: boolean; search?: string; sortOrder?: 'newest' | 'oldest' }) => {
     const next = await window.api.ftGetFeed({
       categoryId,
       includeSeen: opts?.includeSeen ?? includeSeen,
       hideShorts: opts?.hideShorts ?? hideShorts,
       search: opts?.search ?? null,
+      sortOrder: opts?.sortOrder ?? sortOrder,
       limit: 60,
     })
     setVideos(next || [])
 
     const summary = await window.api.ftGetCategorySummary(categoryId)
     setLatestPublished(summary?.latestPublished ?? null)
-  }, [hideShorts, includeSeen])
+  }, [hideShorts, includeSeen, sortOrder])
+
+  const handleSortChange = useCallback((next: 'newest' | 'oldest') => {
+    if (next === sortOrder) return
+    setSortOrder(next)
+    try {
+      localStorage.setItem(SORT_ORDER_KEY, next)
+    } catch {}
+    void loadFeed(activeCategoryId, { sortOrder: next })
+  }, [sortOrder, activeCategoryId, loadFeed])
 
   const loadCategories = useCallback(async () => {
     const list = (await window.api.ftListCategories()) || []
@@ -230,8 +251,14 @@ const FocusTube: React.FC = () => {
 
   // Split out so a live stream is never buried in the middle of the stack.
   const liveVideos = useMemo(() => eligibleVideos.filter((video) => video.isLive), [eligibleVideos])
-  const restVideos = useMemo(() => eligibleVideos.filter((video) => !video.isLive), [eligibleVideos])
-  // Playback queue = display order (live first, then newest-first rest).
+  const restVideos = useMemo(() => {
+    const list = eligibleVideos.filter((video) => !video.isLive)
+    return [...list].sort((a, b) => {
+      const diff = new Date(a.publishedAt).getTime() - new Date(b.publishedAt).getTime()
+      return sortOrder === 'oldest' ? diff : -diff
+    })
+  }, [eligibleVideos, sortOrder])
+  // Playback queue = display order (live first, then sorted rest).
   const playQueue = useMemo(() => [...liveVideos, ...restVideos], [liveVideos, restVideos])
 
   const toggleAutoplayNext = useCallback(() => {
@@ -249,10 +276,12 @@ const FocusTube: React.FC = () => {
   const getNextInQueue = useCallback((currentVideoId: string): FtVideo | null => {
     const source = videosRef.current.length ? videosRef.current : videos
     const eligible = source.filter((v) => (!hideShorts || !v.isShort))
-    const queue = [
-      ...eligible.filter((v) => v.isLive),
-      ...eligible.filter((v) => !v.isLive),
-    ]
+    const live = eligible.filter((v) => v.isLive)
+    const rest = eligible.filter((v) => !v.isLive).sort((a, b) => {
+      const diff = new Date(a.publishedAt).getTime() - new Date(b.publishedAt).getTime()
+      return sortOrder === 'oldest' ? diff : -diff
+    })
+    const queue = [...live, ...rest]
     const currentIndex = queue.findIndex((video) => video.videoId === currentVideoId)
     if (currentIndex !== -1) {
       for (let i = currentIndex + 1; i < queue.length; i++) {
@@ -264,7 +293,7 @@ const FocusTube: React.FC = () => {
       return null
     }
     return queue.find((v) => (!v.seen || includeSeen) && v.videoId !== currentVideoId) ?? queue[0] ?? null
-  }, [videos, hideShorts, includeSeen])
+  }, [videos, hideShorts, includeSeen, sortOrder])
 
   const resolveStartSeconds = useCallback(async (video: FtVideo): Promise<number> => {
     const cached = progressCacheRef.current.get(video.videoId)
@@ -681,8 +710,40 @@ const FocusTube: React.FC = () => {
           )}
         </div>
 
-        {/* Right side: Modern Toggle Switches (Hide Shorts, Hide Watched, Mark all seen) */}
-        <div data-tour="focustube-feed" className="flex shrink-0 items-center gap-3.5 self-end pt-1 sm:pt-0">
+        {/* Right side: Modern Controls (Sort Order, Hide Shorts, Hide Watched, Mark all seen) */}
+        <div data-tour="focustube-feed" className="flex shrink-0 items-center gap-3 self-end pt-1 sm:pt-0">
+          {/* Upload Date Sort Order Pill */}
+          <div className="flex items-center gap-0.5 rounded-xl border border-white/10 bg-white/5 p-0.5" title="Sort videos by upload date">
+            <button
+              type="button"
+              onClick={() => handleSortChange('newest')}
+              title="Newest uploads first (latest)"
+              className={`flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-[11px] font-bold transition-all ${
+                sortOrder === 'newest'
+                  ? 'bg-primary text-white shadow-sm'
+                  : 'text-white/50 hover:bg-white/5 hover:text-white'
+              }`}
+            >
+              <ArrowDownWideNarrow size={13} />
+              <span>Newest</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => handleSortChange('oldest')}
+              title="Oldest uploads first (chronological order)"
+              className={`flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-[11px] font-bold transition-all ${
+                sortOrder === 'oldest'
+                  ? 'bg-primary text-white shadow-sm'
+                  : 'text-white/50 hover:bg-white/5 hover:text-white'
+              }`}
+            >
+              <ArrowUpNarrowWide size={13} />
+              <span>Oldest</span>
+            </button>
+          </div>
+
+          <div className="h-4 w-px bg-white/10" />
+
           {/* Hide Shorts Switch */}
           <div className="flex items-center gap-2">
             <span className="text-[11px] font-bold text-white/60">Hide Shorts</span>
@@ -893,6 +954,8 @@ const FocusTube: React.FC = () => {
           onAutoAdvance={(videoId) => void handleAutoAdvance(videoId)}
           onManualNext={(videoId) => void handleManualNext(videoId)}
           hideShorts={hideShorts}
+          sortOrder={sortOrder}
+          onToggleSortOrder={handleSortChange}
         />
       )}
     </div>

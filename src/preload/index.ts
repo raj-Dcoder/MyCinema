@@ -235,6 +235,7 @@ const api = {
     hideShorts?: boolean
     limit?: number
     search?: string | null
+    sortOrder?: 'newest' | 'oldest'
   }) => ipcRenderer.invoke('ft-get-feed', options ?? {}),
   ftGetVideo: (videoId: string) => ipcRenderer.invoke('ft-get-video', videoId),
   ftSetVideoSeen: (videoId: string, seen: boolean) => ipcRenderer.invoke('ft-set-video-seen', { videoId, seen }),

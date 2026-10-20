@@ -138,17 +138,31 @@ const QUALITY_OPTIONS: Array<{ id: string; label: string }> = [
   { id: 'tiny', label: '144p' },
 ]
 
+export const QUALITY_WEIGHTS: Record<string, number> = {
+  highres: 4320,
+  hd2880: 2880,
+  hd2160: 2160,
+  hd1440: 1440,
+  hd1080: 1080,
+  hd720: 720,
+  large: 480,
+  medium: 360,
+  small: 240,
+  tiny: 144,
+  auto: 0,
+}
+
 function qualityLabel(id: string): string {
   return QUALITY_OPTIONS.find((q) => q.id === id)?.label ?? id
 }
 
-export const QUALITY_TARGETS: Array<{ id: string; label: string; desc: string }> = [
-  { id: 'auto', label: 'Auto (Recommended)', desc: 'Adaptive quality managed by YouTube based on bandwidth' },
-  { id: 'hd2160', label: '4K Ultra HD', desc: 'Prioritize 2160p resolution' },
-  { id: 'hd1440', label: '1440p Quad HD', desc: 'Crisp 2K resolution' },
-  { id: 'hd1080', label: '1080p Full HD', desc: 'Standard crisp high-definition 1080p' },
-  { id: 'hd720', label: '720p HD', desc: 'Smooth streaming with reduced data usage' },
-  { id: 'medium', label: 'Data Saver (360p / 480p)', desc: 'Lowest bandwidth usage for metered connections' },
+export const QUALITY_TARGETS: Array<{ id: string; label: string; desc: string; weight: number }> = [
+  { id: 'auto', label: 'Auto (Recommended)', desc: 'Adaptive quality managed by YouTube based on bandwidth', weight: 0 },
+  { id: 'hd2160', label: '4K Ultra HD', desc: 'Prioritize 2160p resolution', weight: 2160 },
+  { id: 'hd1440', label: '1440p Quad HD', desc: 'Crisp 2K resolution', weight: 1440 },
+  { id: 'hd1080', label: '1080p Full HD', desc: 'Standard crisp high-definition 1080p', weight: 1080 },
+  { id: 'hd720', label: '720p HD', desc: 'Smooth streaming with reduced data usage', weight: 720 },
+  { id: 'medium', label: 'Data Saver (360p / 480p)', desc: 'Lowest bandwidth usage for metered connections', weight: 360 },
 ]
 
 export const QUALITY_PREF_KEY = 'mycinema_ft_preferred_quality'
@@ -423,6 +437,7 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
   const [speed, setSpeed] = useState<number>(() => loadSpeedPref())
   // Live rendition readout (getPlaybackQuality / onPlaybackQualityChange) + target preference.
   const [actualQuality, setActualQuality] = useState<string | null>(null)
+  const [availableQualities, setAvailableQualities] = useState<string[]>([])
   const [qualityPref, setQualityPref] = useState<string>(() => {
     try {
       return localStorage.getItem(QUALITY_PREF_KEY) || 'auto'
@@ -432,6 +447,39 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
   })
   const qualityPrefRef = useRef(qualityPref)
   qualityPrefRef.current = qualityPref
+
+  const maxDetectedWeight = useMemo(() => {
+    let maxW = 0
+    if (Array.isArray(availableQualities)) {
+      for (const q of availableQualities) {
+        const w = QUALITY_WEIGHTS[q] || 0
+        if (w > maxW) maxW = w
+      }
+    }
+    if (actualQuality) {
+      const w = QUALITY_WEIGHTS[actualQuality] || 0
+      if (w > maxW) maxW = w
+    }
+    return maxW
+  }, [availableQualities, actualQuality])
+
+  const maxSupportedLabel = useMemo(() => {
+    if (maxDetectedWeight >= 2160) return '4K'
+    if (maxDetectedWeight >= 1440) return '1440p'
+    if (maxDetectedWeight >= 1080) return '1080p'
+    if (maxDetectedWeight >= 720) return '720p'
+    if (maxDetectedWeight >= 480) return '480p'
+    if (maxDetectedWeight >= 360) return '360p'
+    return null
+  }, [maxDetectedWeight])
+
+  const displayedQualityTargets = useMemo(() => {
+    if (maxDetectedWeight === 0) return QUALITY_TARGETS
+    return QUALITY_TARGETS.filter((t) => {
+      if (t.id === 'auto') return true
+      return t.weight <= maxDetectedWeight
+    })
+  }, [maxDetectedWeight])
   const [isHolding2x, setIsHolding2x] = useState(false)
   // Two separate menus instead of one generic "settings" gear: speed gets a
   // real panel; quality opens an Auto readout (same tab UI, honest content).
@@ -662,6 +710,9 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
       ?.then(() => {
         window.api?.ftGetFrameQuality?.()?.then((res) => {
           if (res?.quality) setActualQuality(res.quality)
+          if (Array.isArray(res?.available) && res.available.length > 0) {
+            setAvailableQualities(res.available)
+          }
         })
       })
       .catch(() => {})
@@ -673,11 +724,18 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
   const requestPlaybackInfo = useCallback(() => {
     withBridge(() => {
       cmd('getPlaybackQuality', [])
+      cmd('getAvailableQualityLevels', [])
       cmd('getAvailablePlaybackRates', [])
       cmd('getPlaybackRate', [])
     })
     window.api?.ftGetFrameQuality?.()?.then((res) => {
       if (res?.quality) setActualQuality((prev) => (prev === res.quality ? prev : res.quality))
+      if (Array.isArray(res?.available) && res.available.length > 0) {
+        setAvailableQualities((prev) => {
+          if (JSON.stringify(prev) === JSON.stringify(res.available)) return prev
+          return res.available
+        })
+      }
     }).catch(() => {})
   }, [cmd, withBridge])
 
@@ -935,6 +993,7 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
     setScrubTime(null)
     scrubbingRef.current = false
     setActualQuality(null)
+    setAvailableQualities([])
     // Fresh video = fresh metadata. Without this a reused instance would show
     // the previous video's duration / thumbnail / error state for a beat.
     setDuration(video.duration)
@@ -1005,6 +1064,7 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
           window.api?.ftSetFrameQuality?.(targetPref).catch(() => {})
         }
         send('getPlaybackQuality', [])
+        send('getAvailableQualityLevels', [])
         send('getAvailablePlaybackRates', [])
         // Assert preferred playback rate if configured
         const currentSpeed = speedRef.current
@@ -1012,6 +1072,12 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
           send('setPlaybackRate', [currentSpeed])
         }
         send('getPlaybackRate', [])
+        window.api?.ftGetFrameQuality?.()?.then((res) => {
+          if (res?.quality) setActualQuality(res.quality)
+          if (Array.isArray(res?.available) && res.available.length > 0) {
+            setAvailableQualities(res.available)
+          }
+        }).catch(() => {})
         // Captions OFF by default. cc_load_policy=0 only means "do not force",
         // which is not the same as off — YouTube can still enable them from its
         // own preferences / auto-captions. Unloading the module plus clearing
@@ -1046,8 +1112,16 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
               send('setPlaybackQuality', [targetPref])
               window.api?.ftSetFrameQuality?.(targetPref).catch(() => {})
               send('getPlaybackQuality', [])
+              send('getAvailableQualityLevels', [])
             }, 600)
           }
+          send('getAvailableQualityLevels', [])
+          window.api?.ftGetFrameQuality?.()?.then((res) => {
+            if (res?.quality) setActualQuality((prev) => (prev === res.quality ? prev : res.quality))
+            if (Array.isArray(res?.available) && res.available.length > 0) {
+              setAvailableQualities(res.available)
+            }
+          }).catch(() => {})
           // YouTube can auto-enable captions once playback actually starts
           // (account prefs / auto-captions), even after the onReady unload.
           // Re-assert OFF here unless the user explicitly turned them on.
@@ -1114,6 +1188,17 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
             }
           }
         }
+        // Extract available quality levels if reported in infoDelivery
+        const levels = Array.isArray(data.info.availableQualityLevels)
+          ? data.info.availableQualityLevels
+          : Array.isArray(data.info.qualityLevels)
+            ? data.info.qualityLevels
+            : Array.isArray(data.info) && data.info.every((x: any) => typeof x === 'string')
+              ? data.info
+              : null
+        if (levels && levels.length > 0) {
+          setAvailableQualities((prev) => (prev.length === levels.length && prev.every((q, i) => q === levels[i]) ? prev : levels))
+        }
         // The live rendition YouTube picked (Auto). Read-only — reported here
         // so the UI can show what is actually playing.
         if (typeof data.info.playbackQuality === 'string' && data.info.playbackQuality.length > 0) {
@@ -1145,6 +1230,12 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
         if (raw) {
           setActualQuality((prev) => (prev === raw ? prev : raw))
         }
+        send('getAvailableQualityLevels', [])
+        window.api?.ftGetFrameQuality?.()?.then((res) => {
+          if (Array.isArray(res?.available) && res.available.length > 0) {
+            setAvailableQualities(res.available)
+          }
+        }).catch(() => {})
         return
       }
 
@@ -2450,9 +2541,16 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
                   ) : (
                     <>
                       <div className="flex items-center justify-between px-1 pb-2">
-                        <p className="text-[10px] font-black uppercase tracking-widest text-white/40">
-                          Quality Preference
-                        </p>
+                        <div className="flex items-center gap-1.5">
+                          <p className="text-[10px] font-black uppercase tracking-widest text-white/40">
+                            Quality Preference
+                          </p>
+                          {maxSupportedLabel && (
+                            <span className="rounded bg-white/10 px-1.5 py-0.5 text-[9px] font-bold text-white/70">
+                              Max: {maxSupportedLabel}
+                            </span>
+                          )}
+                        </div>
                         <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-500/10 border border-emerald-500/20 px-2 py-0.5 text-[10px] font-bold text-emerald-400">
                           <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse" />
                           {actualQuality ? `Live: ${qualityLabel(actualQuality)}` : 'Detecting…'}
@@ -2460,8 +2558,13 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
                       </div>
 
                       <div className="space-y-1 max-h-56 overflow-y-auto pr-0.5">
-                        {QUALITY_TARGETS.map((target) => {
-                          const isSelected = qualityPref === target.id
+                        {displayedQualityTargets.map((target, idx) => {
+                          const isHighestSupported = idx === 1 && displayedQualityTargets.length > 1
+                          const isCappedActive =
+                            qualityPref !== 'auto' &&
+                            !displayedQualityTargets.some((t) => t.id === qualityPref) &&
+                            isHighestSupported
+                          const isSelected = qualityPref === target.id || isCappedActive
                           return (
                             <button
                               key={target.id}
@@ -2474,9 +2577,18 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
                               }`}
                             >
                               <div className="min-w-0 pr-2">
-                                <p className="text-xs font-bold leading-tight">{target.label}</p>
+                                <div className="flex items-center gap-1.5">
+                                  <p className="text-xs font-bold leading-tight">{target.label}</p>
+                                  {isCappedActive && (
+                                    <span className="rounded bg-white/20 px-1 py-0.2 text-[8px] font-black uppercase tracking-wider text-white">
+                                      Active
+                                    </span>
+                                  )}
+                                </div>
                                 <p className={`text-[9px] truncate ${isSelected ? 'text-white/80' : 'text-white/40'}`}>
-                                  {target.desc}
+                                  {isCappedActive
+                                    ? `Video max: ${target.label} (preferred ${QUALITY_TARGETS.find((q) => q.id === qualityPref)?.label || qualityPref})`
+                                    : target.desc}
                                 </p>
                               </div>
                               {isSelected && <Check size={12} className="shrink-0 text-white" strokeWidth={3} />}

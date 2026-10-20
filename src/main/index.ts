@@ -8681,26 +8681,29 @@ ipcMain.handle('ft-get-frame-quality', async () => {
     const frames = getYouTubeEmbedFrames()
     for (const frame of frames) {
       try {
-        const q = await frame.executeJavaScript(`
+        const res = await frame.executeJavaScript(`
           (() => {
             try {
               const p = document.getElementById('movie_player') || document.querySelector('.html5-video-player');
-              return p && typeof p.getPlaybackQuality === 'function' ? p.getPlaybackQuality() : null;
+              if (!p) return null;
+              const quality = typeof p.getPlaybackQuality === 'function' ? p.getPlaybackQuality() : null;
+              const available = typeof p.getAvailableQualityLevels === 'function' ? p.getAvailableQualityLevels() : [];
+              return { quality, available };
             } catch {
               return null;
             }
           })()
         `)
-        if (typeof q === 'string' && q) {
-          return { quality: q }
+        if (res && (typeof res.quality === 'string' || (Array.isArray(res.available) && res.available.length > 0))) {
+          return { quality: res.quality || null, available: Array.isArray(res.available) ? res.available : [] }
         }
       } catch {
         // ignore
       }
     }
-    return { quality: null }
+    return { quality: null, available: [] }
   } catch {
-    return { quality: null }
+    return { quality: null, available: [] }
   }
 })
 

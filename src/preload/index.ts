@@ -249,6 +249,7 @@ const api = {
   ftRefreshFeeds: (options?: { force?: boolean }) => ipcRenderer.invoke('ft-refresh-feeds', options ?? { force: true }),
   ftResolveChannel: (query: string) => ipcRenderer.invoke('ft-resolve-channel', query),
   ftSearchChannels: (query: string) => ipcRenderer.invoke('ft-search-channels', query),
+  ftSearchVideos: (query: string, limit?: number) => ipcRenderer.invoke('ft-search-videos', { query, limit }),
   ftRefreshChannelAvatars: () => ipcRenderer.invoke('ft-refresh-avatars'),
   ftSubscribeChannel: (channel: { channelId: string; title: string; handle?: string | null; avatarUrl?: string | null; url?: string | null }, categoryIds: number[]) =>
     ipcRenderer.invoke('ft-subscribe-channel', { channel, categoryIds }),

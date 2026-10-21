@@ -28,6 +28,7 @@ export interface FtCategory {
 export interface FtChannel {
   channelId: string
   title: string
+  thumbnail?: string | null
   handle: string | null
   avatarUrl: string | null
   url: string
@@ -45,6 +46,7 @@ export interface FtVideo {
   channelAvatarUrl?: string | null
   channelHandle?: string | null
   title: string
+  thumbnail?: string | null
   publishedAt: string
   duration: number | null
   isLive: boolean
@@ -691,6 +693,29 @@ export function updateVideoProgress(videoId: string, position: number): boolean 
     ON CONFLICT(video_id) DO UPDATE SET position = excluded.position, updated_at = CURRENT_TIMESTAMP
   `).run(videoId, safe)
   return true
+}
+
+/** Enriches a list of external or search videos with local seen state and watch progress from SQLite. */
+export function attachVideoState(videos: FtVideo[]): FtVideo[] {
+  if (!videos || !videos.length) return videos || []
+  const db = getRawDb()
+  const stateStmt = db.prepare('SELECT seen, seen_at, position FROM ft_video_state WHERE video_id = ?')
+  return videos.map((v) => {
+    try {
+      const row = stateStmt.get(v.videoId) as any
+      if (row) {
+        return {
+          ...v,
+          seen: Boolean(row.seen),
+          seenAt: row.seen_at || null,
+          position: Number(row.position || 0),
+        }
+      }
+    } catch {
+      // Ignore read errors
+    }
+    return v
+  })
 }
 
 /**

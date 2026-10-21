@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react'
-import { Check, CheckCircle2, Loader2, Play, Radio } from 'lucide-react'
+import { Check, CheckCircle2, Loader2, Play, Plus, Radio } from 'lucide-react'
 import type { FtVideo } from '../../types'
 import { avatarHue, formatDuration, formatRelativeTime, formatViews, thumbnailUrl } from '../../utils/focusTube'
 
@@ -7,11 +7,13 @@ interface FocusTubeCardProps {
   video: FtVideo
   onPlay: (video: FtVideo) => void
   onToggleSeen: (video: FtVideo) => void
+  isSubscribed?: boolean
+  onSubscribe?: (video: FtVideo) => void
 }
 
 // 16:9 card. The RSS feed only publishes 4:3 hqdefault thumbnails, so we try
 // maxresdefault first and step down through the fallbacks on load failure.
-const FocusTubeCard: React.FC<FocusTubeCardProps> = ({ video, onPlay, onToggleSeen }) => {
+const FocusTubeCard: React.FC<FocusTubeCardProps> = ({ video, onPlay, onToggleSeen, isSubscribed, onSubscribe }) => {
   const [variant, setVariant] = useState(0)
   const [thumbBroken, setThumbBroken] = useState(false)
   const [marking, setMarking] = useState(false)
@@ -198,6 +200,30 @@ const FocusTubeCard: React.FC<FocusTubeCardProps> = ({ video, onPlay, onToggleSe
             {video.publishedAt ? ` • ${formatRelativeTime(video.publishedAt)} ago` : ''}
           </p>
         </div>
+        {onSubscribe && isSubscribed !== undefined && (
+          isSubscribed ? (
+            <span
+              title="Subscribed to channel"
+              className="shrink-0 flex items-center gap-1 rounded-full border border-emerald-500/20 bg-emerald-500/10 px-2.5 py-1 text-[10px] font-bold text-emerald-400"
+            >
+              <Check size={10} strokeWidth={3} />
+              <span>Subscribed</span>
+            </span>
+          ) : (
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation()
+                onSubscribe(video)
+              }}
+              title={`Subscribe to ${video.channelTitle}`}
+              className="shrink-0 inline-flex items-center gap-1 rounded-full border border-red-500/50 bg-red-600/20 px-2.5 py-1 text-[11px] font-bold text-red-300 transition-all hover:bg-red-600 hover:text-white hover:border-red-500 hover:scale-105 active:scale-95 shadow-sm"
+            >
+              <Plus size={11} strokeWidth={2.5} />
+              <span>Subscribe</span>
+            </button>
+          )
+        )}
       </div>
     </div>
   )

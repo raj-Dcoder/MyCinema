@@ -8448,6 +8448,17 @@ ipcMain.handle('ft-search-channels', async (_e, query: string) => {
   }
 })
 
+ipcMain.handle('ft-search-videos', async (_e, input: { query: string; limit?: number } | string) => {
+  try {
+    const q = typeof input === 'string' ? input : input?.query
+    const limit = typeof input === 'object' && typeof input?.limit === 'number' ? input.limit : 30
+    return await focusTubeFeed.searchYouTubeVideos(q, limit)
+  } catch (err: any) {
+    console.error('[FocusTube] Video search failed:', err?.message)
+    return []
+  }
+})
+
 // Backfills logos for previously-subscribed channels stored without one.
 ipcMain.handle('ft-refresh-avatars', async () => {
   try {
@@ -8746,8 +8757,9 @@ ipcMain.handle('ft-get-frame-quality', async () => {
             }
           })()
         `)
-        if (res && (typeof res.quality === 'string' || (Array.isArray(res.available) && res.available.length > 0))) {
-          return { quality: res.quality || null, available: Array.isArray(res.available) ? res.available : [] }
+        const r = res as any;
+        if (r && (typeof r.quality === 'string' || (Array.isArray(r.available) && r.available.length > 0))) {
+          return { quality: r.quality || null, available: Array.isArray(r.available) ? r.available : [] }
         }
       } catch {
         // ignore

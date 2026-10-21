@@ -1396,3 +1396,224 @@ export async function pollFeeds(options?: { force?: boolean }): Promise<PollResu
 
   return result
 }
+
+
+// ── Video search ─────────────────────────────────────────────────────────────
+
+function collectVideoRenderers(node: unknown, out: any[], max: number, depth = 0): void {
+  if (!node || typeof node !== 'object' || depth > 50 || out.length >= max) return
+  if (Array.isArray(node)) {
+    for (const item of node) {
+      if (out.length >= max) return
+      collectVideoRenderers(item, out, max, depth + 1)
+    }
+    return
+  }
+  const record = node as Record<string, unknown>
+  if (record.videoRenderer && typeof record.videoRenderer === 'object') {
+    out.push(record.videoRenderer)
+    if (out.length >= max) return
+  }
+  for (const key of Object.keys(record)) {
+    if (out.length >= max) return
+    const value = record[key]
+    if (value && typeof value === 'object') collectVideoRenderers(value, out, max, depth + 1)
+  }
+}
+
+function parseDurationText(text: string | null | undefined): number | null {
+  if (!text || typeof text !== 'string') return null
+  const parts = text.trim().split(':').map((p) => parseInt(p, 10))
+  if (parts.some((n) => Number.isNaN(n))) return null
+  if (parts.length === 2) return parts[0] * 60 + parts[1]
+  if (parts.length === 3) return parts[0] * 3600 + parts[1] * 60 + parts[2]
+  return null
+}
+
+function parseRelativeTimeToIso(text: string | null | undefined): string {
+  if (!text || typeof text !== 'string') return new Date().toISOString()
+  const lower = text.toLowerCase().trim()
+  const now = Date.now()
+  const match = lower.match(/(\d+)\s*(second|sec|minute|min|hour|hr|day|week|month|mo|year|yr)/)
+  if (!match) return new Date().toISOString()
+  const num = parseInt(match[1], 10)
+  const unit = match[2]
+  let ms = 0
+  if (unit.startsWith('sec')) ms = num * 1000
+  else if (unit.startsWith('min')) ms = num * 60 * 1000
+  else if (unit.startsWith('hour') || unit.startsWith('hr')) ms = num * 3600 * 1000
+  else if (unit.startsWith('day')) ms = num * 86400 * 1000
+  else if (unit.startsWith('week')) ms = num * 7 * 86400 * 1000
+  else if (unit.startsWith('month') || unit.startsWith('mo')) ms = num * 30 * 86400 * 1000
+  else if (unit.startsWith('year') || unit.startsWith('yr')) ms = num * 365 * 86400 * 1000
+  return new Date(Math.max(0, now - ms)).toISOString()
+}
+
+function parseViewsText(text: string | null | undefined): number | null {
+  if (!text || typeof text !== 'string') return null
+  const cleaned = text.trim()
+  const match = cleaned.match(/([\d,.]+)\s*([KMBkmb])?/)
+  if (!match) return null
+  const num = parseFloat(match[1].replace(/,/g, ''))
+  if (Number.isNaN(num)) return null
+  const multiplier = (match[2] || '').toUpperCase()
+  if (multiplier === 'K') return Math.round(num * 1_000)
+  if (multiplier === 'M') return Math.round(num * 1_000_000)
+  if (multiplier === 'B') return Math.round(num * 1_000_000_000)
+  return Math.round(num)
+}
+
+function parseVideoRenderer(renderer: any): focusTube.FtVideo | null {
+  const videoId = typeof renderer.videoId === 'string' ? renderer.videoId : null
+  if (!videoId) return null
+
+  const title = textFromTextContainer(renderer.title) || ''
+  const ownerText = renderer.ownerText || renderer.shortBylineText
+  const channelTitle = textFromTextContainer(ownerText) || ''
+  const runs = ownerText?.runs || []
+  let channelId = ''
+  let channelHandle: string | null = null
+  for (const r of runs) {
+    const browse = r?.navigationEndpoint?.browseEndpoint
+    if (browse?.browseId && !channelId) channelId = browse.browseId
+    if (browse?.canonicalBaseUrl && !channelHandle) {
+      channelHandle = browse.canonicalBaseUrl.replace(/^\/@?/, '@')
+    }
+  }
+
+  const avatar = renderer.channelThumbnailSupportedRenderers?.channelThumbnailWithLinkRenderer?.thumbnail
+  const channelAvatarUrl = pickBestThumbnail(avatar)
+
+  const durationStr = textFromTextContainer(renderer.lengthText)
+  const duration = parseDurationText(durationStr)
+
+  const viewsStr = textFromTextContainer(renderer.viewCountText)
+  const views = parseViewsText(viewsStr)
+
+  const publishedStr = textFromTextContainer(renderer.publishedTimeText)
+  const publishedAt = parseRelativeTimeToIso(publishedStr)
+
+  const isLive = Array.isArray(renderer.badges) && renderer.badges.some((b: any) => {
+    const label = b?.metadataBadgeRenderer?.label || b?.metadataBadgeRenderer?.style
+    return typeof label === 'string' && /live/i.test(label)
+  })
+
+  const isShort = !isLive && duration !== null && duration > 0 && duration <= 60
+  const desc = textFromTextContainer(renderer.descriptionSnippet) || null
+
+  return {
+    videoId,
+    channelId: channelId || '',
+    channelTitle: channelTitle || 'YouTube Creator',
+    channelAvatarUrl: normalizeAvatarUrl(channelAvatarUrl),
+    channelHandle,
+    title,
+    thumbnail: `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`,
+    publishedAt,
+    duration,
+    isLive,
+    isShort,
+    views,
+    description: desc,
+    embeddable: true,
+    firstSeenAt: new Date().toISOString(),
+    seen: false,
+    seenAt: null,
+    saved: false,
+    position: 0,
+  }
+}
+
+async function searchVideosInvidious(query: string, limit = 30): Promise<focusTube.FtVideo[]> {
+  for (const instance of INVIDIOUS_INSTANCES) {
+    try {
+      const url = `${instance}/api/v1/search?q=${encodeURIComponent(query)}&type=video`
+      const data = await fetchJson(url, INVIDIOUS_TIMEOUT_MS) as any[]
+      if (!Array.isArray(data) || !data.length) continue
+      const results: focusTube.FtVideo[] = []
+      for (const item of data) {
+        if (!item || item.type !== 'video' || !item.videoId) continue
+        const duration = typeof item.lengthSeconds === 'number' ? item.lengthSeconds : null
+        const isLive = !!item.liveNow || !!item.isLive
+        results.push({
+          videoId: item.videoId,
+          channelId: item.authorId || '',
+          channelTitle: item.author || '',
+          channelAvatarUrl: item.authorThumbnails?.[0]?.url ? normalizeAvatarUrl(item.authorThumbnails[0].url) : null,
+          channelHandle: null,
+          title: item.title || '',
+          thumbnail: `https://i.ytimg.com/vi/${item.videoId}/hqdefault.jpg`,
+          publishedAt: item.published ? new Date(item.published * 1000).toISOString() : parseRelativeTimeToIso(item.publishedText),
+          duration,
+          isLive,
+          isShort: !isLive && duration !== null && duration > 0 && duration <= 60,
+          views: typeof item.viewCount === 'number' ? item.viewCount : null,
+          description: typeof item.description === 'string' ? item.description : null,
+          embeddable: true,
+          firstSeenAt: new Date().toISOString(),
+          seen: false,
+          seenAt: null,
+          saved: false,
+          position: 0,
+        })
+        if (results.length >= limit) break
+      }
+      if (results.length > 0) return results
+    } catch {
+      // Try next instance
+    }
+  }
+  return []
+}
+
+/**
+ * Searches YouTube for video results matching a query.
+ * Scrapes YouTube directly (filtering for videos) with redundant Invidious fallback.
+ * Maps to FtVideo items enriched with local seen status & watch progress.
+ */
+export async function searchYouTubeVideos(query: string, limit = 30): Promise<focusTube.FtVideo[]> {
+  const trimmed = String(query || '').trim()
+  if (!trimmed) return []
+
+  try {
+    const { text, finalUrl } = await fetchText(
+      `https://www.youtube.com/results?search_query=${encodeURIComponent(trimmed)}&sp=EgIQAQ%3D%3D`,
+      12_000,
+      2,
+    )
+    const blocked = detectSearchBlock(text, finalUrl)
+    if (!blocked) {
+      const data = extractYtInitialData(text)
+      if (data) {
+        const renderers: any[] = []
+        collectVideoRenderers(data, renderers, limit)
+        const mapped: focusTube.FtVideo[] = []
+        const seen = new Set<string>()
+        for (const r of renderers) {
+          const v = parseVideoRenderer(r)
+          if (v && !seen.has(v.videoId)) {
+            seen.add(v.videoId)
+            mapped.push(v)
+            if (mapped.length >= limit) break
+          }
+        }
+        if (mapped.length > 0) {
+          return focusTube.attachVideoState(mapped)
+        }
+      }
+    }
+  } catch (err: any) {
+    console.warn(`[FocusTube] Direct YouTube video search failed for "${trimmed}": ${err.message}; trying Invidious fallback`)
+  }
+
+  try {
+    const invidiousResults = await searchVideosInvidious(trimmed, limit)
+    if (invidiousResults.length > 0) {
+      return focusTube.attachVideoState(invidiousResults)
+    }
+  } catch (err: any) {
+    console.warn(`[FocusTube] Invidious fallback video search failed: ${err.message}`)
+  }
+
+  return []
+}

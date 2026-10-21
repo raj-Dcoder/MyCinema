@@ -70,6 +70,9 @@ interface FocusTubePlayerProps {
   hideShorts?: boolean
   sortOrder?: 'newest' | 'oldest'
   onToggleSortOrder?: (order: 'newest' | 'oldest') => void
+  isSearchQueue?: boolean
+  isChannelSubscribed?: boolean
+  onSubscribeChannel?: (channel: { channelId: string; title: string; handle?: string | null; avatarUrl?: string | null }) => void
 }
 
 // YouTube player states (see IFrame Player API reference).
@@ -425,6 +428,9 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
   hideShorts,
   sortOrder = 'newest',
   onToggleSortOrder,
+  isSearchQueue,
+  isChannelSubscribed = true,
+  onSubscribeChannel,
 }) => {
   const iframeRef = useRef<HTMLIFrameElement>(null)
   // Stable per-video channel id. (A previous revision read a mutated counter
@@ -727,6 +733,11 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
       if (hideShorts && v.isShort) return false
       return true
     })
+    if (isSearchQueue) {
+      if (!queueSearch.trim()) return list
+      const q = queueSearch.trim().toLowerCase()
+      return list.filter((v) => v.title.toLowerCase().includes(q) || v.channelTitle.toLowerCase().includes(q))
+    }
     const live = list.filter((v) => v.isLive)
     const rest = list.filter((v) => !v.isLive).sort((a, b) => {
       const diff = new Date(a.publishedAt).getTime() - new Date(b.publishedAt).getTime()
@@ -736,7 +747,7 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
     if (!queueSearch.trim()) return sorted
     const q = queueSearch.trim().toLowerCase()
     return sorted.filter((v) => v.title.toLowerCase().includes(q) || v.channelTitle.toLowerCase().includes(q))
-  }, [queue, queueSearch, hideShorts, sortOrder])
+  }, [queue, queueSearch, hideShorts, sortOrder, isSearchQueue])
 
   const remainingCount = useMemo(() => {
     return (queue || []).filter((v) => (!hideShorts || !v.isShort) && !v.seen && v.videoId !== video.videoId).length
@@ -3080,16 +3091,38 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
                       <p className="text-base font-bold text-white">
                         {video.channelTitle}
                       </p>
-                      <p className="flex items-center gap-1.5 text-xs font-semibold text-emerald-400">
-                        <Check size={12} strokeWidth={3} />
-                        <span>Subscribed</span>
-                        {video.channelHandle && (
-                          <>
-                            <span className="text-white/20">•</span>
-                            <span className="text-white/40">@{video.channelHandle.replace(/^@/, '')}</span>
-                          </>
-                        )}
-                      </p>
+                      {isChannelSubscribed ? (
+                        <p className="flex items-center gap-1.5 text-xs font-semibold text-emerald-400">
+                          <Check size={12} strokeWidth={3} />
+                          <span>Subscribed</span>
+                          {video.channelHandle && (
+                            <>
+                              <span className="text-white/20">•</span>
+                              <span className="text-white/40">@{video.channelHandle.replace(/^@/, '')}</span>
+                            </>
+                          )}
+                        </p>
+                      ) : (
+                        <div className="flex items-center gap-2 mt-0.5">
+                          {onSubscribeChannel && (
+                            <button
+                              type="button"
+                              onClick={() => onSubscribeChannel({
+                                channelId: video.channelId,
+                                title: video.channelTitle,
+                                handle: video.channelHandle,
+                                avatarUrl: video.channelAvatarUrl
+                              })}
+                              className="inline-flex items-center gap-1 rounded-full bg-red-600 hover:bg-red-500 px-3 py-1 text-xs font-bold text-white shadow-md transition-transform hover:scale-105 active:scale-95"
+                            >
+                              <Plus size={11} strokeWidth={2.5} /> Subscribe
+                            </button>
+                          )}
+                          {video.channelHandle && (
+                            <span className="text-xs font-medium text-white/40">@{video.channelHandle.replace(/^@/, '')}</span>
+                          )}
+                        </div>
+                      )}
                     </div>
                   </div>
 
@@ -3386,7 +3419,7 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
                 <>
                   <div className="flex items-center justify-between pb-2 mb-1 border-b border-white/[0.06]">
                     <span className="text-[11px] font-bold text-white/50">
-                      Upload Order
+                      {isSearchQueue ? `Search Queue (${queueItems.length})` : 'Upload Order'}
                     </span>
                     <div className="flex items-center gap-0.5 bg-white/[0.04] p-0.5 rounded-lg border border-white/[0.08]">
                       <button

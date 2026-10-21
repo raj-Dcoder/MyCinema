@@ -15,7 +15,8 @@ import {
   Users,
   X,
 } from 'lucide-react'
-import type { FtCategory, FtVideo } from '../types'
+import type { FtCategory, FtChannel, FtVideo } from '../types'
+import QuickSubscribeModal from '../components/focus/QuickSubscribeModal'
 import FocusTubeCard from '../components/focus/FocusTubeCard'
 import FocusTubePlayer from '../components/focus/FocusTubePlayer'
 import ChannelManager from '../components/focus/ChannelManager'
@@ -69,6 +70,35 @@ const FocusTube: React.FC = () => {
   const [editName, setEditName] = useState('')
   const [managing, setManaging] = useState(false)
   const [totalChannels, setTotalChannels] = useState(0)
+  const [channels, setChannels] = useState<FtChannel[]>([])
+  const [youtubeSearchQuery, setYoutubeSearchQuery] = useState<string | null>(null)
+  const [youtubeSearchResults, setYoutubeSearchResults] = useState<FtVideo[]>([])
+  const [isSearchingYouTube, setIsSearchingYouTube] = useState(false)
+  const [searchError, setSearchError] = useState<string | null>(null)
+  const [searchDropdownOpen, setSearchDropdownOpen] = useState(false)
+  const [playingFromSearch, setPlayingFromSearch] = useState(false)
+  const [subscribeModalChannel, setSubscribeModalChannel] = useState<{
+    channelId: string
+    title: string
+    handle?: string | null
+    avatarUrl?: string | null
+  } | null>(null)
+
+  const subscribedChannelIds = useMemo(() => new Set(channels.map((c) => c.channelId)), [channels])
+
+  const loadChannels = useCallback(async () => {
+    try {
+      const list = await window.api.ftListChannels()
+      setChannels(list || [])
+    } catch {
+      // Ignore
+    }
+  }, [])
+
+  useEffect(() => {
+    void loadChannels()
+  }, [loadChannels])
+
   const [playing, setPlaying] = useState<{ video: FtVideo; startSeconds: number } | null>(null)
 
   // ── Carousel scroll controls for categories ──────────────────────────────
@@ -274,6 +304,14 @@ const FocusTube: React.FC = () => {
   }, [])
 
   const getNextInQueue = useCallback((currentVideoId: string): FtVideo | null => {
+    if (playingFromSearch) {
+      const list = youtubeSearchResults.filter((v) => (!hideShorts || !v.isShort))
+      const currentIndex = list.findIndex((video) => video.videoId === currentVideoId)
+      if (currentIndex !== -1 && currentIndex + 1 < list.length) {
+        return list[currentIndex + 1]
+      }
+      return null
+    }
     const source = videosRef.current.length ? videosRef.current : videos
     const eligible = source.filter((v) => (!hideShorts || !v.isShort))
     const live = eligible.filter((v) => v.isLive)
@@ -343,8 +381,54 @@ const FocusTube: React.FC = () => {
     await loadFeed(activeCategoryId)
   }, [activeCategoryId, loadCategories, loadFeed])
 
+  const handleExecuteYouTubeSearch = useCallback(async (query: string) => {
+    const trimmed = query.trim()
+    if (!trimmed) return
+    setSearchDropdownOpen(false)
+    setYoutubeSearchQuery(trimmed)
+    setIsSearchingYouTube(true)
+    setSearchError(null)
+    try {
+      const results = await window.api.ftSearchVideos(trimmed, 30)
+      setYoutubeSearchResults(results || [])
+      if (!results || results.length === 0) {
+        setSearchError(`No YouTube videos found matching "${trimmed}"`)
+      }
+    } catch (err: any) {
+      setSearchError(err?.message || 'Failed to search YouTube')
+      setYoutubeSearchResults([])
+    } finally {
+      setIsSearchingYouTube(false)
+    }
+  }, [])
+
+  const handleClearYouTubeSearch = useCallback(() => {
+    setYoutubeSearchQuery(null)
+    setYoutubeSearchResults([])
+    setSearchError(null)
+    setSearch('')
+    void loadFeed(activeCategoryId, { search: undefined })
+  }, [activeCategoryId, loadFeed])
+
+  const handlePlayFromSearch = useCallback(async (video: FtVideo) => {
+    setPlayingFromSearch(true)
+    window.dispatchEvent(new CustomEvent('focustube-tab-changed', { detail: { activeTab: 'focustube' } }))
+    let startSeconds = progressCacheRef.current.get(video.videoId) ?? 0
+    if (startSeconds === 0) {
+      try {
+        const progress = await window.api.ftGetProgress(video.videoId)
+        startSeconds = Number(progress?.position || 0)
+        progressCacheRef.current.set(video.videoId, startSeconds)
+      } catch {
+        // Ignore
+      }
+    }
+    setPlaying({ video, startSeconds })
+  }, [])
+
   const handlePlay = useCallback(async (video: FtVideo) => {
     if (hideShorts && video.isShort) return
+    setPlayingFromSearch(false)
     window.dispatchEvent(new CustomEvent('focustube-tab-changed', { detail: { activeTab: 'focustube' } }))
     let startSeconds = progressCacheRef.current.get(video.videoId) ?? 0
     if (startSeconds === 0) {
@@ -461,22 +545,51 @@ const FocusTube: React.FC = () => {
           </div>
         </div>
 
-        {/* Center: Search with ⌘K / Ctrl+K */}
+        {/* Center: Search with ⌘K / Ctrl+K and Hybrid Suggestions */}
         <div className="relative max-w-md flex-1">
           <Search size={14} className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-white/30" />
           <input
             ref={searchInputRef}
             value={search}
-            onChange={(event) => setSearch(event.target.value)}
-            onKeyDown={(event) => { if (event.key === 'Enter') void runSearch() }}
-            placeholder="Search channels..."
-            aria-label="Search videos in your subscriptions"
+            onFocus={() => { if (search.trim()) setSearchDropdownOpen(true) }}
+            onChange={(event) => {
+              const val = event.target.value
+              setSearch(val)
+              setSearchDropdownOpen(Boolean(val.trim()))
+              if (!val.trim() && youtubeSearchQuery) {
+                handleClearYouTubeSearch()
+              } else if (!youtubeSearchQuery) {
+                void loadFeed(activeCategoryId, { search: val.trim() || undefined })
+              }
+            }}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter') {
+                if (search.trim()) {
+                  void handleExecuteYouTubeSearch(search.trim())
+                }
+              } else if (event.key === 'Escape') {
+                setSearchDropdownOpen(false)
+                if (youtubeSearchQuery) {
+                  handleClearYouTubeSearch()
+                }
+              }
+            }}
+            placeholder="Search subscriptions or YouTube..."
+            aria-label="Search subscriptions or YouTube"
             className="h-9 w-full rounded-xl border border-white/10 bg-white/5 pl-9 pr-14 text-xs font-medium text-white placeholder:text-white/30 transition-colors hover:border-white/20 focus:border-primary/60 focus:bg-white/[0.08] focus:outline-none focus:ring-2 focus:ring-primary/20"
           />
           {search ? (
             <button
               type="button"
-              onClick={() => { setSearch(''); void runSearch() }}
+              onClick={() => {
+                setSearch('')
+                setSearchDropdownOpen(false)
+                if (youtubeSearchQuery) {
+                  handleClearYouTubeSearch()
+                } else {
+                  void runSearch()
+                }
+              }}
               aria-label="Clear search"
               className="absolute right-2 top-1/2 -translate-y-1/2 rounded p-1 text-white/30 hover:text-white"
             >
@@ -486,6 +599,42 @@ const FocusTube: React.FC = () => {
             <kbd className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 rounded border border-white/10 bg-white/5 px-1.5 py-0.5 text-[10px] font-semibold text-white/30">
               ⌘K
             </kbd>
+          )}
+
+          {/* Hybrid Suggestions Dropdown */}
+          {searchDropdownOpen && search.trim() && (
+            <div className="absolute left-0 right-0 top-full mt-1.5 z-50 overflow-hidden rounded-2xl border border-white/10 bg-[#0d0f17]/95 p-1.5 shadow-2xl backdrop-blur-xl animate-in fade-in zoom-in-95 duration-150">
+              {/* Option 1: YouTube Live Search */}
+              <button
+                type="button"
+                onMouseDown={(e) => {
+                  e.preventDefault()
+                  void handleExecuteYouTubeSearch(search.trim())
+                }}
+                className="w-full flex items-center justify-between rounded-xl p-2.5 text-left transition-colors bg-red-600/15 hover:bg-red-600/25 border border-red-500/30 text-white group"
+              >
+                <div className="flex items-center gap-2.5 min-w-0">
+                  <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-red-600 text-white shadow-sm">
+                    <Search size={13} strokeWidth={2.5} />
+                  </div>
+                  <div className="min-w-0">
+                    <p className="text-xs font-bold truncate">
+                      Search YouTube for <span className="text-red-400">&ldquo;{search.trim()}&rdquo;</span>
+                    </p>
+                    <p className="text-[10px] text-white/40">Watch with side-panel queue & playlist</p>
+                  </div>
+                </div>
+                <span className="hidden sm:inline-flex items-center rounded border border-white/10 bg-white/5 px-1.5 py-0.5 text-[10px] font-semibold text-white/50 group-hover:text-white">
+                  ↵ Enter
+                </span>
+              </button>
+
+              {/* Option 2: Subscription Results count indicator */}
+              <div className="mt-1 flex items-center justify-between px-3 py-1.5 text-[11px] font-medium text-white/40">
+                <span>In your subscriptions</span>
+                <span>{videos.length} matching</span>
+              </div>
+            </div>
           )}
         </div>
 
@@ -872,13 +1021,22 @@ const FocusTube: React.FC = () => {
           <p className="max-w-md text-xs font-bold uppercase tracking-widest text-white/35">
             Nothing in your subscriptions matches “{search}”
           </p>
-          <button
-            type="button"
-            onClick={() => { setSearch(''); void runSearch() }}
-            className="mt-1 inline-flex items-center gap-1.5 rounded-lg border border-white/10 bg-white/5 px-3.5 py-2 text-xs font-black uppercase tracking-widest text-white/60 transition-colors hover:bg-white/10 hover:text-white"
-          >
-            <X size={13} /> Clear search
-          </button>
+          <div className="flex flex-wrap items-center justify-center gap-2.5 mt-2">
+            <button
+              type="button"
+              onClick={() => void handleExecuteYouTubeSearch(search.trim())}
+              className="inline-flex items-center gap-1.5 rounded-xl bg-red-600 px-4 py-2 text-xs font-bold text-white shadow-lg hover:bg-red-500 transition-colors"
+            >
+              <Search size={13} strokeWidth={2.5} /> Search YouTube for &ldquo;{search.trim()}&rdquo;
+            </button>
+            <button
+              type="button"
+              onClick={() => { setSearch(''); void runSearch() }}
+              className="inline-flex items-center gap-1.5 rounded-xl border border-white/10 bg-white/5 px-3.5 py-2 text-xs font-bold text-white/60 hover:bg-white/10 hover:text-white"
+            >
+              <X size={13} /> Clear search
+            </button>
+          </div>
         </div>
       ) : activeCategory && (activeCategory.channelCount ?? 0) === 0 ? (
         <div className="flex flex-col items-center justify-center gap-5 rounded-3xl border border-dashed border-white/10 py-24 text-center">
@@ -936,6 +1094,24 @@ const FocusTube: React.FC = () => {
         />
       )}
 
+      {subscribeModalChannel && (
+        <QuickSubscribeModal
+          channel={subscribeModalChannel}
+          categories={categories}
+          initialCategoryIds={activeCategoryId ? [activeCategoryId] : []}
+          onClose={() => setSubscribeModalChannel(null)}
+          onSubscribed={() => {
+            void loadChannels()
+            void loadCategories()
+          }}
+          onCreateCategory={async (name) => {
+            const cat = await window.api.ftCreateCategory(name)
+            await loadCategories()
+            return cat
+          }}
+        />
+      )}
+
       {playing && (
         <FocusTubePlayer
           // No key on videoId on purpose: the player shell (the element we
@@ -946,11 +1122,23 @@ const FocusTube: React.FC = () => {
           key="focustube-player"
           video={playing.video}
           startSeconds={playing.startSeconds}
-          categoryName={activeCategory ? activeCategory.name : 'All'}
+          categoryName={playingFromSearch ? 'YouTube Search' : (activeCategory ? activeCategory.name : 'All')}
           categories={categories}
-          onSelectCategory={(id) => void selectCategory(id)}
-          queue={playQueue}
-          onSelectVideo={(item) => void handlePlay(item)}
+          onSelectCategory={(id) => {
+            setPlayingFromSearch(false)
+            void selectCategory(id)
+          }}
+          queue={playingFromSearch ? youtubeSearchResults : playQueue}
+          isSearchQueue={playingFromSearch}
+          isChannelSubscribed={subscribedChannelIds.has(playing.video.channelId)}
+          onSubscribeChannel={(ch) => setSubscribeModalChannel(ch)}
+          onSelectVideo={(item) => {
+            if (playingFromSearch) {
+              void handlePlayFromSearch(item)
+            } else {
+              void handlePlay(item)
+            }
+          }}
           onToggleSeen={(item) => void handleToggleSeen(item)}
           onClose={() => setPlaying(null)}
           onMarkSeen={(videoId) => void handleMarkSeen(videoId)}

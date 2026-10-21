@@ -154,6 +154,7 @@ export interface FtFeedOptions {
   hideShorts?: boolean
   limit?: number
   search?: string | null
+  sortOrder?: 'newest' | 'oldest'
 }
 
 export interface FtComment {

@@ -1221,7 +1221,31 @@ const FocusTube: React.FC = () => {
           queue={playingFromSearch ? youtubeSearchResults : playQueue}
           isSearchQueue={playingFromSearch}
           isChannelSubscribed={subscribedChannelIds.has(playing.video.channelId)}
-          onSubscribeChannel={(ch) => setSubscribeModalChannel(ch)}
+          onSubscribeChannel={async (ch, categoryId) => {
+            if (typeof categoryId === 'number') {
+              await window.api.ftSubscribeChannel(
+                {
+                  channelId: ch.channelId,
+                  title: ch.title,
+                  handle: ch.handle ?? null,
+                  avatarUrl: ch.avatarUrl ?? null,
+                },
+                [categoryId],
+              )
+              setChannels((prev) => [...prev, {
+                channelId: ch.channelId,
+                title: ch.title,
+                handle: ch.handle ?? null,
+                avatarUrl: ch.avatarUrl ?? null,
+                position: 0,
+              } as any])
+              void loadChannels()
+              void loadCategories()
+              if (activeCategoryId) void loadFeed(activeCategoryId)
+            } else {
+              setSubscribeModalChannel(ch)
+            }
+          }}
           onSelectVideo={(item) => {
             if (playingFromSearch) {
               void handlePlayFromSearch(item)

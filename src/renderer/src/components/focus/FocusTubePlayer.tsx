@@ -10,6 +10,7 @@ import {
   ChevronRight,
   ExternalLink,
   FileText,
+  FolderPlus,
   Gauge,
   ListVideo,
   Loader2,
@@ -72,7 +73,10 @@ interface FocusTubePlayerProps {
   onToggleSortOrder?: (order: 'newest' | 'oldest') => void
   isSearchQueue?: boolean
   isChannelSubscribed?: boolean
-  onSubscribeChannel?: (channel: { channelId: string; title: string; handle?: string | null; avatarUrl?: string | null }) => void
+  onSubscribeChannel?: (
+    channel: { channelId: string; title: string; handle?: string | null; avatarUrl?: string | null },
+    categoryId?: number
+  ) => Promise<void> | void
 }
 
 // YouTube player states (see IFrame Player API reference).
@@ -565,6 +569,14 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
   const [queueSearch, setQueueSearch] = useState('')
   const [sidebarTab, setSidebarTab] = useState<'queue' | 'chapters' | 'comments'>('queue')
   const [categoryDropdownOpen, setCategoryDropdownOpen] = useState(false)
+  const [subscribePopoverOpen, setSubscribePopoverOpen] = useState(false)
+  const [subscribingCatId, setSubscribingCatId] = useState<number | null>(null)
+  const [optimisticSubscribed, setOptimisticSubscribed] = useState(false)
+  const [showNewCatInput, setShowNewCatInput] = useState(false)
+  const [newCatName, setNewCatName] = useState('')
+  const [creatingCat, setCreatingCat] = useState(false)
+  const subscribePopoverRef = useRef<HTMLDivElement>(null)
+  const subscribeBtnRef = useRef<HTMLButtonElement>(null)
   const [isSidepanelExpanded, setIsSidepanelExpanded] = useState<boolean>(() => {
     try {
       return localStorage.getItem(SIDEPANEL_EXPANDED_STORAGE_KEY) !== 'false'
@@ -1169,6 +1181,11 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
     setRefused(false)
     setThumbOk(true)
     setErrorText(null)
+    setOptimisticSubscribed(false)
+    setSubscribePopoverOpen(false)
+    setShowNewCatInput(false)
+    setNewCatName('')
+    setSubscribingCatId(null)
     // If we were fullscreen before the swap and the browser dropped us
     // (remount, iframe quirk), climb straight back in — no flash of windowed.
     // Windowed stays windowed: we only ever re-enter, never exit here.
@@ -1769,6 +1786,77 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
     transitionToMinimized(false)
     pokeBottom()
   }, [transitionToMinimized, pokeBottom])
+
+  // Dismiss subtle subscribe popover on outside click or Escape
+  useEffect(() => {
+    if (!subscribePopoverOpen) return
+    const handleClickOutside = (e: MouseEvent) => {
+      if (
+        subscribePopoverRef.current &&
+        !subscribePopoverRef.current.contains(e.target as Node) &&
+        subscribeBtnRef.current &&
+        !subscribeBtnRef.current.contains(e.target as Node)
+      ) {
+        setSubscribePopoverOpen(false)
+        setShowNewCatInput(false)
+      }
+    }
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setSubscribePopoverOpen(false)
+        setShowNewCatInput(false)
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside)
+    document.addEventListener('keydown', handleKeyDown)
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside)
+      document.removeEventListener('keydown', handleKeyDown)
+    }
+  }, [subscribePopoverOpen])
+
+  const handleSelectSubscribeCategory = useCallback(async (catId: number) => {
+    setSubscribingCatId(catId)
+    try {
+      if (onSubscribeChannel) {
+        await onSubscribeChannel(
+          {
+            channelId: video.channelId,
+            title: video.channelTitle,
+            handle: video.channelHandle,
+            avatarUrl: video.channelAvatarUrl,
+          },
+          catId,
+        )
+      }
+      setOptimisticSubscribed(true)
+      setSubscribePopoverOpen(false)
+      setShowNewCatInput(false)
+    } catch {
+      // ignore
+    } finally {
+      setSubscribingCatId(null)
+    }
+  }, [onSubscribeChannel, video.channelId, video.channelTitle, video.channelHandle, video.channelAvatarUrl])
+
+  const handleCreateAndSubscribeCategory = useCallback(async (e: React.FormEvent) => {
+    e.preventDefault()
+    const trimmed = newCatName.trim()
+    if (!trimmed) return
+    setCreatingCat(true)
+    try {
+      const newCat = await window.api.ftCreateCategory(trimmed)
+      if (newCat) {
+        await handleSelectSubscribeCategory(newCat.id)
+      }
+    } catch {
+      // ignore
+    } finally {
+      setCreatingCat(false)
+      setShowNewCatInput(false)
+      setNewCatName('')
+    }
+  }, [newCatName, handleSelectSubscribeCategory])
 
   // ── Commands ───────────────────────────────────────────────────────────────
   const handleSeek = useCallback((seconds: number) => {
@@ -3137,7 +3225,7 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
                       <p className="text-base font-bold text-white">
                         {video.channelTitle}
                       </p>
-                      {isChannelSubscribed ? (
+                      {isChannelSubscribed || optimisticSubscribed ? (
                         <p className="flex items-center gap-1.5 text-xs font-semibold text-emerald-400">
                           <Check size={12} strokeWidth={3} />
                           <span>Subscribed</span>
@@ -3149,20 +3237,112 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
                           )}
                         </p>
                       ) : (
-                        <div className="flex items-center gap-2 mt-0.5">
+                        <div className="relative inline-flex items-center gap-2 mt-0.5">
                           {onSubscribeChannel && (
-                            <button
-                              type="button"
-                              onClick={() => onSubscribeChannel({
-                                channelId: video.channelId,
-                                title: video.channelTitle,
-                                handle: video.channelHandle,
-                                avatarUrl: video.channelAvatarUrl
-                              })}
-                              className="inline-flex items-center gap-1 rounded-full bg-red-600 hover:bg-red-500 px-3 py-1 text-xs font-bold text-white shadow-md transition-transform hover:scale-105 active:scale-95"
-                            >
-                              <Plus size={11} strokeWidth={2.5} /> Subscribe
-                            </button>
+                            <>
+                              <button
+                                ref={subscribeBtnRef}
+                                type="button"
+                                onClick={() => setSubscribePopoverOpen((prev) => !prev)}
+                                aria-expanded={subscribePopoverOpen}
+                                className="inline-flex items-center gap-1 rounded-full bg-red-600 hover:bg-red-500 px-3 py-1 text-xs font-bold text-white shadow-md transition-transform hover:scale-105 active:scale-95"
+                              >
+                                <Plus size={11} strokeWidth={2.5} /> Subscribe
+                              </button>
+
+                              {subscribePopoverOpen && (
+                                <div
+                                  ref={subscribePopoverRef}
+                                  className="absolute bottom-full left-0 mb-2 z-50 w-60 overflow-hidden rounded-2xl border border-white/15 bg-[#12141e]/98 p-2.5 shadow-2xl shadow-black/90 backdrop-blur-xl animate-in fade-in zoom-in-95 duration-150"
+                                >
+                                  <div className="flex items-center justify-between px-1 pb-1.5 border-b border-white/[0.08] mb-1.5">
+                                    <span className="text-[11px] font-black uppercase tracking-wider text-white/50">
+                                      Add to Category
+                                    </span>
+                                    <button
+                                      type="button"
+                                      onClick={() => setSubscribePopoverOpen(false)}
+                                      className="rounded-full p-0.5 text-white/40 hover:text-white transition-colors"
+                                    >
+                                      <X size={12} />
+                                    </button>
+                                  </div>
+
+                                  <div className="max-h-48 overflow-y-auto space-y-1 pr-0.5">
+                                    {categories && categories.length > 0 ? (
+                                      categories.map((cat) => {
+                                        const isBusy = subscribingCatId === cat.id
+                                        return (
+                                          <button
+                                            key={cat.id}
+                                            type="button"
+                                            disabled={subscribingCatId !== null || creatingCat}
+                                            onClick={() => void handleSelectSubscribeCategory(cat.id)}
+                                            className={`w-full flex items-center gap-2 px-2.5 py-1.5 rounded-xl text-xs font-semibold transition-all text-left group ${
+                                              isBusy
+                                                ? 'bg-red-600/20 text-white'
+                                                : 'text-white/80 hover:bg-white/10 hover:text-white'
+                                            }`}
+                                          >
+                                            <span
+                                              className={`h-2 w-2 rounded-full shrink-0 ${categoryDot(cat.color)}`}
+                                            />
+                                            <span className="truncate flex-1">{cat.name}</span>
+                                            {isBusy ? (
+                                              <Loader2 size={12} className="animate-spin text-red-400 shrink-0" />
+                                            ) : (
+                                              <Plus size={12} className="opacity-0 group-hover:opacity-100 text-white/60 shrink-0 transition-opacity" />
+                                            )}
+                                          </button>
+                                        )
+                                      })
+                                    ) : (
+                                      <div className="p-2 text-center text-xs text-white/40">
+                                        No categories yet
+                                      </div>
+                                    )}
+                                  </div>
+
+                                  {showNewCatInput ? (
+                                    <form onSubmit={handleCreateAndSubscribeCategory} className="mt-2 pt-2 border-t border-white/[0.08] flex items-center gap-1.5">
+                                      <input
+                                        type="text"
+                                        autoFocus
+                                        value={newCatName}
+                                        onChange={(e) => setNewCatName(e.target.value)}
+                                        placeholder="New category..."
+                                        className="min-w-0 flex-1 rounded-lg border border-white/15 bg-white/5 px-2 py-1 text-xs text-white placeholder-white/30 focus:border-red-500 focus:outline-none"
+                                      />
+                                      <button
+                                        type="submit"
+                                        disabled={!newCatName.trim() || creatingCat}
+                                        className="rounded-lg bg-red-600 px-2.5 py-1 text-xs font-bold text-white hover:bg-red-500 disabled:opacity-40"
+                                      >
+                                        {creatingCat ? <Loader2 size={11} className="animate-spin" /> : 'Add'}
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={() => { setShowNewCatInput(false); setNewCatName('') }}
+                                        className="rounded-lg p-1 text-white/40 hover:text-white"
+                                      >
+                                        <X size={12} />
+                                      </button>
+                                    </form>
+                                  ) : (
+                                    <div className="mt-1.5 pt-1.5 border-t border-white/[0.08]">
+                                      <button
+                                        type="button"
+                                        onClick={() => setShowNewCatInput(true)}
+                                        className="w-full flex items-center gap-1.5 px-2 py-1 rounded-lg text-[11px] font-bold text-white/40 hover:text-white/80 hover:bg-white/5 transition-colors"
+                                      >
+                                        <FolderPlus size={12} />
+                                        <span>+ Create category</span>
+                                      </button>
+                                    </div>
+                                  )}
+                                </div>
+                              )}
+                            </>
                           )}
                           {video.channelHandle && (
                             <span className="text-xs font-medium text-white/40">@{video.channelHandle.replace(/^@/, '')}</span>

@@ -665,7 +665,38 @@ const FocusTube: React.FC = () => {
         </div>
       </header>
 
-      {/* ── CATEGORY CAROUSEL & FILTER CONTROLS (Single clean row) ── */}
+      {/* ── YOUTUBE SEARCH ACTIVE BAR OR CATEGORY CAROUSEL ── */}
+      {youtubeSearchQuery ? (
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-red-500/25 bg-gradient-to-r from-red-950/40 via-[#0e1018] to-[#0e1018] px-4 py-3 shadow-lg">
+          <div className="flex items-center gap-3 min-w-0">
+            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-red-600 text-white shadow-[0_0_18px_rgba(229,9,20,0.55)]">
+              <Search size={16} strokeWidth={2.5} />
+            </div>
+            <div className="min-w-0">
+              <div className="flex items-center gap-2">
+                <h2 className="text-sm font-black text-white truncate">
+                  YouTube Results for &ldquo;{youtubeSearchQuery}&rdquo;
+                </h2>
+                <span className="rounded-full bg-red-500/20 px-2 py-0.5 text-[10px] font-bold text-red-300">
+                  {isSearchingYouTube ? 'Searching…' : `${youtubeSearchResults.length} videos`}
+                </span>
+              </div>
+              <p className="text-[11px] text-white/40 truncate">
+                Click any video to play; the remaining videos will load in the player side panel playlist
+              </p>
+            </div>
+          </div>
+
+          <button
+            type="button"
+            onClick={handleClearYouTubeSearch}
+            className="inline-flex shrink-0 items-center gap-1.5 rounded-xl border border-white/10 bg-white/5 px-3 py-1.5 text-xs font-bold text-white/80 transition-colors hover:bg-white/10 hover:text-white"
+          >
+            <X size={13} />
+            <span>Back to Subscriptions</span>
+          </button>
+        </div>
+      ) : (
       <div className="flex flex-col gap-3 py-1 lg:flex-row lg:items-center lg:justify-between">
         {/* Left / Center: Category Carousel with chevrons and overflow */}
         <div data-tour="focustube-categories" className="relative flex min-w-0 flex-1 items-center">
@@ -965,8 +996,60 @@ const FocusTube: React.FC = () => {
           </button>
         </div>
       </div>
+      )}
 
-      {loading ? (
+      {youtubeSearchQuery ? (
+        isSearchingYouTube ? (
+          <div className="flex flex-col items-center justify-center gap-4 py-28 text-center">
+            <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-red-600/10 text-red-500 shadow-xl border border-red-500/20">
+              <RefreshCw size={28} className="animate-spin" />
+            </div>
+            <div className="space-y-1">
+              <h3 className="text-lg font-bold text-white">Searching YouTube…</h3>
+              <p className="text-xs text-white/40">
+                Finding videos for &ldquo;{youtubeSearchQuery}&rdquo;
+              </p>
+            </div>
+          </div>
+        ) : searchError && youtubeSearchResults.length === 0 ? (
+          <div className="flex flex-col items-center justify-center gap-4 rounded-3xl border border-dashed border-white/10 py-24 text-center">
+            <Search size={52} strokeWidth={1} className="text-white/20" />
+            <h3 className="text-xl font-black text-white">No videos found</h3>
+            <p className="max-w-md text-xs font-medium text-white/40">
+              {searchError}
+            </p>
+            <button
+              type="button"
+              onClick={handleClearYouTubeSearch}
+              className="mt-1 inline-flex items-center gap-1.5 rounded-lg border border-white/10 bg-white/5 px-3.5 py-2 text-xs font-bold text-white/60 hover:bg-white/10 hover:text-white"
+            >
+              <X size={13} /> Back to Subscriptions
+            </button>
+          </div>
+        ) : (
+          <div className="space-y-4">
+            <div className="grid grid-cols-2 gap-x-5 gap-y-8 md:grid-cols-3 lg:grid-cols-4">
+              {youtubeSearchResults.map((video) => (
+                <FocusTubeCard
+                  key={video.videoId}
+                  video={video}
+                  onPlay={(item) => void handlePlayFromSearch(item)}
+                  onToggleSeen={(item) => void handleToggleSeen(item)}
+                  isSubscribed={subscribedChannelIds.has(video.channelId)}
+                  onSubscribe={(item) =>
+                    setSubscribeModalChannel({
+                      channelId: item.channelId,
+                      title: item.channelTitle,
+                      handle: item.channelHandle,
+                      avatarUrl: item.channelAvatarUrl,
+                    })
+                  }
+                />
+              ))}
+            </div>
+          </div>
+        )
+      ) : loading ? (
         <div className="grid grid-cols-2 gap-x-5 gap-y-8 md:grid-cols-3 lg:grid-cols-4">
           {Array.from({ length: 8 }, (_, index) => (
             <div key={index}>

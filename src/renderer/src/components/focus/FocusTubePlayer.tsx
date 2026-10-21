@@ -3253,7 +3253,7 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
                               {subscribePopoverOpen && (
                                 <div
                                   ref={subscribePopoverRef}
-                                  className="absolute top-full left-0 mt-2 z-50 w-64 overflow-hidden rounded-2xl border border-white/15 bg-[#161822] p-2.5 shadow-[0_16px_40px_rgba(0,0,0,0.85)] animate-in fade-in zoom-in-95 duration-150"
+                                  className="absolute bottom-full left-0 mb-2 z-50 w-64 overflow-hidden rounded-2xl border border-white/15 bg-[#161822] p-2.5 shadow-[0_16px_40px_rgba(0,0,0,0.85)] animate-in fade-in zoom-in-95 duration-150"
                                 >
                                   <div className="flex items-center justify-between px-1.5 pb-2 border-b border-white/[0.08] mb-1.5">
                                     <span className="text-[11px] font-black uppercase tracking-wider text-white/50">
@@ -3268,7 +3268,7 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
                                     </button>
                                   </div>
 
-                                  <div className="max-h-60 overflow-y-auto space-y-1 pr-1 subtle-scrollbar">
+                                  <div className="max-h-52 overflow-y-auto space-y-1 pr-0.5 scrollbar-hide">
                                     {categories && categories.length > 0 ? (
                                       categories.map((cat) => {
                                         const isBusy = subscribingCatId === cat.id
@@ -3278,7 +3278,7 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
                                             type="button"
                                             disabled={subscribingCatId !== null || creatingCat}
                                             onClick={() => void handleSelectSubscribeCategory(cat.id)}
-                                            className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs font-semibold transition-all text-left group ${
+                                            className={`w-full flex items-center gap-2.5 px-3 py-1.5 rounded-xl text-xs font-semibold transition-all text-left group ${
                                               isBusy
                                                 ? 'bg-red-600/25 text-white'
                                                 : 'text-white/85 hover:bg-white/[0.08] hover:text-white'

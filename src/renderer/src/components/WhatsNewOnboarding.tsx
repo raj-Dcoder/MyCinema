@@ -89,27 +89,37 @@ const UPDATE_ICONS: Record<UpdateIconKey, { icon: React.ReactNode; tile: string 
 }
 
 export const LATEST_RELEASE: ReleaseNotes = {
-  version: '1.43.1',
-  title: 'Persistent profiles and reliability updates.',
-  highlight: 'Persistent profiles',
+  version: '1.44.0',
+  title: 'Ultra-smooth theater mode and distraction-free viewing.',
+  highlight: 'Ultra-smooth theater mode',
   description:
-    'Your custom profile name and picture now stay permanently saved across updates, cache resets, and all environments.',
+    'Focus Tube is now smoother than ever with collapsible theater sidepanels, calm atmospheric glow, and instant queue auto-advance.',
   tourId: null,
   updates: [
     {
+      icon: 'play',
+      title: 'Collapsible theater sidepanel',
+      description: 'Hide the queue and chapters anytime for an ultra-wide, distraction-free view.',
+    },
+    {
       icon: 'sparkles',
-      title: 'Disk-backed user profiles',
-      description: 'Your username and avatar persist reliably across app updates and launches.',
+      title: 'Calm ambient lighting',
+      description: 'Widescreen atmospheric glow tuned for maximum immersion without washing out text.',
+    },
+    {
+      icon: 'layers',
+      title: 'Snappy mark-watched advance',
+      description: 'Tapping Mark Watched jumps to the next video instantly without waiting.',
     },
     {
       icon: 'fix',
-      title: 'Seamless profile synchronization',
-      description: 'Changes sync live across all screens and the home banner greeting.',
+      title: 'Fluid 60FPS animations',
+      description: 'Silky smooth dock and restore transitions with zero jitter or abrupt cuts.',
     },
     {
       icon: 'shield',
-      title: 'Clean process shutdown',
-      description: 'Prevents zombie background processes from holding database locks.',
+      title: 'Media path hardening',
+      description: 'Sanitized internal media protocols and database path isolation.',
     },
   ],
 }

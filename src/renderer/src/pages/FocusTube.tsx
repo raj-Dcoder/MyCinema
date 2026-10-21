@@ -370,6 +370,16 @@ const FocusTube: React.FC = () => {
   const handleAutoAdvance = useCallback(async (finishedVideoId: string) => {
     const next = getNextInQueue(finishedVideoId)
     progressCacheRef.current.delete(finishedVideoId)
+
+    // Switch video immediately (snappy UX)
+    if (next && (!hideShorts || !next.isShort)) {
+      const startSeconds = await resolveStartSeconds(next)
+      setPlaying({ video: next, startSeconds })
+    } else {
+      setPlaying((prev) => (prev && prev.video.videoId === finishedVideoId ? { ...prev, video: { ...prev.video, seen: true } } : prev))
+    }
+
+    // Persist seen status and refresh categories/feed in the background
     try {
       await window.api.ftSetVideoSeen(finishedVideoId, true)
       await loadCategories()
@@ -377,13 +387,6 @@ const FocusTube: React.FC = () => {
     } catch (err) {
       console.error('[FocusTube] Auto-advance refresh failed:', err)
     }
-    if (!next || (hideShorts && next.isShort)) {
-      // Reached the end of the queue: update current video seen state, but stay in player
-      setPlaying((prev) => (prev && prev.video.videoId === finishedVideoId ? { ...prev, video: { ...prev.video, seen: true } } : prev))
-      return
-    }
-    const startSeconds = await resolveStartSeconds(next)
-    setPlaying({ video: next, startSeconds })
   }, [activeCategoryId, getNextInQueue, hideShorts, loadCategories, loadFeed, resolveStartSeconds])
 
   // Manual "Next" path: skip without marking the current video seen.
@@ -537,23 +540,26 @@ const FocusTube: React.FC = () => {
             ref={carouselRef}
             onScroll={checkCarouselScroll}
             onWheel={handleCarouselWheel}
-            className={`flex items-center gap-2 overflow-x-auto no-scrollbar scroll-smooth py-1 ${
+            className={`flex items-center gap-2 overflow-x-auto no-scrollbar scroll-smooth py-1.5 ${
               canScrollLeft ? 'pl-8' : ''
             } ${canScrollRight ? 'pr-8' : ''}`}
             style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}
           >
-            {/* "All" category pill */}
-            <button
-              type="button"
-              onClick={() => void selectCategory(null)}
-              className={`inline-flex shrink-0 items-center rounded-xl px-4 py-1.5 text-xs font-bold transition-all ${
-                activeCategoryId === null
-                  ? 'bg-primary text-white shadow-[0_0_15px_rgba(229,9,20,0.45)]'
-                  : 'border border-white/10 bg-white/5 text-white/70 hover:border-white/20 hover:bg-white/10 hover:text-white'
-              }`}
-            >
-              All
-            </button>
+            {/* "All" category pill with notification dot */}
+            <div className="relative shrink-0">
+              <button
+                type="button"
+                onClick={() => void selectCategory(null)}
+                className={`inline-flex shrink-0 items-center rounded-xl px-4 py-1.5 text-xs font-bold transition-all ${
+                  activeCategoryId === null
+                    ? 'bg-primary text-white shadow-[0_0_15px_rgba(229,9,20,0.45)]'
+                    : 'border border-white/10 bg-white/5 text-white/70 hover:border-white/20 hover:bg-white/10 hover:text-white'
+                }`}
+              >
+                All
+              </button>
+
+            </div>
 
             {/* Category pills */}
             {categories.map((category) => {
@@ -623,6 +629,8 @@ const FocusTube: React.FC = () => {
                 )
               }
 
+              const hasUnseen = Boolean(category.unseenCount && category.unseenCount > 0)
+
               return (
                 <div key={category.id} className="relative shrink-0">
                   <button
@@ -637,7 +645,7 @@ const FocusTube: React.FC = () => {
                       e.preventDefault()
                       setConfirmDeleteId(category.id)
                     }}
-                    title={`${category.name} · Double-click to rename · Right-click to delete`}
+                    title={`${category.name}${hasUnseen ? ` (${category.unseenCount} new)` : ''} · Double-click to rename · Right-click to delete`}
                     className={`inline-flex items-center rounded-xl px-4 py-1.5 text-xs font-bold transition-all ${
                       isActive
                         ? 'bg-primary text-white shadow-[0_0_15px_rgba(229,9,20,0.45)]'
@@ -646,6 +654,8 @@ const FocusTube: React.FC = () => {
                   >
                     <span className="truncate">{category.name}</span>
                   </button>
+
+
                 </div>
               )
             })}

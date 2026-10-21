@@ -1,3 +1,23 @@
+# MyCinema v1.44.0
+
+Ultra-smooth Focus Tube theater experience with collapsible sidepanels, calm atmospheric ambient glow, instant queue progression on mark watched, and buttery 60FPS transitions.
+
+### Focus Tube Theater Polish
+- **Collapsible Theater Sidepanel**: Collapse the queue, chapters, and comments panel into a minimal edge tab with a single click, unlocking an ultra-wide cinematic view for immersive viewing.
+- **Calm Atmospheric Glow**: Restructured ambient mode lighting with widened lateral spread and soft bottom feathering, keeping scene glow vibrant while preserving text legibility.
+- **Snappy Mark-Watched Auto-Advance**: Tapping "Mark Watched" immediately jumps to the next queue item with zero latency while synchronizing watch history and counts in the background.
+- **Fluid Dock & Restore Transitions**: Rebuilt mini-player minimize and restore animations with synchronized 60FPS coordinate tracking and opacity cross-fades, eliminating visual cut-offs.
+- **Decluttered Interface & Clean Layout**: Removed redundant buttons, eliminated horizontal scroll overflow, and removed category dots for a cleaner, focused feed.
+
+### Core & Stability
+- **Media Protocol Query Sanitization**: Strips URL query parameters and hashes before resolving local file requests, ensuring reliable playback of stored media.
+- **Development Database Isolation**: Scoped custom database override directories strictly to unpacked development runs to guarantee production builds access standard application data.
+
+### Security & Privacy
+- **Safe Protocol Resolution**: Strict URL path decoding and normalization safeguards prevent path traversal attacks across custom media protocols.
+
+***
+
 # MyCinema v1.43.1
 
 Persistent user profile synchronization across dev and production, disk-backed settings storage, and background process lifecycle reliability.

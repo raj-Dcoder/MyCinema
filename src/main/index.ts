@@ -1001,9 +1001,9 @@ function registerMediaProtocol(): void {
   protocol.handle('media', (request) => {
     try {
       const prefix = 'media://file/'
-      const encodedPath = request.url.startsWith(prefix) 
-        ? request.url.slice(prefix.length) 
-        : request.url.slice('media://'.length)
+      const encodedPath = request.url.startsWith(prefix)
+        ? request.url.slice(prefix.length).split('?')[0].split('#')[0]
+        : request.url.slice('media://'.length).split('?')[0].split('#')[0]
       
       let normalizedPath = decodeURIComponent(encodedPath)
       if (normalizedPath.startsWith('/') && normalizedPath.includes(':')) {

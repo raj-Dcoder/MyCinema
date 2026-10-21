@@ -6,6 +6,8 @@ import {
   ArrowUpNarrowWide,
   Check,
   ChevronDown,
+  ChevronLeft,
+  ChevronRight,
   ExternalLink,
   FileText,
   Gauge,
@@ -18,6 +20,7 @@ import {
   Minimize2,
   Minus,
   MonitorPlay,
+
   SquareArrowDownRight,
   Pause,
   Play,
@@ -168,6 +171,31 @@ export const QUALITY_TARGETS: Array<{ id: string; label: string; desc: string; w
 
 export const QUALITY_PREF_KEY = 'mycinema_ft_preferred_quality'
 export const AMBIENT_PREF_KEY = 'mycinema_ft_ambient_mode'
+export const SIDEPANEL_EXPANDED_STORAGE_KEY = 'mycinema_ft_sidepanel_expanded'
+
+/**
+ * Ambient Mode Visual Configuration
+ * Tweak these parameters to adjust glow spread, intensity, and feathering:
+ */
+export const AMBIENT_CONFIG = {
+  // Horizontal spread outwards to the left & right sides (widescreen theater aura)
+  insetX: '-inset-x-12 sm:-inset-x-24 md:-inset-x-36',
+  scaleX: 'scale-x-125 sm:scale-x-140',
+
+  // Vertical expansion above & below the player
+  insetY: '-inset-y-8 sm:-inset-y-12',
+  scaleY: 'scale-y-110 sm:scale-y-115',
+
+  // Diffusion softness (blur radius)
+  blur: 'blur-[65px] sm:blur-[95px]',
+
+  // Brightness / Opacity - Calm, non-distracting atmospheric glow
+  playingOpacity: 0.55,
+  pausedOpacity: 0.35,
+
+  // Soft bottom feathering: allows gentle ambient view below the video without washing out text
+  bottomMask: '[mask-image:linear-gradient(to_bottom,black_85%,rgba(0,0,0,0.4)_95%,transparent_100%)]'
+}
 
 /** Compact like/comment counts: 1234 -> "1.2K". */
 function formatCompactCount(n: number | null): string {
@@ -461,7 +489,6 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
   const ambientModeRef = useRef(ambientMode)
   ambientModeRef.current = ambientMode
   const ambientCanvasRef = useRef<HTMLCanvasElement | null>(null)
-  const ambientFsCanvasRef = useRef<HTMLCanvasElement | null>(null)
   const lastAmbientUrlRef = useRef<string | null>(null)
 
   const handleToggleAmbient = useCallback(() => {
@@ -524,12 +551,38 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
   const prevMinimizedRef = useRef(false)
   const prevFullscreenRef = useRef(false)
   const [isTransitioning, setIsTransitioning] = useState(false)
+  const isTransitioningRef = useRef(false)
+  isTransitioningRef.current = isTransitioning
   const prevRectRef = useRef<DOMRect | null>(null)
   const activeAnimRef = useRef<Animation | null>(null)
 
   const [queueSearch, setQueueSearch] = useState('')
   const [sidebarTab, setSidebarTab] = useState<'queue' | 'chapters' | 'comments'>('queue')
   const [categoryDropdownOpen, setCategoryDropdownOpen] = useState(false)
+  const [isSidepanelExpanded, setIsSidepanelExpanded] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem(SIDEPANEL_EXPANDED_STORAGE_KEY) !== 'false'
+    } catch {
+      return true
+    }
+  })
+  const [isSidepanelTransitioning, setIsSidepanelTransitioning] = useState(false)
+  const isSidepanelTransitioningRef = useRef(false)
+  isSidepanelTransitioningRef.current = isSidepanelTransitioning
+
+  const handleToggleSidepanel = useCallback((expand?: boolean) => {
+    setIsSidepanelTransitioning(true)
+    setIsSidepanelExpanded((prev) => (typeof expand === 'boolean' ? expand : !prev))
+    window.setTimeout(() => {
+      setIsSidepanelTransitioning(false)
+    }, 320)
+  }, [])
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(SIDEPANEL_EXPANDED_STORAGE_KEY, String(isSidepanelExpanded))
+    } catch {}
+  }, [isSidepanelExpanded])
 
   const stateRef = useRef<number | null>(null)
   const timeRef = useRef(startSeconds)
@@ -757,9 +810,10 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
     window.api?.ftGetFrameQuality?.()?.then((res) => {
       if (res?.quality) setActualQuality((prev) => (prev === res.quality ? prev : res.quality))
       if (Array.isArray(res?.available) && res.available.length > 0) {
+        const avail = res.available
         setAvailableQualities((prev) => {
-          if (JSON.stringify(prev) === JSON.stringify(res.available)) return prev
-          return res.available
+          if (JSON.stringify(prev) === JSON.stringify(avail)) return prev
+          return avail
         })
       }
     }).catch(() => {})
@@ -819,24 +873,26 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
     img.crossOrigin = 'anonymous'
     img.src = thumbUrl
     img.onload = () => {
-      const canvases = [ambientCanvasRef.current, ambientFsCanvasRef.current]
-      for (const canvas of canvases) {
-        if (!canvas) continue
-        const ctx = canvas.getContext('2d')
-        if (ctx) {
-          ctx.drawImage(img, 0, 0, canvas.width, canvas.height)
-        }
+      const canvas = ambientCanvasRef.current
+      if (!canvas) return
+      const ctx = canvas.getContext('2d')
+      if (ctx) {
+        ctx.imageSmoothingEnabled = true
+        ctx.imageSmoothingQuality = 'high'
+        ctx.drawImage(img, 0, 0, canvas.width, canvas.height)
       }
     }
   }, [video.videoId, video.thumbnail, ambientMode])
 
-  // ── Ambient Mode: Live video frame sampling during playback ──────────────
+  // ── Ambient Mode: Live video frame sampling with calm, micro-smoothed transitions ──
   useEffect(() => {
     if (!ambientMode || isMinimized || playerState !== STATE_PLAYING) return
 
     let active = true
+    let rAFId = 0
     const interval = setInterval(async () => {
-      if (!active || stateRef.current !== STATE_PLAYING) return
+      // Don't poll if paused or during dock/theater/sidepanel animations
+      if (!active || stateRef.current !== STATE_PLAYING || isTransitioningRef.current || isSidepanelTransitioningRef.current) return
       try {
         const res = await window.api?.ftGetAmbientFrame?.()
         if (!active || !res?.dataUrl) return
@@ -846,26 +902,39 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
         const img = new Image()
         img.onload = () => {
           if (!active) return
-          const canvases = [ambientCanvasRef.current, ambientFsCanvasRef.current]
-          for (const canvas of canvases) {
-            if (!canvas) continue
-            const ctx = canvas.getContext('2d')
-            if (!ctx) continue
-            // Smooth temporal blend (35% new, 65% existing)
-            ctx.globalAlpha = 0.35
-            ctx.drawImage(img, 0, 0, canvas.width, canvas.height)
-            ctx.globalAlpha = 1.0
+          // Micro-smooth transition: gently blend over 8 rAF frames (~130ms) then remain 100% calm and static
+          let frame = 0
+          const totalFrames = 8
+          const step = () => {
+            if (!active || frame >= totalFrames) return
+            const canvas = ambientCanvasRef.current
+            if (canvas) {
+              const ctx = canvas.getContext('2d')
+              if (ctx) {
+                ctx.imageSmoothingEnabled = true
+                ctx.imageSmoothingQuality = 'high'
+                ctx.globalAlpha = 0.25
+                ctx.drawImage(img, 0, 0, canvas.width, canvas.height)
+                ctx.globalAlpha = 1.0
+              }
+            }
+            frame++
+            if (frame < totalFrames && active) {
+              rAFId = requestAnimationFrame(step)
+            }
           }
+          step()
         }
         img.src = res.dataUrl
       } catch {
         // ignore
       }
-    }, 250)
+    }, 750)
 
     return () => {
       active = false
       clearInterval(interval)
+      cancelAnimationFrame(rAFId)
     }
   }, [ambientMode, isMinimized, playerState])
 
@@ -1553,7 +1622,7 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
       return
     }
 
-    const duration = 280
+    const duration = 300
     const easing = 'cubic-bezier(0.16, 1, 0.3, 1)'
 
     const prevRadius = prevFullscreenRef.current ? '0px' : prevMinimizedRef.current ? '12px' : '16px'
@@ -1863,12 +1932,20 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
 
   const handleMarkWatched = useCallback(() => {
     saveProgress(timeRef.current)
-    if (onToggleSeen) {
-      onToggleSeen(video)
+    pokeBottom()
+    ftFullscreenIntent = !!document.fullscreenElement
+
+    // If there is a next video in queue, mark current watched & immediately advance
+    if (hasNext && cbRef.current.onAutoAdvance) {
+      cbRef.current.onAutoAdvance(video.videoId)
     } else {
-      cbRef.current.onMarkSeen(video.videoId)
+      if (onToggleSeen) {
+        onToggleSeen(video)
+      } else {
+        cbRef.current.onMarkSeen(video.videoId)
+      }
     }
-  }, [saveProgress, onToggleSeen, video])
+  }, [hasNext, pokeBottom, saveProgress, onToggleSeen, video])
 
   // Manual skip: keep the current position (NOT marked seen) and hand the
   // queue to the parent. Disabled when this is the last video in the stack.
@@ -2062,34 +2139,43 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
   // video is still windowed just because the app launched fullscreen.
   const fsActive = isFullscreen
   const isFullscreenLayer = fsActive || (isTransitioning && (isFullscreen || prevFullscreenRef.current))
-  // Single chrome visibility source: floating corner buttons + bottom bar fade
-  // together on idle while playing (YouTube-style), in windowed and
-  // fullscreen alike — so the video owns the whole stage while watching.
   const chromeVisible = bottomVisible
+  // Theater UI stays mounted during the 300ms transition to fade out smoothly with zero cuts
+  const theaterUiVisible = !isMinimized || isTransitioning
 
-  // Portalled to document.body: immune to any ancestor transform/filter that
-  // would otherwise turn `fixed` into a cropped box and leak the feed through
-  // the top. True viewport takeover, edge to edge.
   return createPortal(
-    // Root: fixed full-screen column. Geometry is set once by flexbox; overlays
-    // never participate in layout, so nothing here can shift the video.
-    // data-fullscreen-gesture-scope keeps App's double-tap-to-toggle-window
-    // handler from firing while interacting with this player.
     <div
       data-fullscreen-gesture-scope="player"
       style={{ left: fsActive ? '0' : 'var(--sidebar-width, 5rem)' }}
       className={`fixed right-0 top-0 bottom-0 ${
+        fsActive ? 'left-0' : ''
+      } ${
         isFullscreenLayer ? 'z-[100]' : 'z-[70]'
-      } m-0 flex flex-col text-white select-none transition-[left,background-color] duration-300 ease-in-out ${
-        isMinimized
-          ? 'pointer-events-none bg-transparent'
-          : `bg-[#090a0f] ${isTransitioning ? 'overflow-visible' : 'overflow-hidden'}`
+      } m-0 flex flex-col text-white select-none transition-[left] duration-300 ease-[cubic-bezier(0.16,1,0.3,1)] bg-transparent ${
+        isMinimized && !isTransitioning
+          ? 'pointer-events-none'
+          : fsActive
+            ? 'bg-black overflow-hidden'
+            : isTransitioning
+              ? 'overflow-visible'
+              : 'overflow-hidden'
       }`}
     >
+      {/* Smooth Dark Theater Backdrop that cross-fades during dock / restore */}
+      {!fsActive && (
+        <div
+          aria-hidden
+          className={`absolute inset-0 bg-[#090a0f] pointer-events-none transition-opacity duration-300 ease-[cubic-bezier(0.16,1,0.3,1)] ${
+            isMinimized ? 'opacity-0' : 'opacity-100'
+          }`}
+        />
+      )}
 
-      {/* ── TOP THEATER HEADER (hidden in mini mode and native fullscreen) ── */}
-      {!isMinimized && !fsActive && (
-        <header className="relative z-40 flex h-14 shrink-0 items-center justify-between border-b border-white/[0.08] bg-[#0c0d12]/95 px-4 backdrop-blur-md sm:px-6 animate-in fade-in duration-200">
+      {/* ── TOP THEATER HEADER (smooth cross-fade during dock/restore) ── */}
+      {theaterUiVisible && !fsActive && (
+        <header className={`relative z-40 flex h-14 shrink-0 items-center justify-between border-b border-white/[0.08] bg-[#0c0d12]/95 px-4 backdrop-blur-md sm:px-6 transition-opacity duration-300 ease-[cubic-bezier(0.16,1,0.3,1)] ${
+          isMinimized ? 'opacity-0 pointer-events-none' : 'opacity-100'
+        }`}>
           <div className="flex items-center gap-3">
             <button
               type="button"
@@ -2180,9 +2266,10 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
           </div>
 
           {/* Right: Autoplay Next + Minimize to Dock */}
-          <div className="flex items-center gap-3 sm:gap-4">
+          <div className="flex items-center gap-2.5 sm:gap-3">
+
             <div className="flex items-center gap-2">
-              <span className="text-xs font-semibold text-white/70">Autoplay Next</span>
+              <span className="hidden md:inline text-xs font-semibold text-white/70">Autoplay Next</span>
               <button
                 type="button"
                 role="switch"
@@ -2207,47 +2294,64 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
               title="Minimize to corner dock"
               className="inline-flex items-center gap-1.5 rounded-xl border border-white/10 bg-white/5 px-3 py-1.5 text-xs font-bold text-white/80 transition-colors hover:border-white/20 hover:bg-white/10 hover:text-white"
             >
-              <Minimize2 size={13} /> Minimize to Dock
+              <Minimize2 size={13} /> <span className="hidden md:inline">Minimize to Dock</span>
             </button>
           </div>
         </header>
       )}
 
+      {/* Floating Expand Tab (docked on right edge when sidepanel is collapsed) */}
+      {theaterUiVisible && !isMinimized && !fsActive && !isSidepanelExpanded && (
+        <button
+          type="button"
+          onClick={() => handleToggleSidepanel(true)}
+          className="fixed right-0 top-20 z-40 hidden lg:flex h-8 w-6 items-center justify-center rounded-l-full bg-[#1a2230] border border-r-0 border-white/10 text-white/70 shadow-2xl opacity-75 hover:opacity-100 hover:text-white hover:bg-[#253040] hover:w-7 transition-all duration-200"
+          title="Expand Sidepanel (Queue, Chapters, Comments)"
+        >
+          <ChevronLeft size={16} strokeWidth={2.5} />
+        </button>
+      )}
+
       {/* Body: stable two columns on desktop, stacked on mobile. */}
-      <div className={isMinimized
+      <div className={isMinimized || fsActive
         ? 'contents'
-        : `relative z-10 flex min-h-0 flex-1 flex-col ${isTransitioning ? 'overflow-visible' : 'overflow-y-auto lg:overflow-hidden'} lg:flex-row`}>
+        : `relative z-10 flex min-h-0 flex-1 flex-col overflow-x-hidden ${isTransitioning ? 'overflow-visible' : 'overflow-y-auto lg:overflow-hidden'} lg:flex-row`}>
 
         {/* ── MAIN VIDEO AREA ─────────────────────────────────────────── */}
-        <div className={isMinimized
+        <div className={isMinimized || fsActive
           ? 'contents'
-          : `flex min-h-0 flex-1 flex-col bg-[#0a0b10] p-4 sm:p-6 lg:p-7 ${isTransitioning ? 'overflow-visible' : 'overflow-y-auto'}`}>
-          <div className={isMinimized ? 'contents' : 'relative mx-auto w-full max-w-5xl space-y-4'}>
-            {!isMinimized && ambientMode && (
-              <div
-                aria-hidden
-                className="pointer-events-none absolute -inset-6 sm:-inset-10 z-0 overflow-visible transition-opacity duration-700"
-                style={{ opacity: isPlaying ? 0.75 : 0.4 }}
-              >
-                {/* Fallback ambient color layer from thumbnail while live frames load */}
+          : `flex min-h-0 flex-1 flex-col bg-transparent p-4 sm:p-6 lg:p-7 transition-all duration-300 ease-[cubic-bezier(0.16,1,0.3,1)] overflow-x-hidden ${isTransitioning ? 'overflow-visible' : 'overflow-y-auto'}`}>
+          <div className={isMinimized || fsActive ? 'contents' : `relative mx-auto w-full transition-[max-width] duration-300 ease-[cubic-bezier(0.16,1,0.3,1)] will-change-[max-width] transform-gpu ${isSidepanelExpanded ? 'max-w-5xl' : 'max-w-5xl xl:max-w-6xl'} space-y-5`}>
+            
+            {/* Player Stage Wrapper: Ambient glow with widescreen spread & gentle bottom reach */}
+            <div className={isMinimized || fsActive ? 'contents' : 'relative w-full'}>
+              {!fsActive && ambientMode && (
                 <div
-                  className="absolute inset-0 scale-110 sm:scale-120 rounded-3xl bg-cover bg-center filter blur-[55px] sm:blur-[75px] opacity-40 transform-gpu"
-                  style={{ backgroundImage: `url(${video.thumbnail || thumbnailUrl(video.videoId)})` }}
-                />
-                {/* Dynamic live frame ambient canvas */}
-                <canvas
-                  ref={ambientCanvasRef}
-                  width={32}
-                  height={18}
-                  className="absolute inset-0 h-full w-full scale-110 sm:scale-120 transform-gpu rounded-3xl filter blur-[55px] sm:blur-[80px]"
-                />
-                {/* Glossy specular reflection sheen layer for premium finish */}
-                <div className="absolute inset-0 scale-110 sm:scale-120 rounded-3xl bg-gradient-to-b from-white/[0.08] via-transparent to-black/40 filter blur-[35px] pointer-events-none" />
-              </div>
-            )}
-            {!isMinimized && !ambientMode && (
-              <div aria-hidden className="pointer-events-none absolute -inset-3 rounded-3xl bg-primary/10 blur-2xl opacity-60 animate-in fade-in duration-300" />
-            )}
+                  aria-hidden
+                  className={`pointer-events-none absolute ${AMBIENT_CONFIG.insetY} ${AMBIENT_CONFIG.insetX} z-0 overflow-visible transition-opacity duration-500 ease-out ${AMBIENT_CONFIG.bottomMask} ${
+                    isMinimized ? 'opacity-0' : ''
+                  }`}
+                  style={{ opacity: isMinimized ? 0 : (isPlaying ? AMBIENT_CONFIG.playingOpacity : AMBIENT_CONFIG.pausedOpacity) }}
+                >
+                  {/* Fallback ambient color layer from thumbnail while live frames load */}
+                  <div
+                    className={`absolute inset-0 ${AMBIENT_CONFIG.scaleX} ${AMBIENT_CONFIG.scaleY} rounded-3xl bg-cover bg-center filter ${AMBIENT_CONFIG.blur} opacity-40 transform-gpu transition-opacity duration-700`}
+                    style={{ backgroundImage: `url(${video.thumbnail || thumbnailUrl(video.videoId)})` }}
+                  />
+                  {/* Dynamic live frame ambient canvas — Calm, steady, micro-smoothed */}
+                  <canvas
+                    ref={ambientCanvasRef}
+                    width={32}
+                    height={18}
+                    className={`absolute inset-0 h-full w-full ${AMBIENT_CONFIG.scaleX} ${AMBIENT_CONFIG.scaleY} transform-gpu rounded-3xl filter ${AMBIENT_CONFIG.blur}`}
+                  />
+                  {/* Glossy specular reflection sheen layer for premium finish */}
+                  <div className={`absolute inset-0 ${AMBIENT_CONFIG.scaleX} ${AMBIENT_CONFIG.scaleY} rounded-3xl bg-gradient-to-b from-white/[0.08] via-transparent to-black/30 filter blur-[45px] pointer-events-none`} />
+                </div>
+              )}
+              {!isMinimized && !fsActive && !ambientMode && (
+                <div aria-hidden className="pointer-events-none absolute -inset-3 rounded-3xl bg-primary/10 blur-2xl opacity-60 animate-in fade-in duration-300" />
+              )}
 
             {/* Stage: 16:9 on theater, full in fullscreen, corner dock when minimized */}
             <div
@@ -2258,7 +2362,7 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
                       isTransitioning ? 'will-change-transform' : ''
                     }`
                   : fsActive
-                    ? `pointer-events-auto fixed inset-0 z-[100] w-full h-full overflow-hidden rounded-none border-0 bg-black shadow-none ${
+                    ? `pointer-events-auto fixed inset-0 z-[100] w-full h-full m-0 overflow-hidden rounded-none border-0 bg-black shadow-none ${
                         isTransitioning ? 'will-change-transform' : ''
                       } ${isPlaying && !chromeVisible ? 'cursor-none' : ''}`
                     : `relative aspect-video w-full overflow-hidden rounded-2xl border border-white/10 bg-black shadow-2xl ${
@@ -2728,20 +2832,7 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
                       <span className={`absolute top-0.5 h-4 w-4 rounded-full bg-black transition-all ${skipSponsors ? 'left-[18px]' : 'left-0.5 bg-white/70'}`} />
                     </button>
                   </div>
-                  <div className="mt-2.5 flex items-center justify-between gap-2 border-t border-white/10 px-1 pt-2.5">
-                    <span className="inline-flex items-center gap-1.5 text-[11px] font-bold text-white/70">
-                      <Sparkles size={12} className="text-sky-400" /> Ambient Glow
-                    </span>
-                    <button
-                      type="button"
-                      role="switch"
-                      aria-checked={ambientMode}
-                      onClick={handleToggleAmbient}
-                      className={`relative h-5 w-9 shrink-0 rounded-full transition-colors ${ambientMode ? 'bg-sky-400' : 'bg-white/15'}`}
-                    >
-                      <span className={`absolute top-0.5 h-4 w-4 rounded-full bg-black transition-all ${ambientMode ? 'left-[18px]' : 'left-0.5 bg-white/70'}`} />
-                    </button>
-                  </div>
+
                 </div>
               </>
             )}
@@ -2915,6 +3006,23 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
                 </button>
                 <button
                   type="button"
+                  onClick={handleToggleAmbient}
+                  aria-label={ambientMode ? 'Turn off ambient glow' : 'Turn on ambient glow'}
+                  title={ambientMode ? 'Ambient Mode: ON (Click to turn off)' : 'Ambient Mode: OFF (Click to turn on)'}
+                  tabIndex={bottomVisible ? 0 : -1}
+                  className={`flex items-center gap-1 p-2 transition-all rounded-lg ${
+                    ambientMode
+                      ? 'text-sky-400 hover:text-sky-300 drop-shadow-[0_0_6px_rgba(56,189,248,0.5)]'
+                      : 'text-white/70 hover:text-white'
+                  }`}
+                >
+                  <Sparkles size={18} className={ambientMode ? 'animate-pulse' : ''} />
+                  <span className="hidden text-[11px] font-black min-[480px]:inline">
+                    Ambient
+                  </span>
+                </button>
+                <button
+                  type="button"
                   onClick={toggleFullscreen}
                   aria-label={fsActive ? 'Exit fullscreen' : 'Fullscreen'}
                   title="Fullscreen (f)"
@@ -2954,11 +3062,14 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
               </div>
             )}
           </div>
+            </div>
 
           {/* Video Meta Info (Title, Channel, Actions, Sections) below the Player */}
-          {!isMinimized && !fsActive && (
-              <div className="space-y-4 pt-1 animate-in fade-in duration-200">
-                <h1 className="text-lg sm:text-xl lg:text-2xl font-bold text-white/95 leading-snug tracking-tight">
+          {theaterUiVisible && !fsActive && (
+              <div className={`relative z-10 space-y-4 pt-1 transition-opacity duration-300 ease-[cubic-bezier(0.16,1,0.3,1)] ${
+                isMinimized ? 'opacity-0 pointer-events-none' : 'opacity-100'
+              }`}>
+                <h1 className="text-lg sm:text-xl lg:text-2xl font-bold text-white leading-snug tracking-tight">
                   {video.title}
                 </h1>
 
@@ -2986,6 +3097,7 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
                     <button
                       type="button"
                       onClick={handleMarkWatched}
+                      title={hasNext ? (nextTitle ? `Mark watched & play next: ${nextTitle}` : 'Mark watched & play next') : (video.seen ? 'Watched' : 'Mark watched')}
                       className={`inline-flex items-center gap-2 rounded-xl border px-4 py-2 text-xs font-bold transition-all ${
                         video.seen
                           ? 'border-emerald-500/30 bg-emerald-500/15 text-emerald-300'
@@ -3016,25 +3128,25 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
                   </div>
                 </div>
 
-                {/* Video Views & Upload Date stats row (clearly belongs to the video, not subscriber count) */}
-                <div className="flex flex-wrap items-center gap-2 text-xs font-medium text-white/60">
+                {/* Video Views & Upload Date stats row */}
+                <div className="flex flex-wrap items-center gap-2 text-xs font-medium text-white/80">
                   <span className="font-bold text-white">
                     {video.views ? formatViews(video.views) : 'Subscribed upload'}
                   </span>
-                  <span className="text-white/25">•</span>
+                  <span className="text-white/30">•</span>
                   <span>{publishedAgo ? `${publishedAgo} ago` : 'Uploaded'} ({formatPublishedExact(video.publishedAt)})</span>
                 </div>
 
                 {/* Collapsible Sections (Chapters, Segments, About) */}
                 <div className="space-y-3 pt-1">
                   {chapters.length > 0 && (
-                    <section aria-label="Chapters" className="rounded-xl border border-white/[0.08] bg-white/[0.02] p-3.5">
+                    <section aria-label="Chapters" className="rounded-xl border border-white/10 bg-[#12131a]/90 backdrop-blur-md p-3.5 shadow-lg">
                       <div className="flex w-full items-center justify-between">
                         <button
                           type="button"
                           onClick={() => setChaptersOpen((v) => !v)}
                           aria-expanded={chaptersOpen}
-                          className="flex items-center gap-2 text-left text-xs font-black uppercase tracking-wider text-white/70 transition-colors hover:text-white"
+                          className="flex items-center gap-2 text-left text-xs font-black uppercase tracking-wider text-white/90 transition-colors hover:text-white"
                         >
                           <ListVideo size={14} /> Chapters ({chapters.length})
                           {activeChapterIndex >= 0 && chapters[activeChapterIndex] && (
@@ -3046,7 +3158,10 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
                         </button>
                         <button
                           type="button"
-                          onClick={() => setSidebarTab('chapters')}
+                          onClick={() => {
+                            setSidebarTab('chapters')
+                            handleToggleSidepanel(true)
+                          }}
                           className="text-[10px] font-bold text-primary hover:text-primary/80 transition-colors hover:underline"
                         >
                           Sidepanel →
@@ -3062,10 +3177,10 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
                               className={`flex items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-left text-xs transition-colors ${
                                 index === activeChapterIndex
                                   ? 'bg-primary/20 text-white font-bold border border-primary/40'
-                                  : 'text-white/60 hover:bg-white/5 hover:text-white'
+                                  : 'text-white/70 hover:bg-white/5 hover:text-white'
                               }`}
                             >
-                              <span className="rounded bg-white/10 px-1.5 py-0.5 text-[10px] font-bold tabular-nums text-white/70">
+                              <span className="rounded bg-white/10 px-1.5 py-0.5 text-[10px] font-bold tabular-nums text-white/80">
                                 {formatChapterTime(chapter.start)}
                               </span>
                               <span className="min-w-0 flex-1 truncate">{chapter.title}</span>
@@ -3078,12 +3193,12 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
                   )}
 
                   {sponsorSegments.length > 0 && (
-                    <section aria-label="In-video segments" className="rounded-xl border border-amber-300/20 bg-amber-300/[0.04] p-3.5">
+                    <section aria-label="In-video segments" className="rounded-xl border border-amber-300/30 bg-[#161412]/90 backdrop-blur-md p-3.5 shadow-lg">
                       <div className="flex items-center justify-between">
                         <button
                           type="button"
                           onClick={() => setSegmentsOpen((v) => !v)}
-                          className="flex items-center gap-2 text-xs font-black uppercase tracking-wider text-amber-200"
+                          className="flex items-center gap-2 text-xs font-black uppercase tracking-wider text-amber-300"
                         >
                           <Zap size={14} /> SponsorBlock Segments ({sponsorSegments.length})
                           <ChevronDown size={14} className={`transition-transform ${segmentsOpen ? '' : '-rotate-90'}`} />
@@ -3092,7 +3207,7 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
                           type="button"
                           onClick={() => setSkipSponsors((v) => !v)}
                           className={`rounded-lg px-2.5 py-1 text-[10px] font-black uppercase tracking-widest transition-colors ${
-                            skipSponsors ? 'bg-amber-300 text-black' : 'bg-white/10 text-white/60 hover:text-white'
+                            skipSponsors ? 'bg-amber-300 text-black' : 'bg-white/10 text-white/70 hover:text-white'
                           }`}
                         >
                           {skipSponsors ? 'Auto-skip on' : 'Auto-skip off'}
@@ -3105,10 +3220,10 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
                               key={`${seg.start}-${seg.end}-${index}`}
                               type="button"
                               onClick={() => handleSeek(seg.start)}
-                              className="flex w-full items-center justify-between rounded-lg px-2 py-1 text-left text-xs font-medium text-white/60 hover:bg-white/5 hover:text-white"
+                              className="flex w-full items-center justify-between rounded-lg px-2 py-1 text-left text-xs font-medium text-white/70 hover:bg-white/5 hover:text-white"
                             >
                               <span className="truncate">{sponsorLabel(seg.category)}</span>
-                              <span className="shrink-0 tabular-nums text-white/40">
+                              <span className="shrink-0 tabular-nums text-white/50">
                                 {formatChapterTime(seg.start)} → {formatChapterTime(seg.end)}
                               </span>
                             </button>
@@ -3118,11 +3233,11 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
                     </section>
                   )}
 
-                  <section aria-label="Description" className="rounded-xl border border-white/[0.08] bg-white/[0.02] p-3.5">
+                  <section aria-label="Description" className="rounded-xl border border-white/10 bg-[#12131a]/90 backdrop-blur-md p-3.5 shadow-lg">
                     <button
                       type="button"
                       onClick={() => setDescriptionOpen((v) => !v)}
-                      className="flex w-full items-center justify-between text-left text-xs font-black uppercase tracking-wider text-white/70 hover:text-white"
+                      className="flex w-full items-center justify-between text-left text-xs font-black uppercase tracking-wider text-white/90 hover:text-white"
                     >
                       <span className="flex items-center gap-2">
                         <FileText size={14} /> About / Description
@@ -3130,7 +3245,7 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
                       <ChevronDown size={14} className={`transition-transform ${descriptionOpen ? '' : '-rotate-90'}`} />
                     </button>
                     {descriptionOpen && (
-                      <div className="mt-3 whitespace-pre-wrap break-words text-xs leading-relaxed text-white/70 max-h-72 overflow-y-auto">
+                      <div className="mt-3 whitespace-pre-wrap break-words text-xs leading-relaxed text-white/85 max-h-72 overflow-y-auto">
                         {video.description ? (
                           descParts.map((part, i) => {
                             if (part.kind === 'newline') return <br key={i} />
@@ -3161,7 +3276,7 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
                             return <span key={i}>{part.text}</span>
                           })
                         ) : (
-                          <p className="text-white/30">No description available.</p>
+                          <p className="text-white/40">No description available.</p>
                         )}
                       </div>
                     )}
@@ -3173,71 +3288,100 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
         </div>
 
         {/* ── SIDEBAR (Up Next in Category Queue & Comments) ── */}
-        {isMinimized || fsActive ? null : (
-          <aside className="flex w-full shrink-0 flex-col border-t border-white/[0.08] bg-[#0c0d12]/95 lg:h-full lg:min-h-0 lg:w-[380px] lg:border-l lg:border-t-0 xl:w-[420px] animate-in fade-in duration-200">
-            {/* Sidebar Header */}
-            <div className="flex shrink-0 items-center justify-between border-b border-white/[0.08] p-3 sm:p-3.5 gap-2">
-              <div className="min-w-0 pr-1">
-                <h3 className="truncate text-sm font-black text-white">
-                  {sidebarTab === 'queue'
-                    ? `Up Next in ${categoryName || 'All'}`
-                    : sidebarTab === 'chapters'
-                      ? 'Video Chapters'
-                      : 'Discussion'}
-                </h3>
-                <p className="text-[11px] font-semibold text-white/40 truncate">
-                  {sidebarTab === 'queue'
-                    ? `${remainingCount} unseen ${remainingCount === 1 ? 'video' : 'videos'} remaining`
-                    : sidebarTab === 'chapters'
-                      ? (chapters.length > 0
-                          ? (activeChapterIndex >= 0 && chapters[activeChapterIndex]
-                              ? `Current: ${chapters[activeChapterIndex].title}`
-                              : 'Timestamped sections')
-                          : 'No chapters available')
-                      : 'Viewer comments'}
-                </p>
-              </div>
+        {!fsActive && theaterUiVisible && (
+          <aside
+            className={`group/sidepanel relative flex shrink-0 flex-col border-white/[0.08] bg-[#0c0d12]/95 lg:h-full lg:min-h-0 transition-all duration-300 ease-[cubic-bezier(0.16,1,0.3,1)] will-change-[width,opacity] transform-gpu ${
+              isSidepanelExpanded
+                ? 'w-full border-t lg:w-[380px] lg:border-l lg:border-t-0 xl:w-[420px] opacity-100'
+                : 'w-0 lg:w-0 xl:w-0 opacity-0 overflow-hidden pointer-events-none border-l-0 hidden lg:flex'
+            } ${isMinimized ? 'opacity-0 pointer-events-none' : ''}`}
+          >
+            {/* Floating Collapse Button on Left Border (Consistent with MyCinema sidebar) */}
+            <button
+              type="button"
+              onClick={() => handleToggleSidepanel(false)}
+              className="absolute -left-3.5 top-9 z-50 hidden lg:flex h-7 w-7 items-center justify-center rounded-full bg-[#1a2230] border border-white/10 text-white/70 shadow-xl opacity-0 translate-x-2 pointer-events-none group-hover/sidepanel:opacity-100 group-hover/sidepanel:translate-x-0 group-hover/sidepanel:pointer-events-auto hover:text-white hover:bg-[#253040] hover:scale-110 transition-all duration-300"
+              title="Collapse Sidepanel"
+            >
+              <ChevronRight size={16} strokeWidth={2.5} />
+            </button>
 
-              {/* Quick Tab Switcher */}
-              <div className="flex shrink-0 items-center gap-0.5 bg-white/[0.04] p-0.5 rounded-xl border border-white/[0.08]">
-                <button
-                  type="button"
-                  onClick={() => setSidebarTab('queue')}
-                  className={`rounded-lg px-2 py-1 text-[11px] font-bold transition-colors ${
-                    sidebarTab === 'queue'
-                      ? 'bg-primary text-white shadow'
-                      : 'text-white/50 hover:bg-white/10 hover:text-white'
-                  }`}
-                >
-                  Queue
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setSidebarTab('chapters')}
-                  className={`rounded-lg px-2 py-1 text-[11px] font-bold transition-colors ${
-                    sidebarTab === 'chapters'
-                      ? 'bg-primary text-white shadow'
-                      : 'text-white/50 hover:bg-white/10 hover:text-white'
-                  }`}
-                >
-                  Chapters
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setSidebarTab('comments')}
-                  className={`rounded-lg px-2 py-1 text-[11px] font-bold transition-colors ${
-                    sidebarTab === 'comments'
-                      ? 'bg-primary text-white shadow'
-                      : 'text-white/50 hover:bg-white/10 hover:text-white'
-                  }`}
-                >
-                  Comments
-                </button>
+            {/* Stable inner container to prevent text reflow during width collapse transition */}
+            <div className="w-full lg:w-[380px] xl:w-[420px] h-full flex flex-col min-h-0 shrink-0">
+              {/* Sidebar Header */}
+              <div className="flex shrink-0 items-center justify-between border-b border-white/[0.08] p-3 sm:p-3.5 gap-2">
+                <div className="min-w-0 pr-1">
+                  <h3 className="truncate text-sm font-black text-white">
+                    {sidebarTab === 'queue'
+                      ? `Up Next in ${categoryName || 'All'}`
+                      : sidebarTab === 'chapters'
+                        ? 'Video Chapters'
+                        : 'Discussion'}
+                  </h3>
+                  <p className="text-[11px] font-semibold text-white/40 truncate">
+                    {sidebarTab === 'queue'
+                      ? `${remainingCount} unseen ${remainingCount === 1 ? 'video' : 'videos'} remaining`
+                      : sidebarTab === 'chapters'
+                        ? (chapters.length > 0
+                            ? (activeChapterIndex >= 0 && chapters[activeChapterIndex]
+                                ? `Current: ${chapters[activeChapterIndex].title}`
+                                : 'Timestamped sections')
+                            : 'No chapters available')
+                        : 'Viewer comments'}
+                  </p>
+                </div>
+
+                {/* Quick Tab Switcher & Collapse Button */}
+                <div className="flex shrink-0 items-center gap-1.5">
+                  <div className="flex shrink-0 items-center gap-0.5 bg-white/[0.04] p-0.5 rounded-xl border border-white/[0.08]">
+                    <button
+                      type="button"
+                      onClick={() => setSidebarTab('queue')}
+                      className={`rounded-lg px-2 py-1 text-[11px] font-bold transition-colors ${
+                        sidebarTab === 'queue'
+                          ? 'bg-primary text-white shadow'
+                          : 'text-white/50 hover:bg-white/10 hover:text-white'
+                      }`}
+                    >
+                      Queue
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setSidebarTab('chapters')}
+                      className={`rounded-lg px-2 py-1 text-[11px] font-bold transition-colors ${
+                        sidebarTab === 'chapters'
+                          ? 'bg-primary text-white shadow'
+                          : 'text-white/50 hover:bg-white/10 hover:text-white'
+                      }`}
+                    >
+                      Chapters
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setSidebarTab('comments')}
+                      className={`rounded-lg px-2 py-1 text-[11px] font-bold transition-colors ${
+                        sidebarTab === 'comments'
+                          ? 'bg-primary text-white shadow'
+                          : 'text-white/50 hover:bg-white/10 hover:text-white'
+                      }`}
+                    >
+                      Comments
+                    </button>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => handleToggleSidepanel(false)}
+                    title="Collapse Sidepanel"
+                    className="hidden lg:flex h-7 w-7 items-center justify-center rounded-lg text-white/40 hover:bg-white/10 hover:text-white transition-colors"
+                  >
+                    <ChevronRight size={14} strokeWidth={2.5} />
+                  </button>
+                </div>
               </div>
-            </div>
 
             {/* Sidebar Body */}
-            <div className="min-h-0 flex-1 overflow-y-auto p-3 space-y-2">
+            <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden p-3 space-y-2">
               {sidebarTab === 'queue' && (
                 <>
                   <div className="flex items-center justify-between pb-2 mb-1 border-b border-white/[0.06]">
@@ -3430,6 +3574,7 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
                   )}
                 </div>
               )}
+            </div>
             </div>
           </aside>
         )}

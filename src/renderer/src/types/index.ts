@@ -132,6 +132,7 @@ export interface FtVideo {
   channelAvatarUrl?: string | null
   channelHandle?: string | null
   title: string
+  thumbnail?: string | null
   publishedAt: string
   duration: number | null
   isLive: boolean

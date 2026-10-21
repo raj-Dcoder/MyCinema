@@ -7,7 +7,7 @@ import fs from 'fs'
 const require = createRequire(import.meta.url)
 const Database = require('better-sqlite3')
 
-const dbRoot = process.env.MYCINEMA_USER_DATA_DIR || app.getPath('userData')
+const dbRoot = (!app.isPackaged && process.env.MYCINEMA_USER_DATA_DIR) || app.getPath('userData')
 fs.mkdirSync(dbRoot, { recursive: true })
 const dbPath = join(dbRoot, 'mycinema.db')
 const db = new Database(dbPath, { 

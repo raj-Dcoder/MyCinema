@@ -1181,11 +1181,18 @@ const FocusTube: React.FC = () => {
         <QuickSubscribeModal
           channel={subscribeModalChannel}
           categories={categories}
-          initialCategoryIds={activeCategoryId ? [activeCategoryId] : []}
           onClose={() => setSubscribeModalChannel(null)}
-          onSubscribed={() => {
+          onSubscribed={(channelId) => {
+            setChannels((prev) => [...prev, {
+              channelId,
+              title: subscribeModalChannel?.title || '',
+              handle: subscribeModalChannel?.handle || null,
+              avatarUrl: subscribeModalChannel?.avatarUrl || null,
+              position: 0
+            } as any])
             void loadChannels()
             void loadCategories()
+            if (activeCategoryId) void loadFeed(activeCategoryId)
           }}
           onCreateCategory={async (name) => {
             const cat = await window.api.ftCreateCategory(name)

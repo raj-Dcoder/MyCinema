@@ -3253,22 +3253,22 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
                               {subscribePopoverOpen && (
                                 <div
                                   ref={subscribePopoverRef}
-                                  className="absolute bottom-full left-0 mb-2 z-50 w-60 overflow-hidden rounded-2xl border border-white/15 bg-[#12141e]/98 p-2.5 shadow-2xl shadow-black/90 backdrop-blur-xl animate-in fade-in zoom-in-95 duration-150"
+                                  className="absolute top-full left-0 mt-2 z-50 w-64 overflow-hidden rounded-2xl border border-white/15 bg-[#161822] p-2.5 shadow-[0_16px_40px_rgba(0,0,0,0.85)] animate-in fade-in zoom-in-95 duration-150"
                                 >
-                                  <div className="flex items-center justify-between px-1 pb-1.5 border-b border-white/[0.08] mb-1.5">
+                                  <div className="flex items-center justify-between px-1.5 pb-2 border-b border-white/[0.08] mb-1.5">
                                     <span className="text-[11px] font-black uppercase tracking-wider text-white/50">
                                       Add to Category
                                     </span>
                                     <button
                                       type="button"
                                       onClick={() => setSubscribePopoverOpen(false)}
-                                      className="rounded-full p-0.5 text-white/40 hover:text-white transition-colors"
+                                      className="rounded-full p-1 text-white/40 hover:bg-white/10 hover:text-white transition-colors"
                                     >
                                       <X size={12} />
                                     </button>
                                   </div>
 
-                                  <div className="max-h-48 overflow-y-auto space-y-1 pr-0.5">
+                                  <div className="max-h-60 overflow-y-auto space-y-1 pr-1 subtle-scrollbar">
                                     {categories && categories.length > 0 ? (
                                       categories.map((cat) => {
                                         const isBusy = subscribingCatId === cat.id
@@ -3278,16 +3278,16 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
                                             type="button"
                                             disabled={subscribingCatId !== null || creatingCat}
                                             onClick={() => void handleSelectSubscribeCategory(cat.id)}
-                                            className={`w-full flex items-center gap-2 px-2.5 py-1.5 rounded-xl text-xs font-semibold transition-all text-left group ${
+                                            className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs font-semibold transition-all text-left group ${
                                               isBusy
-                                                ? 'bg-red-600/20 text-white'
-                                                : 'text-white/80 hover:bg-white/10 hover:text-white'
+                                                ? 'bg-red-600/25 text-white'
+                                                : 'text-white/85 hover:bg-white/[0.08] hover:text-white'
                                             }`}
                                           >
                                             <span
-                                              className={`h-2 w-2 rounded-full shrink-0 ${categoryDot(cat.color)}`}
+                                              className={`h-2.5 w-2.5 rounded-full shrink-0 ${categoryDot(cat.color)}`}
                                             />
-                                            <span className="truncate flex-1">{cat.name}</span>
+                                            <span className="truncate flex-1 font-medium">{cat.name}</span>
                                             {isBusy ? (
                                               <Loader2 size={12} className="animate-spin text-red-400 shrink-0" />
                                             ) : (
@@ -3297,7 +3297,7 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
                                         )
                                       })
                                     ) : (
-                                      <div className="p-2 text-center text-xs text-white/40">
+                                      <div className="p-3 text-center text-xs text-white/40">
                                         No categories yet
                                       </div>
                                     )}

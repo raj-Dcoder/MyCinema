@@ -31,6 +31,23 @@
     -ms-overflow-style: none;
     scrollbar-width: none;
   }
+  .subtle-scrollbar::-webkit-scrollbar {
+    width: 4px;
+  }
+  .subtle-scrollbar::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  .subtle-scrollbar::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.18);
+    border-radius: 9999px;
+  }
+  .subtle-scrollbar::-webkit-scrollbar-thumb:hover {
+    background: rgba(255, 255, 255, 0.35);
+  }
+  .subtle-scrollbar {
+    scrollbar-width: thin;
+    scrollbar-color: rgba(255, 255, 255, 0.18) transparent;
+  }
   .continue-watch-scroll {
     scrollbar-width: none;
     -ms-overflow-style: none;

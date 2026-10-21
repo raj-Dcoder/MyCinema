@@ -190,7 +190,7 @@ export const AMBIENT_CONFIG = {
   scaleX: 'scale-x-125 sm:scale-x-140',
 
   // Vertical expansion above & below the player
-  insetY: '-inset-y-8 sm:-inset-y-12',
+  insetY: '-inset-y-50 sm:-inset-y-60',
   scaleY: 'scale-y-110 sm:scale-y-115',
 
   // Diffusion softness (blur radius)
@@ -467,6 +467,7 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
   const [descriptionOpen, setDescriptionOpen] = useState(true)
   const [segmentsOpen, setSegmentsOpen] = useState(true)
   const [chaptersOpen, setChaptersOpen] = useState(true)
+  const [fetchedDetails, setFetchedDetails] = useState<import('../../types').FtVideoDetails | null>(null)
   const [expandedLong, setExpandedLong] = useState<Record<string, boolean>>({})
   const [commentReplies, setCommentReplies] = useState<Record<string, { items: FtComment[]; continuation: string | null; loading: boolean; open: boolean }>>({})
   const [sponsorSegments, setSponsorSegments] = useState<FtSponsorSegment[]>([])
@@ -667,17 +668,21 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
     [video.videoId, iframeKey, resumeAt],
   )
 
-  const chapters = useMemo(
-    () => parseChapters(video.description, duration ?? video.duration),
-    [video.description, duration, video.duration],
-  )
+  const currentDescription = fetchedDetails?.description ?? video.description ?? ''
+
+  const chapters = useMemo(() => {
+    if (fetchedDetails?.chapters && fetchedDetails.chapters.length > 0) {
+      return fetchedDetails.chapters
+    }
+    return parseChapters(currentDescription, duration ?? video.duration ?? fetchedDetails?.duration ?? null)
+  }, [fetchedDetails?.chapters, fetchedDetails?.duration, currentDescription, duration, video.duration])
   const activeChapterIndex = useMemo(
     () => (chapters.length ? getActiveChapterIndex(chapters, currentTime) : 0),
     [chapters, currentTime],
   )
   const descParts = useMemo(
-    () => (video.description ? splitDescription(video.description) : []),
-    [video.description],
+    () => (currentDescription ? splitDescription(currentDescription) : []),
+    [currentDescription],
   )
   const remaining = duration !== null && duration > 0 ? Math.max(0, duration - currentTime) : null
   // Mask YouTube's forced endscreen grid: fade our own cover in the last
@@ -879,6 +884,22 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
         if (!cancelled) setSponsorSegments([])
       })
     return () => { cancelled = true }
+  }, [video.videoId])
+
+  // ── Video details lookup (full description + chapters) ────────────────────
+  useEffect(() => {
+    let cancelled = false
+    setFetchedDetails(null)
+    window.api?.ftGetVideoDetails?.(video.videoId)
+      ?.then((details) => {
+        if (!cancelled && details) {
+          setFetchedDetails(details)
+        }
+      })
+      ?.catch(() => {})
+    return () => {
+      cancelled = true
+    }
   }, [video.videoId])
 
   useEffect(() => {
@@ -2465,7 +2486,7 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
           <div className={`relative mx-auto w-full transition-[max-width] duration-300 ease-[cubic-bezier(0.16,1,0.3,1)] ${isSidepanelExpanded ? 'max-w-5xl' : 'max-w-5xl xl:max-w-6xl'} space-y-5`}>
             
             {/* Player Stage Wrapper: Ambient glow with widescreen spread & gentle bottom reach */}
-            <div ref={stageWrapperRef} className="relative w-full aspect-video">
+            <div ref={stageWrapperRef} className={`relative w-full aspect-video ${isMinimized || fsActive ? '' : 'z-0'}`}>
               {ambientMode && (
                 <div
                   aria-hidden
@@ -3211,7 +3232,7 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
 
           {/* Video Meta Info (Title, Channel, Actions, Sections) below the Player */}
           {theaterUiVisible && (
-              <div className={`relative z-10 space-y-4 pt-1 transition-opacity duration-300 ease-[cubic-bezier(0.16,1,0.3,1)] ${
+              <div className={`relative ${subscribePopoverOpen ? 'z-50' : 'z-20'} space-y-4 pt-1 transition-opacity duration-300 ease-[cubic-bezier(0.16,1,0.3,1)] ${
                 isMinimized || fsActive ? 'opacity-0 pointer-events-none' : 'opacity-100'
               }`}>
                 <h1 className="text-lg sm:text-xl lg:text-2xl font-bold text-white leading-snug tracking-tight">
@@ -3237,7 +3258,7 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
                           )}
                         </p>
                       ) : (
-                        <div className="relative inline-flex items-center gap-2 mt-0.5">
+                        <div className={`relative inline-flex items-center gap-2 mt-0.5 ${subscribePopoverOpen ? 'z-50' : ''}`}>
                           {onSubscribeChannel && (
                             <>
                               <button
@@ -3253,7 +3274,8 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
                               {subscribePopoverOpen && (
                                 <div
                                   ref={subscribePopoverRef}
-                                  className="absolute bottom-full left-0 mb-2 z-50 w-64 overflow-hidden rounded-2xl border border-white/15 bg-[#161822] p-2.5 shadow-[0_16px_40px_rgba(0,0,0,0.85)] animate-in fade-in zoom-in-95 duration-150"
+                                  onClick={(e) => e.stopPropagation()}
+                                  className="absolute bottom-full left-0 mb-2 z-[70] w-64 overflow-hidden rounded-2xl border border-white/15 bg-[#161822] p-2.5 shadow-[0_16px_40px_rgba(0,0,0,0.85)] animate-in fade-in zoom-in-95 duration-150 pointer-events-auto"
                                 >
                                   <div className="flex items-center justify-between px-1.5 pb-2 border-b border-white/[0.08] mb-1.5">
                                     <span className="text-[11px] font-black uppercase tracking-wider text-white/50">
@@ -3505,7 +3527,7 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
                     </button>
                     {descriptionOpen && (
                       <div className="mt-3 whitespace-pre-wrap break-words text-xs leading-relaxed text-white/85 max-h-72 overflow-y-auto">
-                        {video.description ? (
+                        {currentDescription ? (
                           descParts.map((part, i) => {
                             if (part.kind === 'newline') return <br key={i} />
                             if (part.kind === 'timestamp') {

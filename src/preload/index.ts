@@ -250,6 +250,7 @@ const api = {
   ftResolveChannel: (query: string) => ipcRenderer.invoke('ft-resolve-channel', query),
   ftSearchChannels: (query: string) => ipcRenderer.invoke('ft-search-channels', query),
   ftSearchVideos: (query: string, limit?: number) => ipcRenderer.invoke('ft-search-videos', { query, limit }),
+  ftGetVideoDetails: (videoId: string) => ipcRenderer.invoke('ft-get-video-details', videoId),
   ftRefreshChannelAvatars: () => ipcRenderer.invoke('ft-refresh-avatars'),
   ftSubscribeChannel: (channel: { channelId: string; title: string; handle?: string | null; avatarUrl?: string | null; url?: string | null }, categoryIds: number[]) =>
     ipcRenderer.invoke('ft-subscribe-channel', { channel, categoryIds }),

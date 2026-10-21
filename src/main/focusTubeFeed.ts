@@ -1617,3 +1617,110 @@ export async function searchYouTubeVideos(query: string, limit = 30): Promise<fo
 
   return []
 }
+
+export interface FtVideoDetails {
+  videoId: string
+  description: string | null
+  duration?: number | null
+  chapters?: Array<{ start: number; title: string }>
+}
+
+export async function fetchVideoDetails(videoId: string): Promise<FtVideoDetails> {
+  const id = String(videoId || '').trim()
+  if (!/^[A-Za-z0-9_-]{11}$/.test(id)) {
+    throw new Error('Invalid video id')
+  }
+
+  // 1. Direct YouTube watch page fetch
+  try {
+    const { text } = await fetchText(`https://www.youtube.com/watch?v=${encodeURIComponent(id)}`, 10_000, 2)
+    if (text) {
+      let description: string | null = null
+      let duration: number | null = null
+      const chapters: Array<{ start: number; title: string }> = []
+
+      // Try ytInitialPlayerResponse JSON
+      const playerResponseMatch = text.match(/ytInitialPlayerResponse\s*=\s*(\{.+?\});(?:var|<\/script>)/s)
+      if (playerResponseMatch) {
+        try {
+          const data = JSON.parse(playerResponseMatch[1])
+          const videoDetails = data?.videoDetails
+          if (typeof videoDetails?.shortDescription === 'string') {
+            description = videoDetails.shortDescription
+          }
+          if (videoDetails?.lengthSeconds) {
+            const sec = Number(videoDetails.lengthSeconds)
+            if (Number.isFinite(sec) && sec > 0) duration = sec
+          }
+        } catch {}
+      }
+
+      // Fallback regex for shortDescription
+      if (!description) {
+        const rawMatch = text.match(/"shortDescription":"(.*?)(?<!\\)"/s)
+        if (rawMatch) {
+          try {
+            description = JSON.parse(`"${rawMatch[1]}"`)
+          } catch {}
+        }
+      }
+
+      // Extract native chapter markers from HTML
+      const chapterMatches = [...text.matchAll(/"chapterRenderer":\{"title":\{"simpleText":"(.*?)"\},"timeRangeStartMillis":(\d+)/g)]
+      if (chapterMatches.length > 0) {
+        const seen = new Set<number>()
+        for (const m of chapterMatches) {
+          const title = m[1].replace(/\\"/g, '"').trim()
+          const start = Math.floor(Number(m[2]) / 1000)
+          if (!seen.has(start) && title) {
+            seen.add(start)
+            chapters.push({ start, title })
+          }
+        }
+        chapters.sort((a, b) => a.start - b.start)
+      }
+
+      if (description || chapters.length > 0) {
+        // Cache into local SQLite if this video exists in ft_videos
+        try {
+          focusTube.setVideoEnrichment(id, { description, duration })
+        } catch {}
+
+        return {
+          videoId: id,
+          description,
+          duration,
+          chapters: chapters.length > 0 ? chapters : undefined,
+        }
+      }
+    }
+  } catch (err: any) {
+    console.warn(`[FocusTube] Direct watch page fetch failed for ${id}:`, err?.message)
+  }
+
+  // 2. Invidious fallback
+  for (const base of INVIDIOUS_INSTANCES) {
+    try {
+      const data = await fetchJson(`${base}/api/v1/videos/${encodeURIComponent(id)}`, INVIDIOUS_TIMEOUT_MS) as any
+      if (data && typeof data.description === 'string') {
+        const desc = data.description
+        const dur = typeof data.lengthSeconds === 'number' ? data.lengthSeconds : null
+
+        try {
+          focusTube.setVideoEnrichment(id, { description: desc, duration: dur })
+        } catch {}
+
+        return {
+          videoId: id,
+          description: desc,
+          duration: dur,
+        }
+      }
+    } catch {}
+  }
+
+  return {
+    videoId: id,
+    description: null,
+  }
+}

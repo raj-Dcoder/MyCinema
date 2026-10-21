@@ -168,3 +168,10 @@ export interface FtComment {
   replyCount: number
   replyContinuation: string | null
 }
+
+export interface FtVideoDetails {
+  videoId: string
+  description: string | null
+  duration?: number | null
+  chapters?: Array<{ start: number; title: string }>
+}

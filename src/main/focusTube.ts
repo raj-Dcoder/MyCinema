@@ -826,7 +826,7 @@ export function upsertFeedEntries(channelId: string, entries: FtFeedEntry[]): Ft
 
 export function setVideoEnrichment(
   videoId: string,
-  patch: { duration?: number | null; isLive?: boolean; embeddable?: boolean },
+  patch: { duration?: number | null; isLive?: boolean; embeddable?: boolean; description?: string | null },
 ): boolean {
   const db = getRawDb()
   const fields: string[] = []
@@ -834,6 +834,10 @@ export function setVideoEnrichment(
   if (patch.duration !== undefined) {
     fields.push('duration = ?')
     params.push(patch.duration)
+  }
+  if (patch.description !== undefined && patch.description !== null) {
+    fields.push('description = ?')
+    params.push(patch.description)
   }
   if (patch.isLive !== undefined) {
     fields.push('is_live = ?')

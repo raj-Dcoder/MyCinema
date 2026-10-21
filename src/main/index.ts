@@ -8459,6 +8459,15 @@ ipcMain.handle('ft-search-videos', async (_e, input: { query: string; limit?: nu
   }
 })
 
+ipcMain.handle('ft-get-video-details', async (_e, videoId: string) => {
+  try {
+    return await focusTubeFeed.fetchVideoDetails(videoId)
+  } catch (err: any) {
+    console.error('[FocusTube] Fetch video details failed:', err?.message)
+    return { videoId, description: null }
+  }
+})
+
 // Backfills logos for previously-subscribed channels stored without one.
 ipcMain.handle('ft-refresh-avatars', async () => {
   try {

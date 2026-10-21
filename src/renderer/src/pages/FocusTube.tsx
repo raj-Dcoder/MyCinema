@@ -402,6 +402,15 @@ const FocusTube: React.FC = () => {
     }
   }, [])
 
+  const handleOpenSubscribeModal = useCallback((video: FtVideo) => {
+    setSubscribeModalChannel({
+      channelId: video.channelId,
+      title: video.channelTitle,
+      handle: video.channelHandle,
+      avatarUrl: video.channelAvatarUrl,
+    })
+  }, [])
+
   const handleClearYouTubeSearch = useCallback(() => {
     setYoutubeSearchQuery(null)
     setYoutubeSearchResults([])
@@ -1036,14 +1045,7 @@ const FocusTube: React.FC = () => {
                   onPlay={(item) => void handlePlayFromSearch(item)}
                   onToggleSeen={(item) => void handleToggleSeen(item)}
                   isSubscribed={subscribedChannelIds.has(video.channelId)}
-                  onSubscribe={(item) =>
-                    setSubscribeModalChannel({
-                      channelId: item.channelId,
-                      title: item.channelTitle,
-                      handle: item.channelHandle,
-                      avatarUrl: item.channelAvatarUrl,
-                    })
-                  }
+                  onSubscribe={handleOpenSubscribeModal}
                 />
               ))}
             </div>
@@ -1080,6 +1082,8 @@ const FocusTube: React.FC = () => {
                     video={video}
                     onPlay={(item) => void handlePlay(item)}
                     onToggleSeen={(item) => void handleToggleSeen(item)}
+                    isSubscribed={subscribedChannelIds.has(video.channelId)}
+                    onSubscribe={handleOpenSubscribeModal}
                   />
                 ))}
               </div>
@@ -1093,6 +1097,8 @@ const FocusTube: React.FC = () => {
                 video={video}
                 onPlay={(item) => void handlePlay(item)}
                 onToggleSeen={(item) => void handleToggleSeen(item)}
+                isSubscribed={subscribedChannelIds.has(video.channelId)}
+                onSubscribe={handleOpenSubscribeModal}
               />
             ))}
           </div>

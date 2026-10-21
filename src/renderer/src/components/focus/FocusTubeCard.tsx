@@ -157,7 +157,23 @@ const FocusTubeCard: React.FC<FocusTubeCardProps> = ({ video, onPlay, onToggleSe
               <Check size={13} strokeWidth={video.seen ? 3.5 : 2.5} />
             )}
             <span>{video.seen ? 'Watched' : 'Mark Watched'}</span>
-          </button>
+          </button>
+
+          {/* Subscribe Button Pill (when not subscribed) */}
+          {!isSubscribed && onSubscribe && (
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation()
+                onSubscribe(video)
+              }}
+              title={`Subscribe to ${video.channelTitle}`}
+              className="inline-flex items-center gap-1.5 rounded-full bg-red-600 px-3.5 py-2 text-xs font-bold text-white shadow-xl hover:bg-red-500 hover:scale-105 active:scale-95 transition-all"
+            >
+              <Plus size={13} strokeWidth={2.5} />
+              <span>Subscribe</span>
+            </button>
+          )}
         </div>
       </div>
 
@@ -200,11 +216,11 @@ const FocusTubeCard: React.FC<FocusTubeCardProps> = ({ video, onPlay, onToggleSe
             {video.publishedAt ? ` • ${formatRelativeTime(video.publishedAt)} ago` : ''}
           </p>
         </div>
-        {onSubscribe && isSubscribed !== undefined && (
+        {onSubscribe && (
           isSubscribed ? (
             <span
               title="Subscribed to channel"
-              className="shrink-0 flex items-center gap-1 rounded-full border border-emerald-500/20 bg-emerald-500/10 px-2.5 py-1 text-[10px] font-bold text-emerald-400"
+              className="shrink-0 inline-flex items-center gap-1 rounded-full border border-emerald-500/25 bg-emerald-500/10 px-2.5 py-1 text-[10px] font-bold text-emerald-400"
             >
               <Check size={10} strokeWidth={3} />
               <span>Subscribed</span>
@@ -217,9 +233,9 @@ const FocusTubeCard: React.FC<FocusTubeCardProps> = ({ video, onPlay, onToggleSe
                 onSubscribe(video)
               }}
               title={`Subscribe to ${video.channelTitle}`}
-              className="shrink-0 inline-flex items-center gap-1 rounded-full border border-red-500/50 bg-red-600/20 px-2.5 py-1 text-[11px] font-bold text-red-300 transition-all hover:bg-red-600 hover:text-white hover:border-red-500 hover:scale-105 active:scale-95 shadow-sm"
+              className="shrink-0 inline-flex items-center gap-1.5 rounded-full bg-red-600 hover:bg-red-500 px-3 py-1 text-xs font-bold text-white shadow-md hover:scale-105 active:scale-95 transition-all"
             >
-              <Plus size={11} strokeWidth={2.5} />
+              <Plus size={12} strokeWidth={2.5} />
               <span>Subscribe</span>
             </button>
           )

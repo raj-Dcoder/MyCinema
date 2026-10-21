@@ -601,6 +601,7 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
   const barRef = useRef<HTMLDivElement>(null)
   const scrubbingRef = useRef(false)
   const shellRef = useRef<HTMLDivElement>(null)
+  const stageWrapperRef = useRef<HTMLDivElement>(null)
   const fsToggleInFlightRef = useRef(false)
   const lastTapRef = useRef<{ time: number; x: number; y: number } | null>(null)
   const singleTapTimerRef = useRef<number>(0)
@@ -1535,6 +1536,12 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
         } catch {}
         activeAnimRef.current = null
       }
+      shellRef.current.style.position = ''
+      shellRef.current.style.left = ''
+      shellRef.current.style.top = ''
+      shellRef.current.style.width = ''
+      shellRef.current.style.height = ''
+      shellRef.current.style.zIndex = ''
     }
 
     setIsTransitioning(true)
@@ -1559,6 +1566,12 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
         } catch {}
         activeAnimRef.current = null
       }
+      shellRef.current.style.position = ''
+      shellRef.current.style.left = ''
+      shellRef.current.style.top = ''
+      shellRef.current.style.width = ''
+      shellRef.current.style.height = ''
+      shellRef.current.style.zIndex = ''
     }
 
     setIsTransitioning(true)
@@ -1616,9 +1629,37 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
       return
     }
 
-    const currentRect = shell.getBoundingClientRect()
+    const stageWrapper = stageWrapperRef.current
+    const isReturningToTheater = !isMinimized && !isFullscreen && (prevMinimizedRef.current || prevFullscreenRef.current)
+
+    let currentRect: DOMRect
+    if (isReturningToTheater && stageWrapper) {
+      currentRect = stageWrapper.getBoundingClientRect()
+      shell.style.position = 'fixed'
+      shell.style.left = `${currentRect.left}px`
+      shell.style.top = `${currentRect.top}px`
+      shell.style.width = `${currentRect.width}px`
+      shell.style.height = `${currentRect.height}px`
+      shell.style.zIndex = '90'
+    } else {
+      currentRect = shell.getBoundingClientRect()
+    }
+
+    const cleanupReturningStyles = () => {
+      if (isReturningToTheater && shell) {
+        shell.style.position = ''
+        shell.style.left = ''
+        shell.style.top = ''
+        shell.style.width = ''
+        shell.style.height = ''
+        shell.style.zIndex = ''
+      }
+    }
 
     if (prevRect.width === 0 || prevRect.height === 0 || currentRect.width === 0 || currentRect.height === 0) {
+      cleanupReturningStyles()
+      prevMinimizedRef.current = false
+      prevFullscreenRef.current = false
       setIsTransitioning(false)
       return
     }
@@ -1629,11 +1670,14 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
     const scaleY = prevRect.height / currentRect.height
 
     if (Math.abs(deltaX) < 1 && Math.abs(deltaY) < 1 && Math.abs(scaleX - 1) < 0.01 && Math.abs(scaleY - 1) < 0.01) {
+      cleanupReturningStyles()
+      prevMinimizedRef.current = false
+      prevFullscreenRef.current = false
       setIsTransitioning(false)
       return
     }
 
-    const duration = 300
+    const duration = 280
     const easing = 'cubic-bezier(0.16, 1, 0.3, 1)'
 
     const prevRadius = prevFullscreenRef.current ? '0px' : prevMinimizedRef.current ? '12px' : '16px'
@@ -1665,6 +1709,9 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
       const finishHandler = () => {
         if (activeAnimRef.current === anim) {
           activeAnimRef.current = null
+          cleanupReturningStyles()
+          prevMinimizedRef.current = false
+          prevFullscreenRef.current = false
           setIsTransitioning(false)
         }
       }
@@ -1672,6 +1719,9 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
       anim.onfinish = finishHandler
       anim.oncancel = finishHandler
     } catch {
+      cleanupReturningStyles()
+      prevMinimizedRef.current = false
+      prevFullscreenRef.current = false
       setIsTransitioning(false)
     }
 
@@ -2162,30 +2212,26 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
         fsActive ? 'left-0' : ''
       } ${
         isFullscreenLayer ? 'z-[100]' : 'z-[70]'
-      } m-0 flex flex-col text-white select-none transition-[left] duration-300 ease-[cubic-bezier(0.16,1,0.3,1)] bg-transparent ${
+      } m-0 flex flex-col text-white select-none bg-transparent ${
         isMinimized && !isTransitioning
           ? 'pointer-events-none'
           : fsActive
             ? 'bg-black overflow-hidden'
-            : isTransitioning
-              ? 'overflow-visible'
-              : 'overflow-hidden'
+            : 'overflow-hidden'
       }`}
     >
-      {/* Smooth Dark Theater Backdrop that cross-fades during dock / restore */}
-      {!fsActive && (
-        <div
-          aria-hidden
-          className={`absolute inset-0 bg-[#090a0f] pointer-events-none transition-opacity duration-300 ease-[cubic-bezier(0.16,1,0.3,1)] ${
-            isMinimized ? 'opacity-0' : 'opacity-100'
-          }`}
-        />
-      )}
+      {/* Smooth Dark Theater Backdrop that cross-fades during dock / restore / fullscreen */}
+      <div
+        aria-hidden
+        className={`absolute inset-0 bg-[#090a0f] pointer-events-none transition-opacity duration-300 ease-[cubic-bezier(0.16,1,0.3,1)] ${
+          isMinimized || fsActive ? 'opacity-0' : 'opacity-100'
+        }`}
+      />
 
-      {/* ── TOP THEATER HEADER (smooth cross-fade during dock/restore) ── */}
-      {theaterUiVisible && !fsActive && (
+      {/* ── TOP THEATER HEADER (smooth cross-fade during dock/restore/fullscreen) ── */}
+      {theaterUiVisible && (
         <header className={`relative z-40 flex h-14 shrink-0 items-center justify-between border-b border-white/[0.08] bg-[#0c0d12]/95 px-4 backdrop-blur-md sm:px-6 transition-opacity duration-300 ease-[cubic-bezier(0.16,1,0.3,1)] ${
-          isMinimized ? 'opacity-0 pointer-events-none' : 'opacity-100'
+          isMinimized || fsActive ? 'opacity-0 pointer-events-none' : 'opacity-100'
         }`}>
           <div className="flex items-center gap-3">
             <button
@@ -2324,25 +2370,21 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
       )}
 
       {/* Body: stable two columns on desktop, stacked on mobile. */}
-      <div className={isMinimized || fsActive
-        ? 'contents'
-        : `relative z-10 flex min-h-0 flex-1 flex-col overflow-x-hidden ${isTransitioning ? 'overflow-visible' : 'overflow-y-auto lg:overflow-hidden'} lg:flex-row`}>
+      <div className={`relative z-10 flex min-h-0 flex-1 flex-col overflow-x-hidden ${isMinimized || fsActive ? 'overflow-hidden pointer-events-none' : 'overflow-y-auto lg:overflow-hidden'} lg:flex-row`}>
 
         {/* ── MAIN VIDEO AREA ─────────────────────────────────────────── */}
-        <div className={isMinimized || fsActive
-          ? 'contents'
-          : `flex min-h-0 flex-1 flex-col bg-transparent p-4 sm:p-6 lg:p-7 transition-all duration-300 ease-[cubic-bezier(0.16,1,0.3,1)] overflow-x-hidden ${isTransitioning ? 'overflow-visible' : 'overflow-y-auto'}`}>
-          <div className={isMinimized || fsActive ? 'contents' : `relative mx-auto w-full transition-[max-width] duration-300 ease-[cubic-bezier(0.16,1,0.3,1)] will-change-[max-width] transform-gpu ${isSidepanelExpanded ? 'max-w-5xl' : 'max-w-5xl xl:max-w-6xl'} space-y-5`}>
+        <div className={`flex min-h-0 flex-1 flex-col bg-transparent p-4 sm:p-6 lg:p-7 overflow-x-hidden ${isMinimized || fsActive ? 'overflow-y-hidden pointer-events-none' : 'overflow-y-auto [scrollbar-gutter:stable]'}`}>
+          <div className={`relative mx-auto w-full transition-[max-width] duration-300 ease-[cubic-bezier(0.16,1,0.3,1)] ${isSidepanelExpanded ? 'max-w-5xl' : 'max-w-5xl xl:max-w-6xl'} space-y-5`}>
             
             {/* Player Stage Wrapper: Ambient glow with widescreen spread & gentle bottom reach */}
-            <div className={isMinimized || fsActive ? 'contents' : 'relative w-full'}>
-              {!fsActive && ambientMode && (
+            <div ref={stageWrapperRef} className="relative w-full aspect-video">
+              {ambientMode && (
                 <div
                   aria-hidden
                   className={`pointer-events-none absolute ${AMBIENT_CONFIG.insetY} ${AMBIENT_CONFIG.insetX} z-0 overflow-visible transition-opacity duration-500 ease-out ${AMBIENT_CONFIG.bottomMask} ${
-                    isMinimized ? 'opacity-0' : ''
+                    isMinimized || fsActive ? 'opacity-0' : ''
                   }`}
-                  style={{ opacity: isMinimized ? 0 : (isPlaying ? AMBIENT_CONFIG.playingOpacity : AMBIENT_CONFIG.pausedOpacity) }}
+                  style={{ opacity: (isMinimized || fsActive) ? 0 : (isPlaying ? AMBIENT_CONFIG.playingOpacity : AMBIENT_CONFIG.pausedOpacity) }}
                 >
                   {/* Fallback ambient color layer from thumbnail while live frames load */}
                   <div
@@ -2376,9 +2418,13 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
                     ? `pointer-events-auto fixed inset-0 z-[100] w-full h-full m-0 overflow-hidden rounded-none border-0 bg-black shadow-none ${
                         isTransitioning ? 'will-change-transform' : ''
                       } ${isPlaying && !chromeVisible ? 'cursor-none' : ''}`
-                    : `relative aspect-video w-full overflow-hidden rounded-2xl border border-white/10 bg-black shadow-2xl ${
-                        isTransitioning ? 'z-[90] will-change-transform' : ''
-                      } ${isPlaying && !chromeVisible ? 'cursor-none' : ''}`
+                    : isTransitioning && (prevMinimizedRef.current || prevFullscreenRef.current)
+                      ? `pointer-events-auto fixed z-[90] overflow-hidden rounded-2xl border border-white/10 bg-black shadow-2xl will-change-transform ${
+                          isPlaying && !chromeVisible ? 'cursor-none' : ''
+                        }`
+                      : `absolute inset-0 h-full w-full overflow-hidden rounded-2xl border border-white/10 bg-black shadow-2xl ${
+                          isPlaying && !chromeVisible ? 'cursor-none' : ''
+                        }`
               }
             onMouseMove={pokeBottom}
             onMouseEnter={handlePointerEnter}
@@ -3076,9 +3122,9 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
             </div>
 
           {/* Video Meta Info (Title, Channel, Actions, Sections) below the Player */}
-          {theaterUiVisible && !fsActive && (
+          {theaterUiVisible && (
               <div className={`relative z-10 space-y-4 pt-1 transition-opacity duration-300 ease-[cubic-bezier(0.16,1,0.3,1)] ${
-                isMinimized ? 'opacity-0 pointer-events-none' : 'opacity-100'
+                isMinimized || fsActive ? 'opacity-0 pointer-events-none' : 'opacity-100'
               }`}>
                 <h1 className="text-lg sm:text-xl lg:text-2xl font-bold text-white leading-snug tracking-tight">
                   {video.title}
@@ -3321,13 +3367,13 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
         </div>
 
         {/* ── SIDEBAR (Up Next in Category Queue & Comments) ── */}
-        {!fsActive && theaterUiVisible && (
+        {theaterUiVisible && (
           <aside
             className={`group/sidepanel relative flex shrink-0 flex-col border-white/[0.08] bg-[#0c0d12]/95 lg:h-full lg:min-h-0 transition-all duration-300 ease-[cubic-bezier(0.16,1,0.3,1)] will-change-[width,opacity] transform-gpu ${
               isSidepanelExpanded
                 ? 'w-full border-t lg:w-[380px] lg:border-l lg:border-t-0 xl:w-[420px] opacity-100'
                 : 'w-0 lg:w-0 xl:w-0 opacity-0 overflow-hidden pointer-events-none border-l-0 hidden lg:flex'
-            } ${isMinimized ? 'opacity-0 pointer-events-none' : ''}`}
+            } ${isMinimized || fsActive ? 'opacity-0 pointer-events-none' : ''}`}
           >
             {/* Floating Collapse Button on Left Border (Consistent with MyCinema sidebar) */}
             <button

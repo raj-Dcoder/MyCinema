@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react'
-import { Check, CheckCircle2, Loader2, Play, Plus, Radio } from 'lucide-react'
+import { Check, CheckCircle2, Loader2, Play, Radio } from 'lucide-react'
 import type { FtVideo } from '../../types'
 import { avatarHue, formatDuration, formatRelativeTime, formatViews, thumbnailUrl } from '../../utils/focusTube'
 
@@ -7,13 +7,11 @@ interface FocusTubeCardProps {
   video: FtVideo
   onPlay: (video: FtVideo) => void
   onToggleSeen: (video: FtVideo) => void
-  isSubscribed?: boolean
-  onSubscribe?: (video: FtVideo) => void
 }
 
 // 16:9 card. The RSS feed only publishes 4:3 hqdefault thumbnails, so we try
 // maxresdefault first and step down through the fallbacks on load failure.
-const FocusTubeCard: React.FC<FocusTubeCardProps> = ({ video, onPlay, onToggleSeen, isSubscribed, onSubscribe }) => {
+const FocusTubeCard: React.FC<FocusTubeCardProps> = ({ video, onPlay, onToggleSeen }) => {
   const [variant, setVariant] = useState(0)
   const [thumbBroken, setThumbBroken] = useState(false)
   const [marking, setMarking] = useState(false)
@@ -159,22 +157,7 @@ const FocusTubeCard: React.FC<FocusTubeCardProps> = ({ video, onPlay, onToggleSe
             <span>{video.seen ? 'Watched' : 'Mark Watched'}</span>
           </button>
 
-          {/* Subscribe Button Pill (when not subscribed) */}
-          {!isSubscribed && onSubscribe && (
-            <button
-              type="button"
-              onClick={(e) => {
-                e.stopPropagation()
-                onSubscribe(video)
-              }}
-              title={`Subscribe to ${video.channelTitle}`}
-              className="inline-flex items-center gap-1.5 rounded-full bg-red-600 px-3.5 py-2 text-xs font-bold text-white shadow-xl hover:bg-red-500 hover:scale-105 active:scale-95 transition-all"
-            >
-              <Plus size={13} strokeWidth={2.5} />
-              <span>Subscribe</span>
-            </button>
-          )}
-        </div>
+          </div>
       </div>
 
       {/* ── Info Section (Below Thumbnail) ── */}
@@ -216,30 +199,6 @@ const FocusTubeCard: React.FC<FocusTubeCardProps> = ({ video, onPlay, onToggleSe
             {video.publishedAt ? ` • ${formatRelativeTime(video.publishedAt)} ago` : ''}
           </p>
         </div>
-        {onSubscribe && (
-          isSubscribed ? (
-            <span
-              title="Subscribed to channel"
-              className="shrink-0 inline-flex items-center gap-1 rounded-full border border-emerald-500/25 bg-emerald-500/10 px-2.5 py-1 text-[10px] font-bold text-emerald-400"
-            >
-              <Check size={10} strokeWidth={3} />
-              <span>Subscribed</span>
-            </span>
-          ) : (
-            <button
-              type="button"
-              onClick={(e) => {
-                e.stopPropagation()
-                onSubscribe(video)
-              }}
-              title={`Subscribe to ${video.channelTitle}`}
-              className="shrink-0 inline-flex items-center gap-1.5 rounded-full bg-red-600 hover:bg-red-500 px-3 py-1 text-xs font-bold text-white shadow-md hover:scale-105 active:scale-95 transition-all"
-            >
-              <Plus size={12} strokeWidth={2.5} />
-              <span>Subscribe</span>
-            </button>
-          )
-        )}
       </div>
     </div>
   )

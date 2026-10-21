@@ -1044,8 +1044,6 @@ const FocusTube: React.FC = () => {
                   video={video}
                   onPlay={(item) => void handlePlayFromSearch(item)}
                   onToggleSeen={(item) => void handleToggleSeen(item)}
-                  isSubscribed={subscribedChannelIds.has(video.channelId)}
-                  onSubscribe={handleOpenSubscribeModal}
                 />
               ))}
             </div>
@@ -1082,9 +1080,7 @@ const FocusTube: React.FC = () => {
                     video={video}
                     onPlay={(item) => void handlePlay(item)}
                     onToggleSeen={(item) => void handleToggleSeen(item)}
-                    isSubscribed={subscribedChannelIds.has(video.channelId)}
-                    onSubscribe={handleOpenSubscribeModal}
-                  />
+                />
                 ))}
               </div>
             </section>
@@ -1097,9 +1093,7 @@ const FocusTube: React.FC = () => {
                 video={video}
                 onPlay={(item) => void handlePlay(item)}
                 onToggleSeen={(item) => void handleToggleSeen(item)}
-                isSubscribed={subscribedChannelIds.has(video.channelId)}
-                onSubscribe={handleOpenSubscribeModal}
-              />
+                />
             ))}
           </div>
         </div>

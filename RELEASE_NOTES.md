@@ -1,3 +1,24 @@
+# MyCinema v1.45.0
+
+Seamless Focus Tube YouTube search, automatic video description and native chapter extraction, subtle 1-click channel subscription popovers, expanded ambient glow, and bug-free fullscreen transitions.
+
+### Focus Tube Search & Playback
+- **Direct YouTube Video Search**: Search directly for any YouTube video right within Focus Tube, with instant feed loading, direct watch page parsing, and automatic Invidious failover.
+- **Full Video Descriptions & Chapters**: Player now extracts full video descriptions and native YouTube chapter markers, populating interactive timestamp chapters in both the sidebar and collapsible sections below the player.
+- **Subtle 1-Click Channel Subscription**: Tapping Subscribe opens a lightweight, clean category picker anchored directly over the button, allowing instant 1-click channel categorization without full-screen blur or disruptions.
+- **Search Queue Playback**: Playing a search result automatically enqueues the search feed so you can seamlessly play through all results without interruption.
+
+### Theater UI & Visual Polish
+- **Extended Ambient Lighting**: Deepened the vertical atmospheric glow around the theater player (`-inset-y-50 sm:-inset-y-60`) for an even richer cinematic immersion.
+- **Isolated Control Stacking**: Cleaned up CSS stacking contexts so the category popover sits completely above the player controls without any visual clipping or overlap.
+- **Fluid Fullscreen & Miniplayer Exits**: Fixed FLIP transition glitches when returning from fullscreen or closing the miniplayer, delivering stable, jitter-free animations.
+- **Streamlined Video Cards**: Removed unnecessary subscribe buttons and tags from cards to keep the Focus Tube browsing grid clean and distraction-free.
+
+### Security & Privacy
+- **Encrypted Local Storage**: Enriched metadata and category associations are stored strictly on-device in local SQLite databases without external tracking or telemetry.
+
+***
+
 # MyCinema v1.44.0
 
 Ultra-smooth Focus Tube theater experience with collapsible sidepanels, calm atmospheric ambient glow, instant queue progression on mark watched, and buttery 60FPS transitions.

@@ -89,37 +89,37 @@ const UPDATE_ICONS: Record<UpdateIconKey, { icon: React.ReactNode; tile: string 
 }
 
 export const LATEST_RELEASE: ReleaseNotes = {
-  version: '1.44.0',
-  title: 'Ultra-smooth theater mode and distraction-free viewing.',
-  highlight: 'Ultra-smooth theater mode',
+  version: '1.45.0',
+  title: 'Direct YouTube search, instant chapters, and refined subscriptions.',
+  highlight: 'Direct YouTube search',
   description:
-    'Focus Tube is now smoother than ever with collapsible theater sidepanels, calm atmospheric glow, and instant queue auto-advance.',
+    'Search YouTube videos directly within Focus Tube, navigate timestamps with native chapters, and subscribe in one click.',
   tourId: null,
   updates: [
     {
       icon: 'play',
-      title: 'Collapsible theater sidepanel',
-      description: 'Hide the queue and chapters anytime for an ultra-wide, distraction-free view.',
-    },
-    {
-      icon: 'sparkles',
-      title: 'Calm ambient lighting',
-      description: 'Widescreen atmospheric glow tuned for maximum immersion without washing out text.',
+      title: 'YouTube video search',
+      description: 'Search and stream YouTube videos directly in Focus Tube with full-queue playback.',
     },
     {
       icon: 'layers',
-      title: 'Snappy mark-watched advance',
-      description: 'Tapping Mark Watched jumps to the next video instantly without waiting.',
+      title: 'Automatic video chapters',
+      description: 'Timestamp chapters are extracted automatically for seamless jump navigation.',
+    },
+    {
+      icon: 'bell',
+      title: '1-click channel subscriptions',
+      description: 'Subscribe and assign channels to your categories directly from the video player.',
+    },
+    {
+      icon: 'sparkles',
+      title: 'Deeper ambient glow',
+      description: 'Expanded vertical atmospheric lighting around the theater player.',
     },
     {
       icon: 'fix',
-      title: 'Fluid 60FPS animations',
-      description: 'Silky smooth dock and restore transitions with zero jitter or abrupt cuts.',
-    },
-    {
-      icon: 'shield',
-      title: 'Media path hardening',
-      description: 'Sanitized internal media protocols and database path isolation.',
+      title: 'Jitter-free transitions',
+      description: 'Smoothed fullscreen and miniplayer exits with isolated control stacking.',
     },
   ],
 }

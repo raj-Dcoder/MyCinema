@@ -89,37 +89,37 @@ const UPDATE_ICONS: Record<UpdateIconKey, { icon: React.ReactNode; tile: string 
 }
 
 export const LATEST_RELEASE: ReleaseNotes = {
-  version: '1.45.0',
-  title: 'Direct YouTube search, instant chapters, and refined subscriptions.',
-  highlight: 'Direct YouTube search',
+  version: '1.46.0',
+  title: 'In-app updates, smart downloads, and card actions.',
+  highlight: 'smart downloads',
   description:
-    'Search YouTube videos directly within Focus Tube, navigate timestamps with native chapters, and subscribe in one click.',
+    'Browse the full changelog right inside the app, manage downloads with smart name parsing, and enjoy refined video cards.',
   tourId: null,
   updates: [
     {
-      icon: 'play',
-      title: 'YouTube video search',
-      description: 'Search and stream YouTube videos directly in Focus Tube with full-queue playback.',
-    },
-    {
       icon: 'layers',
-      title: 'Automatic video chapters',
-      description: 'Timestamp chapters are extracted automatically for seamless jump navigation.',
+      title: 'Dedicated updates tab',
+      description: 'Browse release history and search past changelogs right above Settings.',
     },
     {
-      icon: 'bell',
-      title: '1-click channel subscriptions',
-      description: 'Subscribe and assign channels to your categories directly from the video player.',
+      icon: 'download',
+      title: 'Smart download queue',
+      description: 'Automatic title parsing, clean storage indicators, and cleaner state sync.',
+    },
+    {
+      icon: 'play',
+      title: 'Refined Focus Tube cards',
+      description: 'Creator avatars, view counts, and quick actions directly on video cards.',
     },
     {
       icon: 'sparkles',
-      title: 'Deeper ambient glow',
-      description: 'Expanded vertical atmospheric lighting around the theater player.',
+      title: 'Faster series library scans',
+      description: 'Cached show metadata speeds up multi-episode folder detection.',
     },
     {
-      icon: 'fix',
-      title: 'Jitter-free transitions',
-      description: 'Smoothed fullscreen and miniplayer exits with isolated control stacking.',
+      icon: 'shield',
+      title: 'Automatic metadata cleanup',
+      description: 'Deleting local media automatically clears associated download records.',
     },
   ],
 }
@@ -131,9 +131,11 @@ interface WhatsNewOnboardingProps {
   onSkipSession: () => void
   /** Called instead of onClose when the release has a tour and the user picks it. */
   onStartTour?: () => void
+  /** Navigate directly to the Updates tab. */
+  onViewAllUpdates?: () => void
 }
 
-const WhatsNewOnboarding: React.FC<WhatsNewOnboardingProps> = ({ onClose, onSkipSession, onStartTour }) => {
+const WhatsNewOnboarding: React.FC<WhatsNewOnboardingProps> = ({ onClose, onSkipSession, onStartTour, onViewAllUpdates }) => {
   const continueRef = useRef<HTMLButtonElement>(null)
   // Checked = remember this version as seen (the default). Unchecked = show
   // this dialog again on next launch.
@@ -255,6 +257,18 @@ const WhatsNewOnboarding: React.FC<WhatsNewOnboardingProps> = ({ onClose, onSkip
               )
             })}
           </ul>
+          {onViewAllUpdates && (
+            <div className="mt-3.5 text-center">
+              <button
+                type="button"
+                onClick={onViewAllUpdates}
+                className="inline-flex items-center gap-1 text-[11.5px] font-semibold text-white/40 hover:text-white transition-colors"
+              >
+                <span>View all updates & release history</span>
+                <ChevronRight size={13} />
+              </button>
+            </div>
+          )}
         </div>
 
         {/* Footer */}

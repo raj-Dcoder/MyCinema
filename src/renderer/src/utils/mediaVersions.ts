@@ -10,9 +10,10 @@ export const getMovieIdentity = (video: Video) => {
 }
 
 export const getEpisodeIdentity = (video: Video) => {
+  const seriesNamePart = normalizeIdentity(video.series_name || video.title)
   const seriesIdentity = video.tmdb_id
-    ? `tmdb:${video.tmdb_id}`
-    : `series:${normalizeIdentity(video.series_name || video.title)}`
+    ? `tmdb:${video.tmdb_id}:${seriesNamePart}`
+    : `series:${seriesNamePart}`
   return `${seriesIdentity}:s${Number(video.season || 1)}:e${Number(video.episode || 0)}`
 }
 

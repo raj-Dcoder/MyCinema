@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from 'react'
 import hdHub4uLogo from '../assets/site-logos/hdhub4u.webp'
 import katMovieHdLogo from '../assets/site-logos/katmoviehd.jpg'
 import { cleanIpcError } from '../utils/ipcError'
-import { X, Play, Info, Calendar, CalendarDays, Clock, Star, FolderOpen, Film, Music, Subtitles, HardDrive, ChevronDown, ChevronUp, Heart, Bookmark, Share2, Search, Zap, Users, Download, AlertTriangle, Clapperboard, Loader2, ExternalLink, Languages, CheckCircle2, Copy, MessageCircle, Send, Trash2, Bell, BellRing, Hourglass, Layers, Plus } from 'lucide-react'
+import { X, Play, Info, Calendar, CalendarDays, Clock, Star, FolderOpen, Film, Music, Subtitles, HardDrive, ChevronDown, ChevronUp, Bookmark, Share2, Search, Zap, Users, Download, AlertTriangle, Clapperboard, Loader2, ExternalLink, Languages, CheckCircle2, Copy, MessageCircle, Send, Trash2, Bell, BellRing, Hourglass, Layers, Plus } from 'lucide-react'
 import { Video, WatchlistIntent } from '../types'
 import { getWatchlistIntent, normalizeWatchlistIntent, WATCHLIST_INTENT_META } from '../utils/watchlistIntent'
 import { ShareHintGuide, DeleteHintGuide, FollowGuide } from './FeatureGuides'
@@ -181,7 +181,6 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
   const trailerCacheRef = useRef<Map<string, any>>(new Map())
   const [showAllAudio, setShowAllAudio] = useState(false)
   const [selectedSeason, setSelectedSeason] = useState<number | null>(null)
-  const [isFavorite, setIsFavorite] = useState(video.is_favorite)
   // Local rows come from SQLite where booleans are 0/1 numbers — coerce to a
   // real boolean, otherwise `{isWatchlist && ...}` renders a stray "0".
   const [isWatchlist, setIsWatchlist] = useState(Boolean(video.is_watchlist))
@@ -211,7 +210,6 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
 
   // Keep the bookmark + intent pill in sync when a different title opens.
   useEffect(() => {
-    setIsFavorite(video.is_favorite)
     setIsWatchlist(Boolean(video.is_watchlist))
     setWatchlistIntent(getWatchlistIntent(video as any))
     setShowIntentPicker(false)
@@ -450,11 +448,6 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
   const isDownloadComplete = matchingDownload?.status === 'completed' || matchingDownload?.status === 'done' || downloadProgress >= 100
   const isDownloadActive = Boolean(matchingDownload && !isDownloadComplete)
 
-  const handleToggleFavorite = async () => {
-    const newValue = await window.api.toggleFavorite(video.id)
-    setIsFavorite(!!newValue)
-    video.is_favorite = !!newValue // Sync local object
-  }
 
   const applyWatchlistState = (intent: WatchlistIntent | null, saved: boolean) => {
     setIsWatchlist(saved)
@@ -2136,15 +2129,6 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
                         </>
                       )}
                     </div>
-                    <button
-                      onClick={handleToggleFavorite}
-                      className={`p-3.5 rounded-xl border transition-all hover:-translate-y-0.5 active:scale-95 glass-effect ${
-                        isFavorite ? 'bg-red-500/20 border-red-500 text-red-500' : 'bg-white/5 border-white/10 text-white/40 hover:text-white'
-                      }`}
-                      title="Mark as Favorite"
-                    >
-                      <Heart size={20} fill={isFavorite ? "currentColor" : "none"} />
-                    </button>
                     {video.type === 'series' && video.tmdb_id && (
                       <div className="relative">
                         <button

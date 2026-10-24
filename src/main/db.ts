@@ -297,8 +297,9 @@ export function addVideo(video: any) {
         WHEN excluded.type = 'video' THEN NULL
         ELSE videos.tmdb_id
       END
+    RETURNING id;
   `)
-  return stmt.run(
+  const row = stmt.get(
     video.title,
     video.file_path,
     video.type,
@@ -310,7 +311,8 @@ export function addVideo(video: any) {
     video.vote_average || null,
     video.release_year || null,
     video.tmdb_id || null
-  )
+  ) as { id: number } | undefined
+  return row || { id: 0 }
 }
 
 export function getVideos() {

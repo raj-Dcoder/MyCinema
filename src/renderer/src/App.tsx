@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useLayoutEffect, useRef, useCallback } from 'react'
-import { Home as HomeIcon, Film, Tv, Settings as SettingsIcon, Video as VideoIcon, Download as DownloadIcon, Menu, Bookmark, Clock, Heart, Settings, RefreshCw, Maximize2, Minimize2, Loader2, PauseCircle, AlertCircle, X, Minus, ArrowUpRight, Image as ImageIcon, ChevronLeft, ChevronRight, Layers, Compass } from 'lucide-react'
+import { Home as HomeIcon, Film, Tv, Settings as SettingsIcon, Video as VideoIcon, Download as DownloadIcon, Menu, Bookmark, Settings, RefreshCw, Maximize2, Minimize2, Loader2, PauseCircle, AlertCircle, X, Minus, ArrowUpRight, Image as ImageIcon, ChevronLeft, ChevronRight, Layers, Compass, Megaphone } from 'lucide-react'
 import { Video } from './types'
 import Home from './pages/Home'
 import Videos from './pages/Videos'
@@ -7,8 +7,8 @@ import Movies from './pages/Movies'
 import Series from './pages/Series'
 import Collections from './pages/Collections'
 import Watchlist from './pages/Watchlist'
-import Favorites from './pages/Favorites'
-import History from './pages/History'
+
+
 import SettingsPage from './pages/Settings'
 import VideoPlayer from './components/VideoPlayer'
 import DetailScreen from './components/DetailScreen'
@@ -17,12 +17,13 @@ import ProductTour, { TOURS, isTourSeen, markTourSeen } from './components/Produ
 import { WindowControlsGuide } from './components/FeatureGuides'
 import Download from './pages/Download'
 import FocusTube from './pages/FocusTube'
+import Updates from './pages/Updates'
 import appLogo from './assets/mycinema-logo.png'
 
 const getWhatsNewStorageKey = (version: string) => `mycinema_whats_new_seen_${version}`
 const SIDEBAR_EXPANDED_STORAGE_KEY = 'mycinema_sidebar_expanded'
 const DOUBLE_TAP_WINDOW_MS = 300
-type AppTab = 'home' | 'videos' | 'movies' | 'series' | 'collections' | 'download' | 'settings' | 'watchlist' | 'history' | 'favorites' | 'focustube'
+type AppTab = 'home' | 'videos' | 'movies' | 'series' | 'collections' | 'download' | 'settings' | 'watchlist' | 'focustube' | 'updates'
 
 type ActiveDownload = {
   id: string
@@ -551,10 +552,6 @@ const App: React.FC = () => {
     { id: 'download' as const,  label: 'Downloads',    icon: <DownloadIcon size={20} /> },
   ]
 
-  const libraryItems = [
-    { id: 'history' as const,   label: 'History',      icon: <Clock size={20} /> },
-    { id: 'favorites' as const, label: 'Favorites',    icon: <Heart size={20} /> },
-  ]
 
   const handlePlayVideo = useCallback((video: Video) => {
     if (video.streamSourceId) {
@@ -911,32 +908,6 @@ const App: React.FC = () => {
             })}
           </nav>
 
-          {/* Library Section */}
-          <div className="space-y-1">
-            <div className="h-6 relative overflow-hidden">
-              <h3 className={`absolute left-3 top-2 text-[10px] font-black uppercase tracking-[0.2em] text-white/20 whitespace-nowrap transition-all duration-300 ${isSidebarExpanded ? 'opacity-100 translate-x-0' : 'opacity-0 -translate-x-2 pointer-events-none'}`}>
-                Library
-              </h3>
-            </div>
-            <nav className="space-y-1">
-              {libraryItems.map(item => (
-                <button
-                  key={item.id}
-                  onClick={() => navigateToTab(item.id)}
-                  className={`relative w-full flex items-center h-12 rounded-xl transition-colors duration-200 group ${
-                    activeTab === item.id ? 'bg-primary/10 text-primary' : 'text-white/40 hover:bg-white/5 hover:text-white'
-                  }`}
-                >
-                  <div className="w-12 h-full flex items-center justify-center flex-shrink-0 text-current">
-                    {item.icon}
-                  </div>
-                  <div className={`absolute left-12 whitespace-nowrap text-sm font-bold transition-all duration-300 ${isSidebarExpanded ? 'opacity-100 translate-x-0' : 'opacity-0 -translate-x-2 pointer-events-none'}`}>
-                    {item.label}
-                  </div>
-                </button>
-              ))}
-            </nav>
-          </div>
         </div>
 
         <div className={`overflow-hidden px-4 transition-all duration-300 ${!isSidebarExpanded && updateState.status !== 'idle' ? 'max-h-16 pb-3 opacity-100' : 'max-h-0 pb-0 opacity-0'}`}>
@@ -1058,7 +1029,30 @@ const App: React.FC = () => {
         </div>
 
         {/* User Profile */}
-        <div className="p-4 mt-auto">
+        {/* Updates Tab - Positioned directly above Profile / Settings */}
+        <div className="px-4 pb-2 mt-auto">
+          <button
+            onClick={() => navigateToTab('updates')}
+            className={`relative w-full flex items-center h-12 rounded-xl transition-colors duration-200 group ${
+              activeTab === 'updates' ? 'bg-primary/10 text-primary' : 'text-white/40 hover:bg-white/5 hover:text-white'
+            }`}
+            title="Updates & Changelog"
+          >
+            <div className="w-12 h-full flex items-center justify-center flex-shrink-0 text-current">
+              <Megaphone size={19} strokeWidth={2.2} />
+            </div>
+            <div className={`absolute left-12 right-2 flex items-center justify-between whitespace-nowrap transition-all duration-300 ${
+              isSidebarExpanded ? 'opacity-100 translate-x-0' : 'opacity-0 -translate-x-2 pointer-events-none'
+            }`}>
+              <span className="text-sm font-bold">Updates</span>
+              <span className="rounded border border-primary/30 bg-primary/10 px-1.5 py-0.5 text-[9px] font-black uppercase text-primary">
+                v{LATEST_RELEASE.version}
+              </span>
+            </div>
+          </button>
+        </div>
+
+        <div className="p-4 pt-0">
           <div className="relative flex items-center bg-white/5 rounded-2xl border border-white/5 h-[52px] w-full overflow-hidden transition-all duration-300">
             
             {/* Avatar (Fixed Left) */}
@@ -1121,9 +1115,8 @@ const App: React.FC = () => {
               {activeTab === 'series'  && <Series onPlay={handlePlayVideo} onShowDetail={setSelectedVideo} />}
               {activeTab === 'collections' && <Collections onPlay={handlePlayVideo} onShowDetail={setSelectedVideo} focusCollectionId={sharedCollectionFocus?.id ?? null} focusNonce={sharedCollectionFocus?.nonce ?? 0} />}
               {activeTab === 'watchlist' && <Watchlist onPlay={handlePlayVideo} onShowDetail={setSelectedVideo} refreshKey={watchlistRefreshKey} />}
-              {activeTab === 'history' && <History onPlay={handlePlayVideo} onShowDetail={setSelectedVideo} />}
-              {activeTab === 'favorites' && <Favorites onPlay={handlePlayVideo} onShowDetail={setSelectedVideo} />}
               {activeTab === 'download' && <Download onShowDetail={setSelectedVideo} />}
+              {activeTab === 'updates' && <Updates />}
               {activeTab === 'settings' && <SettingsPage />}
             </div>
         </div>
@@ -1272,6 +1265,10 @@ const App: React.FC = () => {
           onClose={() => closeWhatsNew(false)}
           onSkipSession={() => setShowWhatsNew(false)}
           onStartTour={() => closeWhatsNew(true)}
+          onViewAllUpdates={() => {
+            closeWhatsNew(false)
+            navigateToTab('updates')
+          }}
         />
       )}
 

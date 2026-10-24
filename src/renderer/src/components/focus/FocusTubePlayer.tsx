@@ -18,7 +18,6 @@ import {
   Maximize2,
   MessageSquare,
   Minimize,
-  Minimize2,
   Minus,
   MonitorPlay,
 
@@ -594,7 +593,7 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
     setIsSidepanelExpanded((prev) => (typeof expand === 'boolean' ? expand : !prev))
     window.setTimeout(() => {
       setIsSidepanelTransitioning(false)
-    }, 320)
+    }, 500)
   }, [])
 
   useEffect(() => {
@@ -2350,64 +2349,6 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
             >
               <ArrowLeft size={14} /> Back to Feed
             </button>
-
-            {/* Category Dropdown / Badge */}
-            <div className="relative z-50">
-              <button
-                type="button"
-                onClick={() => setCategoryDropdownOpen((v) => !v)}
-                className="inline-flex items-center gap-1.5 rounded-xl border border-primary/40 bg-primary/10 px-3 py-1.5 text-xs font-bold text-primary transition-colors hover:bg-primary/20"
-              >
-                <span className="text-white/50 font-normal">Playing from:</span>
-                <span className="font-black text-white">{categoryName || 'All'}</span>
-                {categories && categories.length > 0 && (
-                  <ChevronDown size={13} className={`transition-transform text-white/60 ${categoryDropdownOpen ? 'rotate-180' : ''}`} />
-                )}
-              </button>
-
-              {categoryDropdownOpen && (
-                <>
-                  <div
-                    className="fixed inset-0 z-40 cursor-default"
-                    onClick={() => setCategoryDropdownOpen(false)}
-                  />
-                  <div className="absolute left-0 top-full z-50 mt-1.5 w-52 max-h-80 overflow-y-auto rounded-xl border border-white/15 bg-[#14161f] p-1.5 shadow-2xl backdrop-blur-xl">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setCategoryDropdownOpen(false)
-                        if (onSelectCategory) onSelectCategory(null)
-                      }}
-                      className={`flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-xs font-bold transition-colors ${
-                        !categoryName || categoryName === 'All'
-                          ? 'bg-primary/20 text-white font-black'
-                          : 'text-white/80 hover:bg-white/10 hover:text-white'
-                      }`}
-                    >
-                      All
-                    </button>
-                    {categories && categories.map((cat) => (
-                      <button
-                        key={cat.id}
-                        type="button"
-                        onClick={() => {
-                          setCategoryDropdownOpen(false)
-                          if (onSelectCategory) onSelectCategory(cat.id)
-                        }}
-                        className={`flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-xs font-bold transition-colors ${
-                          categoryName === cat.name
-                            ? 'bg-primary/20 text-white font-black'
-                            : 'text-white/80 hover:bg-white/10 hover:text-white'
-                        }`}
-                      >
-                        <span className={`h-2 w-2 rounded-full ${categoryDot(cat.color)}`} />
-                        <span className="truncate">{cat.name}</span>
-                      </button>
-                    ))}
-                  </div>
-                </>
-              )}
-            </div>
           </div>
 
           {/* Search Queue */}
@@ -2431,37 +2372,62 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
             )}
           </div>
 
-          {/* Right: Autoplay Next + Minimize to Dock */}
-          <div className="flex items-center gap-2.5 sm:gap-3">
-
-            <div className="flex items-center gap-2">
-              <span className="hidden md:inline text-xs font-semibold text-white/70">Autoplay Next</span>
-              <button
-                type="button"
-                role="switch"
-                aria-checked={autoplayNext}
-                onClick={handleToggleAutoplay}
-                title={autoplayNext ? 'Autoplay ON: plays next video in queue automatically' : 'Autoplay OFF'}
-                className={`relative h-5 w-9 shrink-0 rounded-full transition-colors ${
-                  autoplayNext ? 'bg-primary' : 'bg-white/20'
-                }`}
-              >
-                <span
-                  className={`absolute top-0.5 h-4 w-4 rounded-full bg-white shadow transition-all ${
-                    autoplayNext ? 'left-[18px]' : 'left-0.5'
-                  }`}
-                />
-              </button>
-            </div>
-
+          {/* Right: Playing from (moved here) */}
+          <div className="relative z-50">
             <button
               type="button"
-              onClick={toggleMinimize}
-              title="Minimize to corner dock"
-              className="inline-flex items-center gap-1.5 rounded-xl border border-white/10 bg-white/5 px-3 py-1.5 text-xs font-bold text-white/80 transition-colors hover:border-white/20 hover:bg-white/10 hover:text-white"
+              onClick={() => setCategoryDropdownOpen((v) => !v)}
+              className="inline-flex items-center gap-1.5 rounded-xl border border-primary/40 bg-primary/10 px-3 py-1.5 text-xs font-bold text-primary transition-colors hover:bg-primary/20"
             >
-              <Minimize2 size={13} /> <span className="hidden md:inline">Minimize to Dock</span>
+              <span className="text-white/50 font-normal">Playing from:</span>
+              <span className="font-black text-white">{categoryName || 'All'}</span>
+              {categories && categories.length > 0 && (
+                <ChevronDown size={13} className={`transition-transform text-white/60 ${categoryDropdownOpen ? 'rotate-180' : ''}`} />
+              )}
             </button>
+
+            {categoryDropdownOpen && (
+              <>
+                <div
+                  className="fixed inset-0 z-40 cursor-default"
+                  onClick={() => setCategoryDropdownOpen(false)}
+                />
+                <div className="absolute right-0 top-full z-50 mt-1.5 w-52 max-h-80 overflow-y-auto rounded-xl border border-white/15 bg-[#14161f] p-1.5 shadow-2xl backdrop-blur-xl">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setCategoryDropdownOpen(false)
+                      if (onSelectCategory) onSelectCategory(null)
+                    }}
+                    className={`flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-xs font-bold transition-colors ${
+                      !categoryName || categoryName === 'All'
+                        ? 'bg-primary/20 text-white font-black'
+                        : 'text-white/80 hover:bg-white/10 hover:text-white'
+                    }`}
+                  >
+                    All
+                  </button>
+                  {categories && categories.map((cat) => (
+                    <button
+                      key={cat.id}
+                      type="button"
+                      onClick={() => {
+                        setCategoryDropdownOpen(false)
+                        if (onSelectCategory) onSelectCategory(cat.id)
+                      }}
+                      className={`flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-xs font-bold transition-colors ${
+                        categoryName === cat.name
+                          ? 'bg-primary/20 text-white font-black'
+                          : 'text-white/80 hover:bg-white/10 hover:text-white'
+                      }`}
+                    >
+                      <span className={`h-2 w-2 rounded-full ${categoryDot(cat.color)}`} />
+                      <span className="truncate">{cat.name}</span>
+                    </button>
+                  ))}
+                </div>
+              </>
+            )}
           </div>
         </header>
       )}
@@ -2923,20 +2889,11 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
                   ) : (
                     <>
                       <div className="flex items-center justify-between px-1 pb-2">
-                        <div className="flex items-center gap-1.5">
-                          <p className="text-[10px] font-black uppercase tracking-widest text-white/40">
-                            Quality Preference
-                          </p>
-                          {maxSupportedLabel && (
-                            <span className="rounded bg-white/10 px-1.5 py-0.5 text-[9px] font-bold text-white/70">
-                              Max: {maxSupportedLabel}
-                            </span>
-                          )}
-                        </div>
-                        <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-500/10 border border-emerald-500/20 px-2 py-0.5 text-[10px] font-bold text-emerald-400">
-                          <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse" />
-                          {actualQuality ? `Live: ${qualityLabel(actualQuality)}` : 'Detecting…'}
-                        </span>
+                          <div className="flex items-center gap-1.5">
+                            <p className="text-[10px] font-black uppercase tracking-widest text-white/40">
+                              Quality Preference
+                            </p>
+                          </div>
                       </div>
 
                       <div className="space-y-1 max-h-56 overflow-y-auto pr-0.5">
@@ -3571,10 +3528,10 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
         {/* ── SIDEBAR (Up Next in Category Queue & Comments) ── */}
         {theaterUiVisible && (
           <aside
-            className={`group/sidepanel relative flex shrink-0 flex-col border-white/[0.08] bg-[#0c0d12]/95 lg:h-full lg:min-h-0 transition-all duration-300 ease-[cubic-bezier(0.16,1,0.3,1)] will-change-[width,opacity] transform-gpu ${
+            className={`group/sidepanel relative flex shrink-0 flex-col border-white/[0.08] ${isSidepanelTransitioning ? 'bg-[#0c0d12]' : 'bg-[#0c0d12]/95'} lg:h-full lg:min-h-0 transition-[width,opacity] duration-500 ease-[cubic-bezier(0.4,0,0.2,1)] will-change-[width,opacity] ${
               isSidepanelExpanded
                 ? 'w-full border-t lg:w-[380px] lg:border-l lg:border-t-0 xl:w-[420px] opacity-100'
-                : 'w-0 lg:w-0 xl:w-0 opacity-0 overflow-hidden pointer-events-none border-l-0 hidden lg:flex'
+                : 'w-0 lg:w-0 xl:w-0 opacity-0 overflow-hidden pointer-events-none border-l-0 lg:flex'
             } ${isMinimized || fsActive ? 'opacity-0 pointer-events-none' : ''}`}
           >
             {/* Floating Collapse Button on Left Border (Consistent with MyCinema sidebar) */}

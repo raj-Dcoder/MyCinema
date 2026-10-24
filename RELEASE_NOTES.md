@@ -1,3 +1,36 @@
+# MyCinema v1.46.0
+
+Dedicated in-app updates and changelog tab, smart torrent title parsing with modular download queue, real-time download and library cleanup synchronization, and refined Focus Tube cards.
+
+### In-App Updates & Changelog
+- **Dedicated Updates Tab**: Added an Updates tab directly above Settings to browse the complete release history, search changes, filter by version, and view category tags.
+- **What's New Integration**: Jump directly from the What's New dialog to the full changelog at any time with a single click.
+- **Automated Changelog Synchronization**: Built an automated parser to keep in-app release logs permanently synchronized with official release notes.
+
+### Download Queue & Smart Parsing
+- **Intelligent Title Parsing**: Torrent and download names are automatically parsed into clean media titles, release years, season/episode numbers, quality, source, and audio tags.
+- **Modular Download Queue**: Revamped the active downloads interface with real-time progress indicators, search filtering, and storage usage breakdowns.
+- **Clean State Synchronization**: Deleting downloaded files or library entries automatically purges corresponding download records so the downloads view stays clean.
+- **Reliable Download Retries**: Retrying a failed download completely resets transfer progress and speed before queuing for a fresh start.
+
+### Focus Tube & Theater Enhancements
+- **Enhanced Video Cards**: Video cards now display creator channel avatars, formatted view counts, relative timestamps, and a 3-dot context menu for quick actions.
+- **Quick Card Actions**: Mark videos as watched or unwatched, copy video links, or open on YouTube directly from any card.
+- **Smooth Theater Panel Transitions**: Eased sidebar collapse and expand animations to 500ms for a seamless widescreen viewing experience.
+
+### Library Scanning & Metadata Reliability
+- **Series Metadata Caching**: Scanner caches TMDB show metadata across multi-episode folders, dramatically speeding up library scans and avoiding redundant requests.
+- **High-Quality Poster Selection**: Series cards prioritize official TMDB artwork over generic video snapshots.
+- **Reliable Database ID Resolution**: Database operations now use transactional ID resolution to ensure robust video tracking during library updates.
+
+### Navigation Streamline
+- **Focused Sidebar**: Streamlined sidebar navigation by retiring legacy History and Favorites tabs in favor of unified Watchlist and Collections.
+
+### Security & Privacy
+- **Orphaned Metadata Cleanup**: Deleting video files purges associated download records and cache entries from local SQLite databases without retaining lingering tracker data.
+
+***
+
 # MyCinema v1.45.0
 
 Seamless Focus Tube YouTube search, automatic video description and native chapter extraction, subtle 1-click channel subscription popovers, expanded ambient glow, and bug-free fullscreen transitions.

@@ -1,6 +1,6 @@
 {
   "name": "mycinema",
-  "version": "1.45.0",
+  "version": "1.46.0",
   "main": "./out/main/index.js",
   "scripts": {
     "dev": "electron-vite dev",
@@ -14,6 +14,7 @@
     "release:publish": "electron-builder --publish always --config.win.forceCodeSigning=true",
     "release:publish:unsigned": "electron-builder --publish always --config.win.forceCodeSigning=false",
     "verify:installer-signature": "pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/verify-windows-signature.ps1",
+    "sync:updates": "node scripts/generate-updates-data.js",
     "postinstall": "electron-builder install-app-deps"
   },
   "keywords": [],

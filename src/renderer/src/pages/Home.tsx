@@ -11,7 +11,7 @@ import { Search as SearchIcon, Bookmark, ChevronLeft, ChevronRight, Play, X, Loa
 interface HomeProps {
   onPlay: (video: Video) => void
   onShowDetail: (video: Video) => void
-  onNavigate: (tab: 'movies' | 'series' | 'history' | 'settings') => void
+  onNavigate: (tab: 'movies' | 'series' | 'settings') => void
   refreshKey: number
   isActive?: boolean
 }
@@ -1356,14 +1356,6 @@ const Home: React.FC<HomeProps> = ({ onPlay, onShowDetail, onNavigate, refreshKe
                   resumingKey={resumingOnlineKey}
                   isActive={isActive}
                 />
-                {hasContinueWatching && (
-                  <button
-                    className="absolute bottom-8 left-8 z-30 flex items-center gap-1 text-[10px] font-black uppercase tracking-widest text-white/70 transition-all hover:gap-2 hover:text-primary md:left-16"
-                    onClick={() => onNavigate('history')}
-                  >
-                    View all continue watching <ChevronRight size={14} />
-                  </button>
-                )}
               </>
             ) : showLocalEmptyState ? (
               <div className="relative flex min-h-[570px] h-[73vh] max-h-[800px] flex-col items-start justify-end overflow-hidden bg-[#05080d] px-8 pb-20 pt-32 md:px-16">

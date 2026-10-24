@@ -4,6 +4,7 @@ import { Search, Download as DownloadIcon, Film, Tv, X, Loader2, HardDrive, Chec
 import { Video } from '../types'
 import { DownloadOptionsGuide, ConcurrentDownloadsGuide } from '../components/FeatureGuides'
 import { getTorrentSourceHealthScore, getTorrentSourceSpeedLabel, isHevcSource } from '../utils/torrentSources'
+import DownloadQueue from '../components/DownloadQueue'
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 interface TMDBResult {
@@ -159,10 +160,11 @@ const sortDownloads = (items: ActiveDownload[]) => {
 }
 
 interface DownloadProps {
+  onPlay?: (video: Video) => void
   onShowDetail?: (video: Video) => void
 }
 
-const Download: React.FC<DownloadProps> = ({ onShowDetail }) => {
+const Download: React.FC<DownloadProps> = ({ onPlay, onShowDetail }) => {
   const [query, setQuery] = useState('')
   const [results, setResults] = useState<TMDBResult[]>([])
   const [searching, setSearching] = useState(false)
@@ -410,16 +412,19 @@ const Download: React.FC<DownloadProps> = ({ onShowDetail }) => {
     const reconcile = () => {
       window.api.getActiveDownloads().then((active: ActiveDownload[]) => {
         if (!Array.isArray(active)) return
+        const activeIds = new Set(active.map(a => a.id))
         setDownloads(prev => {
-          const next = [...prev]
-          let changed = false
+          // Auto-remove any downloads no longer present in DB (e.g. deleted from library/disk)
+          const filtered = prev.filter(p => activeIds.has(p.id) && !removedIdsRef.current.has(p.id))
+          let changed = filtered.length !== prev.length
+          const next = [...filtered]
           active.forEach(a => {
             if (removedIdsRef.current.has(a.id)) return
             const index = next.findIndex(d => d.id === a.id)
             if (index === -1) {
               next.push(a)
               changed = true
-            } else if (next[index].status !== a.status) {
+            } else if (next[index].status !== a.status || next[index].progress !== a.progress) {
               next[index] = { ...next[index], ...a }
               changed = true
             }
@@ -430,9 +435,20 @@ const Download: React.FC<DownloadProps> = ({ onShowDetail }) => {
     }
     const reconcileInterval = setInterval(reconcile, 2000)
 
+    // Real-time synchronization when library videos or downloads change
+    const unsubDl = window.api.onDownloadsChanged?.(() => {
+      reconcile()
+    })
+    const unsubLib = window.api.onLibraryUpdated?.(() => {
+      fetchVideos()
+      reconcile()
+    })
+
     return () => {
       clearInterval(reconcileInterval)
       cleanup()
+      unsubDl?.()
+      unsubLib?.()
     }
   }, [])
 
@@ -734,6 +750,17 @@ const Download: React.FC<DownloadProps> = ({ onShowDetail }) => {
     }
   }
 
+  const handleOpenFolder = async (targetPath?: string) => {
+    if (targetPath) {
+      const opened = await window.api.openFolder(targetPath)
+      if (!opened) {
+        await window.api.openDownloadsFolder()
+      }
+    } else {
+      await window.api.openDownloadsFolder()
+    }
+  }
+
   const sortedDownloads = React.useMemo(() => sortDownloads(downloads), [downloads])
   const activeCount = downloads.filter(d => d.status === 'downloading' || d.status === 'connecting').length
   const completedCount = downloads.filter(d => d.status === 'done').length
@@ -898,31 +925,7 @@ const Download: React.FC<DownloadProps> = ({ onShowDetail }) => {
                   </>
                 )}
                 
-                <button
-                  onClick={async () => {
-                    const targetPath = dlItem?.downloadPath
-                    setDownloadToRemove(null)
-                    if (targetPath) {
-                      const opened = await window.api.openFolder(targetPath)
-                      if (!opened) {
-                        await window.api.openDownloadsFolder()
-                      }
-                    } else {
-                      await window.api.openDownloadsFolder()
-                    }
-                  }}
-                  className="flex items-center gap-3 px-3 py-2.5 rounded-lg hover:bg-white/5 text-left transition-colors group"
-                >
-                  <div className="w-8 h-8 rounded-lg bg-white/5 flex items-center justify-center text-muted group-hover:text-primary transition-colors">
-                    <FolderOpen size={16} />
-                  </div>
-                  <div className="flex flex-col">
-                    <span className="text-xs font-bold text-text">Show in folder</span>
-                    <span className="text-[10px] text-muted">Open file location</span>
-                  </div>
-                </button>
 
-                <div className="h-px bg-white/5 mx-2" />
 
                 <button
                   onClick={() => handleRemoveDownload(downloadToRemove, false)}
@@ -1079,182 +1082,28 @@ const Download: React.FC<DownloadProps> = ({ onShowDetail }) => {
           </div>
         </div>
 
-        {/* Download Queue */}
+        {/* Modern Concept A Download Queue */}
         {downloads.length > 0 && (
-          <div className="bg-surface/90 backdrop-blur-xl border border-secondary rounded-2xl overflow-hidden mb-8 animate-in slide-in-from-top-4 duration-500">
-            <div className="flex items-center justify-between px-5 py-3 border-b border-secondary">
-              <div className="min-w-0">
-                <div className="flex items-center gap-2">
-                  <div className={`h-2 w-2 rounded-full ${activeCount > 0 ? 'animate-pulse bg-primary' : 'bg-white/25'}`} />
-                  <h3 className="text-sm font-semibold text-text">Download Queue</h3>
-                </div>
-                <p className="mt-1 text-[11px] text-muted">{queueStatusText}</p>
-              </div>
-              <div className="flex flex-wrap items-center gap-3 text-[10px] font-black uppercase tracking-widest text-white/40">
-                {activeCount > 0 && <span className="text-primary">{activeCount} active</span>}
-                {completedCount > 0 && <span className="text-emerald-400">{completedCount} complete</span>}
-                {pausedCount > 0 && <span className="text-amber-400">{pausedCount} paused</span>}
-                {failedCount > 0 && <span className="text-red-400">{failedCount} failed</span>}
-                {queuedCount > 0 && <span className="text-sky-300">{queuedCount} queued</span>}
-                <label className="relative flex items-center gap-1.5 normal-case tracking-normal">
-                  <span className="text-white/40">At once</span>
-                  <select
-                    value={maxConcurrent}
-                    onChange={(e) => void handleMaxConcurrentChange(Number(e.target.value))}
-                    className="rounded-lg border border-white/10 bg-black/40 px-1.5 py-1 text-[10px] font-bold text-white outline-none hover:border-white/25 focus:border-primary"
-                    aria-label="Maximum simultaneous downloads"
-                  >
-                    {CONCURRENT_OPTIONS.map(n => (
-                      <option key={n} value={n}>{n === 0 ? 'Unlimited' : n}</option>
-                    ))}
-                  </select>
-                  <ConcurrentDownloadsGuide />
-                </label>
-              </div>
-            </div>
-          <div className="divide-y divide-secondary/50">
-              {sortedDownloads.map((dl, idx) => {
-                // Optimized matching using memoized map
-                const matchingVideo = (() => {
-                  if (dl.tmdbId && videoMap.has(`tmdb-${dl.tmdbId}`)) {
-                    return videoMap.get(`tmdb-${dl.tmdbId}`)
-                  }
-                  const cleanDlTitle = dl.title.replace(/\s*\([^)]*\)\s*$/, '').toLowerCase()
-                  return videoMap.get(`title-${cleanDlTitle}`) || videoMap.get(`series-${cleanDlTitle}`)
-                })()
-                const isShareEligible = Boolean((dl.tmdbId || matchingVideo?.tmdb_id) && dl.magnet)
-
-                const handleShowDetailWithDelay = (video: Video) => {
-                  setLoadingDetailId(dl.id)
-                  setTimeout(() => {
-                    onShowDetail?.(video)
-                    setLoadingDetailId(null)
-                  }, 800)
-                }
-
-                return (
-                  <div key={dl.id} className="px-5 py-4 space-y-2">
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-3 flex-1 min-w-0 mr-4">
-                        <button
-                          disabled={!matchingVideo || loadingDetailId === dl.id}
-                          onClick={() => matchingVideo && handleShowDetailWithDelay(matchingVideo)}
-                          className={`flex-shrink-0 p-1.5 rounded-lg transition-all group ${
-                            matchingVideo 
-                              ? 'bg-primary/20 text-primary hover:bg-primary/30 cursor-pointer shadow-lg shadow-primary/10' 
-                              : 'bg-white/5 text-muted/20 cursor-not-allowed'
-                          } ${loadingDetailId === dl.id ? 'animate-pulse' : ''}`}
-                          title={matchingVideo ? "View Details & Play" : "Fetching Movie Metadata..."}
-                        >
-                          {loadingDetailId === dl.id ? (
-                            <Loader2 size={14} className="animate-spin" />
-                          ) : (
-                            <Play 
-                              size={14} 
-                              fill={matchingVideo ? "currentColor" : "none"} 
-                              className={matchingVideo ? "group-hover:scale-110 transition-transform" : ""} 
-                            />
-                          )}
-                        </button>
-                        <span className="text-sm font-medium text-text truncate" title={dl.name || dl.title}>{dl.name || dl.title}</span>
-                      </div>
-                      <div className="flex items-center gap-2 flex-shrink-0">
-                        {dl.status === 'downloading' && (
-                        <>
-                          <span className="text-xs text-muted">{dl.downloadSpeed}</span>
-                          <span className="text-xs text-muted">•</span>
-                          <span className="text-xs text-muted">{dl.timeRemaining}</span>
-                        </>
-                      )}
-                      {dl.status === 'connecting' && (
-                        <span className="flex items-center gap-1.5 text-xs text-amber-400">
-                          <Loader2 size={12} className="animate-spin" /> Resolving Metadata...
-                        </span>
-                      )}
-                      {dl.status === 'paused' && (
-                        <span className="flex items-center gap-1 text-xs text-muted">
-                          <Pause size={14} /> Paused
-                        </span>
-                      )}
-                      {dl.status === 'queued' && (
-                        <span className="flex items-center gap-1 text-xs text-sky-300" title="Waiting for a free download slot — starts oldest-first">
-                          <Loader2 size={12} className="animate-spin" /> Queued{queuePositions.get(dl.id) ? ` #${queuePositions.get(dl.id)}` : ''}
-                        </span>
-                      )}
-                      {dl.status === 'pending' && (
-                        <span className="flex items-center gap-1 text-xs text-amber-400">
-                          <AlertCircle size={14} /> Pending
-                        </span>
-                      )}
-                        {dl.status === 'done' && (
-                        <span className="flex items-center gap-1 text-xs text-green-400">
-                          <CheckCircle2 size={14} /> Complete
-                        </span>
-                      )}
-                      {dl.status === 'error' && (
-                        <span className="flex items-center gap-1 text-xs text-red-400">
-                          <AlertCircle size={14} /> Failed
-                        </span>
-                      )}
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-3">
-                    <div className="flex-1 h-1.5 bg-white/5 rounded-full overflow-hidden">
-                      <div
-                        className={`h-full rounded-full transition-[width] duration-500 ${
-                          dl.status === 'done' ? 'bg-green-400' :
-                          dl.status === 'error' ? 'bg-red-400' :
-                          dl.status === 'connecting' ? 'bg-amber-400' :
-                          dl.status === 'queued' ? 'bg-sky-300/60' :
-                          'bg-primary'
-                        }`}
-                        style={{ width: `${Math.max(0, Math.min(100, dl.progress || 0))}%` }}
-                      />
-                    </div>
-                    <span className="text-xs text-muted w-10 text-right">{Math.round(dl.progress)}%</span>
-                    {(dl.status === 'downloading' || dl.status === 'paused' || dl.status === 'connecting' || dl.status === 'queued') && (
-                      <div className="flex items-center gap-1">
-                        <button
-                          onClick={() => handlePauseResume(dl.id)}
-                          disabled={pauseResumePendingRef.current.has(dl.id)}
-                          className="p-1 rounded-lg text-muted hover:text-primary hover:bg-primary/10 transition-colors disabled:cursor-wait disabled:opacity-50"
-                          title={dl.status === 'paused' ? 'Resume' : dl.status === 'queued' ? 'Remove from queue (pause)' : 'Pause'}
-                        >
-                          {dl.status === 'paused' ? <Play size={14} /> : <Pause size={14} />}
-                        </button>
-                      </div>
-                    )}
-                    {dl.status === 'error' && (
-                      <button
-                        onClick={() => handleRetryDownload(dl.id)}
-                        className="inline-flex items-center gap-1.5 px-2 py-1 rounded-lg text-xs font-semibold text-red-300 bg-red-400/10 hover:bg-red-400/20 hover:text-red-200 transition-colors"
-                        title="Retry this download"
-                      >
-                        <RotateCcw size={13} />
-                        Retry
-                      </button>
-                    )}
-                    <button
-                      id={`dl-btn-${dl.id}`}
-                      onClick={() => setDownloadToRemove(dl.id)}
-                      className="p-1 rounded-lg text-muted hover:text-red-400 hover:bg-red-400/10 transition-colors relative"
-                      title="More Options"
-                    >
-                      <MoreVertical size={14} />
-                      {idx === 0 && <DownloadOptionsGuide />}
-                    </button>
-                  </div>
-                  {dl.status !== 'done' && dl.downloaded && dl.size && (
-                    <p className="text-[11px] text-muted/70">{dl.downloaded} / {dl.size}</p>
-                  )}
-                  {dl.status === 'error' && dl.errorMessage && (
-                    <p className="text-[11px] text-red-300/70">{dl.errorMessage}</p>
-                  )}
-                </div>
-              )
-            })}
-            </div>
-          </div>
+          <DownloadQueue
+            downloads={downloads}
+            allVideos={allVideos}
+            maxConcurrent={maxConcurrent}
+            downloadsStorage={downloadsStorage}
+            storageUsedPercent={storageUsedPercent}
+            onMaxConcurrentChange={handleMaxConcurrentChange}
+            onPauseResume={handlePauseResume}
+            onRetry={handleRetryDownload}
+            onPlay={onPlay}
+            onShowDetail={onShowDetail}
+            onRequestRemove={(id) => setDownloadToRemove(id)}
+            onOpenFolder={handleOpenFolder}
+            refreshDownloadsStorage={refreshDownloadsStorage}
+            loadingDetailId={loadingDetailId}
+            setLoadingDetailId={setLoadingDetailId}
+            pauseResumePendingRef={pauseResumePendingRef}
+            setDownloads={setDownloads}
+            removedIdsRef={removedIdsRef}
+          />
         )}
 
         {/* Search Results Grid */}

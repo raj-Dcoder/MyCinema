@@ -234,6 +234,24 @@ export async function scanFolder(rootPath: string) {
   const videoByPath = new Map(
     (allInitialVideos as any[]).map(video => [normalizeVideoPath(video.file_path), video])
   )
+  const seriesMetaCache = new Map<string, any>()
+  for (const video of allInitialVideos as any[]) {
+    if (video.type === 'series' && video.series_name && video.tmdb_id && video.poster_path && !video.poster_path.includes('-snap.jpg')) {
+      const sKey = video.series_name.trim().toLowerCase()
+      if (!seriesMetaCache.has(sKey)) {
+        seriesMetaCache.set(sKey, {
+          poster_path: video.poster_path,
+          backdrop_path: video.backdrop_path,
+          overview: video.overview,
+          tagline: video.tagline,
+          genres: video.genres,
+          tmdb_id: video.tmdb_id,
+          vote_average: video.vote_average,
+          release_year: video.release_year
+        })
+      }
+    }
+  }
 
   // 1. Purge globally deleted files from the database before adding new ones
   for (const dbVideo of allInitialVideos as any[]) {
@@ -310,11 +328,12 @@ export async function scanFolder(rootPath: string) {
       tmdb_id: tmdbIdFromDownload
     })
 
-    const insertedId = Number((addResult as any)?.lastInsertRowid || 0)
+    const resolvedVideoId = Number((addResult as any)?.id || existingBeforeScan?.id || (addResult as any)?.lastInsertRowid || 0)
     const currentVideoNode = existingBeforeScan
       ? {
           ...existingBeforeScan,
           ...metadata,
+          id: existingBeforeScan.id || resolvedVideoId,
           file_path: filePath,
           duration,
           poster_path: localPoster || existingBeforeScan.poster_path,
@@ -322,7 +341,7 @@ export async function scanFolder(rootPath: string) {
         }
       : {
           ...metadata,
-          id: insertedId,
+          id: resolvedVideoId,
           file_path: filePath,
           duration,
           poster_path: localPoster,
@@ -363,6 +382,26 @@ export async function scanFolder(rootPath: string) {
       // If we are missing metadata, we should ALSO check if we have a TMDB ID.
       // If we have a TMDB ID but no metadata, we can fetch it directly.
       if (isMissingPoster || isMissingMetadata || downloadTmdbChanged || cachedPosterTmdbMismatch) {
+        const seriesKey = metadata.type === 'series' && metadata.series_name
+          ? metadata.series_name.trim().toLowerCase()
+          : null
+        const cachedSeriesMeta = seriesKey ? seriesMetaCache.get(seriesKey) : null
+
+        if (cachedSeriesMeta && cachedSeriesMeta.poster_path) {
+          updateVideoMetadata(videoId, {
+            poster_path: cachedSeriesMeta.poster_path,
+            backdrop_path: cachedSeriesMeta.backdrop_path,
+            overview: cachedSeriesMeta.overview,
+            tagline: cachedSeriesMeta.tagline,
+            genres: cachedSeriesMeta.genres,
+            tmdb_id: cachedSeriesMeta.tmdb_id,
+            vote_average: cachedSeriesMeta.vote_average,
+            release_year: cachedSeriesMeta.release_year
+          })
+          libraryUpdates.schedule()
+          continue
+        }
+
         const searchTitle = metadata.series_name || metadata.title
         
         // Junk title filter: skip GUIDs, hashes, and extremely long descriptive titles
@@ -453,6 +492,9 @@ export async function scanFolder(rootPath: string) {
              })
            }
         } else {
+           if (seriesKey && tmdbMetadata.poster_path) {
+             seriesMetaCache.set(seriesKey, tmdbMetadata)
+           }
            console.log(`[Scanner] Retrieved official TMDB poster for video ${videoId}!`)
            updateVideoMetadata(videoId, { 
              poster_path: tmdbMetadata.poster_path, 

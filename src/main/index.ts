@@ -3771,6 +3771,21 @@ ipcMain.handle('delete-video-file', async (_, video: any) => {
         try {
           db.deleteVideoAndProgress(item.id)
           deletedAny = true
+          // Auto-remove corresponding download row so Downloads stays 100% clean
+          try {
+            const allDownloads = db.getDownloads()
+            for (const dl of allDownloads) {
+              const matchesPath = dl.downloadPath && (dl.downloadPath === item.file_path || isPathInsideRoot(item.file_path, dl.downloadPath))
+              const matchesTmdb = dl.tmdbId && video?.tmdb_id && Number(dl.tmdbId) === Number(video.tmdb_id)
+              const matchesTitle = dl.title && video?.title && dl.title.trim().toLowerCase() === video.title.trim().toLowerCase()
+              if (matchesPath || matchesTmdb || matchesTitle) {
+                db.removeDownloadRow(dl.id)
+                downloadRecordsCache.delete(dl.id)
+              }
+            }
+          } catch (dlErr) {
+            console.warn('[DeleteVideo] Error cleaning download rows:', dlErr)
+          }
         } catch (err) {
           console.error('Error removing DB record:', err)
         }
@@ -3778,7 +3793,10 @@ ipcMain.handle('delete-video-file', async (_, video: any) => {
     }
     
     if (deletedAny) {
-      BrowserWindow.getAllWindows().forEach(w => w.webContents.send('library-updated'))
+      BrowserWindow.getAllWindows().forEach(w => {
+        w.webContents.send('library-updated')
+        w.webContents.send('downloads-changed')
+      })
     }
     return deletedAny
   } catch (error) {
@@ -7431,14 +7449,29 @@ ipcMain.handle('retry-torrent-download', async (_, id: string) => {
       console.warn('[Torrent] Could not clear previous failed torrent before retry:', err.message)
     }
 
-    db.updateDownload({
+    downloadRecordsCache.delete(id)
+    const resetDl = {
       ...dbDl,
+      progress: 0,
+      downloaded: '0 B',
+      downloadSpeed: '0 B/s',
+      timeRemaining: '—',
+      status: 'queued',
       errorMessage: null
-    })
+    }
+    db.updateDownload(resetDl)
+    downloadRecordsCache.set(id, resetDl)
 
-    // Queues when slots are full (status stays 'error' until the gate runs,
-    // so it never counts itself as running).
-    await startDownloadRespectingQueue(id, dbDl.magnet, dbDl.title, dbDl.progress || 0)
+    broadcastProgress(id, {
+      downloadSpeed: 0,
+      timeRemaining: 0,
+      length: 0,
+      downloaded: 0,
+      progress: 0,
+      name: dbDl.name || getMagnetDisplayName(dbDl.magnet) || dbDl.title
+    } as any, 'queued')
+
+    await startDownloadRespectingQueue(id, dbDl.magnet, dbDl.title, 0)
     return true
   } catch (err) {
     console.error('[Torrent] Retry error:', err)
@@ -7448,7 +7481,46 @@ ipcMain.handle('retry-torrent-download', async (_, id: string) => {
 
 // ─── IPC: Get Active Downloads ───────────────────────────────────────────────
 ipcMain.handle('get-active-downloads', async () => {
-  return db.getDownloads()
+  const downloads = db.getDownloads()
+  const downloadRoot = getDownloadPath()
+  return downloads.map((dl: any) => {
+    let fileExists = true
+    if (dl.status === 'done') {
+      const candidates: string[] = []
+      if (dl.downloadPath) {
+        candidates.push(dl.downloadPath)
+      }
+      if (dl.name) {
+        candidates.push(path.join(downloadRoot, dl.name))
+        candidates.push(path.join(downloadRoot, dl.id, dl.name))
+      }
+      if (dl.id) {
+        candidates.push(path.join(downloadRoot, dl.id))
+      }
+      fileExists = candidates.some(p => {
+        try {
+          if (!fs.existsSync(p)) return false
+          const stat = fs.statSync(p)
+          if (stat.isDirectory()) {
+            const files = fs.readdirSync(p)
+            return files.length > 0
+          }
+          return stat.size > 0
+        } catch {
+          return false
+        }
+      })
+      if (!fileExists) {
+        // Auto-remove deleted download so downloads list stays 100% clean
+        try {
+          db.removeDownloadRow(dl.id)
+          downloadRecordsCache.delete(dl.id)
+        } catch {}
+        return null
+      }
+    }
+    return { ...dl, fileExists }
+  }).filter(Boolean)
 })
 
 ipcMain.handle('prepare-torrent-stream', async (_, id: string) => {

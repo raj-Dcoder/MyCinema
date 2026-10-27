@@ -164,14 +164,67 @@
   position: absolute;
   inset: 0;
   border-radius: 0;
-  transition: background 0.2s ease;
+  opacity: 0;
+  transition: opacity 0.25s ease, background 0.2s ease;
+}
+
+.scroll-nav-btn:hover .scroll-nav-btn__track {
+  opacity: 1;
 }
 
 .scroll-nav-btn--left .scroll-nav-btn__track {
-  background: linear-gradient(to right, rgba(10,10,16,0.92) 55%, transparent);
+  background: linear-gradient(to right, rgba(10, 10, 16, 0.85) 0%, rgba(10, 10, 16, 0.4) 50%, transparent 100%);
 }
 .scroll-nav-btn--right .scroll-nav-btn__track {
-  background: linear-gradient(to left, rgba(10,10,16,0.92) 55%, transparent);
+  background: linear-gradient(to left, rgba(10, 10, 16, 0.85) 0%, rgba(10, 10, 16, 0.4) 50%, transparent 100%);
+}
+
+/* Light Theme Scroll Nav — Soft Feathered Light Glow & Elevated White Pill */
+.light .scroll-nav-btn--left .scroll-nav-btn__track {
+  background: linear-gradient(to right, rgba(241, 243, 246, 0.95) 0%, rgba(241, 243, 246, 0.5) 50%, transparent 100%) !important;
+}
+.light .scroll-nav-btn--right .scroll-nav-btn__track {
+  background: linear-gradient(to left, rgba(241, 243, 246, 0.95) 0%, rgba(241, 243, 246, 0.5) 50%, transparent 100%) !important;
+}
+.light .scroll-nav-btn__icon {
+  color: #111827 !important;
+  background: #ffffff !important;
+  border: 1px solid #d1d5db !important;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.12) !important;
+}
+.light .scroll-nav-btn:hover .scroll-nav-btn__icon {
+  background: #f9fafb !important;
+  border-color: #9ca3af !important;
+  color: #000000 !important;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.16) !important;
+}
+
+/* Glass Theme Scroll Nav */
+.glass .scroll-nav-btn--left .scroll-nav-btn__track {
+  background: linear-gradient(to right, rgba(7, 9, 14, 0.85) 0%, rgba(7, 9, 14, 0.4) 50%, transparent 100%) !important;
+}
+.glass .scroll-nav-btn--right .scroll-nav-btn__track {
+  background: linear-gradient(to left, rgba(7, 9, 14, 0.85) 0%, rgba(7, 9, 14, 0.4) 50%, transparent 100%) !important;
+}
+
+/* Crystal Glass Theme Scroll Nav */
+.glass-light .scroll-nav-btn--left .scroll-nav-btn__track {
+  background: linear-gradient(to right, rgba(255, 255, 255, 0.9) 0%, rgba(255, 255, 255, 0.45) 50%, transparent 100%) !important;
+  backdrop-filter: blur(8px) !important;
+  -webkit-backdrop-filter: blur(8px) !important;
+}
+.glass-light .scroll-nav-btn--right .scroll-nav-btn__track {
+  background: linear-gradient(to left, rgba(255, 255, 255, 0.9) 0%, rgba(255, 255, 255, 0.45) 50%, transparent 100%) !important;
+  backdrop-filter: blur(8px) !important;
+  -webkit-backdrop-filter: blur(8px) !important;
+}
+.glass-light .scroll-nav-btn__icon {
+  color: #111827 !important;
+  background: rgba(255, 255, 255, 0.85) !important;
+  backdrop-filter: blur(16px) saturate(180%) !important;
+  -webkit-backdrop-filter: blur(16px) saturate(180%) !important;
+  border: 1px solid rgba(255, 255, 255, 0.95) !important;
+  box-shadow: 0 4px 14px rgba(16, 24, 40, 0.12) !important;
 }
 
 /* Icon circle */

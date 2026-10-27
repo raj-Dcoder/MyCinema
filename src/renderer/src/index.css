@@ -2871,3 +2871,253 @@
   background-color: rgba(255, 255, 255, 0.03) !important;
   border-color: rgba(255, 255, 255, 0.07) !important;
 }
+
+
+/* ------------------------------------------------------------------ */
+/* 11. SETTINGS PAGE — Crisp, Modern Light Theme                      */
+/* ------------------------------------------------------------------ */
+
+/* Top Banner */
+.light .settings-banner,
+.glass-light .settings-banner {
+  background: linear-gradient(135deg, rgba(229, 9, 20, 0.05) 0%, rgba(241, 245, 249, 0.7) 45%, #ffffff 100%) !important;
+  border: 1px solid #e2e8f0 !important;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.03) !important;
+}
+.light .settings-banner h2,
+.glass-light .settings-banner h2 {
+  color: #0f172a !important;
+  text-shadow: none !important;
+  filter: none !important;
+}
+.light .settings-banner p,
+.glass-light .settings-banner p {
+  color: #64748b !important;
+}
+
+/* Outer Panels & Cards */
+.light .settings-panel,
+.glass-light .settings-panel {
+  background-color: #ffffff !important;
+  border: 1px solid #e2e8f0 !important;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.03), 0 1px 3px rgba(0, 0, 0, 0.02) !important;
+  backdrop-filter: none !important;
+}
+.light .settings-panel:hover,
+.glass-light .settings-panel:hover {
+  background-color: #ffffff !important;
+  border-color: #cbd5e1 !important;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.05), 0 2px 6px rgba(0, 0, 0, 0.03) !important;
+}
+
+/* Icon Boxes */
+.light .settings-icon-box,
+.glass-light .settings-icon-box {
+  background: linear-gradient(135deg, #f8fafc 0%, #edf2f7 100%) !important;
+  color: #334155 !important;
+  border: 1px solid #e2e8f0 !important;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04) !important;
+  --tw-ring-color: transparent !important;
+}
+.light .settings-icon-box svg,
+.glass-light .settings-icon-box svg {
+  color: #334155 !important;
+}
+.light .settings-icon-box svg.text-primary,
+.glass-light .settings-icon-box svg.text-primary {
+  color: #dc2626 !important;
+}
+
+/* Headings and descriptions */
+.light .settings-panel h4,
+.glass-light .settings-panel h4 {
+  color: #0f172a !important;
+  font-weight: 800 !important;
+}
+.light .settings-panel p,
+.glass-light .settings-panel p {
+  color: #475569 !important;
+}
+
+/* Inset Storage Card (Downloads Directory) */
+.light .settings-drive-card,
+.glass-light .settings-drive-card {
+  background-color: #f8fafc !important;
+  border: 1px solid #e2e8f0 !important;
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.02) !important;
+}
+.light .settings-drive-card p,
+.glass-light .settings-drive-card p {
+  color: #0f172a !important;
+}
+.light .settings-drive-card svg,
+.glass-light .settings-drive-card svg {
+  color: #64748b !important;
+}
+.light .settings-drive-card .text-white\/50,
+.glass-light .settings-drive-card .text-white\/50 {
+  color: #64748b !important;
+}
+.light .settings-drive-card .text-white\/80,
+.glass-light .settings-drive-card .text-white\/80 {
+  color: #0f172a !important;
+  font-weight: 700 !important;
+}
+.light .settings-drive-card .bg-white\/10,
+.glass-light .settings-drive-card .bg-white\/10 {
+  background-color: #e2e8f0 !important;
+}
+
+/* Inset Site Cards (Download Sites) */
+.light .settings-site-card,
+.glass-light .settings-site-card {
+  background-color: #f8fafc !important;
+  border: 1px solid #e2e8f0 !important;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.02) !important;
+}
+.light .settings-site-card p.text-white,
+.glass-light .settings-site-card p.text-white {
+  color: #0f172a !important;
+  font-weight: 800 !important;
+}
+.light .settings-site-card p.text-white\/35,
+.glass-light .settings-site-card p.text-white\/35 {
+  color: #64748b !important;
+}
+
+.light .settings-site-input,
+.glass-light .settings-site-input {
+  background-color: #ffffff !important;
+  border: 1px solid #cbd5e1 !important;
+  color: #0f172a !important;
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.03) !important;
+}
+.light .settings-site-input:focus,
+.glass-light .settings-site-input:focus {
+  border-color: #e50914 !important;
+}
+.light .settings-site-input::placeholder,
+.glass-light .settings-site-input::placeholder {
+  color: #94a3b8 !important;
+}
+
+.light .settings-site-btn,
+.glass-light .settings-site-btn {
+  background-color: #ffffff !important;
+  border: 1px solid #cbd5e1 !important;
+  color: #334155 !important;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04) !important;
+}
+.light .settings-site-btn:hover,
+.glass-light .settings-site-btn:hover {
+  background-color: #f1f5f9 !important;
+  color: #0f172a !important;
+  border-color: #94a3b8 !important;
+}
+
+/* Toggle Switches */
+.light .settings-switch,
+.glass-light .settings-switch {
+  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1) !important;
+}
+.light .settings-switch[aria-checked="false"],
+.glass-light .settings-switch[aria-checked="false"] {
+  background-color: #e2e8f0 !important;
+  border: 1.5px solid #cbd5e1 !important;
+}
+.light .settings-switch[aria-checked="false"] span,
+.glass-light .settings-switch[aria-checked="false"] span {
+  background-color: #ffffff !important;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.15) !important;
+}
+.light .settings-switch[aria-checked="true"],
+.glass-light .settings-switch[aria-checked="true"] {
+  background-color: #dc2626 !important;
+  border: 1.5px solid #dc2626 !important;
+  box-shadow: 0 2px 8px rgba(220, 38, 38, 0.25) !important;
+}
+.light .settings-switch[aria-checked="true"] span,
+.glass-light .settings-switch[aria-checked="true"] span {
+  background-color: #ffffff !important;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2) !important;
+}
+
+/* Secondary & Action Buttons in Settings */
+.light .settings-page button.border-white\/10.bg-white\/5,
+.glass-light .settings-page button.border-white\/10.bg-white\/5 {
+  background-color: #ffffff !important;
+  border: 1px solid #cbd5e1 !important;
+  color: #0f172a !important;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04) !important;
+}
+.light .settings-page button.border-white\/10.bg-white\/5:hover,
+.glass-light .settings-page button.border-white\/10.bg-white\/5:hover {
+  background-color: #f1f5f9 !important;
+  border-color: #94a3b8 !important;
+}
+
+.light .settings-page button.bg-transparent.text-white\/50,
+.glass-light .settings-page button.bg-transparent.text-white\/50 {
+  background-color: #ffffff !important;
+  border: 1px solid #cbd5e1 !important;
+  color: #475569 !important;
+}
+.light .settings-page button.bg-transparent.text-white\/50:hover,
+.glass-light .settings-page button.bg-transparent.text-white\/50:hover {
+  background-color: #f1f5f9 !important;
+  color: #0f172a !important;
+  border-color: #94a3b8 !important;
+}
+
+/* Subtitle Style Select & Sliders */
+.light .settings-select,
+.glass-light .settings-select {
+  background-color: #ffffff !important;
+  border: 1px solid #cbd5e1 !important;
+  color: #0f172a !important;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04) !important;
+}
+.light .settings-select option,
+.glass-light .settings-select option {
+  background-color: #ffffff !important;
+  color: #0f172a !important;
+}
+
+.light .settings-page input[type="range"],
+.glass-light .settings-page input[type="range"] {
+  background-color: #e2e8f0 !important;
+}
+
+/* Watched Folders Placeholder & Danger Zone */
+.light .settings-empty-card,
+.glass-light .settings-empty-card {
+  border-color: #cbd5e1 !important;
+  background-color: #f8fafc !important;
+  color: #94a3b8 !important;
+}
+.light .settings-danger-card,
+.glass-light .settings-danger-card {
+  background: linear-gradient(to right, rgba(239, 68, 68, 0.05), #ffffff) !important;
+  border: 1.5px solid rgba(239, 68, 68, 0.25) !important;
+  box-shadow: 0 4px 20px rgba(239, 68, 68, 0.04) !important;
+}
+.light .settings-danger-card h4,
+.glass-light .settings-danger-card h4 {
+  color: #991b1b !important;
+}
+.light .settings-danger-card p,
+.glass-light .settings-danger-card p {
+  color: #475569 !important;
+}
+
+/* Glass Dark Mode for Settings */
+.glass .settings-panel {
+  background-color: rgba(14, 18, 27, 0.8) !important;
+  backdrop-filter: blur(20px) !important;
+  border-color: rgba(255, 255, 255, 0.1) !important;
+}
+.glass .settings-drive-card,
+.glass .settings-site-card {
+  background-color: rgba(0, 0, 0, 0.35) !important;
+  border-color: rgba(255, 255, 255, 0.08) !important;
+}

@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react'
 import { FolderOpen, Trash2, Plus, HardDrive, AlertTriangle, Check, X as CloseIcon, Maximize2, Download, Upload, Image as ImageIcon, Subtitles, Wifi, Bell, Compass, RotateCcw, Layers } from 'lucide-react'
 import ProfilePictureModal from '../components/ProfilePictureModal'
+import { normalizeProfileImage, resolveProfileImageUrl } from '../utils/profileImage'
 import { SUBTITLE_STYLE_KEY, SUBTITLE_FONT_SIZE_KEY, SUBTITLE_POSITION_KEY, type SubtitleStyle } from '../components/player/SubtitleOverlay'
 import { ONLINE_PROGRESS_STORAGE_KEY, setOnlineProgressEnabledLocal, NOTIFY_NEW_EPISODES_KEY, setNewEpisodeNotifyLocal } from '../utils/streamResume'
 import { cleanIpcError } from '../utils/ipcError'
@@ -25,6 +26,7 @@ const Settings: React.FC = () => {
   const [scanning, setScanning] = useState<string | null>(null)
   const [userName, setUserName] = useState(() => localStorage.getItem('mycinema_user_name') || 'User')
   const [profileImage, setProfileImage] = useState<string | null>(() => localStorage.getItem('mycinema_profile_image'))
+  const [profileImageFailed, setProfileImageFailed] = useState(false)
   const [isProfileModalOpen, setIsProfileModalOpen] = useState(false)
   const [isEditingName, setIsEditingName] = useState(false)
   const [tempName, setTempName] = useState(userName)
@@ -235,18 +237,24 @@ const Settings: React.FC = () => {
   }
 
   const handleProfileImageChange = async (newImage: string | null) => {
-    setProfileImage(newImage)
-    if (newImage) {
-      localStorage.setItem('mycinema_profile_image', newImage)
+    const normalizedImage = normalizeProfileImage(newImage) ?? null
+    setProfileImage(normalizedImage)
+    if (normalizedImage) {
+      localStorage.setItem('mycinema_profile_image', normalizedImage)
     } else {
       localStorage.removeItem('mycinema_profile_image')
     }
     window.dispatchEvent(new Event('mycinema_profile_updated'))
     try {
-      const res = await window.api.setUserProfile({ profileImage: newImage })
+      const res = await window.api.setUserProfile({ profileImage: normalizedImage })
       if (res?.profileImage) {
-        setProfileImage(res.profileImage)
-        localStorage.setItem('mycinema_profile_image', res.profileImage)
+        const savedImage = normalizeProfileImage(res.profileImage) ?? null
+        setProfileImage(savedImage)
+        if (savedImage) {
+          localStorage.setItem('mycinema_profile_image', savedImage)
+        } else {
+          localStorage.removeItem('mycinema_profile_image')
+        }
       }
     } catch (err) {
       console.error('Failed to persist profile image:', err)
@@ -255,11 +263,15 @@ const Settings: React.FC = () => {
 
   useEffect(() => {
     const handleProfileUpdate = () => {
-      setProfileImage(localStorage.getItem('mycinema_profile_image'))
+      setProfileImage(normalizeProfileImage(localStorage.getItem('mycinema_profile_image')) ?? null)
     }
     window.addEventListener('mycinema_profile_updated', handleProfileUpdate)
     return () => window.removeEventListener('mycinema_profile_updated', handleProfileUpdate)
   }, [])
+
+  useEffect(() => {
+    setProfileImageFailed(false)
+  }, [profileImage])
 
   useEffect(() => {
     fetchFolders()
@@ -283,8 +295,9 @@ const Settings: React.FC = () => {
         localStorage.setItem('mycinema_user_name', settings.userName)
       }
       if (settings?.profileImage !== undefined) {
-        setProfileImage(settings.profileImage)
-        if (settings.profileImage) localStorage.setItem('mycinema_profile_image', settings.profileImage)
+        const normalizedImage = normalizeProfileImage(settings.profileImage) ?? null
+        setProfileImage(normalizedImage)
+        if (normalizedImage) localStorage.setItem('mycinema_profile_image', normalizedImage)
         else localStorage.removeItem('mycinema_profile_image')
       }
     })
@@ -314,8 +327,9 @@ const Settings: React.FC = () => {
         localStorage.setItem('mycinema_user_name', settings.userName)
       }
       if (settings.profileImage !== undefined) {
-        setProfileImage(settings.profileImage)
-        if (settings.profileImage) localStorage.setItem('mycinema_profile_image', settings.profileImage)
+        const normalizedImage = normalizeProfileImage(settings.profileImage) ?? null
+        setProfileImage(normalizedImage)
+        if (normalizedImage) localStorage.setItem('mycinema_profile_image', normalizedImage)
         else localStorage.removeItem('mycinema_profile_image')
       }
     }).catch(() => {})
@@ -491,12 +505,17 @@ const Settings: React.FC = () => {
           <h3 className={sectionTitleClass}>User Profile</h3>
           <div className={`${panelClass} flex items-center gap-6 p-6 group`}>
             <div 
-              className={`relative flex h-16 w-16 cursor-pointer items-center justify-center overflow-hidden rounded-2xl ${profileImage ? 'bg-transparent' : 'bg-red-600'} text-2xl font-black text-white shadow-xl shadow-red-950/20 transition-transform duration-300 group-hover:scale-105`}
+              className={`relative flex h-16 w-16 cursor-pointer items-center justify-center overflow-hidden rounded-2xl ${profileImage && !profileImageFailed ? 'bg-transparent' : 'bg-red-600'} text-2xl font-black text-white shadow-xl shadow-red-950/20 transition-transform duration-300 group-hover:scale-105`}
               onClick={() => setIsProfileModalOpen(true)}
               title="Change Profile Picture"
             >
-              {profileImage ? (
-                <img src={profileImage} alt={userName} className="h-full w-full object-cover" />
+              {profileImage && !profileImageFailed ? (
+                <img
+                  src={resolveProfileImageUrl(profileImage) ?? undefined}
+                  alt={userName}
+                  className="h-full w-full object-cover"
+                  onError={() => setProfileImageFailed(true)}
+                />
               ) : (
                 userName.charAt(0).toUpperCase()
               )}

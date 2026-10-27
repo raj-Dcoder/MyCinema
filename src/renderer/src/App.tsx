@@ -19,6 +19,7 @@ import Download from './pages/Download'
 import FocusTube from './pages/FocusTube'
 import Updates from './pages/Updates'
 import appLogo from './assets/mycinema-logo.png'
+import { normalizeProfileImage, resolveProfileImageUrl } from './utils/profileImage'
 
 const getWhatsNewStorageKey = (version: string) => `mycinema_whats_new_seen_${version}`
 const SIDEBAR_EXPANDED_STORAGE_KEY = 'mycinema_sidebar_expanded'
@@ -90,6 +91,7 @@ const App: React.FC = () => {
   const [watchlistRefreshKey, setWatchlistRefreshKey] = useState(0)
   const [userName, setUserName] = useState(() => localStorage.getItem('mycinema_user_name') || 'User')
   const [profileImage, setProfileImage] = useState<string | null>(() => localStorage.getItem('mycinema_profile_image'))
+  const [profileImageFailed, setProfileImageFailed] = useState(false)
   const [isFullscreen, setIsFullscreen] = useState(true)
   const [launchFullscreen, setLaunchFullscreen] = useState(true)
   const [showWindowControls, setShowWindowControls] = useState(false)
@@ -285,14 +287,6 @@ const App: React.FC = () => {
         const localName = localStorage.getItem('mycinema_user_name')
         if (localName && localName !== 'User') {
           finalName = localName
-        } else {
-          try {
-            const ftReg = localStorage.getItem('mycinema_ft_test_user_registration')
-            if (ftReg) {
-              const parsed = JSON.parse(ftReg)
-              if (parsed?.name?.trim()) finalName = parsed.name.trim()
-            }
-          } catch {}
         }
       }
 
@@ -300,6 +294,7 @@ const App: React.FC = () => {
         const localImage = localStorage.getItem('mycinema_profile_image')
         if (localImage) finalImage = localImage
       }
+      finalImage = normalizeProfileImage(finalImage)
 
       if (finalName && finalName !== 'User' && finalName !== settings.userName) {
         window.api.setUserProfile({ userName: finalName, profileImage: finalImage ?? undefined }).catch(() => {})
@@ -311,7 +306,7 @@ const App: React.FC = () => {
         window.dispatchEvent(new Event('mycinema_name_updated'))
       }
       if (finalImage !== undefined) {
-        setProfileImage(finalImage)
+        setProfileImage(finalImage ?? null)
         if (finalImage) localStorage.setItem('mycinema_profile_image', finalImage)
         else localStorage.removeItem('mycinema_profile_image')
         window.dispatchEvent(new Event('mycinema_profile_updated'))
@@ -336,8 +331,9 @@ const App: React.FC = () => {
         window.dispatchEvent(new Event('mycinema_name_updated'))
       }
       if (settings.profileImage !== undefined) {
-        setProfileImage(settings.profileImage)
-        if (settings.profileImage) localStorage.setItem('mycinema_profile_image', settings.profileImage)
+        const normalizedImage = normalizeProfileImage(settings.profileImage)
+        setProfileImage(normalizedImage ?? null)
+        if (normalizedImage) localStorage.setItem('mycinema_profile_image', normalizedImage)
         else localStorage.removeItem('mycinema_profile_image')
         window.dispatchEvent(new Event('mycinema_profile_updated'))
       }
@@ -347,6 +343,10 @@ const App: React.FC = () => {
       syncStreamingMirrors(settings)
     })
   }, [])
+
+  useEffect(() => {
+    setProfileImageFailed(false)
+  }, [profileImage])
 
   useEffect(() => {
     const handleTrayToggle = (e: any) => {
@@ -1058,12 +1058,17 @@ const App: React.FC = () => {
             {/* Avatar (Fixed Left) */}
             <div className="absolute left-1 w-10 h-10 flex-shrink-0 flex items-center justify-center">
               <div 
-                className={`relative w-full h-full rounded-xl ${profileImage ? 'bg-transparent' : 'bg-red-600'} flex items-center justify-center text-white font-black text-lg shadow-lg italic cursor-pointer hover:scale-105 transition-transform overflow-hidden`}
+                className={`relative w-full h-full rounded-xl ${profileImage && !profileImageFailed ? 'bg-transparent' : 'bg-red-600'} flex items-center justify-center text-white font-black text-lg shadow-lg italic cursor-pointer hover:scale-105 transition-transform overflow-hidden`}
                 onClick={() => navigateToTab('settings')}
                 title="Settings & Profile"
               >
-                {profileImage ? (
-                  <img src={profileImage} alt={userName} className="w-full h-full object-cover" />
+                {profileImage && !profileImageFailed ? (
+                  <img
+                    src={resolveProfileImageUrl(profileImage) ?? undefined}
+                    alt={userName}
+                    className="w-full h-full object-cover"
+                    onError={() => setProfileImageFailed(true)}
+                  />
                 ) : (
                   userName.charAt(0).toUpperCase()
                 )}

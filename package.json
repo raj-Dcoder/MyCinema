@@ -3,7 +3,7 @@
   "version": "1.46.0",
   "main": "./out/main/index.js",
   "scripts": {
-    "dev": "electron-vite dev",
+    "dev": "set MYCINEMA_USER_DATA_DIR=%cd%\\.tmp-dev-profile&& electron-vite dev",
     "dev:host": "set MYCINEMA_MULTI_CLIENT=1&& set MYCINEMA_USER_DATA_DIR=%cd%\\.tmp-watch-host&& electron-vite dev",
     "dev:guest": "set MYCINEMA_MULTI_CLIENT=1&& set MYCINEMA_USER_DATA_DIR=%cd%\\.tmp-watch-guest&& electron-vite dev",
     "build": "electron-vite build",

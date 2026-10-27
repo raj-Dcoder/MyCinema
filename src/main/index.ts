@@ -579,6 +579,20 @@ const defaultAppSettings: AppSettings = {
   profileImage: null
 }
 
+const BUILTIN_PROFILE_AVATAR_PREFIX = 'mycinema-avatar:'
+const BUILTIN_PROFILE_AVATAR_IDS = ['anime', 'clay', 'vector', 'y2k'] as const
+
+function normalizeBuiltinProfileImage(image: string | null | undefined): string | null | undefined {
+  if (typeof image !== 'string') return image
+  if (image.startsWith(BUILTIN_PROFILE_AVATAR_PREFIX)) return image
+
+  const avatarId = BUILTIN_PROFILE_AVATAR_IDS.find((id) =>
+    new RegExp(`(?:^|[/\\\\])${id}(?:--[^/\\\\?#]+)?\\.png(?:[?#].*)?$`, 'i').test(image)
+  )
+
+  return avatarId ? `${BUILTIN_PROFILE_AVATAR_PREFIX}${avatarId}` : image
+}
+
 function getAppSettingsPath() {
   return join(app.getPath('userData'), 'app-settings.json')
 }
@@ -586,7 +600,14 @@ function getAppSettingsPath() {
 function loadAppSettings(): AppSettings {
   try {
     const raw = fs.readFileSync(getAppSettingsPath(), 'utf8')
-    return { ...defaultAppSettings, ...JSON.parse(raw) }
+    const settings = { ...defaultAppSettings, ...JSON.parse(raw) }
+    const profileImage = normalizeBuiltinProfileImage(settings.profileImage)
+    if (profileImage !== settings.profileImage) {
+      const migratedSettings = { ...settings, profileImage }
+      saveAppSettings(migratedSettings)
+      return migratedSettings
+    }
+    return settings
   } catch {
     return defaultAppSettings
   }
@@ -3054,7 +3075,10 @@ ipcMain.handle('set-user-profile', (_event, { userName, profileImage }: { userNa
   let processedImage = current.profileImage
 
   if (profileImage !== undefined) {
-    if (!profileImage) {
+    const normalizedBuiltinImage = normalizeBuiltinProfileImage(profileImage)
+    if (normalizedBuiltinImage !== profileImage) {
+      processedImage = normalizedBuiltinImage
+    } else if (!profileImage) {
       processedImage = null
       try {
         const avatarPath = join(app.getPath('userData'), 'user-avatar.png')

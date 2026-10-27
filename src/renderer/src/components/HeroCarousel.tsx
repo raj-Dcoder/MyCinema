@@ -179,7 +179,7 @@ const HeroCarousel: React.FC<HeroCarouselProps> = ({ items, onPlay, onShowDetail
 
   return (
     <div
-      className="keep-dark relative w-full min-h-[540px] h-[68vh] max-h-[760px] overflow-hidden bg-black group cursor-pointer"
+      className="keep-dark relative w-full min-h-[540px] h-[68vh] max-h-[760px] overflow-hidden bg-[#05080d] group cursor-pointer"
       onClick={() => onShowDetail(current)}
       role="button"
       tabIndex={0}
@@ -224,7 +224,7 @@ const HeroCarousel: React.FC<HeroCarouselProps> = ({ items, onPlay, onShowDetail
                 />
                 {/* Cinema Scrim Overlays — pure rich dark, protected against light-mode washout */}
                 <div className="absolute inset-0 z-20 bg-gradient-to-r from-black/90 via-black/45 to-transparent" />
-                <div className="absolute inset-0 z-20 bg-gradient-to-t from-black/90 via-black/35 to-transparent" />
+                <div className="absolute inset-0 z-20 bg-gradient-to-t from-[#05080d] via-[#05080d]/40 to-transparent" />
                 <div className="absolute inset-x-0 top-0 h-44 z-20 bg-gradient-to-b from-black/80 via-black/30 to-transparent" />
                 <div className="absolute inset-y-0 right-0 z-20 w-1/4 bg-gradient-to-l from-black/55 to-transparent" />
               </>
@@ -350,8 +350,6 @@ const HeroCarousel: React.FC<HeroCarouselProps> = ({ items, onPlay, onShowDetail
         </button>
       </div>
 
-      {/* Crisp Edge Divider: Sleek boundary line separating hero from library below */}
-      <div className="absolute inset-x-0 bottom-0 h-[1px] bg-white/15 shadow-[0_4px_16px_rgba(0,0,0,0.5)] z-30 pointer-events-none" />
     </div>
   )
 }

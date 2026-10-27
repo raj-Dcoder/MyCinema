@@ -1229,7 +1229,7 @@ const Home: React.FC<HomeProps> = ({ onPlay, onShowDetail, onNavigate, refreshKe
     <div onClickCapture={handleHomeClickCapture}>
       {(showHero || showLocalEmptyState || !localDataLoaded) && (
         <section className="-mt-6 mb-10">
-          <div className="keep-dark relative overflow-hidden w-full border-b border-black/10 dark:border-white/10 shadow-[0_16px_40px_rgba(0,0,0,0.15)]">
+          <div className="keep-dark relative overflow-hidden w-full">
             {/* Top Scrim Header inside Full-Bleed Hero */}
             <div className="absolute left-0 right-0 top-0 z-30 pointer-events-none">
               <div className="mx-auto flex max-w-[1600px] items-start justify-between px-8 pt-8 md:px-16">

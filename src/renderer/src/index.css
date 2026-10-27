@@ -392,29 +392,41 @@
   background-color: #d1d5db !important;
 }
 
-/* Text Hierarchy — CRISP, HIGH-CONTRAST */
+/* Text Hierarchy — CRISP, HIGH-CONTRAST (All Opacities Mapped) */
 .light .text-white,
 .light .text-white\/95,
 .light .text-white\/90,
-.light .text-white\/80 {
+.light .text-white\/85,
+.light .text-white\/80,
+.light .text-white\/75 {
   color: #111827 !important;
 }
 .light .text-white\/70,
-.light .text-white\/60 {
+.light .text-white\/65,
+.light .text-white\/60,
+.light .text-white\/55 {
   color: #1f2937 !important;
 }
 .light .text-white\/50,
+.light .text-white\/45,
 .light .text-white\/40 {
-  color: #374151 !important;
+  color: #4b5563 !important;
 }
 .light .text-white\/35,
 .light .text-white\/30,
 .light .text-white\/25,
-.light .text-white\/20 {
+.light .text-white\/20,
+.light .text-white\/15,
+.light .text-white\/10 {
   color: #6b7280 !important;
 }
-.light .hover\:text-white:hover { color: #111827 !important; }
-.light .hover\:text-white\/95:hover { color: #111827 !important; }
+.light .hover\:text-white:hover,
+.light .hover\:text-white\/95:hover,
+.light .hover\:text-white\/90:hover,
+.light .hover\:text-white\/85:hover,
+.light .hover\:text-white\/80:hover {
+  color: #111827 !important;
+}
 
 /* Borders & Lines — SOLID & VISIBLE */
 .light .border-white\/5,
@@ -812,6 +824,161 @@
 .light .text-sky-300\/80,
 .light .text-sky-400 {
   color: #0284c7 !important;
+}
+
+/* ── FocusTube Top Bar Refinement (Theater Mode) ─────────────────── */
+.light header.relative.z-40 {
+  background-color: #ffffff !important;
+  border-bottom: 1px solid #e5e7eb !important;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05) !important;
+}
+.light header.relative.z-40 button {
+  color: #111827 !important;
+}
+/* Back to Feed button */
+.light header.relative.z-40 button.border-white\/10 {
+  background-color: #ffffff !important;
+  border: 1px solid #d1d5db !important;
+  color: #111827 !important;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04) !important;
+}
+.light header.relative.z-40 button.border-white\/10:hover {
+  background-color: #f3f4f6 !important;
+  border-color: #9ca3af !important;
+  color: #000000 !important;
+}
+/* Search Queue input & icon */
+.light header.relative.z-40 input[type="text"] {
+  background-color: #f3f4f6 !important;
+  border: 1px solid #e5e7eb !important;
+  color: #111827 !important;
+}
+.light header.relative.z-40 input[type="text"]::placeholder {
+  color: #9ca3af !important;
+}
+.light header.relative.z-40 input[type="text"]:hover {
+  border-color: #d1d5db !important;
+  background-color: #f9fafb !important;
+}
+.light header.relative.z-40 input[type="text"]:focus {
+  background-color: #ffffff !important;
+  border-color: #e50914 !important;
+  box-shadow: 0 0 0 3px rgba(229, 9, 20, 0.12) !important;
+}
+.light header.relative.z-40 .pointer-events-none svg {
+  color: #6b7280 !important;
+}
+/* Playing from: category dropdown button */
+.light header.relative.z-40 button.border-primary\/40 {
+  background-color: #fef2f2 !important;
+  border: 1px solid #fecaca !important;
+}
+.light header.relative.z-40 button.border-primary\/40:hover {
+  background-color: #fee2e2 !important;
+}
+.light header.relative.z-40 button.border-primary\/40 span.font-normal {
+  color: #6b7280 !important;
+}
+.light header.relative.z-40 button.border-primary\/40 span.font-black {
+  color: #b91c1c !important;
+}
+.light header.relative.z-40 button.border-primary\/40 svg {
+  color: #dc2626 !important;
+}
+/* Category Dropdown Menu */
+.light header.relative.z-40 .absolute.right-0.top-full {
+  background-color: #ffffff !important;
+  border: 1px solid #e5e7eb !important;
+  box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.1) !important;
+}
+.light header.relative.z-40 .absolute.right-0.top-full button {
+  color: #374151 !important;
+}
+.light header.relative.z-40 .absolute.right-0.top-full button:hover {
+  background-color: #f3f4f6 !important;
+  color: #111827 !important;
+}
+.light header.relative.z-40 .absolute.right-0.top-full button.bg-primary\/20 {
+  background-color: #fee2e2 !important;
+  color: #b91c1c !important;
+}
+
+/* ── FocusTube Queue Cards (High Visibility Titles & Channel Names) ── */
+.light aside.group\/sidepanel div.group:has(> .aspect-video) {
+  background-color: #ffffff !important;
+  border: 1px solid #e5e7eb !important;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04) !important;
+}
+.light aside.group\/sidepanel div.group:has(> .aspect-video):hover {
+  background-color: #f9fafb !important;
+  border-color: #d1d5db !important;
+}
+.light aside.group\/sidepanel div.group.border-primary\/60 {
+  background-color: #fef2f2 !important;
+  border: 1px solid #fca5a5 !important;
+  box-shadow: 0 2px 8px -2px rgba(229, 9, 20, 0.18) !important;
+}
+/* Force queue card video titles to bold dark slate */
+.light aside.group\/sidepanel h4,
+.light aside.group\/sidepanel .line-clamp-2 {
+  color: #111827 !important;
+  font-weight: 700 !important;
+}
+/* Force queue card channel names to readable medium gray */
+.light aside.group\/sidepanel p.text-\[11px\],
+.light aside.group\/sidepanel p.truncate {
+  color: #4b5563 !important;
+  font-weight: 500 !important;
+}
+
+/* ── FocusTube Description Section (Crystal Clear Readability) ───── */
+.light section[aria-label="Description"] {
+  background-color: #ffffff !important;
+  border: 1px solid #d1d5db !important;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05) !important;
+}
+.light section[aria-label="Description"] button[type="button"] span {
+  color: #111827 !important;
+}
+.light section[aria-label="Description"] svg {
+  color: #6b7280 !important;
+}
+.light section[aria-label="Description"] .whitespace-pre-wrap,
+.light section[aria-label="Description"] .whitespace-pre-wrap span {
+  color: #1f2937 !important;
+}
+.light section[aria-label="Description"] a,
+.light section[aria-label="Description"] button.text-sky-400 {
+  color: #0284c7 !important;
+}
+.light section[aria-label="Description"] a:hover,
+.light section[aria-label="Description"] button.text-sky-400:hover {
+  color: #0369a1 !important;
+  text-decoration: underline !important;
+}
+
+/* ── FocusTube Chapters & Comments Sections ───────────────────────── */
+.light section[aria-label="Chapters"] {
+  background-color: #ffffff !important;
+  border: 1px solid #d1d5db !important;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05) !important;
+}
+.light section[aria-label="Chapters"] button {
+  color: #111827 !important;
+}
+.light aside.group\/sidepanel button.group\/chap {
+  background-color: #ffffff !important;
+  border: 1px solid #e5e7eb !important;
+}
+.light aside.group\/sidepanel button.group\/chap:hover {
+  background-color: #f9fafb !important;
+  border-color: #d1d5db !important;
+}
+.light aside.group\/sidepanel button.group\/chap p {
+  color: #111827 !important;
+}
+.light aside.group\/sidepanel button.group\/chap span.font-mono {
+  color: #4b5563 !important;
 }
 
 

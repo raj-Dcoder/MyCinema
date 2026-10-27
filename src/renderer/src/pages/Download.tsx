@@ -1106,6 +1106,94 @@ const Download: React.FC<DownloadProps> = ({ onPlay, onShowDetail }) => {
           />
         )}
 
+        {/* Explore Categories & Watchlist Shortcuts when no search results */}
+        {results.length === 0 && !searching && (
+          <div className="space-y-7 pb-12 animate-in fade-in duration-300">
+            {/* Quick Explore Category Chips */}
+            <div className="rounded-2xl border border-secondary/50 bg-surface/50 p-5 shadow-sm">
+              <div className="flex items-center justify-between mb-3">
+                <div className="flex items-center gap-2">
+                  <Film size={15} className="text-primary" />
+                  <h3 className="text-xs font-black uppercase tracking-[0.16em] text-muted">
+                    Explore & Find Downloads
+                  </h3>
+                </div>
+                <span className="text-[11px] text-muted/60 font-medium">Click to search TMDB</span>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                {[
+                  { label: '🔥 Trending Movies', q: 'Trending' },
+                  { label: '🍿 Latest 2026', q: '2026' },
+                  { label: '📺 Top Series', q: 'Series' },
+                  { label: '⚡ Action & Thriller', q: 'Action' },
+                  { label: '🚀 Sci-Fi & Space', q: 'Sci-Fi' },
+                  { label: '🎌 Anime', q: 'Anime' },
+                  { label: '🎭 Comedy', q: 'Comedy' },
+                  { label: '🇮🇳 Hindi & Dual Audio', q: 'Hindi' }
+                ].map(cat => (
+                  <button
+                    key={cat.label}
+                    onClick={() => setQuery(cat.q)}
+                    className="px-3.5 py-2 rounded-xl border border-secondary bg-surface text-text/80 text-xs font-bold transition-all hover:scale-105 hover:border-primary/50 hover:text-primary active:scale-95 shadow-sm"
+                  >
+                    {cat.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Saved in Watchlist to Download */}
+            {watchlist.filter(w => w.isExternal).length > 0 && (
+              <div>
+                <div className="flex items-center justify-between mb-3.5">
+                  <div className="flex items-center gap-2">
+                    <Bookmark size={16} className="text-primary" />
+                    <h3 className="text-xs font-black uppercase tracking-[0.16em] text-muted">
+                      Ready to Download from Watchlist
+                    </h3>
+                  </div>
+                  <span className="text-[11px] text-muted/70 font-semibold">
+                    {watchlist.filter(w => w.isExternal).length} titles saved
+                  </span>
+                </div>
+                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-3.5">
+                  {watchlist.filter(w => w.isExternal).slice(0, 6).map(item => (
+                    <div
+                      key={item.id}
+                      onClick={() => setQuery(item.title)}
+                      className="group relative flex flex-col rounded-xl overflow-hidden border border-secondary/50 bg-surface transition-all duration-300 hover:border-primary/60 hover:scale-[1.02] cursor-pointer shadow-sm"
+                    >
+                      <div className="aspect-[2/3] bg-surface relative overflow-hidden">
+                        {item.poster_path ? (
+                          <img
+                            src={item.poster_path}
+                            alt={item.title}
+                            className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-105"
+                            loading="lazy"
+                          />
+                        ) : (
+                          <div className="w-full h-full flex items-center justify-center text-muted/30">
+                            <Film size={32} />
+                          </div>
+                        )}
+                        <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-black/20 to-transparent opacity-0 group-hover:opacity-100 transition-opacity flex items-end p-2.5">
+                          <span className="w-full py-1.5 rounded-lg bg-primary text-white text-[10px] font-black uppercase tracking-wider text-center flex items-center justify-center gap-1 shadow-md">
+                            <DownloadIcon size={11} /> Find Sources
+                          </span>
+                        </div>
+                      </div>
+                      <div className="p-2.5 bg-surface">
+                        <p className="text-xs font-bold text-text truncate">{item.title}</p>
+                        <p className="text-[10px] text-muted mt-0.5">{item.release_year || 'Movie'}</p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
         {/* Search Results Grid */}
         {results.length > 0 && (
           <div className={`grid gap-4 ${panelOpen ? 'grid-cols-2 sm:grid-cols-3 md:grid-cols-4' : 'grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6'}`}>

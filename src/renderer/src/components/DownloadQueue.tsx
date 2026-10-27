@@ -258,9 +258,9 @@ export const DownloadQueue: React.FC<DownloadQueueProps> = ({
   }
 
   return (
-    <div className="bg-[#12161F]/90 backdrop-blur-xl border border-white/10 rounded-2xl overflow-hidden mb-8 shadow-2xl transition-all duration-300">
+    <div className="download-queue-container bg-[#12161F]/90 backdrop-blur-xl border border-white/10 rounded-2xl overflow-hidden mb-8 shadow-2xl transition-all duration-300">
       {/* ─── Top Telemetry & Control Bar: Guaranteed Single-Row (No Wrapping) ───── */}
-      <div className="flex items-center justify-between gap-3 px-5 py-3 border-b border-white/[0.08] bg-white/[0.015] whitespace-nowrap overflow-x-auto scrollbar-none">
+      <div className="download-queue-header flex items-center justify-between gap-3 px-5 py-3 border-b border-white/[0.08] bg-white/[0.015] whitespace-nowrap overflow-x-auto scrollbar-none">
         {/* Left: Queue Title, Sub-Navigation Tabs & Live Speed Telemetry */}
         <div className="flex items-center gap-3 shrink-0">
           <div className="flex items-center gap-2 mr-1 shrink-0">
@@ -273,12 +273,12 @@ export const DownloadQueue: React.FC<DownloadQueueProps> = ({
           </div>
 
           {/* Sub-Navigation Tabs */}
-          <div className="flex items-center bg-black/40 p-1 rounded-xl border border-white/10 text-xs font-semibold shrink-0">
+          <div className="download-queue-tabs flex items-center bg-black/40 p-1 rounded-xl border border-white/10 text-xs font-semibold shrink-0">
             <button
               onClick={() => setActiveTab('all')}
               className={`px-3 py-1 rounded-lg transition-all ${
                 activeTab === 'all'
-                  ? 'bg-white/15 text-white shadow-sm'
+                  ? 'active-all bg-white/15 text-white shadow-sm'
                   : 'text-white/50 hover:text-white/80'
               }`}
             >
@@ -403,7 +403,7 @@ export const DownloadQueue: React.FC<DownloadQueueProps> = ({
             <select
               value={maxConcurrent}
               onChange={(e) => void onMaxConcurrentChange(Number(e.target.value))}
-              className="rounded-lg border border-white/10 bg-black/50 px-2 py-1 text-[11px] font-bold text-white outline-none hover:border-white/25 focus:border-primary cursor-pointer"
+              className="download-queue-select rounded-lg border border-white/10 bg-black/50 px-2 py-1 text-[11px] font-bold text-white outline-none hover:border-white/25 focus:border-primary cursor-pointer"
               aria-label="Maximum simultaneous downloads"
             >
               {CONCURRENT_OPTIONS.map(n => (
@@ -432,7 +432,7 @@ export const DownloadQueue: React.FC<DownloadQueueProps> = ({
           )}
         </div>
       ) : (
-        <div className="divide-y divide-white/[0.05]">
+        <div className="download-queue-list divide-y divide-white/[0.05]">
           {displayedDownloads.map((dl, idx) => {
             const parsed = parseTorrentTitle(dl.name || dl.title || '', dl.title)
             const matchingVideo = (() => {
@@ -476,7 +476,7 @@ export const DownloadQueue: React.FC<DownloadQueueProps> = ({
             return (
               <div
                 key={dl.id}
-                className={`group px-5 py-3.5 transition-colors ${
+                className={`download-queue-row group px-5 py-3.5 transition-colors ${
                   isDownloading
                     ? 'bg-primary/[0.015] hover:bg-primary/[0.03]'
                     : isDone
@@ -713,7 +713,7 @@ export const DownloadQueue: React.FC<DownloadQueueProps> = ({
                 {/* Bottom line: Progress Bar (Only for active or non-completed downloads) */}
                 {(!isDone || isDownloading || isConnecting) && (
                   <div className="mt-2.5 flex items-center gap-3">
-                    <div className="flex-1 h-1.5 bg-white/10 rounded-full overflow-hidden">
+                    <div className="download-queue-progress-track flex-1 h-2 bg-white/10 rounded-full overflow-hidden">
                       <div
                         className={`h-full rounded-full transition-all duration-300 ${
                           isDone ? 'bg-emerald-400' :

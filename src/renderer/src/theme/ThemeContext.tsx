@@ -1,6 +1,6 @@
 import React, { createContext, useCallback, useContext, useEffect, useState } from 'react'
 
-export type AppTheme = 'dark' | 'light'
+export type AppTheme = 'dark' | 'light' | 'glass' | 'glass-light'
 
 const THEME_STORAGE_KEY = 'mycinema_theme'
 
@@ -14,10 +14,12 @@ const ThemeContext = createContext<{
   toggleTheme: () => {},
 })
 
+const VALID_THEMES: AppTheme[] = ['dark', 'light', 'glass', 'glass-light']
+
 const getInitialTheme = (): AppTheme => {
   try {
-    const saved = localStorage.getItem(THEME_STORAGE_KEY)
-    if (saved === 'light' || saved === 'dark') return saved
+    const saved = localStorage.getItem(THEME_STORAGE_KEY) as AppTheme
+    if (VALID_THEMES.includes(saved)) return saved
   } catch {}
   return 'dark'
 }
@@ -27,9 +29,22 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
   useEffect(() => {
     const root = document.documentElement
-    root.classList.toggle('light', theme === 'light')
-    root.classList.toggle('dark', theme === 'dark')
-    root.style.colorScheme = theme
+    root.classList.remove('light', 'dark', 'glass', 'glass-light')
+
+    if (theme === 'light') {
+      root.classList.add('light')
+      root.style.colorScheme = 'light'
+    } else if (theme === 'glass-light') {
+      root.classList.add('light', 'glass-light')
+      root.style.colorScheme = 'light'
+    } else if (theme === 'glass') {
+      root.classList.add('dark', 'glass')
+      root.style.colorScheme = 'dark'
+    } else {
+      root.classList.add('dark')
+      root.style.colorScheme = 'dark'
+    }
+
     try {
       localStorage.setItem(THEME_STORAGE_KEY, theme)
     } catch {}
@@ -38,8 +53,14 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
   const setTheme = useCallback((t: AppTheme) => setThemeState(t), [])
   const toggleTheme = useCallback(
-    () => setThemeState((t) => (t === 'dark' ? 'light' : 'dark')),
-    []
+    () =>
+      setThemeState((t) => {
+        if (t === 'dark') return 'light'
+        if (t === 'light') return 'glass'
+        if (t === 'glass') return 'glass-light'
+        return 'dark'
+      }),
+    [],
   )
 
   return (

@@ -2273,7 +2273,7 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
   // Either the flag already said so, or the embed told us mid-flight.
   if (!video.embeddable || refused) {
     return createPortal(
-      <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black p-8">
+      <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black p-8 keep-dark dark">
         <div className="w-full max-w-lg border border-white/10 bg-[#0b0b0b] p-8 text-center space-y-5">
           <h3 className="text-lg font-black uppercase italic text-white">Embedding disabled</h3>
           <p className="text-sm text-white/50 font-semibold">
@@ -2320,7 +2320,7 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
         fsActive ? 'left-0' : ''
       } ${
         isFullscreenLayer ? 'z-[100]' : 'z-[70]'
-      } m-0 flex flex-col text-white select-none bg-transparent ${
+      } m-0 flex flex-col text-white select-none bg-transparent keep-dark dark ${
         isMinimized && !isTransitioning
           ? 'pointer-events-none'
           : fsActive

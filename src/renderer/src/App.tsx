@@ -756,7 +756,7 @@ const App: React.FC = () => {
 
   return (
     <div
-      className={`flex h-screen bg-background text-text font-sans overflow-hidden ${theme === 'light' ? 'light' : 'dark'}`}
+      className={`flex h-screen bg-background text-text font-sans overflow-hidden ${theme === 'light' ? 'light' : theme === 'glass-light' ? 'light glass-light' : theme === 'glass' ? 'dark glass' : 'dark'}`}
       onClick={handleAppSurfaceClick}
     >
       <WindowControls />

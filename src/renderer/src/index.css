@@ -572,6 +572,7 @@
 .light .bg-\[\#0f141d\]\/70,
 .light .bg-\[\#0B0F16\]\/70,
 .light .bg-\[\#111111\]\/90,
+.light .bg-\[\#0a0f18\]\/80,
 .light .bg-\[\#12161F\]\/90,
 .light .bg-\[\#14161f\]\/95,
 .light .bg-\[\#16181f\]\/95,
@@ -2635,4 +2636,238 @@
   background-color: rgba(18, 22, 31, 0.8) !important;
   backdrop-filter: blur(24px) !important;
   border-color: rgba(255, 255, 255, 0.12) !important;
+}
+
+
+/* ------------------------------------------------------------------ */
+/* 10. UPDATES PAGE — Crisp, High-Contrast Modern Light Theme         */
+/* ------------------------------------------------------------------ */
+
+/* Page Header & Divider */
+.light .updates-header,
+.glass-light .updates-header {
+  border-bottom-color: #e5e7eb !important;
+}
+.light .updates-header h2,
+.glass-light .updates-header h2 {
+  color: #111827 !important;
+}
+.light .updates-header p,
+.glass-light .updates-header p {
+  color: #6b7280 !important;
+}
+
+/* Quick Action Buttons (Expand All, Collapse All) */
+.light .updates-action-btn,
+.glass-light .updates-action-btn {
+  background-color: #ffffff !important;
+  border: 1px solid #d1d5db !important;
+  color: #374151 !important;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04) !important;
+}
+.light .updates-action-btn:hover,
+.glass-light .updates-action-btn:hover {
+  background-color: #f3f4f6 !important;
+  color: #111827 !important;
+  border-color: #9ca3af !important;
+}
+
+/* Search Bar & Version Select */
+.light .updates-search-box input,
+.glass-light .updates-search-box input {
+  background-color: #ffffff !important;
+  border: 1px solid #d1d5db !important;
+  color: #111827 !important;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05) !important;
+}
+.light .updates-search-box input:focus,
+.glass-light .updates-search-box input:focus {
+  border-color: #e50914 !important;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08) !important;
+}
+.light .updates-search-box input::placeholder,
+.glass-light .updates-search-box input::placeholder {
+  color: #9ca3af !important;
+}
+
+.light .updates-version-select,
+.glass-light .updates-version-select {
+  background-color: #ffffff !important;
+  border: 1px solid #d1d5db !important;
+  color: #111827 !important;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04) !important;
+}
+.light .updates-version-select:focus,
+.glass-light .updates-version-select:focus {
+  border-color: #e50914 !important;
+}
+.light .updates-version-select option,
+.glass-light .updates-version-select option {
+  background-color: #ffffff !important;
+  color: #111827 !important;
+}
+
+/* Release Cards */
+.light .updates-release-card,
+.glass-light .updates-release-card {
+  background-color: #ffffff !important;
+  border: 1px solid #e5e7eb !important;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.04), 0 1px 3px rgba(0, 0, 0, 0.03) !important;
+}
+.light .updates-release-card:hover,
+.glass-light .updates-release-card:hover {
+  border-color: #d1d5db !important;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.06), 0 2px 4px rgba(0, 0, 0, 0.04) !important;
+}
+
+/* Latest Release Card (Special Accent) */
+.light .updates-release-card.is-latest,
+.glass-light .updates-release-card.is-latest {
+  background: linear-gradient(180deg, rgba(229, 9, 20, 0.03) 0%, #ffffff 100%) !important;
+  border: 1.5px solid rgba(229, 9, 20, 0.3) !important;
+  box-shadow: 0 8px 30px rgba(229, 9, 20, 0.06), 0 1px 3px rgba(0, 0, 0, 0.04) !important;
+}
+
+/* Release Card Header Banner */
+.light .updates-release-header,
+.glass-light .updates-release-header {
+  background-color: transparent !important;
+}
+.light .updates-release-version,
+.glass-light .updates-release-version {
+  color: #111827 !important;
+  font-weight: 800 !important;
+}
+.light .updates-release-card.is-latest .updates-release-version,
+.glass-light .updates-release-card.is-latest .updates-release-version {
+  color: #dc2626 !important;
+}
+
+.light .updates-count-badge,
+.glass-light .updates-count-badge {
+  background-color: #f3f4f6 !important;
+  border: 1px solid #e5e7eb !important;
+  color: #4b5563 !important;
+  font-weight: 700 !important;
+}
+
+.light .updates-release-date,
+.glass-light .updates-release-date {
+  color: #6b7280 !important;
+}
+
+.light .updates-release-header span,
+.glass-light .updates-release-header span {
+  color: #4b5563 !important;
+}
+
+.light .updates-chevron-btn,
+.glass-light .updates-chevron-btn {
+  background-color: #f3f4f6 !important;
+  border: 1px solid #e5e7eb !important;
+  color: #374151 !important;
+}
+.light .updates-chevron-btn:hover,
+.glass-light .updates-chevron-btn:hover {
+  background-color: #e5e7eb !important;
+  color: #111827 !important;
+  border-color: #d1d5db !important;
+}
+
+/* Release Summary */
+.light .updates-release-summary p,
+.glass-light .updates-release-summary p {
+  color: #4b5563 !important;
+  font-weight: 500 !important;
+}
+
+/* Collapsible Updates List Container */
+.light .updates-list-container,
+.glass-light .updates-list-container {
+  background-color: #f9fafb !important;
+  border-top: 1px solid #e5e7eb !important;
+}
+
+/* Individual Update Item Cards */
+.light .updates-item-card,
+.glass-light .updates-item-card {
+  background-color: #ffffff !important;
+  border: 1px solid #e5e7eb !important;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.03) !important;
+}
+.light .updates-item-card:hover,
+.glass-light .updates-item-card:hover {
+  background-color: #ffffff !important;
+  border-color: #cbd5e1 !important;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.06) !important;
+}
+
+.light .updates-item-title,
+.glass-light .updates-item-title {
+  color: #111827 !important;
+  font-weight: 700 !important;
+}
+
+.light .updates-item-desc,
+.glass-light .updates-item-desc {
+  color: #4b5563 !important;
+  line-height: 1.55 !important;
+}
+
+/* Category Badges in Light Mode */
+.light .updates-category-badge.bg-emerald-500\/10,
+.glass-light .updates-category-badge.bg-emerald-500\/10 {
+  background-color: #ecfdf5 !important;
+  color: #047857 !important;
+  border-color: #a7f3d0 !important;
+  font-weight: 700 !important;
+}
+.light .updates-category-badge.bg-pink-500\/10,
+.glass-light .updates-category-badge.bg-pink-500\/10 {
+  background-color: #fdf2f8 !important;
+  color: #be185d !important;
+  border-color: #fbcfe8 !important;
+  font-weight: 700 !important;
+}
+.light .updates-category-badge.bg-cyan-500\/10,
+.glass-light .updates-category-badge.bg-cyan-500\/10 {
+  background-color: #ecfeff !important;
+  color: #0e7490 !important;
+  border-color: #a5f3fc !important;
+  font-weight: 700 !important;
+}
+.light .updates-category-badge.bg-amber-500\/10,
+.glass-light .updates-category-badge.bg-amber-500\/10 {
+  background-color: #fffbeb !important;
+  color: #b45309 !important;
+  border-color: #fde68a !important;
+  font-weight: 700 !important;
+}
+.light .updates-category-badge.bg-violet-500\/10,
+.glass-light .updates-category-badge.bg-violet-500\/10 {
+  background-color: #f5f3ff !important;
+  color: #6d28d9 !important;
+  border-color: #ddd6fe !important;
+  font-weight: 700 !important;
+}
+.light .updates-category-badge.bg-primary\/10,
+.glass-light .updates-category-badge.bg-primary\/10 {
+  background-color: #fef2f2 !important;
+  color: #dc2626 !important;
+  border-color: #fecaca !important;
+  font-weight: 700 !important;
+}
+
+/* Glass Dark Mode for Updates */
+.glass .updates-release-card {
+  background-color: rgba(14, 18, 27, 0.8) !important;
+  backdrop-filter: blur(20px) !important;
+  border-color: rgba(255, 255, 255, 0.1) !important;
+}
+.glass .updates-list-container {
+  background-color: rgba(0, 0, 0, 0.25) !important;
+}
+.glass .updates-item-card {
+  background-color: rgba(255, 255, 255, 0.03) !important;
+  border-color: rgba(255, 255, 255, 0.07) !important;
 }

@@ -7,6 +7,9 @@ module.exports = {
   ],
   theme: {
     extend: {
+      spacing: {
+        '50': '12.5rem',
+      },
       fontFamily: {
         sans: ['Poppins', 'Segoe UI Variable', 'Segoe UI', 'system-ui', 'sans-serif'],
       },

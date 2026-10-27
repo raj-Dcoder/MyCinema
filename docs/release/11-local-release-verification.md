@@ -33,6 +33,16 @@ rg -n "version: 'X.Y.Z'|# MyCinema vX.Y.Z" src/renderer/src/components/WhatsNewO
 
 All package version outputs must be exactly `X.Y.Z`. The `rg` output must show the What's New version and the top release note section.
 
+If `LATEST_RELEASE.tourId` is set, also verify the tour exists and its anchors are present:
+
+```powershell
+rg -n "tourId: '<id>'" src/renderer/src/components/WhatsNewOnboarding.tsx
+rg -n "'<id>'" src/renderer/src/components/ProductTour.tsx
+rg -n 'data-tour="' src/renderer/src/App.tsx src/renderer/src/pages/Settings.tsx src/renderer/src/pages
+```
+
+Every `target` in the tour's steps must match a `data-tour` anchor rendered on the step's `tab`. Then preview with `npm run dev` and `?tour=<id>`.
+
 ## Optional Manual Checks
 
 When useful, launch or package locally:

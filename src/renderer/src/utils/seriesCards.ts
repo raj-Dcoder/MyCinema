@@ -35,7 +35,22 @@ export function groupSeriesCards(videos: Video[]) {
     const ids = episodeIds.get(key) || new Set<string>()
     ids.add(getEpisodeIdentity(episode))
     episodeIds.set(key, ids)
-    if (!fallbackBySeries.has(key)) fallbackBySeries.set(key, episode)
+    const existingFallback = fallbackBySeries.get(key)
+    if (!existingFallback) {
+      fallbackBySeries.set(key, episode)
+    } else {
+      const currentHasPoster = Boolean(existingFallback.poster_path && !existingFallback.poster_path.includes('-snap.jpg'))
+      const newHasPoster = Boolean(episode.poster_path && !episode.poster_path.includes('-snap.jpg'))
+      if (!currentHasPoster && newHasPoster) {
+        fallbackBySeries.set(key, episode)
+      } else if (currentHasPoster === newHasPoster) {
+        const currentSeason = Number(existingFallback.season || 1)
+        const newSeason = Number(episode.season || 1)
+        if (newSeason < currentSeason || (newSeason === currentSeason && Number(episode.episode || 0) < Number(existingFallback.episode || 0))) {
+          fallbackBySeries.set(key, episode)
+        }
+      }
+    }
 
     if (isInProgressEpisode(episode)) {
       const currentResume = resumeBySeries.get(key)

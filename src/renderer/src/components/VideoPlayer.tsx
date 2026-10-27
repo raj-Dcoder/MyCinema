@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState, useMemo } from 'react'
-import { Play, Pause, Rewind, FastForward, X, Maximize, Minimize, Volume2, VolumeX, Subtitles, Music, SkipForward as SkipNext, ArrowLeft, MessageSquareText, AlertTriangle, Check, Monitor, RectangleHorizontal, Crop, FolderOpen, Info, Film, HardDrive, ChevronDown, ChevronUp, ListVideo, Users, Search, Globe, Loader2, Download, RotateCcw, Zap, Sparkles, Wand2, PictureInPicture2, Mic, MicOff, Magnet } from 'lucide-react'
+import { Play, Pause, Rewind, FastForward, X, Maximize, Minimize, Maximize2, Volume2, VolumeX, Subtitles, Music, SkipForward as SkipNext, ArrowLeft, MessageSquareText, AlertTriangle, Check, Monitor, RectangleHorizontal, Crop, FolderOpen, Info, Film, HardDrive, ChevronDown, ChevronUp, ListVideo, Users, Search, Globe, Loader2, Download, RotateCcw, Zap, Sparkles, Wand2, PictureInPicture2, Mic, MicOff, Magnet } from 'lucide-react'
 import { Video } from '../types'
 import { getMediaUnitIdentity, groupMediaVersions } from '../utils/mediaVersions'
 import { getTorrentSourceHealthScore, getTorrentSourceSpeedLabel, isHevcSource } from '../utils/torrentSources'
@@ -11,6 +11,7 @@ import { SubtitleOverlay, SUBTITLE_STYLE_KEY, SUBTITLE_FONT_SIZE_KEY, SUBTITLE_P
 import { VideoStatsOverlay } from './player/VideoStatsOverlay'
 import { SubtitleAppearanceGuide } from './FeatureGuides'
 import { useAudioBoost, AudioBoostProfile, AudioBoostIntensity, AUDIO_BOOST_PROFILES, AUDIO_BOOST_INTENSITIES } from '../hooks/useAudioBoost'
+import { isOnlineProgressEnabled, formatResumeTime, safeGetStreamProgress, safeUpdateStreamProgress, safeFollowSeries, safePrioritizeTempFiles, FOLLOW_TOAST_EVENT } from '../utils/streamResume'
 import { useIntroSkip, IntroDbSegment, getIntroDbSegmentKey, getIntroDbSegmentLabel, getIntroDbSegmentAccentClass, INTRODB_SKIP_END_PADDING_SECONDS, INTRODB_AUTO_SKIP_CONFIRMATION_MS } from '../hooks/useIntroSkip'
 import {
   SUBTITLE_SYNC_COARSE_STEP_MS,
@@ -41,6 +42,28 @@ const hasSourceEpisodeMarker = (source: any) => (
   /\b(?:episode|ep)[\s._-]*\d{1,3}\b/i.test(source.title || '')
 )
 const isSourceSeasonPack = (source: any) => Boolean(source.isSeasonPack) && !hasSourceEpisodeMarker(source)
+// ── Online stream resume identity (source-agnostic, TMDB-keyed) ─────────────
+const getStreamResumeIdentity = (video: Video) => {
+  if (!video.tmdb_id || (video.type !== 'movie' && video.type !== 'series')) return null
+  return {
+    tmdb_id: video.tmdb_id,
+    media_type: video.type,
+    season: video.type === 'series' ? (video.season ?? null) : null,
+    episode: video.type === 'series' ? (video.episode ?? null) : null
+  }
+}
+const buildStreamResumeSnapshot = (video: Video) => {
+  const title = video.type === 'series' && (video as any).series_name
+    ? (video as any).series_name
+    : video.title
+  return {
+    title,
+    poster_path: video.poster_path || null,
+    backdrop_path: video.backdrop_path || null,
+    overview: video.overview || null,
+    release_year: video.release_year ?? null
+  }
+}
 const getArtworkUrl = (artworkPath?: string | null, remoteSize: 'w342' | 'w780' | 'w1280' | 'original' = 'w780') => {
   if (!artworkPath) return null
   if (artworkPath.startsWith('http')) {
@@ -69,6 +92,11 @@ const HIGH_SPEED_DROPPED_FRAME_RATIO = 0.18
 const BUFFERING_INDICATOR_DELAY_MS = 450
 const SERIES_SUBTITLE_AUTO_LOAD_VALUE = 'external'
 const DOUBLE_TAP_WINDOW_MS = 300
+const ARROW_SEEK_STEP_SECONDS = 10
+const SHIFT_ARROW_SEEK_STEP_SECONDS = 3
+const SEEK_BAR_WHEEL_STEP_SECONDS = 5
+const SEEK_BAR_WHEEL_ACCUM_THRESHOLD = 40
+const SEEK_BAR_WHEEL_RESET_MS = 300
 
 
 
@@ -142,6 +170,11 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
   const [currentTime, setCurrentTime] = useState(0)
   const [duration, setDuration] = useState(0)
   const [showControls, setShowControls] = useState(true)
+  // Playback-finished state: when a standalone video (local file, movie,
+  // external file opened from the OS) reaches the end we stay in the player
+  // and show a Replay / Close end screen instead of dumping to Home.
+  // Series / binge flows auto-advance and never set this.
+  const [hasEnded, setHasEnded] = useState(false)
 
   const [sleepTimerEnd, setSleepTimerEnd] = useState<number | null>(null)
   const [showStats, setShowStats] = useState(false)
@@ -284,6 +317,16 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
     return () => clearInterval(interval);
   }, [isHost, isPlaying, broadcastState]);
   const [forceRestart, setForceRestart] = useState(false)
+  const [resumeNotice, setResumeNotice] = useState<string | null>(
+    video.resumeFrom && video.resumeFrom > 0
+      ? `Resuming from ${formatResumeTime(video.resumeFrom)}${video.sourceRefreshed ? ' · Source refreshed' : ''}`
+      : null
+  )
+  useEffect(() => {
+    if (!resumeNotice) return
+    const t = setTimeout(() => setResumeNotice(null), 7000)
+    return () => clearTimeout(t)
+  }, [resumeNotice])
   const [subtitlePath, setSubtitlePath] = useState<string | null>(null)
   const [volume, setVolume] = useState(1)
   const [currentVideo, setCurrentVideo] = useState<Video>(video)
@@ -312,6 +355,83 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
   const [isWindowFullscreen, setIsWindowFullscreen] = useState(false)
   const [isPiPActive, setIsPiPActive] = useState(false)
   const [isPiPSupported, setIsPiPSupported] = useState(false)
+  // In-app mini player: shrinks the SAME video element into a bottom-right
+  // corner dock so playback continues while the user browses MyCinema.
+  // Unlike OS PiP (a separate window + app minimize), this never leaves the
+  // app and never remounts the video element.
+  const [isMinimized, setIsMinimized] = useState(false)
+  // Tracks the "PiP + minimized app" flow: set when we minimize the app for
+  // PiP, cleared when PiP closes (back-to-tab / close / toggle-off) so the
+  // app is restored exactly once per PiP session.
+  const pipMinimizedRef = useRef(false)
+  // Watchdog: if the overlay PiP window dies without firing
+  // leavepictureinpicture (e.g. its close button), this still brings the
+  // app back instead of stranding it minimized.
+  const pipWatchdogRef = useRef<number | null>(null)
+  // Cached taskbar-button icons (canvas-drawn dataURLs) for PiP mode.
+  const pipThumbarIconsRef = useRef<{ play: string; pause: string; back: string; fwd: string } | null>(null)
+
+  const stopPipWatchdog = () => {
+    if (pipWatchdogRef.current !== null) {
+      window.clearInterval(pipWatchdogRef.current)
+      pipWatchdogRef.current = null
+    }
+  }
+
+  // Restores the app after PiP ends — always back to fullscreen.
+  // Runs at most once per PiP session: safe to call from the leave-event,
+  // the watchdog, and effect cleanup.
+  const restoreFromPip = (reason: string) => {
+    if (!pipMinimizedRef.current) return
+    pipMinimizedRef.current = false
+    stopPipWatchdog()
+    console.log(`[PiP] PiP ended (${reason}) — restoring app fullscreen`)
+    window.api.restoreWindow({ enterFullscreen: true }).catch(() => {})
+    window.api.clearPipThumbar().catch(() => {})
+  }
+
+  const startPipWatchdog = () => {
+    stopPipWatchdog()
+    // Safety net: if the overlay window is dismissed without firing
+    // leavepictureinpicture, this still brings the app back promptly.
+    pipWatchdogRef.current = window.setInterval(() => {
+      const doc = document as Document & { pictureInPictureElement?: Element | null }
+      if (pipMinimizedRef.current && doc.pictureInPictureElement !== videoRef.current) {
+        restoreFromPip('watchdog')
+      }
+    }, 500)
+  }
+
+  const getPipThumbarIcons = () => {
+    if (pipThumbarIconsRef.current) return pipThumbarIconsRef.current
+    const draw = (glyph: string, fontPx: number) => {
+      try {
+        const canvas = document.createElement('canvas')
+        canvas.width = 32
+        canvas.height = 32
+        const ctx = canvas.getContext('2d')
+        if (!ctx) return ''
+        ctx.clearRect(0, 0, 32, 32)
+        ctx.fillStyle = '#ffffff'
+        ctx.font = `700 ${fontPx}px system-ui, sans-serif`
+        ctx.textAlign = 'center'
+        ctx.textBaseline = 'middle'
+        ctx.fillText(glyph, 16, 17)
+        return canvas.toDataURL('image/png')
+      } catch (err) {
+        return ''
+      }
+    }
+    const icons = { play: draw('▶', 14), pause: draw('❚❚', 13), back: draw('-10s', 10), fwd: draw('+10s', 10) }
+    pipThumbarIconsRef.current = icons
+    return icons
+  }
+
+  const pushPipThumbar = (playing: boolean) => {
+    try {
+      window.api.setPipThumbar({ isPlaying: playing, icons: getPipThumbarIcons() }).catch(() => {})
+    } catch (err) { /* ignore */ }
+  }
   const [isBuffering, setIsBuffering] = useState(false)
   const [isTorrentLoading, setIsTorrentLoading] = useState(isTorrentStream)
   const [torrentBuffering, setTorrentBuffering] = useState(false)
@@ -348,6 +468,10 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
   const [fullscreenPopup, setFullscreenPopup] = useState<{ show: boolean, isFullscreen: boolean, id: number }>({ show: false, isFullscreen: false, id: 0 })
   const [performanceNotice, setPerformanceNotice] = useState<{ show: boolean, text: string, id: number }>({ show: false, text: '', id: 0 })
   const [highSpeedPerformanceMode, setHighSpeedPerformanceMode] = useState(false)
+  // Audio-strain mode: transcoded audio is falling behind (drift <= -1s across
+  // consecutive rebuilds). Eases the heaviest WebGL work (FPS Boost frame
+  // blending) until audio locks back in. Same pattern as the high-speed ease.
+  const [audioStrainMode, setAudioStrainMode] = useState(false)
   const ASPECT_MODES: ('contain' | 'cover' | 'fill')[] = ['contain', 'cover', 'fill'];
   const [aspectMode, setAspectMode] = useState<('contain' | 'cover' | 'fill')>('contain');
   const [trackPopup, setTrackPopup] = useState<{ show: boolean, type: 'audio' | 'subtitle' | 'subtitleSync' | 'aspect' | 'skip', text: string, id: number }>({ show: false, type: 'subtitle', text: '', id: 0 })
@@ -552,6 +676,30 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
 
   // Torrent stream episode switching
   const [torrentEpisodes, setTorrentEpisodes] = useState<{ index: number; fileName: string; size: number; season: number | null; episode: number | null; isSeasonPack: boolean }[] | null>(null)
+  // ── Pack binge mode: a season-pack torrent plays as ONE virtual video ─────
+  // (combined duration, cross-file seek). Files stay separate on disk; only the
+  // timeline is virtual. Movies never binge.
+  interface PackBingeFile { index: number; season: number | null; episode: number | null; title: string; url: string }
+  interface PackBingeState { sid: string; base: string; files: PackBingeFile[]; index: number; durations: (number | null | undefined)[]; total: number | null }
+  const [packBinge, setPackBinge] = useState<PackBingeState | null>(null)
+  const packBingeRef = useRef<PackBingeState | null>(null)
+  packBingeRef.current = packBinge
+  const packPendingSeekRef = useRef<number | null>(null)
+  // File whose end-of-episode position was already flushed by a pack switch —
+  // the save effect's cleanup must not overwrite it with a zeroed clock.
+  const skipStreamSaveForRef = useRef<string | null>(null)
+  const packTimingRef = useRef<{ offsets: number[]; total: number } | null>(null)
+  const parsePackFileIndex = (filePath?: string | null) => {
+    const m = (filePath || '').match(/[?&]file=(\d+)/)
+    return m ? Number(m[1]) : null
+  }
+  // Keep the current + next pack files selected so the upcoming episode
+  // buffers while the current one plays (stream setup deselects the rest).
+  const prioritizePackWindow = (sid: string, files: PackBingeFile[], idx: number) => {
+    const wanted = [files[idx]?.index, files[idx + 1]?.index]
+      .filter((i): i is number => typeof i === 'number')
+    if (wanted.length > 0) safePrioritizeTempFiles(sid, wanted)
+  }
   const [seriesCatalog, setSeriesCatalog] = useState<{ seasonNumber: number; episodeNumber: number; name?: string }[]>([])
   const [episodeSwitchState, setEpisodeSwitchState] = useState<{ status: 'searching' | 'error'; label?: string } | null>(null)
 
@@ -589,8 +737,17 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
   const seekPreviewThumbTimerRef = useRef<NodeJS.Timeout | null>(null)
   const seekPreviewThumbRequestRef = useRef(0)
   const lastSeekPreviewBucketRef = useRef<number | null>(null)
+  // Wheel-to-seek accumulation over the seek bar. Trackpad gestures emit many
+  // tiny deltas; we accumulate them until a full step threshold is reached so
+  // one notch ≈ one SEEK_BAR_WHEEL_STEP_SECONDS jump without hypersensitivity.
+  const seekBarWheelAccumRef = useRef(0)
+  const seekBarWheelResetTimerRef = useRef<NodeJS.Timeout | null>(null)
   const [videoAspectRatio, setVideoAspectRatio] = useState(16 / 9)
-  const isAnyFullscreen = isFullscreen || isWindowFullscreen
+  // Video element fullscreen only — the app window mode must not drive the
+  // icon, otherwise the button shows "exit" while windowed just because the
+  // app launched fullscreen. isWindowFullscreen is still tracked below for
+  // diagnostics but no longer affects the player chrome.
+  const isAnyFullscreen = isFullscreen
   const forceRestartRef = useRef(false)
   const startupPlaybackTokenRef = useRef(0)
   const startupPlaybackPendingRef = useRef(true)
@@ -598,6 +755,18 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
   const startupResumeTimeRef = useRef(0)
   const startupExternalAudioBarrierRef = useRef(false)
   const startupDriftCorrectionUntilRef = useRef(0)
+  // Throttle for drift-correction rebuilds. A ref (not an effect-local) so it
+  // survives the effect re-subscribing on every seek — otherwise each rebuild
+  // resets the throttle and the corrector fires in a tight loop.
+  const driftReloadThrottleRef = useRef(0)
+  // Consecutive rebuilds triggered while audio starves (drift <= -1s).
+  const starvingReloadStreakRef = useRef(0)
+  const strainHealthyChecksRef = useRef(0)
+  const audioStrainNoticeShownRef = useRef(false)
+  // Timestamp of when the video first looked stalled; audio rides through
+  // sub-second stalls instead of pausing instantly (see pause helper).
+  const videoNotReadySinceRef = useRef(0)
+  const audioStallPauseTimerRef = useRef<NodeJS.Timeout | null>(null)
   const lastRelaxedAudioSyncCheckRef = useRef(0)
   const externalAudioSeekBarrierRef = useRef(false)
   const externalAudioSeekTokenRef = useRef(0)
@@ -613,7 +782,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
   const highSpeedPlaybackActive = playbackRate >= HIGH_SPEED_PERFORMANCE_RATE || isHolding2x
   const highSpeedDisplayRate = isHolding2x ? 2 : playbackRate
   const highSpeedMotionPaused = fpsBoostEnabled && highSpeedPlaybackActive && highSpeedPerformanceMode
-  const effectiveFpsBoostEnabled = fpsBoostEnabled && !highSpeedMotionPaused
+  const effectiveFpsBoostEnabled = fpsBoostEnabled && !highSpeedMotionPaused && !audioStrainMode
   const effectiveSharpnessEnabled = qualitySharpnessEnabled
   const effectiveVibranceEnabled = qualityVibranceEnabled
 
@@ -647,6 +816,32 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
     }
     setIsBuffering(false)
   }, [])
+
+  const cancelDelayedAudioPause = () => {
+    if (audioStallPauseTimerRef.current) {
+      clearTimeout(audioStallPauseTimerRef.current)
+      audioStallPauseTimerRef.current = null
+    }
+  }
+
+  // Transient video stalls (<1s — constant micro-buffering on torrents) are
+  // better ridden through than reacted to: pausing audio on every blip and
+  // then racing play() against the next stall leaves play() rejected
+  // (AbortError, the "Audio onPlaying failed" spam) and audio losing ground
+  // until a full rebuild. Only pause when the stall persists; the drift
+  // nudge absorbs the sub-second gap.
+  const pauseAudioOnStallGracefully = () => {
+    const audioEl = audioRef.current
+    if (!audioEl || !audioEl.src || audioEl.paused || audioStallPauseTimerRef.current) return
+    audioStallPauseTimerRef.current = setTimeout(() => {
+      audioStallPauseTimerRef.current = null
+      const v = videoRef.current
+      const a = audioRef.current
+      if (v && a && a.src && !v.paused && !a.paused && v.readyState < 3) {
+        a.pause()
+      }
+    }, 800)
+  }
 
   const releaseMediaElement = (mediaEl: HTMLMediaElement | null) => {
     if (!mediaEl) return
@@ -703,6 +898,12 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
       clearTimeout(seekPreviewThumbTimerRef.current)
       seekPreviewThumbTimerRef.current = null
     }
+    if (seekBarWheelResetTimerRef.current) {
+      clearTimeout(seekBarWheelResetTimerRef.current)
+      seekBarWheelResetTimerRef.current = null
+    }
+    seekBarWheelAccumRef.current = 0
+    cancelDelayedAudioPause()
     clearIntroDbRuntimeWork()
     if (seriesSubtitleStatusTimerRef.current) {
       clearTimeout(seriesSubtitleStatusTimerRef.current)
@@ -887,7 +1088,47 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
   // This ensures that switching from one external file to another (both with ID -1) triggers a re-load.
   useEffect(() => {
     setCurrentVideo(video)
+    setHasEnded(false)
   }, [video])
+
+  // A new file inside the player (episode switch, magnet switch, pack hop)
+  // is a fresh watch — clear any finished state from the previous file.
+  useEffect(() => {
+    setHasEnded(false)
+  }, [currentVideo.file_path])
+
+  // Keep controls visible while the end screen is up so Replay / Close are reachable.
+  useEffect(() => {
+    if (hasEnded) {
+      setShowControls(true)
+      clearTimeout(window.controlsTimeout)
+    }
+  }, [hasEnded])
+
+  // Enter replays from the end screen (fresh closure per hasEnded change,
+  // so it never goes stale like the global shortcut effect).
+  useEffect(() => {
+    if (!hasEnded) return
+    const onKey = (e: KeyboardEvent) => {
+      const active = document.activeElement as HTMLElement | null
+      if (active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA' || active.tagName === 'SELECT')) return
+      if (e.code === 'Enter' || e.code === 'NumpadEnter') {
+        e.preventDefault()
+        const el = videoRef.current
+        setHasEnded(false)
+        setEpisodeSwitchState(null)
+        try {
+          if (el) {
+            el.currentTime = 0
+            el.play().catch(() => {})
+            setIsPlaying(true)
+          }
+        } catch { /* ignore */ }
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [hasEnded])
 
   const handleOpenFolder = () => {
     if (isTorrentStream) return
@@ -1208,7 +1449,11 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
     applyStartupResumeTime()
 
     try {
-      await Promise.allSettled([audioEl.play(), videoEl.play()])
+      // Video first, then audio (see syncSelectedExternalAudio): starting
+      // the instantly-ready MP3 before the buffering torrent video banks an
+      // "audio early" lead.
+      await videoEl.play().catch((error) => console.error('Startup video play failed:', error))
+      await audioEl.play().catch((error) => console.error('Startup external audio play failed:', error))
       audioEl.playbackRate = playbackRate
       if (audioCtxRef.current?.state === 'suspended') {
         await audioCtxRef.current.resume()
@@ -1285,7 +1530,8 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
 
   const syncSelectedExternalAudio = async (
     time: number,
-    shouldPlay: boolean
+    shouldPlay: boolean,
+    isDriftCorrection = false
   ) => {
     const trackObj = availableAudio.find(a => a.id === selectedAudioId)
     const videoEl = videoRef.current
@@ -1295,6 +1541,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
 
     const syncToken = ++externalAudioSeekTokenRef.current
     externalAudioSeekBarrierRef.current = true
+    cancelDelayedAudioPause()
     hideBufferingIndicator()
     audioEl.pause()
     // Always pause video while preparing external audio stream to guarantee 0ms desync
@@ -1323,25 +1570,40 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
 
     lastSeekTimeRef.current = safeTime
     setLastSeekTime(safeTime)
+    // Only re-seek the video when it actually moved: re-assigning the same
+    // time forces a torrent re-buffer (waiting → audio paused → watchdog and
+    // drift corrector pile on with more rebuilds — the stutter loop).
     // The assignment below fires a 'seeked' event. Without this flag the
     // onSeeked handler would call syncSelectedExternalAudio again, which
     // re-pauses the video, rebuilds the ffmpeg audio stream and re-seeks —
     // the 1s play / 1s buffer loop seen on track switches and slow swarms.
-    suppressNextSeekSyncRef.current = true
-    videoEl.currentTime = safeTime
-    // If Chromium coalesces this seek (same-time assignment) no 'seeked'
-    // fires — clear the stale flag so the next genuine seek still syncs.
-    setTimeout(() => {
-      if (suppressNextSeekSyncRef.current) suppressNextSeekSyncRef.current = false
-    }, 1500)
+    if (Math.abs(videoEl.currentTime - safeTime) > 0.25) {
+      suppressNextSeekSyncRef.current = true
+      videoEl.currentTime = safeTime
+      // If Chromium coalesces this seek (same-time assignment) no 'seeked'
+      // fires — clear the stale flag so the next genuine seek still syncs.
+      setTimeout(() => {
+        if (suppressNextSeekSyncRef.current) suppressNextSeekSyncRef.current = false
+      }, 1500)
+    }
 
     if (!shouldPlay) {
       return
     }
 
     try {
-      await Promise.allSettled([audioEl.play(), videoEl.play()])
+      // Start video first, then audio: the MP3 stream is ready instantly
+      // while torrent video still buffers, so starting audio first (or both
+      // at once) banks a permanent "audio early" lead.
+      await videoEl.play().catch((e) => console.log('Video resume after audio seek failed:', e))
+      await audioEl.play().catch((e) => console.log('Audio resume after seek failed:', e))
       audioEl.playbackRate = playbackRate
+      // Aggressive correction window is for user-initiated (re)starts only.
+      // Re-arming it on drift-correction rebuilds makes every rebuild schedule
+      // the next one — a self-sustaining reload storm.
+      if (!isDriftCorrection) {
+        startupDriftCorrectionUntilRef.current = Date.now() + 3000
+      }
     } catch (e) {
       console.error('[Audio] Error resuming audio/video after seek:', e)
     }
@@ -1466,8 +1728,44 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
     const sessionToken = playerSessionTokenRef.current
 
     const fetchProgress = async () => {
+      // Explicit one-click resume target (Detail/Home pass resumeFrom) always wins.
+      const explicitResume = Math.max(0, Number((currentVideo as any).resumeFrom) || 0)
+      if (explicitResume > 0 && !(forceRestart || forceRestartRef.current)) {
+        startupResumeTimeRef.current = explicitResume
+        if (videoRef.current && videoRef.current.readyState >= 1) {
+          applyStartupResumeTime()
+        }
+        if (!isCancelled) setStartupProgressReady(true)
+        return
+      }
       if (isTorrentStreamPath(currentVideo.file_path) || currentVideo.id < 0) {
-        startupResumeTimeRef.current = 0
+        // Online stream: restore source-agnostic position by TMDB identity.
+        const streamIdent = getStreamResumeIdentity(currentVideo)
+        if (!streamIdent || !isOnlineProgressEnabled()) {
+          startupResumeTimeRef.current = explicitResume
+          if (!isCancelled) setStartupProgressReady(true)
+          return
+        }
+        try {
+          const row = await safeGetStreamProgress(
+            streamIdent.tmdb_id, streamIdent.media_type, streamIdent.season, streamIdent.episode
+          )
+          if (isCancelled || isPlayerClosingRef.current || sessionToken !== playerSessionTokenRef.current) return
+          let targetTime = row?.position || explicitResume
+          if (row?.completed) targetTime = 0
+          if (forceRestart || forceRestartRef.current) {
+            targetTime = 0
+            forceRestartRef.current = false
+            setForceRestart(false)
+          }
+          startupResumeTimeRef.current = Math.max(0, targetTime)
+          if (videoRef.current && targetTime > 0 && videoRef.current.readyState >= 1) {
+            applyStartupResumeTime()
+          }
+        } catch (err) {
+          console.warn('[StreamResume] progress lookup failed:', err)
+          startupResumeTimeRef.current = explicitResume
+        }
         if (!isCancelled) setStartupProgressReady(true)
         return
       }
@@ -1579,6 +1877,13 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
     startupResumeTimeRef.current = 0
     startupExternalAudioBarrierRef.current = false
     startupDriftCorrectionUntilRef.current = 0
+    driftReloadThrottleRef.current = 0
+    starvingReloadStreakRef.current = 0
+    strainHealthyChecksRef.current = 0
+    audioStrainNoticeShownRef.current = false
+    videoNotReadySinceRef.current = 0
+    cancelDelayedAudioPause()
+    setAudioStrainMode(false)
     lastRelaxedAudioSyncCheckRef.current = 0
     externalAudioSeekBarrierRef.current = false
     externalAudioSeekTokenRef.current = 0
@@ -1617,9 +1922,14 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
       }
     }
 
-    // Auto-enter fullscreen on first mount
+    // Auto-enter fullscreen on first mount — only when the open came from a
+    // user gesture. Programmatic opens (autoplay, prefetches) have no
+    // transient activation and the request just throws a console error.
     if (!document.fullscreenElement && playerShellRef.current) {
-      playerShellRef.current.requestFullscreen().catch(() => {})
+      const nav = navigator as Navigator & { userActivation?: { isActive?: boolean } }
+      if (!('userActivation' in navigator) || nav.userActivation?.isActive) {
+        playerShellRef.current.requestFullscreen().catch(() => {})
+      }
     }
 
     const handleFullscreenChange = () => {
@@ -1670,7 +1980,13 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
     if (!videoEl || !canUsePiP) return
 
     const handleEnterPiP = () => setIsPiPActive(true)
-    const handleLeavePiP = () => setIsPiPActive(false)
+    const handleLeavePiP = () => {
+      setIsPiPActive(false)
+      // PiP window gone (back-to-tab button, PiP close, or toggle-off):
+      // bring the app back. The same video element never stopped playing,
+      // so it simply resumes visibly in the original player.
+      restoreFromPip('leave-event')
+    }
 
     videoEl.addEventListener('enterpictureinpicture', handleEnterPiP)
     videoEl.addEventListener('leavepictureinpicture', handleLeavePiP)
@@ -1678,6 +1994,10 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
     return () => {
       videoEl.removeEventListener('enterpictureinpicture', handleEnterPiP)
       videoEl.removeEventListener('leavepictureinpicture', handleLeavePiP)
+      // Listeners above are already detached, so the leave-handler can't
+      // fire from the exit below — restore explicitly so the app is never
+      // left stranded minimized with no PiP window.
+      restoreFromPip('cleanup')
       if (doc.pictureInPictureElement === videoEl && doc.exitPictureInPicture) {
         doc.exitPictureInPicture().catch(() => {})
       }
@@ -1939,8 +2259,16 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
       switch(e.code) {
         case 'ArrowRight':
           if (!e.repeat) {
+            e.preventDefault()
+            // Shift + Right = fine seek (3s), plain Right = coarse seek (10s).
+            const stepRight = e.shiftKey ? SHIFT_ARROW_SEEK_STEP_SECONDS : ARROW_SEEK_STEP_SECONDS
+            // Binge: arrows ride the virtual timeline (can cross episodes).
+            if (packTimingRef.current) {
+              seekRef.current(stepRight)
+              break
+            }
             const currentT = videoRef.current?.currentTime ?? 0
-            const nextT = Math.min(videoRef.current?.duration || 0, currentT + 10)
+            const nextT = Math.min(videoRef.current?.duration || 0, currentT + stepRight)
             if (videoRef.current) {
               seekWasPlayingRef.current = !videoRef.current.paused
               pendingControlledSeekTimeRef.current = nextT
@@ -1949,7 +2277,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
               timeRef.current = nextT
             }
             if (isHost) broadcastState({ type: 'SEEK', time: nextT });
-            setSeekPopup({ show: true, text: '+10s', id: Date.now() })
+            setSeekPopup({ show: true, text: `+${stepRight}s`, id: Date.now() })
 
             arrowHoldTimerRef.current = setTimeout(() => {
               seekPreviewRef.current = videoRef.current?.currentTime ?? 0
@@ -1959,8 +2287,8 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
               if (seekPreviewIntervalRef.current) clearInterval(seekPreviewIntervalRef.current)
               seekPreviewIntervalRef.current = setInterval(() => {
                 const dur = videoRef.current?.duration || 1
-                // 10.0s per 100ms = 100x real-time speed
-                seekPreviewRef.current = Math.min(dur, seekPreviewRef.current + 10.0)
+                // Hold-scrub speed follows the initial step: 3s/100ms for Shift, 10s/100ms otherwise.
+                seekPreviewRef.current = Math.min(dur, seekPreviewRef.current + stepRight)
                 setSeekPreview(seekPreviewRef.current)
                 // Drive the existing thumbnail preview to show frame at this timestamp
                 const pct = (seekPreviewRef.current / dur) * 100
@@ -1972,8 +2300,15 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
           break
         case 'ArrowLeft':
           if (!e.repeat) {
+            e.preventDefault()
+            // Shift + Left = fine seek (-3s), plain Left = coarse seek (-10s).
+            const stepLeft = e.shiftKey ? SHIFT_ARROW_SEEK_STEP_SECONDS : ARROW_SEEK_STEP_SECONDS
+            if (packTimingRef.current) {
+              seekRef.current(-stepLeft)
+              break
+            }
             const currentT = videoRef.current?.currentTime ?? 0
-            const nextT = Math.max(0, currentT - 10)
+            const nextT = Math.max(0, currentT - stepLeft)
             if (videoRef.current) {
               seekWasPlayingRef.current = !videoRef.current.paused
               pendingControlledSeekTimeRef.current = nextT
@@ -1982,7 +2317,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
               timeRef.current = nextT
             }
             if (isHost) broadcastState({ type: 'SEEK', time: nextT });
-            setSeekPopup({ show: true, text: '-10s', id: Date.now() })
+            setSeekPopup({ show: true, text: `-${stepLeft}s`, id: Date.now() })
 
             arrowHoldTimerRef.current = setTimeout(() => {
               seekPreviewRef.current = videoRef.current?.currentTime ?? 0
@@ -1992,8 +2327,8 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
               if (seekPreviewIntervalRef.current) clearInterval(seekPreviewIntervalRef.current)
               seekPreviewIntervalRef.current = setInterval(() => {
                 const dur = videoRef.current?.duration || 1
-                // 10.0s per 100ms = 100x real-time speed
-                seekPreviewRef.current = Math.max(0, seekPreviewRef.current - 10.0)
+                // Hold-scrub speed follows the initial step: 3s/100ms for Shift, 10s/100ms otherwise.
+                seekPreviewRef.current = Math.max(0, seekPreviewRef.current - stepLeft)
                 setSeekPreview(seekPreviewRef.current)
                 const pct = (seekPreviewRef.current / dur) * 100
                 setHoverTime(seekPreviewRef.current)
@@ -2069,7 +2404,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
             resetSubtitleOffset()
           }
           break
-        case 'Escape': onClose(); break
+        case 'Escape': if (isMinimized) { setIsMinimized(false); setShowControls(true) } else { onClose() } break
         case 'KeyI': handleToggleInfoPanel(); break
         case 'Equal':
         case 'NumpadAdd': {
@@ -2162,36 +2497,152 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
       window.removeEventListener('keyup', handleGlobalKeyUp)
       window.removeEventListener('mousedown', handleGlobalMouseDown)
     }
-  }, [currentVideo, hasNextEpisode, availableSubtitles, playbackRate, isHolding2x, isHoldingRev2x, volume, seekPreview, roomId, voiceEnabled, localPeerId, isHost, isWindowFullscreen])
+  }, [currentVideo, hasNextEpisode, availableSubtitles, playbackRate, isHolding2x, isHoldingRev2x, volume, seekPreview, roomId, voiceEnabled, localPeerId, isHost, isWindowFullscreen, isMinimized])
 
   useEffect(() => {
-    if ('mediaSession' in navigator) {
-      navigator.mediaSession.setActionHandler('play', () => {
-        if (!isHost && roomId !== null) return
+    if (!('mediaSession' in navigator)) return
+    const ms = navigator.mediaSession
+    const canControl = isHost || roomId === null
+    // Shared ±10s step used by the PiP window buttons (binge-aware via seekRef).
+    const seekBy = (seconds: number) => {
+      if (!canControl || !videoRef.current) return
+      seekRef.current(seconds)
+    }
+    try {
+      ms.setActionHandler('play', () => {
+        if (!canControl) return
         if (videoRef.current && videoRef.current.paused) {
           videoRef.current.play()
           setIsPlaying(true)
         }
       })
-      navigator.mediaSession.setActionHandler('pause', () => {
-        if (!isHost && roomId !== null) return
+      ms.setActionHandler('pause', () => {
+        if (!canControl) return
         if (videoRef.current && !videoRef.current.paused) {
           videoRef.current.pause()
           setIsPlaying(false)
         }
       })
+      // PiP window −10s / +10s buttons.
+      ms.setActionHandler('seekbackward', () => seekBy(-10))
+      ms.setActionHandler('seekforward', () => seekBy(10))
+      // PiP scrub bar (only appears when this handler is set).
+      ms.setActionHandler('seekto', (details) => {
+        if (!canControl || !videoRef.current) return
+        const seekTime = (details as MediaSessionActionDetails)?.seekTime
+        if (typeof seekTime === 'number' && Number.isFinite(seekTime)) {
+          seekToTimeRef.current(seekTime)
+        }
+      })
+      // PiP "next" button — series with a following episode only.
+      if (currentVideo.type === 'series' && hasNextEpisode) {
+        ms.setActionHandler('nexttrack', () => {
+          if (canControl) playNextEpisodeRef.current()
+        })
+      } else {
+        ms.setActionHandler('nexttrack', null)
+      }
+    } catch (e) {
+      // Unsupported action on this platform — ignore.
     }
     return () => {
-      if ('mediaSession' in navigator) {
-        try {
-          navigator.mediaSession.setActionHandler('play', null)
-          navigator.mediaSession.setActionHandler('pause', null)
-        } catch (e) {
-          // ignore
-        }
+      try {
+        ms.setActionHandler('play', null)
+        ms.setActionHandler('pause', null)
+        ms.setActionHandler('seekbackward', null)
+        ms.setActionHandler('seekforward', null)
+        ms.setActionHandler('seekto', null)
+        ms.setActionHandler('nexttrack', null)
+      } catch (e) {
+        // ignore
       }
     }
+  }, [isHost, roomId, currentVideo, hasNextEpisode])
+
+  // PiP window title / thumbnail.
+  useEffect(() => {
+    if (!('mediaSession' in navigator)) return
+    try {
+      const isSeries = currentVideo.type === 'series'
+      const title = isSeries && currentVideo.series_name ? currentVideo.series_name : currentVideo.title
+      const episodeLabel = isSeries && currentVideo.season != null && currentVideo.episode != null
+        ? `S${currentVideo.season} E${currentVideo.episode}`
+        : currentVideo.release_year ? String(currentVideo.release_year) : 'MyCinema'
+      const artworkUrl = getArtworkUrl(currentVideo.poster_path, 'w342')
+      navigator.mediaSession.metadata = new MediaMetadata({
+        title,
+        artist: episodeLabel,
+        album: 'MyCinema',
+        artwork: artworkUrl && artworkUrl.startsWith('http')
+          ? [{ src: artworkUrl, sizes: '342x513', type: 'image/jpeg' }]
+          : []
+      })
+    } catch (e) {
+      // ignore
+    }
+  }, [currentVideo])
+
+  // PiP play/pause icon state.
+  useEffect(() => {
+    try {
+      if ('mediaSession' in navigator) {
+        navigator.mediaSession.playbackState = isPlaying ? 'playing' : 'paused'
+      }
+    } catch (e) {
+      // ignore
+    }
+  }, [isPlaying])
+
+  // PiP scrub-bar position (Chromium extrapolates between updates).
+  useEffect(() => {
+    if (!isPiPActive || !('mediaSession' in navigator)) return
+    const updatePosition = () => {
+      try {
+        const el = videoRef.current
+        if (el && Number.isFinite(el.duration) && el.duration > 0) {
+          navigator.mediaSession.setPositionState({
+            duration: el.duration,
+            playbackRate: el.playbackRate || 1,
+            position: Math.max(0, Math.min(el.currentTime, el.duration))
+          })
+        }
+      } catch (e) {
+        // ignore
+      }
+    }
+    updatePosition()
+    const timer = window.setInterval(updatePosition, 2000)
+    return () => window.clearInterval(timer)
+  }, [isPiPActive])
+
+  // Taskbar thumbnail buttons (-10s / play-pause / +10s) while PiP floats.
+  useEffect(() => {
+    const cleanup = window.api.onThumbarCommand((command: string) => {
+      const videoEl = videoRef.current
+      if (!videoEl) return
+      if (isHost || roomId !== null) return
+      if (command === 'seek-back') {
+        seekToTimeRef.current(Math.max(0, videoEl.currentTime - 10))
+      } else if (command === 'seek-forward') {
+        const dur = Number.isFinite(videoEl.duration) ? videoEl.duration : Infinity
+        seekToTimeRef.current(Math.min(dur, videoEl.currentTime + 10))
+      } else if (command === 'toggle-play') {
+        if (videoEl.paused) {
+          videoEl.play().catch(() => {})
+          setIsPlaying(true)
+        } else {
+          videoEl.pause()
+          setIsPlaying(false)
+        }
+      }
+    })
+    return cleanup
   }, [isHost, roomId])
+
+  // Keep the taskbar play/pause glyph in sync while PiP is active.
+  useEffect(() => {
+    if (isPiPActive) pushPipThumbar(isPlaying)
+  }, [isPiPActive, isPlaying])
 
   useEffect(() => {
     if (isTorrentStreamPath(currentVideo.file_path) || currentVideo.id < 0) return
@@ -2218,8 +2669,89 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
     }
   }, [currentVideo.id])
 
+  // Online streams: persist position by TMDB identity (source-agnostic resume).
   useEffect(() => {
-    let lastDriftReloadTime = 0
+    if (!isTorrentStreamPath(currentVideo.file_path)) return
+    const streamIdent = getStreamResumeIdentity(currentVideo)
+    if (!streamIdent) return
+    if (!isOnlineProgressEnabled()) return
+
+    const snapshot = buildStreamResumeSnapshot(currentVideo)
+    // #3: auto-follow series for new-episode alerts once the watch is
+    // meaningful (>2 min, >10%, or completed). Fired once per stream identity.
+    let followSent = false
+    const maybeAutoFollowSeries = (time: number, total: number, completed: boolean) => {
+      if (followSent || currentVideo.type !== 'series' || !streamIdent.tmdb_id) return
+      const meaningful = completed || time >= 120 || (total > 0 && time / total >= 0.1)
+      if (!meaningful) return
+      followSent = true
+      void safeFollowSeries({
+        tmdb_id: streamIdent.tmdb_id,
+        title: snapshot.title,
+        poster_path: snapshot.poster_path,
+        backdrop_path: snapshot.backdrop_path,
+        overview: snapshot.overview,
+        season: streamIdent.season,
+        episode: streamIdent.episode
+      }).then(res => {
+        if (res?.isNew) {
+          window.dispatchEvent(new CustomEvent(FOLLOW_TOAST_EVENT, {
+            detail: {
+              title: snapshot.title,
+              dropSeason: res?.hasNewDrop ? res?.dropSeason : undefined,
+              dropEpisode: res?.hasNewDrop ? res?.dropEpisode : undefined
+            }
+          }))
+        }
+      })
+    }
+    const saveStreamPosition = (isClosing: boolean) => {
+      if (!isOnlineProgressEnabled()) return
+      const time = Number(timeRef.current) || 0
+      const total = Number(durationRef.current) || Number(videoRef.current?.duration) || 0
+      if (!isClosing && time < 10) return
+      const completed = total > 0 && time / total > 0.95
+      safeUpdateStreamProgress({
+        ...streamIdent,
+        ...snapshot,
+        position: time,
+        duration: total,
+        completed,
+        source_magnet: (currentVideo as any).sourceMagnet || null,
+        file_index: parsePackFileIndex(currentVideo.file_path),
+        isClosing
+      })
+    }
+
+    const interval = setInterval(() => {
+      if (videoRef.current && !videoRef.current.paused) {
+        timeRef.current = videoRef.current.currentTime
+        const total = Number(videoRef.current.duration)
+        if (Number.isFinite(total) && total > 0) durationRef.current = total
+        saveStreamPosition(false)
+        const done = (Number(durationRef.current) || 0) > 0 &&
+          timeRef.current / (Number(durationRef.current) || 1) > 0.95
+        maybeAutoFollowSeries(timeRef.current, Number(durationRef.current) || 0, done)
+      }
+    }, 20000)
+
+    return () => {
+      clearInterval(interval)
+      // A pack switch already flushed this file's real end position — don't
+      // let the zeroed clock overwrite it.
+      if (skipStreamSaveForRef.current != null && skipStreamSaveForRef.current === currentVideo.file_path) {
+        skipStreamSaveForRef.current = null
+      } else {
+        saveStreamPosition(true)
+      }
+      const total = Number(durationRef.current) || 0
+      const done = total > 0 && (Number(timeRef.current) || 0) / total > 0.95
+      maybeAutoFollowSeries(Number(timeRef.current) || 0, total, done)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentVideo.file_path, (currentVideo as any).tmdb_id, (currentVideo as any).season, (currentVideo as any).episode])
+
+  useEffect(() => {
     const driftInterval = setInterval(() => {
       const videoEl = videoRef.current
       const audioEl = audioRef.current
@@ -2231,13 +2763,20 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
       const trackObj = availableAudio.find(a => a.id === selectedAudioId)
       if (!trackObj || trackObj.native) return
 
-      // CRITICAL: If the video is buffering or paused, audio MUST be paused and never drifting
+      // CRITICAL: If the video is buffering or paused, audio MUST be paused and never drifting.
+      // Sub-second stalls ride through (unified with the waiting-event grace)
+      // so micro-buffering doesn't pause/resume audio 5x a second.
       if (videoEl.paused || videoEl.readyState < 3 || isBuffering || torrentBuffering || isTorrentLoading) {
         if (!audioEl.paused) {
-          audioEl.pause()
+          const stallNow = Date.now()
+          if (!videoNotReadySinceRef.current) videoNotReadySinceRef.current = stallNow
+          if (stallNow - videoNotReadySinceRef.current > 800) {
+            audioEl.pause()
+          }
         }
         return
       }
+      videoNotReadySinceRef.current = 0
 
       if (audioEl.paused || audioEl.readyState < 2) {
         if (!audioEl.error && audioEl.paused && !videoEl.paused) {
@@ -2249,25 +2788,82 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
       const expectedTime = videoEl.currentTime - lastSeekTimeRef.current
       if (expectedTime < 0) return
       const drift = audioEl.currentTime - expectedTime
+      const driftAbs = Math.abs(drift)
+      // Video hasn't rendered frame 1 yet (cold torrent, first bytes still
+      // arriving): the audio stream is fine, there's just nothing to sync to.
+      // Park audio and wait — rebuilding here loops forever against a frozen
+      // video (audio 1.3s → 2.0s → 2.3s while video sits at 0.00). The
+      // onPlaying handler resumes audio the moment video starts.
+      if (expectedTime < 0.5 && drift > 0.05) {
+        if (!audioEl.paused) audioEl.pause()
+        return
+      }
+      // Recovery: audio locked back in for ~15s straight → restore full
+      // enhancement and re-arm the strain notice.
+      if (audioStrainMode) {
+        if (driftAbs < 0.15) {
+          strainHealthyChecksRef.current += 1
+          if (strainHealthyChecksRef.current >= 75) {
+            strainHealthyChecksRef.current = 0
+            starvingReloadStreakRef.current = 0
+            audioStrainNoticeShownRef.current = false
+            setAudioStrainMode(false)
+          }
+        } else {
+          strainHealthyChecksRef.current = 0
+        }
+      }
+      // First seconds after (re)starting external audio: the MP3 stream is
+      // ready instantly while torrent video still buffers, so audio banks a
+      // permanent lead unless corrected aggressively here.
+      const inStartupWindow = Date.now() < startupDriftCorrectionUntilRef.current
 
-      // Continuous micro-drift correction (between 40ms and 500ms): smoothly adjust playbackRate
-      if (Math.abs(drift) >= 0.04 && Math.abs(drift) <= 0.5) {
+      // Medium/large drift: rebuild the audio stream at the current video
+      // time. (The stream is progressive with `Accept-Ranges: none`, so the
+      // audio element itself can't seek — a fresh ffmpeg stream is the only
+      // exact correction.) This also closes the old 0.5s–1.2s dead band where
+      // NOTHING was corrected, which is why a startup/buffering lead survived
+      // forever as "audio a bit early".
+      if (driftAbs > 0.5 || (inStartupWindow && driftAbs > 0.25)) {
+        // Chronic starvation (audio keeps falling behind rebuild after
+        // rebuild, e.g. EAC3 transcode under load): rebuilding every few
+        // seconds only adds stutter — back off, ease the heaviest renderer,
+        // and tell the user once.
+        const starving = drift < -1.0
+        const chronic = starving && starvingReloadStreakRef.current >= 1
+        const cooldownMs = chronic ? 20000 : 6000
+        if (Date.now() - driftReloadThrottleRef.current > cooldownMs) {
+          driftReloadThrottleRef.current = Date.now()
+          starvingReloadStreakRef.current = starving ? starvingReloadStreakRef.current + 1 : 0
+          console.log('[Audio] Drift correction reload: video=', videoEl.currentTime.toFixed(2), 'audio=', audioEl.currentTime.toFixed(2), 'expected=', expectedTime.toFixed(2), 'drift=', drift.toFixed(2))
+          if (chronic) {
+            if (fpsBoostEnabled && !audioStrainMode) {
+              setAudioStrainMode(true)
+            }
+            if (!audioStrainNoticeShownRef.current) {
+              audioStrainNoticeShownRef.current = true
+              setPerformanceNotice({
+                show: true,
+                text: 'Audio is falling behind — FPS Boost eased to let it catch up',
+                id: Date.now()
+              })
+            }
+          }
+          void syncSelectedExternalAudio(videoEl.currentTime, true, true)
+        }
+      } else if (driftAbs >= 0.04) {
+        // Continuous micro-drift correction: smoothly adjust playbackRate
         // If drift > 0, audio is ahead of video -> slow down audio slightly
         // If drift < 0, audio is behind video -> speed up audio slightly
         const nudgeFactor = drift > 0 ? 0.95 : 1.05
         audioEl.playbackRate = playbackRate * nudgeFactor
-      } else if (Math.abs(drift) < 0.03 && Math.abs(audioEl.playbackRate - playbackRate) > 0.001) {
+      } else if (driftAbs < 0.03 && Math.abs(audioEl.playbackRate - playbackRate) > 0.001) {
         // Back in sync -> restore target playback rate
         audioEl.playbackRate = playbackRate
-      } else if (Math.abs(drift) > 1.2 && Date.now() - lastDriftReloadTime > 6000) {
-        // Severe drift (> 1.2s) -> do a clean resync
-        lastDriftReloadTime = Date.now()
-        console.log('[Audio] Drift correction reload: video=', videoEl.currentTime.toFixed(2), 'audio=', audioEl.currentTime.toFixed(2), 'expected=', expectedTime.toFixed(2), 'drift=', drift.toFixed(2))
-        void syncSelectedExternalAudio(videoEl.currentTime, true)
       }
     }, 200)
     return () => clearInterval(driftInterval)
-  }, [isPlaying, lastSeekTime, isSeeking, selectedAudioId, availableAudio, isBuffering, torrentBuffering, isTorrentLoading, playbackRate, audioTrackSwitching])
+  }, [isPlaying, lastSeekTime, isSeeking, selectedAudioId, availableAudio, isBuffering, torrentBuffering, isTorrentLoading, playbackRate, audioTrackSwitching, fpsBoostEnabled, audioStrainMode])
 
   // Audio watchdog: if the external audio element dies (404 from a destroyed
   // torrent, a failed drift reload, a stalled ffmpeg stream, an autoplay
@@ -2289,14 +2885,23 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
       if (videoEl.paused || videoEl.readyState < 3 || isBuffering || torrentBuffering || isTorrentLoading) return
 
       const now = Date.now()
+      // Merely paused with data available is NOT dead — it just needs play()
+      // (e.g. after a video-buffering pause or a rejected play()). Rebuilding
+      // the ffmpeg stream here fights the drift corrector and causes the
+      // reload storm that freezes audio near 0s and stutters video.
+      if (audioEl.paused && !audioEl.error && !audioEl.ended) {
+        if (!videoEl.paused) {
+          audioEl.play().catch(() => {})
+        }
+        lastAudioTime = audioEl.currentTime
+        lastAudioWallTime = now
+        return
+      }
       let dead = false
       let reason = ''
       if (audioEl.error) {
         dead = true
         reason = `error=${audioEl.error.code}`
-      } else if (audioEl.paused) {
-        dead = true
-        reason = `paused with readyState=${audioEl.readyState}`
       } else if (audioEl.ended) {
         dead = true
         reason = 'ended'
@@ -2352,9 +2957,55 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
     return () => clearInterval(watchdogInterval)
   }, [isPlaying, isSeeking, selectedAudioId, availableAudio, volume])
 
+  const showPlaybackFinished = () => {
+    setIsPlaying(false)
+    setShowControls(true)
+    clearTimeout(window.controlsTimeout)
+    // Persist completed state for library items so Home/History reflect it.
+    try {
+      if (currentVideoRef.current.id >= 0 && !isTorrentStreamPath(currentVideoRef.current.file_path)) {
+        const total = Number(durationRef.current) || Number(videoRef.current?.duration) || 0
+        const at = total > 0 ? total : Number(timeRef.current) || 0
+        if (at > 0) {
+          timeRef.current = at
+          setCurrentTime(videoRef.current?.currentTime ?? at)
+          window.api.updateVideoProgress(currentVideoRef.current.id, at, true, true)
+        }
+      }
+    } catch { /* ignore */ }
+    setHasEnded(true)
+  }
+
   const handleEnded = async () => {
     console.log('[VideoPlayer] handleEnded fired. type=', currentVideo.type, 'series_name=', currentVideo.series_name, 'season=', currentVideo.season, 'episode=', currentVideo.episode, 'streamId=', currentVideo.streamSourceId)
+    if (packBingeRef.current) {
+      const pb = packBingeRef.current
+      if (pb.index < pb.files.length - 1) {
+        advancePack()
+        return
+      }
+      // Last file of the pack — stay and show the finished screen.
+      showPlaybackFinished()
+      return
+    }
     playNextEpisode()
+  }
+
+  const handleReplay = () => {
+    const el = videoRef.current
+    setHasEnded(false)
+    setEpisodeSwitchState(null)
+    try {
+      if (el) {
+        el.currentTime = 0
+        timeRef.current = 0
+        setCurrentTime(0)
+        el.play().then(() => setIsPlaying(true)).catch(() => {})
+      }
+    } catch { /* ignore */ }
+    setShowControls(true)
+    clearTimeout(window.controlsTimeout)
+    window.controlsTimeout = setTimeout(() => setShowControls(false), 3000)
   }
 
   // Load the video files inside the current temp stream (season packs expose
@@ -2370,6 +3021,194 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
     }).catch(() => {})
     return () => { cancelled = true }
   }, [currentVideo.file_path, currentVideo.streamSourceId])
+
+  // Enter pack binge mode: same-torrent series pack with 2+ video files plays
+  // as one virtual timeline. Built once per stream id; the current ?file=
+  // position decides the starting episode.
+  useEffect(() => {
+    const sid = currentVideo.streamSourceId
+    if (!sid || !isTorrentStreamPath(currentVideo.file_path)) {
+      setPackBinge(null)
+      return
+    }
+    // A stale binge must never leak into a different stream (e.g. a movie
+    // started after a pack) — it would warp the timeline.
+    if (packBingeRef.current && packBingeRef.current.sid !== sid) {
+      setPackBinge(null)
+    }
+    if (currentVideo.type !== 'series' || !torrentEpisodes || torrentEpisodes.length < 2) {
+      return
+    }
+    if (packBingeRef.current?.sid === sid) return
+    const base = currentVideo.file_path.split('?')[0]
+    const files: PackBingeFile[] = [...torrentEpisodes]
+      .sort((a, b) => a.index - b.index)
+      .map(te => {
+        const s = te.season ?? null
+        const e = te.episode ?? null
+        return {
+          index: te.index,
+          season: s,
+          episode: e,
+          title: (s != null && e != null && episodeNameMapRef.current[`${s}-${e}`]) || te.fileName.replace(/\.[^/.]+$/, ''),
+          url: `${base}?file=${te.index}`
+        }
+      })
+    const at = parsePackFileIndex(currentVideo.file_path)
+    const found = at != null ? files.findIndex(f => f.index === at) : -1
+    const startIdx = found >= 0 ? found : 0
+    setPackBinge({ sid, base, files, index: startIdx, durations: files.map(() => undefined), total: null })
+    prioritizePackWindow(sid, files, startIdx)
+    setResumeNotice(`Playing all ${files.length} episodes as one video`)
+  }, [torrentEpisodes, currentVideo.streamSourceId, currentVideo.file_path, currentVideo.type])
+
+  // Probe per-file durations to build the combined timeline. Strictly
+  // SEQUENTIAL (one metadata load at a time) and deferred a few seconds so
+  // the playing file's buffering always wins the torrent connection. Priority
+  // order: current file, next files, then the rest. The total finalizes as
+  // soon as one duration is known (average-filled), refining as probes land.
+  const packProbeRef = useRef<{ sid: string; startedAt: number; cancelled: boolean } | null>(null)
+  useEffect(() => {
+    const pb = packBinge
+    if (!pb || pb.total != null) return
+    const sid = pb.sid
+    if (packProbeRef.current?.sid === sid) return
+    const probe = { sid, startedAt: Date.now(), cancelled: false }
+    packProbeRef.current = probe
+    let settled = false
+
+    const readDurations = () => packBingeRef.current && packBingeRef.current.sid === sid
+      ? packBingeRef.current.durations
+      : null
+
+    const maybeFinalize = () => {
+      if (settled || probe.cancelled) return
+      const durations = readDurations()
+      if (!durations) return
+      const known = durations.filter((d): d is number => typeof d === 'number' && d > 0)
+      if (known.length === 0) return
+      const allDone = durations.every(d => d !== undefined)
+      if (!allDone && Date.now() - probe.startedAt < 8000) return
+      const avg = known.reduce((a, b) => a + b, 0) / known.length
+      const total = durations.reduce<number>((acc, d) => acc + (typeof d === 'number' && d > 0 ? d : avg), 0)
+      if (total <= 0) return
+      settled = true
+      setPackBinge(prev => (prev && prev.sid === sid && prev.total == null ? { ...prev, total } : prev))
+    }
+
+    const probeOne = (i: number): Promise<void> => new Promise(resolve => {
+      const current = packBingeRef.current
+      const url = current && current.sid === sid ? current.files[i]?.url : undefined
+      if (!url) { resolve(); return }
+      const el = document.createElement('video') as HTMLVideoElement
+      let done = false
+      const finish = (d: number | null) => {
+        if (done) return
+        done = true
+        clearTimeout(timer)
+        try { el.removeAttribute('src'); el.load() } catch {}
+        if (!probe.cancelled) {
+          setPackBinge(prev => {
+            if (!prev || prev.sid !== sid || prev.durations[i] !== undefined) return prev
+            const durations = [...prev.durations]
+            durations[i] = d
+            return { ...prev, durations }
+          })
+          // Let state land before reading for finalize.
+          setTimeout(() => maybeFinalize(), 0)
+        }
+        resolve()
+      }
+      const timer = setTimeout(() => finish(null), 8000)
+      el.preload = 'metadata'
+      try { (el as any).crossOrigin = 'anonymous' } catch {}
+      el.onloadedmetadata = () => {
+        const d = Number(el.duration)
+        finish(Number.isFinite(d) && d > 0 ? d : null)
+      }
+      el.onerror = () => finish(null)
+      try { el.src = url } catch { finish(null) }
+    })
+
+    let startTimer: ReturnType<typeof setTimeout> | null = null
+    const run = async () => {
+      // Let the playing file buffer first — probing is background work.
+      await new Promise(r => { startTimer = setTimeout(r, 4000) })
+      if (probe.cancelled) return
+      const startIdx = packBingeRef.current && packBingeRef.current.sid === sid
+        ? packBingeRef.current.index
+        : 0
+      const count = packBingeRef.current && packBingeRef.current.sid === sid
+        ? packBingeRef.current.files.length
+        : 0
+      const order: number[] = []
+      for (let k = 0; k < count; k++) order.push((startIdx + k) % count)
+      for (const i of order) {
+        if (probe.cancelled) return
+        const durations = readDurations()
+        if (!durations) return
+        if (durations[i] !== undefined) continue
+        await probeOne(i)
+      }
+      maybeFinalize()
+    }
+    void run()
+    return () => {
+      probe.cancelled = true
+      packProbeRef.current = null
+      if (startTimer) clearTimeout(startTimer)
+    }
+  }, [packBinge?.sid, packBinge?.total])
+
+  // Apply a cross-file seek once the target file's metadata is ready.
+  useEffect(() => {
+    if (packPendingSeekRef.current == null) return
+    const el = videoRef.current
+    if (!el || el.readyState < 1) return
+    const want = packPendingSeekRef.current
+    const cap = Number.isFinite(el.duration) && el.duration > 0 ? el.duration : want
+    packPendingSeekRef.current = null
+    try {
+      el.currentTime = Math.max(0, Math.min(want, cap))
+      timeRef.current = el.currentTime
+      setCurrentTime(el.currentTime)
+    } catch {}
+  }, [currentVideo.file_path, duration])
+
+  // Virtual binge timeline: offsets map each pack file onto one combined
+  // duration. Everything below (bar, labels, seeks) uses the display values;
+  // the element, subtitles, audio and intro engine stay file-relative.
+  const packTiming = React.useMemo(() => {
+    if (!packBinge || packBinge.total == null) return null
+    const known = packBinge.durations.filter((d): d is number => typeof d === 'number' && d > 0)
+    const avg = known.length > 0 ? known.reduce((a, b) => a + b, 0) / known.length : 0
+    const durs = packBinge.durations.map(d => (typeof d === 'number' && d > 0 ? d : avg))
+    const offsets: number[] = []
+    let acc = 0
+    for (const d of durs) { offsets.push(acc); acc += d }
+    return { offsets, total: acc }
+  }, [packBinge])
+  packTimingRef.current = packTiming
+  const packFileOffset = packTiming
+    ? packTiming.offsets[Math.min(Math.max(packBinge?.index ?? 0, 0), packTiming.offsets.length - 1)] ?? 0
+    : 0
+  const displayDuration = packTiming && packTiming.total > 0 ? packTiming.total : duration
+  const displayCurrentTime = packTiming ? Math.min(packFileOffset + currentTime, packTiming.total) : currentTime
+  const displayIntroSegments = packTiming
+    ? introDbSegments.map(s => ({ ...s, startSec: s.startSec + packFileOffset, endSec: s.endSec + packFileOffset }))
+    : introDbSegments
+
+  // Keep the OS/PiP scrub bar on the virtual timeline while binging.
+  useEffect(() => {
+    if (!('mediaSession' in navigator) || !packTiming) return
+    try {
+      navigator.mediaSession.setPositionState({
+        duration: packTiming.total,
+        playbackRate: Number.isFinite(playbackRate) ? playbackRate : 1,
+        position: Math.max(0, Math.min(displayCurrentTime, packTiming.total))
+      })
+    } catch {}
+  }, [packTiming, displayCurrentTime, playbackRate])
 
   // Live progress for the in-player magnets panel
   useEffect(() => {
@@ -2409,6 +3248,12 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
     let timer: ReturnType<typeof setInterval> | null = null
     const check = () => {
       if (cancelled) return
+      // Binge packs switch files instantly on the same torrent — no prefetch.
+      if (packBingeRef.current) {
+        if (timer) clearInterval(timer)
+        timer = null
+        return
+      }
       const el = videoRef.current
       if (!el || !isFinite(el.duration) || el.duration <= 0 || el.currentTime < 5) return
       const remaining = el.duration - el.currentTime
@@ -2622,7 +3467,9 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
           title: episodeNameMapRef.current[`${targetSeason}-${targetEpisode}`] || tEp.fileName.replace(/\.[^/.]+$/, ''),
           file_path: `${base}?file=${tEp.index}`,
           duration: 0,
-          streamSourceId: currentVideo.streamSourceId
+          streamSourceId: currentVideo.streamSourceId,
+          resumeFrom: 0,
+          sourceRefreshed: false
         }
       }
     }
@@ -2637,6 +3484,37 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
 
   const playEpisode = async (targetSeason: number, targetEpisode: number) => {
     if (Number(currentVideo.season || 1) === targetSeason && Number(currentVideo.episode || 0) === targetEpisode) return
+    // Offline-first: a downloaded copy always wins over the stream, even
+    // inside a binge (leaving binge mode for the local file).
+    const localMatch = seriesEpisodes.find(ep =>
+      Number(ep.season || 1) === targetSeason && Number(ep.episode) === targetEpisode
+    )
+    if (localMatch) {
+      setPackBinge(null)
+      episodeSwitchOccurredRef.current = true
+      setEpisodeSwitchState({ status: 'searching', label: `Preparing S${targetSeason}E${targetEpisode}…` })
+      setEpisodeSwitchState(null)
+      setCrossFade(true)
+      setTimeout(() => {
+        forceRestartRef.current = false
+        setForceRestart(false)
+        setCurrentVideo(localMatch)
+      }, 200)
+      return
+    }
+    // Inside a binge, hop within the virtual timeline (no re-search).
+    const pb = packBingeRef.current
+    if (pb && currentVideo.type === 'series') {
+      const k = pb.files.findIndex(f => (f.season ?? 1) === targetSeason && (f.episode ?? -1) === targetEpisode)
+      if (k >= 0) {
+        if (k === pb.index) return
+        episodeSwitchOccurredRef.current = true
+        setEpisodeSwitchState({ status: 'searching', label: `Preparing S${targetSeason}E${targetEpisode}…` })
+        switchPackFile(k, { fresh: false })
+        setEpisodeSwitchState(null)
+        return
+      }
+    }
     episodeSwitchOccurredRef.current = true
     setEpisodeSwitchState({ status: 'searching', label: `Preparing S${targetSeason}E${targetEpisode}…` })
     const resolved = await resolveEpisodeForPlay(targetSeason, targetEpisode)
@@ -2644,13 +3522,115 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
     setEpisodeSwitchState(null)
     setCrossFade(true)
     setTimeout(() => {
-      forceRestartRef.current = true
-      setForceRestart(true)
+      // Manual jump: let any saved position resume instead of restarting.
+      forceRestartRef.current = false
+      setForceRestart(false)
       setCurrentVideo(resolved)
     }, 200)
   }
 
+  // Binge: swap to another pack file on the SAME torrent (instant, no
+  // re-search). Per-file progress keeps saving via the normal stream effect
+  // because season/episode/file_path all update through setCurrentVideo.
+  // fresh=false (manual jumps: panel, Next, scrub) lets a saved position
+  // resume; fresh=true (auto-advance at end of file) starts at zero.
+  const switchPackFile = (targetIndex: number, opts?: { seekLocal?: number; fresh?: boolean }) => {
+    const pb = packBingeRef.current
+    if (!pb || targetIndex < 0 || targetIndex >= pb.files.length || targetIndex === pb.index) return
+    const f = pb.files[targetIndex]
+    if (opts?.seekLocal != null && Number.isFinite(opts.seekLocal)) {
+      packPendingSeekRef.current = Math.max(0, opts.seekLocal)
+    }
+    episodeSwitchOccurredRef.current = true
+    const cur = currentVideoRef.current
+    const season = f.season ?? Number(cur.season ?? 1)
+    const prevEp = Number(cur.episode ?? 0)
+    const episode = f.episode ?? (prevEp > 0 ? prevEp + 1 : undefined)
+    // Flush the outgoing file's real end position first: the clock is zeroed
+    // below, and the save effect's cleanup would otherwise wipe the row.
+    if (isOnlineProgressEnabled()) {
+      const flushIdent = getStreamResumeIdentity(cur)
+      const flushTime = Number(timeRef.current) || 0
+      const flushTotal = Number(durationRef.current) || 0
+      if (flushIdent && flushTime > 0) {
+        safeUpdateStreamProgress({
+          ...flushIdent,
+          ...buildStreamResumeSnapshot(cur),
+          position: flushTime,
+          duration: flushTotal,
+          completed: flushTotal > 0 && flushTime / flushTotal > 0.95,
+          source_magnet: (cur as any).sourceMagnet || null,
+          file_index: parsePackFileIndex(cur.file_path),
+          isClosing: true
+        })
+        skipStreamSaveForRef.current = cur.file_path
+      }
+    }
+    setPackBinge({ ...pb, index: targetIndex })
+    // Pre-buffer the new current + upcoming file immediately.
+    prioritizePackWindow(pb.sid, pb.files, targetIndex)
+    // Reset the clock immediately so the bar doesn't spike during crossfade.
+    // Stale resume targets must not leak into the new file either.
+    timeRef.current = 0
+    setCurrentTime(0)
+    setCrossFade(true)
+    const fresh = opts?.fresh !== false
+    setTimeout(() => {
+      forceRestartRef.current = fresh
+      setForceRestart(fresh)
+      setCurrentVideo({
+        ...cur,
+        id: -Math.abs(Date.now()),
+        title: f.title,
+        season,
+        episode,
+        file_path: f.url,
+        duration: 0,
+        streamSourceId: pb.sid,
+        resumeFrom: 0,
+        sourceRefreshed: false
+      })
+    }, 200)
+    setResumeNotice(episode != null
+      ? `S${season} E${episode} · ${targetIndex + 1}/${pb.files.length}`
+      : `Part ${targetIndex + 1}/${pb.files.length}`)
+  }
+
+  const advancePack = (opts?: { fresh?: boolean }) => {
+    const pb = packBingeRef.current
+    if (!pb) return
+    if (pb.index >= pb.files.length - 1) {
+      setEpisodeSwitchState({ status: 'error', label: 'That was the last episode in this pack' })
+      return
+    }
+    // Auto-advance (ended/outro) starts fresh; manual hops resume.
+    switchPackFile(pb.index + 1, { fresh: opts?.fresh !== false })
+  }
+
+  // Binge-aware absolute seek: a global timestamp maps onto whichever pack
+  // file contains it (switching files first when needed).
+  const seekToGlobalTime = (globalTime: number) => {
+    const pb = packBingeRef.current
+    const timing = packTimingRef.current
+    if (!pb || !timing || timing.total <= 0) {
+      seekToTime(globalTime)
+      return
+    }
+    const g = Math.max(0, Math.min(globalTime, timing.total))
+    let k = 0
+    timing.offsets.forEach((off, i) => { if (off <= g + 0.001) k = i })
+    const local = Math.max(0, g - timing.offsets[k])
+    if (k !== pb.index) switchPackFile(k, { seekLocal: local })
+    else seekToTime(local)
+  }
+
   const playNextEpisode = async () => {
+    // Binge packs advance inside the virtual timeline, never via re-search.
+    // (No timing needed — file order alone advances.)
+    if (packBingeRef.current) {
+      advancePack()
+      return
+    }
     if (currentVideo.type === 'series' && currentVideo.series_name) {
       if (episodeTransitionGuardRef.current) return
       episodeTransitionGuardRef.current = true
@@ -2716,6 +3696,43 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
         return
       }
 
+      // Last resort: advance by torrent file order. Needs zero parsing — even
+      // when filenames carry no S/E tags, the next video file in the pack
+      // almost always is the next episode.
+      const fileIdx = parsePackFileIndex(currentVideo.file_path)
+      if (fileIdx != null && torrentEpisodes && torrentEpisodes.length > 1) {
+        const ordered = [...torrentEpisodes].sort((a, b) => a.index - b.index)
+        const pos = ordered.findIndex(e => e.index === fileIdx)
+        const nxt = pos >= 0 ? ordered[pos + 1] : undefined
+        if (nxt) {
+          const base = currentVideo.file_path.split('?')[0]
+          const season = nxt.season ?? currentSeason
+          const ep = nxt.episode ?? (currentEpisode > 0 ? currentEpisode + 1 : undefined)
+          if (ep && ep > 0) {
+            episodeSwitchOccurredRef.current = true
+            const resolved = {
+              ...currentVideo,
+              id: -Math.abs(Date.now()),
+              title: (nxt.season != null && nxt.episode != null && episodeNameMapRef.current[`${nxt.season}-${nxt.episode}`]) || nxt.fileName.replace(/\.[^/.]+$/, ''),
+              season,
+              episode: ep,
+              file_path: `${base}?file=${nxt.index}`,
+              duration: 0,
+              streamSourceId: currentVideo.streamSourceId,
+              resumeFrom: 0,
+              sourceRefreshed: false
+            }
+            setCrossFade(true)
+            setTimeout(() => {
+              forceRestartRef.current = true
+              setForceRestart(true)
+              setCurrentVideo(resolved)
+            }, 200)
+            return
+          }
+        }
+      }
+
       // No next-episode candidate — never close the player for series; surface it instead.
       console.warn('[VideoPlayer] playNextEpisode: no next-episode candidate for series')
       setEpisodeSwitchState({ status: 'error', label: 'Could not determine the next episode' })
@@ -2731,7 +3748,10 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
         return
       }
       episodeTransitionGuardRef.current = false
-      onClose()
+      // Standalone video finished — stay in the player on an end screen
+      // (Replay / Close) instead of dropping to Home. This is the path hit
+      // by local files opened from the OS file explorer.
+      showPlaybackFinished()
     }
   }
 
@@ -2925,6 +3945,12 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
   const togglePlay = (e?: React.MouseEvent | React.KeyboardEvent) => {
     if (e) e.stopPropagation()
     if (!isHost && roomId !== null) return;
+    // Pressing play on the finished screen restarts from the beginning
+    // (VLC-style) instead of sitting on the last frame.
+    if (hasEnded) {
+      handleReplay()
+      return
+    }
     if (videoRef.current) {
       if (videoRef.current.paused) {
         videoRef.current.play()
@@ -3078,6 +4104,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
 
       const switchToken = ++externalAudioSeekTokenRef.current
       externalAudioSeekBarrierRef.current = true
+      cancelDelayedAudioPause()
 
       const ready = await prepareExternalAudioTrack(
         trackObj.index,
@@ -3105,18 +4132,26 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
       setLastSeekTime(safeTime)
       // Same seek-echo guard as syncSelectedExternalAudio: this programmatic
       // seek must not re-enter the external-audio sync (see onSeeked).
-      suppressNextSeekSyncRef.current = true
-      videoEl.currentTime = safeTime
-      // Same staleness guard as above — a coalesced same-time seek fires no
-      // 'seeked', so don't let the flag swallow the next genuine user seek.
-      setTimeout(() => {
-        if (suppressNextSeekSyncRef.current) suppressNextSeekSyncRef.current = false
-      }, 1500)
+      // Skip it when the video is already there — a pointless re-seek forces
+      // a torrent re-buffer and feeds the reload stutter loop.
+      if (Math.abs(videoEl.currentTime - safeTime) > 0.25) {
+        suppressNextSeekSyncRef.current = true
+        videoEl.currentTime = safeTime
+        // Same staleness guard as above — a coalesced same-time seek fires no
+        // 'seeked', so don't let the flag swallow the next genuine user seek.
+        setTimeout(() => {
+          if (suppressNextSeekSyncRef.current) suppressNextSeekSyncRef.current = false
+        }, 1500)
+      }
 
       if (wasPlaying) {
         try {
-          await Promise.allSettled([audioEl.play(), videoEl.play()])
+          // Video first, then audio — the MP3 is ready instantly while the
+          // video re-buffers, so audio-first banks an "audio early" lead.
+          await videoEl.play().catch(() => {})
+          await audioEl.play().catch(() => {})
           audioEl.playbackRate = playbackRate
+          startupDriftCorrectionUntilRef.current = Date.now() + 3000
         } catch (e) {
           console.error('[Audio] Playback resume failed after track switch:', e)
         }
@@ -3575,6 +4610,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
   const seekToTime = (time: number) => {
     if (!isHost && roomId !== null) return;
     if (videoRef.current) {
+      if (hasEnded) setHasEnded(false)
       const durationLimit = Number.isFinite(videoRef.current.duration) ? videoRef.current.duration : durationRef.current
       const boundedTime = durationLimit > 0
         ? Math.max(0, Math.min(time, durationLimit))
@@ -3592,11 +4628,20 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
   const seek = (seconds: number) => {
     if (!isHost && roomId !== null) return;
     if (videoRef.current) {
-      const time = videoRef.current.currentTime + seconds
-      seekToTime(time)
+      // Binge: relative jumps ride the virtual timeline (can cross episodes).
+      const base = packTimingRef.current
+        ? (packFileOffset + videoRef.current.currentTime)
+        : videoRef.current.currentTime
+      if (packTimingRef.current) {
+        seekToGlobalTime(base + seconds)
+      } else {
+        seekToTime(base + seconds)
+      }
       setSeekPopup(prev => ({ show: true, text: seconds > 0 ? `+${seconds}s` : `${seconds}s`, id: prev.id + 1 }))
     }
   }
+  const seekRef = useRef(seek)
+  seekRef.current = seek
 
   const performIntroDbSkip = (segment: IntroDbSegment) => {
     const targetTime = segment.endSec + INTRODB_SKIP_END_PADDING_SECONDS
@@ -3626,16 +4671,31 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
 
   const handleSeekChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const time = parseFloat(e.target.value)
-    setCurrentTime(time)
-    timeRef.current = time
+    // Binge: the slider runs on the virtual timeline — convert back to
+    // file-relative for element state so the bar doesn't double-count.
+    const timing = packTimingRef.current
+    const pb = packBingeRef.current
+    const off = timing && pb
+      ? timing.offsets[Math.min(Math.max(pb.index, 0), timing.offsets.length - 1)] ?? 0
+      : 0
+    const local = time - off
+    setCurrentTime(local)
+    timeRef.current = local
     if (videoRef.current && !isSeeking) {
-      videoRef.current.currentTime = time
+      videoRef.current.currentTime = local
     }
   }
 
   const handleSeekMouseUp = (e: React.MouseEvent<HTMLInputElement> | React.TouchEvent<HTMLInputElement>) => {
     if (!isHost && roomId !== null) return;
     const time = parseFloat((e.target as HTMLInputElement).value)
+    // Binge: the slider runs on the virtual timeline — map back onto files.
+    if (packTimingRef.current) {
+      setIsSeeking(false)
+      seekToGlobalTime(time)
+      if (isHost) broadcastState({ type: 'SEEK', time });
+      return
+    }
     if (videoRef.current) {
       setIsSeeking(false)
       pendingControlledSeekTimeRef.current = time
@@ -3710,7 +4770,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
     
     let x = e.clientX - rect.left
     const percentage = Math.max(0, Math.min(1, x / rect.width))
-    const time = percentage * duration
+    const time = percentage * (packTimingRef.current ? packTimingRef.current.total : duration)
     
     setHoverTime(time)
 
@@ -3735,26 +4795,63 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
     setSeekPreviewLoading(false)
   }
 
+  // Scroll / trackpad swipe over the seek bar scrubs the timestamp.
+  // Vertical scroll up (or horizontal swipe right) = forward, the opposite = backward.
+  // Deltas are accumulated so precise trackpads need a full notch worth of
+  // movement for one SEEK_BAR_WHEEL_STEP_SECONDS jump — no per-pixel thrashing.
+  const handleProgressWheel = (e: React.WheelEvent<HTMLDivElement>) => {
+    if (!isHost && roomId !== null) return
+    if (isSeeking) return
+    const dx = e.deltaX || 0
+    const dy = e.deltaY || 0
+    if (dx === 0 && dy === 0) return
+    e.preventDefault()
+    e.stopPropagation()
+
+    const unitScale = e.deltaMode === 1 ? 16 : 1
+    const horizontalDominant = Math.abs(dx) > Math.abs(dy)
+    // Positive forwardDelta = move forward in time.
+    const forwardDelta = (horizontalDominant ? dx : -dy) * unitScale
+    if (forwardDelta === 0) return
+
+    seekBarWheelAccumRef.current += forwardDelta
+    if (seekBarWheelResetTimerRef.current) {
+      clearTimeout(seekBarWheelResetTimerRef.current)
+    }
+    seekBarWheelResetTimerRef.current = setTimeout(() => {
+      seekBarWheelAccumRef.current = 0
+      seekBarWheelResetTimerRef.current = null
+    }, SEEK_BAR_WHEEL_RESET_MS)
+
+    let steps = 0
+    while (seekBarWheelAccumRef.current >= SEEK_BAR_WHEEL_ACCUM_THRESHOLD) {
+      seekBarWheelAccumRef.current -= SEEK_BAR_WHEEL_ACCUM_THRESHOLD
+      steps += 1
+    }
+    while (seekBarWheelAccumRef.current <= -SEEK_BAR_WHEEL_ACCUM_THRESHOLD) {
+      seekBarWheelAccumRef.current += SEEK_BAR_WHEEL_ACCUM_THRESHOLD
+      steps -= 1
+    }
+    if (steps === 0) return
+
+    // Keep controls visible while scrubbing with the wheel.
+    setShowControls(true)
+    clearTimeout(window.controlsTimeout)
+    window.controlsTimeout = setTimeout(() => setShowControls(false), 3000)
+
+    seek(steps * SEEK_BAR_WHEEL_STEP_SECONDS)
+  }
+
   const toggleFullscreen = async () => {
     if (fullscreenToggleInFlightRef.current) return
     fullscreenToggleInFlightRef.current = true
 
     try {
-      const hasDocumentFullscreen = !!document.fullscreenElement
-      const hasWindowFullscreen = await window.api.isFullscreen().catch(() => isWindowFullscreen)
-
-      if (hasDocumentFullscreen || hasWindowFullscreen) {
-        if (hasDocumentFullscreen) {
-          await document.exitFullscreen().catch(() => {})
-        }
-
-        const stillWindowFullscreen = await window.api.isFullscreen().catch(() => hasWindowFullscreen)
-        if (stillWindowFullscreen) {
-          const nextState = await window.api.toggleFullscreen()
-          setIsWindowFullscreen(nextState)
-        } else if (hasWindowFullscreen) {
-          setIsWindowFullscreen(false)
-        }
+      // VIDEO-ONLY: the app window fullscreen is a separate layer and must
+      // never be toggled here. The app often runs window-fullscreen; the
+      // video element fullscreen stacks on top of it and exits back to it.
+      if (document.fullscreenElement) {
+        await document.exitFullscreen().catch(() => {})
 
         setShowControls(true)
         clearTimeout(window.controlsTimeout)
@@ -3763,7 +4860,15 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
         return
       }
 
-      await playerShellRef.current?.requestFullscreen()
+      try {
+        await playerShellRef.current?.requestFullscreen()
+      } catch {
+        // Last-resort fallback only when element fullscreen is unavailable.
+        try {
+          const nextState = await window.api.toggleFullscreen()
+          setIsWindowFullscreen(nextState)
+        } catch { /* ignore */ }
+      }
       setFullscreenPopup(previous => ({ show: true, isFullscreen: true, id: previous.id + 1 }))
     } catch (err) {
       console.error('Fullscreen toggle failed:', err)
@@ -3773,6 +4878,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
   }
 
   const togglePictureInPicture = async () => {
+    console.log('[PiP] Toggle clicked')
     const videoEl = videoRef.current as (HTMLVideoElement & { requestPictureInPicture?: () => Promise<PictureInPictureWindow> }) | null
     const doc = document as Document & {
       pictureInPictureEnabled?: boolean
@@ -3786,6 +4892,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
     }
 
     try {
+      // Toggle off: exit the overlay (leave-handler + watchdog restore the app).
       if (doc.pictureInPictureElement === videoEl) {
         await doc.exitPictureInPicture?.()
         return
@@ -3800,13 +4907,69 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
       }
 
       await videoEl.requestPictureInPicture()
+      // PiP is live in its own OS window — get the app out of the way.
+      // Playback continues on the same video element underneath.
+      console.log('[PiP] Overlay PiP open, minimizing app')
+      pipMinimizedRef.current = true
+      pushPipThumbar(!videoEl.paused)
+      startPipWatchdog()
+      window.api.minimizeWindow().catch(() => {})
       setShowControls(true)
       clearTimeout(window.controlsTimeout)
       window.controlsTimeout = setTimeout(() => setShowControls(false), 3000)
     } catch (err) {
-      console.error('Picture-in-Picture failed:', err)
+      console.error('[PiP] Picture-in-Picture failed:', (err as any)?.message || err)
       setIsPiPActive(false)
+      stopPipWatchdog()
+      pipMinimizedRef.current = false
+      window.api.clearPipThumbar().catch(() => {})
     }
+  }
+
+  // Mini-player chrome auto-fade (YouTube-style): while minimized and playing,
+  // the dock controls fade after ~2.5s idle and return on hover/tap. A slim
+  // seek strip stays visible at all times so progress is glanceable and the
+  // position stays adjustable even when faded.
+  const [miniControlsVisible, setMiniControlsVisible] = useState(true)
+  const miniHideTimerRef = useRef<number>(0)
+  const pokeMini = useCallback(() => {
+    setMiniControlsVisible(true)
+    window.clearTimeout(miniHideTimerRef.current)
+    miniHideTimerRef.current = window.setTimeout(() => {
+      const el = videoRef.current
+      if (el && !el.paused && !el.ended) setMiniControlsVisible(false)
+    }, 2500)
+  }, [])
+  useEffect(() => () => window.clearTimeout(miniHideTimerRef.current), [])
+  useEffect(() => {
+    if (isMinimized) pokeMini()
+    else window.clearTimeout(miniHideTimerRef.current)
+  }, [isMinimized, pokeMini])
+  useEffect(() => {
+    if (isMinimized && !isPlaying) {
+      window.clearTimeout(miniHideTimerRef.current)
+      setMiniControlsVisible(true)
+    }
+  }, [isMinimized, isPlaying])
+
+  // In-app minimize: dock the same video element to the bottom-right corner.
+  // Exits element fullscreen first (a fullscreen element cannot be corner
+  // docked), keeps playback running, and makes the rest of the app clickable
+  // by switching the shell to pointer-events-none (only the dock captures).
+  const toggleMinimize = async () => {
+    if (document.fullscreenElement) {
+      try { await document.exitFullscreen() } catch { /* ignore */ }
+    }
+    setShowEpisodesPanel(false)
+    setShowMagnetsPanel(false)
+    setShowInfoPanel(false)
+    setShowAdvancedMenu(false)
+    setShowSpeedMenu(false)
+    setShowSleepMenu(false)
+    setShowMediaMenu(false)
+    setIsMinimized((v) => !v)
+    setShowControls(true)
+    clearTimeout(window.controlsTimeout)
   }
 
   const formatTime = (seconds: number) => {
@@ -3854,11 +5017,17 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
     return null
   }, [currentVideo, hasNextEpisode, seriesEpisodes])
 
+  const miniTitle = currentVideo.type === 'series' && (currentVideo as any).series_name
+    ? `${(currentVideo as any).series_name} · S${currentVideo.season} E${currentVideo.episode}`
+    : currentVideo.title
+
   return (
-    <div 
+    <div
       ref={playerShellRef}
       data-fullscreen-gesture-scope="player"
-      className={`fixed inset-0 z-50 bg-black flex flex-col items-center justify-center group overflow-hidden keep-dark dark ${!showControls ? 'cursor-none' : ''}`}
+      className={isMinimized
+        ? 'pointer-events-none fixed inset-0 z-[80] bg-transparent group overflow-visible keep-dark dark'
+        : `fixed inset-0 z-[90] bg-black flex flex-col items-center justify-center group overflow-hidden keep-dark dark ${!showControls ? 'cursor-none' : ''}`}
       onMouseMove={(e) => {
         setShowControls(true)
         clearTimeout(window.controlsTimeout)
@@ -3878,12 +5047,16 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
     >
       {nextEpisodeStillUrl && <img src={nextEpisodeStillUrl} style={{ display: 'none' }} alt="" />}
       <div
-        className="relative overflow-hidden bg-black"
-        style={{
-          ...videoSurfaceStyle,
-          transition: `opacity ${crossFade ? '200ms' : '300ms'} ease-in-out`,
-          opacity: crossFade ? 0 : 1
-        }}
+        className={isMinimized
+          ? 'pointer-events-auto fixed bottom-4 right-4 overflow-hidden rounded-xl border border-white/15 bg-black shadow-[0_20px_60px_rgba(0,0,0,0.7)]'
+          : 'relative overflow-hidden bg-black'}
+        style={isMinimized
+          ? { width: 'min(380px, calc(100vw - 2rem))', aspectRatio: '16 / 9', transition: `opacity ${crossFade ? '200ms' : '300ms'} ease-in-out`, opacity: crossFade ? 0 : 1 }
+          : {
+            ...videoSurfaceStyle,
+            transition: `opacity ${crossFade ? '200ms' : '300ms'} ease-in-out`,
+            opacity: crossFade ? 0 : 1
+          }}
       >
         <video
           ref={videoRef}
@@ -3910,6 +5083,8 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
           const time = videoRef.current.currentTime
           setCurrentTime(time)
           timeRef.current = time
+          // Scrubbing away from the end dismisses the finished screen.
+          setHasEnded(false)
           if (pendingControlledSeekTimeRef.current !== null) {
             const shouldResume = pendingControlledSeekResumeRef.current
             pendingControlledSeekTimeRef.current = null
@@ -3943,7 +5118,8 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
             return
           }
           allowGuestPlaybackEventRef.current = false
-          setIsPlaying(true); 
+          setHasEnded(false)
+          setIsPlaying(true);
           const trackObj = availableAudio.find(a => a.id === selectedAudioId);
           if (trackObj && !trackObj.native && audioRef.current && !startupExternalAudioBarrierRef.current && !externalAudioSeekBarrierRef.current && !audioTrackSwitchRetryRef.current && !audioTrackSwitching) {
             if (!audioRef.current.src || audioRef.current.error) {
@@ -3960,6 +5136,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
           }
           allowGuestPlaybackEventRef.current = false
           setIsPlaying(false)
+          cancelDelayedAudioPause()
           if (audioRef.current && audioRef.current.src) audioRef.current.pause()
         }}
         onEnded={handleEnded}
@@ -3974,7 +5151,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
           } else {
             showBufferingIndicatorSoon()
           }
-          if (audioRef.current && audioRef.current.src) audioRef.current.pause()
+          pauseAudioOnStallGracefully()
         }}
         onWaiting={() => {
           if (startupExternalAudioBarrierRef.current || externalAudioSeekBarrierRef.current) return
@@ -3990,7 +5167,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
           if (highSpeedPlaybackActive && fpsBoostEnabled) {
             activateHighSpeedPerformanceMode('Buffering at high speed; FPS Boost eased to help playback catch up')
           }
-          if (audioRef.current && audioRef.current.src) audioRef.current.pause()
+          pauseAudioOnStallGracefully()
         }}
         onPlaying={() => { 
           if (isTorrentStream && (isTorrentLoading || torrentBuffering)) {
@@ -4006,6 +5183,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
             }, 1100)
           }
           hideBufferingIndicator(); 
+          cancelDelayedAudioPause()
           if (isTorrentStreamPath(currentVideo.file_path) && !getSelectedExternalAudioTrack()) {
             forceTorrentNativeAudio()
           }
@@ -4022,6 +5200,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
         }}
         onCanPlay={() => {
           hideBufferingIndicator()
+          cancelDelayedAudioPause()
           if (crossFadeRef.current) {
             setCrossFade(false)
           }
@@ -4071,6 +5250,93 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
         }}
         >
         </video>
+
+        {/* ── In-app mini-player dock controls (only when minimized) ──
+            Lives INSIDE the corner dock container so it moves with the video.
+            The video element above is never remounted, so playback continues.
+            Full chrome fades after ~2.5s idle while playing (hover/tap brings
+            it back); the slim seek strip at the very bottom stays visible so
+            progress is glanceable and seeking works even when faded. */}
+        {isMinimized && (
+          <div
+            className="absolute inset-x-0 bottom-0 z-40"
+            onMouseMove={pokeMini}
+            onPointerDown={pokeMini}
+          >
+            <div className={`bg-gradient-to-t from-black/90 via-black/50 to-transparent px-2.5 pb-1 pt-8 transition-all duration-200 ${miniControlsVisible ? 'translate-y-0 opacity-100' : 'pointer-events-none translate-y-1 opacity-0'}`}>
+              <div className="mb-1.5 flex items-center gap-1.5">
+                <p className="min-w-0 flex-1 truncate text-[11px] font-bold text-white/90" title={miniTitle}>
+                  {miniTitle}
+                </p>
+                <button
+                  type="button"
+                  onClick={(e) => { e.stopPropagation(); toggleMinimize() }}
+                  title="Expand player"
+                  className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-white/10 text-white/80 backdrop-blur-md transition-colors hover:bg-white/20 hover:text-white"
+                >
+                  <Maximize2 size={12} />
+                </button>
+                <button
+                  type="button"
+                  onClick={(e) => { e.stopPropagation(); onClose() }}
+                  title="Close player"
+                  className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-white/10 text-white/80 backdrop-blur-md transition-colors hover:bg-primary hover:text-white"
+                >
+                  <X size={12} />
+                </button>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={(e) => { e.stopPropagation(); togglePlay() }}
+                  title={isPlaying ? 'Pause' : 'Play'}
+                  className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-white text-black transition-transform hover:scale-105"
+                >
+                  {isPlaying ? <Pause size={14} fill="currentColor" /> : <Play size={14} fill="currentColor" className="ml-0.5" />}
+                </button>
+                <div className="min-w-0 flex-1">
+                  <input
+                    type="range"
+                    min={0}
+                    max={duration || 0}
+                    step={0.1}
+                    value={currentTime}
+                    onChange={(e) => { const t = Number(e.target.value); if (videoRef.current) { videoRef.current.currentTime = t; setCurrentTime(t) } }}
+                    onClick={(e) => e.stopPropagation()}
+                    className="h-1 w-full accent-primary cursor-pointer"
+                    aria-label="Seek"
+                  />
+                  <div className="mt-0.5 flex items-center justify-between text-[10px] font-semibold tabular-nums text-white/60">
+                    <span>{formatTime(currentTime)}</span>
+                    <span>{formatTime(duration)}</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+            {/* Always-visible slim seek strip: full-width hit area with an
+                invisible native slider, so seeking works even when faded. */}
+            <div className="relative flex h-3.5 items-end px-2.5 pb-1.5">
+              <div className="h-1 w-full overflow-hidden rounded-full bg-white/25">
+                <div
+                  className="h-full rounded-full bg-primary"
+                  style={{ width: `${duration > 0 ? Math.min(100, Math.max(0, (currentTime / duration) * 100)) : 0}%` }}
+                />
+              </div>
+              <input
+                type="range"
+                min={0}
+                max={duration || 0}
+                step={0.1}
+                value={currentTime}
+                onChange={(e) => { const t = Number(e.target.value); if (videoRef.current) { videoRef.current.currentTime = t; setCurrentTime(t) } }}
+                onClick={(e) => e.stopPropagation()}
+                onPointerDown={(e) => e.stopPropagation()}
+                className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
+                aria-label="Seek video"
+              />
+            </div>
+          </div>
+        )}
 
         {(effectiveFpsBoostEnabled || effectiveSharpnessEnabled || effectiveVibranceEnabled) && (
           <AIEnhancementRenderer
@@ -4308,10 +5574,82 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
         </div>
       )}
 
+      {/* Online resume receipt */}
+      {resumeNotice && (
+        <div className="pointer-events-none absolute left-1/2 top-20 z-[65] -translate-x-1/2">
+          <div className="flex items-center gap-2 rounded-full border border-white/10 bg-black/70 px-4 py-2 text-[12px] font-bold text-white/85 shadow-2xl backdrop-blur-xl">
+            <Check size={14} strokeWidth={3} className="text-emerald-400" />
+            <span className="whitespace-nowrap">{resumeNotice}</span>
+          </div>
+        </div>
+      )}
+
       {/* Buffering Indicator */}
       {isBuffering && !isTorrentStream && (
         <div className="absolute inset-0 flex items-center justify-center bg-black/20 pointer-events-none">
           <div className="w-16 h-16 border-4 border-primary border-t-transparent rounded-full animate-spin" />
+        </div>
+      )}
+
+      {/* Playback-finished end screen — stays in the player instead of
+          dropping to Home (VLC / YouTube style). Seek bar + controls stay
+          interactive underneath (z-38 < controls z-40); the card is the
+          only pointer-capturing element so seeking dismisses this screen. */}
+      {hasEnded && (
+        <div className="absolute inset-0 z-[38] flex items-center justify-center pointer-events-none">
+          <div className="absolute inset-0 bg-black/60 backdrop-blur-[2px] pointer-events-none" />
+          <div
+            role="dialog"
+            aria-label="Playback finished"
+            className="pointer-events-auto relative mx-4 w-[min(420px,92vw)] rounded-2xl border border-white/10 bg-[#0b1018]/95 p-6 text-center shadow-[0_24px_80px_rgba(0,0,0,0.6)] backdrop-blur-2xl animate-in fade-in zoom-in duration-200"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-emerald-500/15 text-emerald-300 ring-1 ring-emerald-400/25">
+              <Check size={22} strokeWidth={3} />
+            </div>
+            <h2 className="mt-4 text-lg font-black text-white">Playback finished</h2>
+            <p className="mt-1 truncate text-sm font-semibold text-white/60" title={currentVideo.title}>
+              {currentVideo.title}
+            </p>
+            {currentVideo.id === -1 && (
+              <p className="mt-1 text-[11px] font-medium text-white/35">
+                Opened from your files — it stays here so you can replay it.
+              </p>
+            )}
+            <div className="mt-5 flex items-center justify-center gap-2.5">
+              <button
+                type="button"
+                autoFocus
+                onClick={(e) => { e.stopPropagation(); handleReplay() }}
+                className="flex h-10 items-center gap-2 rounded-xl bg-primary px-5 text-sm font-black text-white transition-all hover:bg-[#c40812] active:scale-95"
+              >
+                <RotateCcw size={16} strokeWidth={2.5} />
+                Replay
+              </button>
+              {!isTorrentStream && (
+                <button
+                  type="button"
+                  onClick={(e) => { e.stopPropagation(); handleOpenFolder() }}
+                  title="Show in folder"
+                  className="flex h-10 items-center gap-2 rounded-xl bg-white/8 px-4 text-sm font-bold text-white/75 ring-1 ring-white/10 transition-all hover:bg-white/15 hover:text-white active:scale-95"
+                >
+                  <FolderOpen size={16} />
+                  Folder
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={(e) => { e.stopPropagation(); onClose() }}
+                className="flex h-10 items-center gap-2 rounded-xl bg-white/8 px-4 text-sm font-bold text-white/75 ring-1 ring-white/10 transition-all hover:bg-white/15 hover:text-white active:scale-95"
+              >
+                <X size={16} />
+                Close
+              </button>
+            </div>
+            <p className="mt-4 text-[10px] font-bold uppercase tracking-[0.18em] text-white/30">
+              Press Enter to replay · Esc to close
+            </p>
+          </div>
         </div>
       )}
 
@@ -4504,8 +5842,8 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
         </div>
       )}
 
-      {/* Unified Top Info Bar */}
-      <div className={`absolute top-0 left-0 right-0 px-10 pt-10 pb-6 flex items-start justify-between transition-opacity duration-300 video-controls z-40 bg-gradient-to-b from-black/80 to-transparent ${showControls ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}>
+      {/* Unified Top Info Bar (hidden in mini-player mode — the dock has its own bar) */}
+      <div className={`absolute top-0 left-0 right-0 px-10 pt-10 pb-6 flex items-start justify-between transition-opacity duration-300 video-controls z-40 bg-gradient-to-b from-black/80 to-transparent ${isMinimized ? 'hidden' : ''} ${showControls ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}>
         <div className="flex items-center space-x-4">
           <button 
             onClick={onClose}
@@ -4847,9 +6185,13 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
               )}
             </div>
 
-          {currentVideo.type === 'series' && hasNextEpisode && (
-            <button 
-              onClick={(e) => { e.stopPropagation(); playNextEpisode(); }}
+          {currentVideo.type === 'series' && (hasNextEpisode || packBinge) && (
+            <button
+              onClick={(e) => {
+                e.stopPropagation()
+                if (packBingeRef.current) { advancePack({ fresh: false }); return }
+                playNextEpisode();
+              }}
               className="flex items-center space-x-2 px-4 py-2 rounded-lg bg-black/50 transition-colors backdrop-blur-md border border-white/5 text-white hover:bg-black/80 group/next"
             >
               <span className="text-sm font-bold tracking-wide">Next Episode</span>
@@ -4874,16 +6216,17 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
 
       {showStats && <VideoStatsOverlay videoRef={videoRef} />}
 
+      {!isMinimized && (
       <PlayerControls
         showControls={showControls}
         hoverTime={hoverTime}
         hoverPosition={hoverPosition}
         seekPreviewImageSrc={seekPreviewImageSrc}
         seekPreviewLoading={seekPreviewLoading}
-        duration={duration}
-        currentTime={currentTime}
+        duration={displayDuration}
+        currentTime={displayCurrentTime}
         seekPreview={seekPreview}
-        introDbSegments={introDbSegments}
+        introDbSegments={displayIntroSegments}
         isPlaying={isPlaying}
         isHost={isHost}
         roomId={roomId}
@@ -4916,11 +6259,12 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
 
         handleProgressMouseMove={handleProgressMouseMove}
         handleProgressMouseLeave={handleProgressMouseLeave}
+        handleProgressWheel={handleProgressWheel}
         handleSeekChange={handleSeekChange}
         handleSeekMouseDown={handleSeekMouseDown}
         handleSeekMouseUp={handleSeekMouseUp}
         seek={seek}
-        seekToTime={seekToTime}
+        seekToTime={seekToGlobalTime}
         togglePlay={togglePlay}
         handleVolumeChange={handleVolumeChange}
         setShowEpisodesPanel={handleToggleEpisodesPanel}
@@ -4943,9 +6287,12 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
         changeSpeed={changeSpeed}
         togglePictureInPicture={togglePictureInPicture}
         toggleFullscreen={toggleFullscreen}
+        toggleMinimize={toggleMinimize}
+        isMinimized={isMinimized}
         setSleepTimerEnd={setSleepTimerEnd}
         setShowStats={setShowStats}
       />
+      )}
       {/* Hidden Custom Audio Extraction Pipeliner */}
       <audio ref={audioRef} crossOrigin="anonymous" style={{ display: 'none' }} />
       {remoteAudioStreams.map(({ peerId, stream }) => (
@@ -5372,4 +6719,4 @@ const PanelRow: React.FC<{ label: string; value: string | null | undefined }> = 
 }
 // ─────────────────────────────────────────────────────────────────────────────
 
-export default VideoPlayer
+export default React.memo(VideoPlayer)

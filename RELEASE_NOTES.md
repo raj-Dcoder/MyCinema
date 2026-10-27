@@ -1,3 +1,433 @@
+# MyCinema v1.46.0
+
+Dedicated in-app updates and changelog tab, smart torrent title parsing with modular download queue, real-time download and library cleanup synchronization, and refined Focus Tube cards.
+
+### In-App Updates & Changelog
+- **Dedicated Updates Tab**: Added an Updates tab directly above Settings to browse the complete release history, search changes, filter by version, and view category tags.
+- **What's New Integration**: Jump directly from the What's New dialog to the full changelog at any time with a single click.
+- **Automated Changelog Synchronization**: Built an automated parser to keep in-app release logs permanently synchronized with official release notes.
+
+### Download Queue & Smart Parsing
+- **Intelligent Title Parsing**: Torrent and download names are automatically parsed into clean media titles, release years, season/episode numbers, quality, source, and audio tags.
+- **Modular Download Queue**: Revamped the active downloads interface with real-time progress indicators, search filtering, and storage usage breakdowns.
+- **Clean State Synchronization**: Deleting downloaded files or library entries automatically purges corresponding download records so the downloads view stays clean.
+- **Reliable Download Retries**: Retrying a failed download completely resets transfer progress and speed before queuing for a fresh start.
+
+### Focus Tube & Theater Enhancements
+- **Enhanced Video Cards**: Video cards now display creator channel avatars, formatted view counts, relative timestamps, and a 3-dot context menu for quick actions.
+- **Quick Card Actions**: Mark videos as watched or unwatched, copy video links, or open on YouTube directly from any card.
+- **Smooth Theater Panel Transitions**: Eased sidebar collapse and expand animations to 500ms for a seamless widescreen viewing experience.
+
+### Library Scanning & Metadata Reliability
+- **Series Metadata Caching**: Scanner caches TMDB show metadata across multi-episode folders, dramatically speeding up library scans and avoiding redundant requests.
+- **High-Quality Poster Selection**: Series cards prioritize official TMDB artwork over generic video snapshots.
+- **Reliable Database ID Resolution**: Database operations now use transactional ID resolution to ensure robust video tracking during library updates.
+
+### Navigation Streamline
+- **Focused Sidebar**: Streamlined sidebar navigation by retiring legacy History and Favorites tabs in favor of unified Watchlist and Collections.
+
+### Security & Privacy
+- **Orphaned Metadata Cleanup**: Deleting video files purges associated download records and cache entries from local SQLite databases without retaining lingering tracker data.
+
+***
+
+# MyCinema v1.45.0
+
+Seamless Focus Tube YouTube search, automatic video description and native chapter extraction, subtle 1-click channel subscription popovers, expanded ambient glow, and bug-free fullscreen transitions.
+
+### Focus Tube Search & Playback
+- **Direct YouTube Video Search**: Search directly for any YouTube video right within Focus Tube, with instant feed loading, direct watch page parsing, and automatic Invidious failover.
+- **Full Video Descriptions & Chapters**: Player now extracts full video descriptions and native YouTube chapter markers, populating interactive timestamp chapters in both the sidebar and collapsible sections below the player.
+- **Subtle 1-Click Channel Subscription**: Tapping Subscribe opens a lightweight, clean category picker anchored directly over the button, allowing instant 1-click channel categorization without full-screen blur or disruptions.
+- **Search Queue Playback**: Playing a search result automatically enqueues the search feed so you can seamlessly play through all results without interruption.
+
+### Theater UI & Visual Polish
+- **Extended Ambient Lighting**: Deepened the vertical atmospheric glow around the theater player (`-inset-y-50 sm:-inset-y-60`) for an even richer cinematic immersion.
+- **Isolated Control Stacking**: Cleaned up CSS stacking contexts so the category popover sits completely above the player controls without any visual clipping or overlap.
+- **Fluid Fullscreen & Miniplayer Exits**: Fixed FLIP transition glitches when returning from fullscreen or closing the miniplayer, delivering stable, jitter-free animations.
+- **Streamlined Video Cards**: Removed unnecessary subscribe buttons and tags from cards to keep the Focus Tube browsing grid clean and distraction-free.
+
+### Security & Privacy
+- **Encrypted Local Storage**: Enriched metadata and category associations are stored strictly on-device in local SQLite databases without external tracking or telemetry.
+
+***
+
+# MyCinema v1.44.0
+
+Ultra-smooth Focus Tube theater experience with collapsible sidepanels, calm atmospheric ambient glow, instant queue progression on mark watched, and buttery 60FPS transitions.
+
+### Focus Tube Theater Polish
+- **Collapsible Theater Sidepanel**: Collapse the queue, chapters, and comments panel into a minimal edge tab with a single click, unlocking an ultra-wide cinematic view for immersive viewing.
+- **Calm Atmospheric Glow**: Restructured ambient mode lighting with widened lateral spread and soft bottom feathering, keeping scene glow vibrant while preserving text legibility.
+- **Snappy Mark-Watched Auto-Advance**: Tapping "Mark Watched" immediately jumps to the next queue item with zero latency while synchronizing watch history and counts in the background.
+- **Fluid Dock & Restore Transitions**: Rebuilt mini-player minimize and restore animations with synchronized 60FPS coordinate tracking and opacity cross-fades, eliminating visual cut-offs.
+- **Decluttered Interface & Clean Layout**: Removed redundant buttons, eliminated horizontal scroll overflow, and removed category dots for a cleaner, focused feed.
+
+### Core & Stability
+- **Media Protocol Query Sanitization**: Strips URL query parameters and hashes before resolving local file requests, ensuring reliable playback of stored media.
+- **Development Database Isolation**: Scoped custom database override directories strictly to unpacked development runs to guarantee production builds access standard application data.
+
+### Security & Privacy
+- **Safe Protocol Resolution**: Strict URL path decoding and normalization safeguards prevent path traversal attacks across custom media protocols.
+
+***
+
+# MyCinema v1.43.1
+
+Persistent user profile synchronization across dev and production, disk-backed settings storage, and background process lifecycle reliability.
+
+### Profile & Settings Persistence
+- **Disk-Backed User Profiles**: Profile name and avatar changes now save directly to disk settings through the main process, ensuring your customized name and picture persist reliably across app updates, cache clears, and dev/production switches.
+- **Smart Profile Migration**: Automatically restores saved profiles from earlier sessions and whitelist registrations so the app never falls back to a blank user state.
+- **Real-Time Cross-Window Sync**: Updating your username or avatar reflects instantly across all open windows, the navigation sidebar, and the home greeting without needing an app restart.
+
+### Stability & Process Lifecycle
+- **Clean Single-Instance Lifecycle**: Enhanced main-process shutdown handling to ensure no zombie or background processes remain active to hold database locks when the app window closes.
+
+### Security & Privacy
+- **Secure Avatar Storage**: Custom uploaded avatars are validated and stored locally within the protected user data directory, served via privileged media protocol with directory traversal protections.
+
+***
+
+# MyCinema v1.43.0
+
+Immersive ambient mode with dynamic color glow and glossy finish, stream-adaptive video quality filtering, upload date sorting for feeds and queues, smooth bi-directional FLIP transitions, and smart playback continuity.
+
+### Ambient Mode & Glossy Finish
+- **Dynamic Ambient Lighting**: Soft-colored ambient light bleeds outward from the active video player onto the theater background, dynamically matching real-time scene colors.
+- **Glossy Specular Sheen**: Layered frosted glass highlight for a premium, cinema-grade reflective finish around the video frame.
+- **Temporal Color Smoothing**: Live frames blend continuously with temporal alpha interpolation, creating cinematic cross-fades across scene changes without flickering.
+- **Ambient Mode Toggle**: Dedicated switch in the player settings popup to easily toggle ambient glow on or off with persistent preference.
+
+### Stream-Adaptive Video Quality
+- **Accurate Quality Filtering**: The quality selector now detects the active stream's real capabilities and only displays resolutions the video actually supports (e.g. 1080p-capped videos show up to 1080p, 4K videos show up to 4K).
+- **Graceful Capping Indicators**: When your global quality target exceeds a video's ceiling, the player automatically activates the highest available stream and badges it clearly.
+
+### Feed & Queue Chronological Sorting
+- **Upload Date Ordering**: Switch between "Newest first" and "Oldest first" directly on the subscription feed and in-player queue to binge multi-part series or daily news in proper chronological order.
+- **Persistent Preferences**: Your selected sorting order is saved across sessions and applied to database queries automatically.
+
+### Symmetrical FLIP Transitions & Fullscreen Polish
+- **Bi-Directional Continuity**: Entering and exiting fullscreen or docking into the corner mini-player now follows an exact, reversible FLIP animation curve with zero clipping or jitter.
+- **Clean Fullscreen Takeover**: Elevated fullscreen player layer to strictly cover the main navigation sidebar, ensuring edge-to-edge immersion without sidebar overlap.
+
+### Playback Continuity & Smart Filters
+- **Persistent Playback Speed**: Your custom playback speed (1.25x, 1.5x, 2x, etc.) persists seamlessly across auto-advancing queue videos.
+- **Strict Shorts Filtering**: When shorts are hidden via the feed toggle, they are completely excluded from queue auto-advance and stopped immediately.
+- **In-App Test Access Whitelist**: Frictionless in-app request form for YouTube subscription import access with developer mail forwarding and instant copy fallback.
+
+### Security & Privacy
+- **Isolated Ambient Sampling**: Frame color analysis executes within an ephemeral in-memory canvas inside the embed frame, transmitting only lightweight low-resolution color buffers without exposing video data.
+- **Protected Request Handlers**: Whitelist request submissions are strictly validated and dispatched through a dedicated mailer gateway without persisting user credentials or tokens.
+
+***
+
+# MyCinema v1.42.0
+
+FocusTube redesign with a focused cinema watch theater, symmetrical bento video cards, authentic creator avatars, an ultra-slim category carousel, and in-browser loading progress.
+
+### FocusTube Redesign & Watch Theater
+- **Focused Watch Theater**: Embedded 16:9 widescreen cinema player with custom timeline controls and dedicated room context.
+- **Chronological Up-Next Queue**: A distraction-free right-hand queue strictly showing upcoming subscriptions from the active category — zero algorithmic recommendations.
+- **Persistent Playback On Completion**: The theater stays in place when a video finishes or autoplay is off, giving you full control to pick what to watch next.
+- **Seamless Tab Switching**: Main sidebar stays accessible in windowed theater mode, and switching tabs automatically docks playback into a floating corner mini-player.
+
+### Symmetrical Bento Video Cards
+- **Flawless Grid Symmetry**: Replaced off-axis side buttons with a serene, balanced card layout so every video in the grid shares the same height and alignment.
+- **Centered Hover Quick Actions**: Hovering over any card reveals sleek frosted-glass `▶ Play` and `✓ Watched` pill buttons centered on the thumbnail.
+- **Authentic Creator Avatars**: Expanded image security policies to display true creator channel profile pictures across your entire subscription library.
+- **Single-Line Truncated Titles**: Clean typography with single-line titles and unified channel, view-count, and release-time metadata.
+
+### Feed & Navigation Polish
+- **Ultra-Slim Header**: Compact single-tier navigation bar with smooth horizontal category scrolling and edge gradient fade masks.
+- **Clean Filter Toggles**: High-contrast macOS-style toggle switches for "Shorts" and "Watched" with instant feed filtering.
+- **Popup Browser Progress Bar**: Instant 0ms visual feedback on clicks and a sleek top progress bar for web catalogs and download mirrors.
+- **Detail Screen Alignment**: Movie and series detail pages now start cleanly to the right of the sidebar with smooth sliding transitions on sidebar expand/collapse.
+
+### Security & Privacy
+- **Google User Content Whitelist**: Explicitly scoped `https://*.googleusercontent.com` and `https://*.ggpht.com` in the renderer Content-Security-Policy to safely load creator channel media without weakening general script isolation.
+- **Isolated Browser Popup Scripting**: Progress bar and popup interaction handlers execute entirely within the dedicated web popup partition without touching main window credentials or media storage.
+
+***
+
+# MyCinema v1.41.1
+
+Download sites that open instantly: mirrors are checked faster, blocked DNS is bypassed, and known-good links are pre-warmed at startup.
+
+### Faster, More Reliable Site Links
+- **Instant Open From Cache**: A recently verified mirror is used immediately with zero waiting, and refreshes silently in the background so nothing blocks your click.
+- **Pre-Warmed At Launch**: The app quietly checks both download sites a few seconds after startup, so the first click of the session already has a working link.
+- **Pre-Warmed Links Shared**: Simultaneous requests for the same site now reuse one lookup instead of repeating the same network work.
+- **Last-Resort Mirrors**: If a site publishes no working mirror right now, the app falls back to a last known good address instead of opening a dead page.
+- **Longer Link Trust**: Verified site links stay usable for a week instead of a few hours, which cuts down repeated re-checking on slow connections.
+
+### Network Reliability
+- **Works On Blocked DNS**: Site lookups query Google's and Cloudflare's DNS directly, so mirrors keep resolving on networks that block or hijack the default resolver.
+- **Encrypted DNS In The App Window**: The in-app browser uses DNS-over-HTTPS, so pages inside MyCinema resolve the same way the link checker does.
+- **Faster Timeout Chain**: Mirrors that hang no longer stall the button — checks time out in about 2.5 seconds and move straight to the next candidate.
+- **Bot-Wall Friendly Checks**: Mirrors behind Cloudflare-style challenges are treated as reachable, because the in-app browser can still load them.
+
+### Reliability
+- **Popups Always Appear**: In-app browser windows now reveal themselves even if the page never signals readiness, so a lookup window no longer fails to show.
+- **Fresher Shared Link File**: The published link list now accepts entries up to seven days old, so portals that rotate slowly stay usable.
+
+### Security & Privacy
+- **Known Domains Only**: Every resolved mirror is matched against each site's expected domain patterns, and app-download or promo hosts can never be chosen as a mirror.
+- **Strict HTTPS Mirror Checks**: Mirror and redirect checks connect only over HTTPS with a verified hostname, so a hijacked path cannot silently redirect the lookup.
+- **Local-Only Lookups**: Link checking talks only to the download portals and public DNS resolvers named in the app, and your settings override is still always honored.
+
+***
+
+# MyCinema v1.41.0
+
+Browse curated download sites with built-in ad blocking, download direct media files to custom folders, navigate instantly with zero background lag, and sync downloads directly into your library.
+
+### Curated Web Download Sites
+- **Browse Inside MyCinema**: Access popular media catalogs including HDHub4u and KatMovieHD directly within the app without leaving for external browsers.
+- **Live Mirror Health Checking**: Verified, multi-mirror health checker automatically tests and routes to working live domain mirrors.
+- **Built-in Ad & Pop-up Blocker**: Powered by the EasyList engine and deep DOM popup interception, automatically eliminating deceptive redirect tabs, ad overlays, and malicious scripts.
+- **Streamlined Navigation Bar**: Integrated navigation controls with back/forward, reload, home, external-browser fallback, and live URL inspection.
+
+### Direct File Downloads & Custom Storage
+- **Automatic Download Interceptor**: Catches direct video and archive downloads (.mp4, .mkv, .avi, .zip, etc.) directly into MyCinema's download manager with progress tracking, speed calculation, and pause/resume support.
+- **Custom Download Folder**: Choose any drive or directory on your system with write-permission verification, default path resets, and real-time disk storage gauges.
+- **Show In Folder**: Reveal downloaded files directly in your operating system's file explorer from the 3-dot download menu.
+- **Automatic Library Detection**: Monitors your download destination and automatically scans and indexes completed movies and episodes into your local library.
+- **Unified Download Queue**: Concurrency controls now coordinate both HTTP direct downloads and torrent transfers seamlessly.
+
+### Zero-Lag Engine & Instant Home Navigation
+- **Persistent Home Mounting**: The Home screen stays mounted and ready in memory instead of constantly unmounting, eliminating reload flashes and redundant network requests.
+- **Smart Discovery Cache**: Caches TMDB discovery rows for 20 minutes so switching back and forth between tabs is instantaneous.
+- **Carousel & Background Power Management**: Pauses auto-advancing hero carousels and background timers when tabs are hidden to conserve GPU and CPU.
+- **Throttled SQLite Disk Writes**: Replaced per-chunk disk writes and full-table scans with an in-memory state cache and 5-second throttled flushes, preventing UI freezing during high-speed downloads.
+- **Component Memoization**: Isolated high-frequency download progress events so browsing your library, movies, series, and watchlist remains silky smooth.
+
+### Reliability & Performance
+- **Queue Pump On HTTP Events**: Completing, pausing, or removing HTTP downloads automatically advances the queue so queued downloads start immediately.
+- **Watchers On Path Changes**: Changing or resetting your download directory immediately updates file-system watchers to follow the new location.
+
+### Security & Privacy
+- **Ad & Popup Shield**: In-app webviews block third-party advertising networks, cryptominers, tracking scripts, and unwanted pop-up tabs automatically.
+- **Strict Path Traversal Guard**: Download directories and shell reveal operations validate paths against safe library roots.
+
+***
+
+# MyCinema v1.40.0
+
+Bring your YouTube subscriptions into Focus Tube, dock the movie player while you browse, and enjoy a tidier Focus Tube.
+
+### YouTube Subscription Import
+- **Import From Google**: The Channels manager has an Import YouTube button that opens the system browser to connect a Google account and lists every subscribed channel.
+- **Review Before Saving**: The import screen shows logos, search, 50-per-page paging, and checkboxes — nothing is added until you confirm the selection.
+- **File Into Categories**: Assign channels to categories before saving, or bulk-file the whole selection at once.
+- **Undo Keeps You Safe**: The summary screen offers Undo for the last import, removing only channels and memberships that import created while keeping anything you watched or re-filed since.
+- **Refresh With Progress**: Newly saved channels pull their latest uploads with per-channel progress, and failures stay in place with a retry instead of blocking the rest.
+- **Setup Guide Included**: `docs/FOCUS_TUBE_GOOGLE_OAUTH.md` documents the Desktop-app client ID (`MAIN_VITE_FOCUS_TUBE_GOOGLE_CLIENT_ID`), test-user, quota, and secure-storage troubleshooting.
+
+### Mini Player For Movies & Shows
+- **Dock And Keep Browsing**: The player toolbar has a mini-player button that shrinks the same video into a bottom-right corner dock so playback continues while you browse MyCinema.
+- **Quiet While Playing**: The dock controls fade after ~2.5s idle while playing and return on hover or tap, with a slim seek strip that stays visible for glanceable progress.
+- **Escape Restores**: Pressing Escape in the dock expands back to the full player; the top bar stays hidden in dock mode since the dock has its own title and close controls.
+
+### Focus Tube Polish
+- **Calmer Header**: The Focus Tube header is rebuilt with a compact title block, live unseen count, and responsive search, Channels, and Refresh controls.
+- **One Card For Controls**: Categories and stack filters (Shorts, seen, mark-all-seen) now live in a single card with a unified stack count line.
+- **Comments That Never Break**: Comment avatars fall back to a stable colored initial when a photo is missing or fails to load, instead of a broken image icon.
+- **Tidy Sidebar**: Description, Chapters, and sponsor-segment panels collapse individually with counts, so long pages stay scannable.
+- **Single Close Control**: The Focus Tube player keeps one close button on the right; the duplicate back arrow and top mini-player button are removed.
+- **Mouse-Back Closes**: Pressing the mouse side/back button closes the Focus Tube player, matching VideoPlayer and DetailScreen.
+
+### Reliability & Performance
+- **Queue Pump On HTTP Events**: Completing, pausing, or removing HTTP downloads automatically advances the queue so queued downloads start immediately.
+- **Shared Feed Refresh**: Polling, imports, and retries use one feed-plus-Shorts upsert path with bounded concurrency, so one dead feed records its error without stalling the others.
+- **Safe Local Saves**: Imports run in one local transaction, validate channel IDs, add memberships without replacing existing ones, and leave existing channel rows untouched.
+
+### Security & Privacy
+- **Read-Only Google Access**: Focus Tube requests only the `youtube.readonly` scope through a Desktop-app OAuth flow with PKCE, loopback callback, and state validation — no write scope and no client secret in the app.
+- **Tokens Stay In Main**: Google credentials are encrypted with Electron `safeStorage` in the app user-data folder and never cross the context bridge; only reviewed channel metadata and progress counts reach the UI, and import refuses to save when no secure store is available.
+- **Disconnect Revokes**: Disconnecting removes the saved credentials and attempts a Google revocation.
+- **Local-Only Library Data**: Imported channels, memberships, and feed history live in the app's own local database exactly like manually added channels.
+
+***
+
+# MyCinema v1.39.0
+
+File it your way: watchlist lanes, collections from any title page, and a mini player that stays put.
+
+### Watchlist Lanes
+- **ASAP, Weekend, Someday**: The bookmark on any title page now files it into a lane — tonight, the weekend, or the rainy-day stash — instead of one flat list.
+- **Filter The List**: The Watchlist tab filters by lane with live counts and groups everything into Up-next, Weekend, and Someday sections.
+- **Old Saves Have A Home**: Everything saved before this update rests in Someday, so nothing is lost or re-sorted behind your back. Open any title to re-file it into another lane.
+- **Backups Keep Lanes**: Export and import carry each title's lane along with it.
+
+### Collections From Any Title
+- **File Without Leaving**: A new collections button on every title page lists your collections with covers and counts — tap to add or remove, and create a new collection inline without switching tabs.
+- **Streamed Titles Included**: Continue Watching and trending titles file into collections by their catalog identity, not just downloaded files.
+
+### Focus Tube
+- **Tick For Watched**: Each card's bookmark is now a tick that marks the video watched (tap again to undo). Unseen-only feeds drop the card right away and update the counts.
+- **Mini Player Survives Home**: A docked Focus Tube video keeps playing when you visit the Home tab, the way movies already did.
+
+### Reliability
+- **Hero Saves Stick**: Titles saved to the watchlist from Continue Watching now land there with the lane you picked, and the title page reflects what is actually saved.
+- **No More Stray Zero**: Downloaded titles no longer show a stray "0" around the bookmark button.
+
+### Security & Privacy
+- **Local-Only Lanes**: Lane data lives in the app's own local database and travels with backups. This update adds no network requests, no permissions, and no data sharing.
+
+***
+
+# MyCinema v1.38.0
+
+YouTube on your terms: a new Focus Tube tab built around channels you pick, with a short guided tour on first launch.
+
+### Focus Tube (Beta)
+- **A New Tab, No Algorithm**: A Focus Tube tab in the sidebar shows uploads only from channels you subscribe to, newest-first and unseen-only. Nothing is recommended and nothing autoplays.
+- **Subscribe In Seconds**: The Channels manager finds channels as you type by name, @handle, ID, or pasted URL, with logos and one-tap subscribe into the category you are viewing.
+- **Categories You Organize**: File channels into rooms you name, with unseen badges, double-click rename, drag-to-reorder, and two-step delete confirmation.
+- **A Player That Respects The Stack**: The cinema player resumes where you left off, can autoplay the next unseen video, reads chapters from descriptions, shows comments, and skips sponsor segments automatically.
+- **Opt Out Anytime**: A switch under Settings > Features hides the tab and stops all background refreshing. Categories, channels, and progress are kept for when you switch it back on.
+- **A Tour On First Launch**: After the What's New card, a 5-step spotlight tour walks you from the new tab through setup to the off-switch.
+
+### Player & Discovery
+- **Scroll The Seek Bar**: Rolling the mouse wheel over the player's progress bar now jumps in small steps, with trackpad-friendly smoothing.
+- **Letterboxd Lookup**: Title pages now offer a one-tap Letterboxd lookup that opens in the in-app window.
+- **Your Library, Named Clearly**: Home rails now read Continue Watching and Your Library so local titles are never confused with trending rows.
+
+### Reliability
+- **Focus Tube Joins Backups**: Categories, channels, watched state, and resume positions now export and restore with the rest of your library.
+- **Feeds That Retry**: Channel polling retries failed requests and refreshes missing channel logos once, so the stack fills in instead of stalling.
+
+### Security & Privacy
+- **No Account, No API Key**: Focus Tube reads public channel feeds and plays through the official YouTube embed — no stream extraction and no credentials anywhere.
+- **Minimal Lookups**: Sponsor data is fetched per video ID only, and channel search runs only when you type in the Channels manager.
+- **Local-Only Data**: Subscriptions, categories, and watch progress live in the app's own local database. Switching Focus Tube off stops every background request.
+
+***
+
+# MyCinema v1.37.0
+
+Take control of your download queue, and get accurate sizes, honest new-episode alerts, and audio that finally stays in sync.
+
+### Download Queue Control
+- **Choose How Many Run At Once**: Set a limit in the Download tab (1, 2, 3, 5, or Unlimited). Extra downloads wait their turn instead of all fighting for your bandwidth at the same time.
+- **A Real Queue, In Order**: Waiting downloads are listed oldest-first and labelled Queued #1, #2, #3, so the next one to start is always the one you added first - never a reshuffled stack.
+- **Starts Itself**: When a download finishes, fails, is paused, or is removed, the next in line starts automatically. Pausing a queued item takes it out of the line; resuming puts it back.
+- **Keeps Your Setting**: Your choice is remembered, respected when the app restarts, and applied to downloads started from a title's page too. Streaming while downloading never eats a download slot.
+
+### Sizes You Can Trust
+- **Season Packs Show The Whole Season**: Pack listings that advertise per-episode sizes are now added up, so a full season reads as one honest total instead of a single episode's size.
+- **No More Raw Numbers**: Some trackers report sizes as unformatted byte counts; they now display as normal sizes (3.6 GB) like everywhere else.
+- **Real Totals Override Estimates**: Once the app has seen a release's true size, it stops trusting the tracker's guess - so the number you see before streaming matches what actually downloads.
+
+### New Episode Alerts That Earn It
+- **No More False Alerts**: Following a series no longer instantly flags episodes that were already out. You are told about an episode only when it actually drops after you started watching.
+- **Only When It's Watchable**: A new-episode banner appears only once a real source for that episode (or its season pack) can be found - no more banners that open to an empty list. If nothing is available yet, the alert waits quietly instead of disappearing forever.
+- **Starting Mid-Season Is Fine**: Whether you began at episode one, binge four episodes, or stop halfway, silence is the default. The banner appears when the next episode genuinely lands.
+
+### Audio & Playback Reliability
+- **Sample-Accurate External Audio**: Non-native audio tracks (EAC3, AC3, DTS and similar) now start at the exact requested moment, fixing dialogue that ran early or late against the picture.
+- **No More Audio Reload Storms**: Long streams no longer stutter through repeated audio restarts. Sync correction now escalates gradually, rides through brief buffering hitches, and stops rebuilding when restarts aren't helping.
+- **Steady Audio Under Load**: If audio falls behind during a busy scene, the heaviest on-screen enhancement eases itself off until sound catches up, then switches back on its own.
+- **Cold Streams Start Clean**: Opening a brand-new slow stream no longer leaves audio racing ahead of a video that hasn't rendered yet, and the visual enhancer recovers by itself if the graphics driver hiccups on startup.
+
+### Security & Privacy
+- **Fewer Simultaneous Connections**: The download limit caps how many torrents connect at once, so the app opens no more swarm connections than you asked for.
+- **Less Background Lookups**: New-episode source checks now run only for a genuinely new episode instead of on every followed series, reducing routine network requests to trackers and metadata services.
+- **Local-Only Settings**: Your download limit and queue order are stored in the app's own local database. No new permissions, no new data sharing, and nothing about your queue leaves your machine.
+
+***
+
+# MyCinema v1.36.0
+
+Streamed shows now remember you: online resume, next-episode tracking, new-episode alerts, and whole-season binge mode.
+
+### Online Resume
+- **Streamed Titles Join Continue Watching**: Movies and episodes you stream (not download) now appear in Hero with your exact position, badge-labeled Online — no more re-searching and scrubbing to find your place.
+- **One-Click Resume, Fresh Sources**: Resume reuses your last working source instantly, or quietly re-finds the healthiest one in the background while the button shows a loading state.
+- **Resume Receipts**: The player confirms where you picked up ("Resuming from 42:15 · Source refreshed"), and title pages show a resume pill plus per-episode progress ticks.
+
+### Next Up, Automatically
+- **One Card Per Series**: Watched-till progress collapses into a single card that points at the next released episode ("Watched till S1 E3 · S1 E4 up next").
+- **Drops Jump The Queue**: Unseen new episodes take hero position one with a NEW EPISODE badge and a Watch S2 E3 button; the hero stays lean at five cards max.
+- **Quieter Badges, Louder Meaning**: NEW EPISODE, NEXT EPISODE, and ONLINE pills share one visual family so fresh drops grab your eye first.
+
+### Follow Your Shows
+- **Follow Bell**: Tap the bell on any series page to track it — or just keep watching, and meaningful watches follow automatically with a confirmation toast.
+- **New-Episode Alerts**: A throttled daily check flags genuinely unwatched drops (never old episodes, never abandoned shows), with a "just dropped" strip right above the episode list.
+- **Your Switches**: Separate Settings toggles for remembering online progress and for alerts — turning alerts off also clears pending flags.
+
+### Season-Pack Binge Mode
+- **One Timeline For The Whole Pack**: A season pack plays as a single virtual video with a combined duration (like /4:34:23) — seek bar, arrows, slider scrub, and PiP controls all ride across episodes.
+- **No Dead Air Between Episodes**: The next file stays buffered while you watch, and playback auto-advances with a brief crossfade.
+- **Unparseable Packs Still Work**: When filenames carry no episode tags, the player advances in torrent order, pins resume to the exact file, and starts at the first file instead of the largest.
+- **Downloads Still Win**: If you own an episode locally, picking it leaves the stream for your file.
+
+### Reliability
+- **Smarter Source Matching**: Torrent filename parsing now handles folder-structured packs, bare episode tokens, and multi-episode files, while sample/proof stubs can no longer hijack playback.
+- **Stale-Session Safe**: New bridge calls degrade gracefully if the dev preload is out of sync, instead of crashing the screen.
+- **Online State In Backups**: Stream positions and followed series now export and restore with the rest of your library.
+
+### Security & Privacy
+- **Off Means Zero Writes**: Disabling online progress blocks all stream-position storage in both renderer and main process; disabling alerts stops all follow checks.
+- **Local-First Data**: Positions, follows, and alert flags live only in your local database — the only network calls are the existing TMDB lookups (throttled) and torrent providers you explicitly use.
+- **Validated Restores**: Imported backup rows are type-checked before touching your library, and existing rows are never overwritten by a restore.
+
+***
+
+# MyCinema v1.35.0
+
+Sources got a full makeover, PiP finally gets out of your way, and scrolling feels silkier.
+
+### Sources, Redesigned
+- **Same Panel Everywhere**: The Download tab sources panel now looks and works exactly like the title-page one — same header, same filters, same cards.
+- **Filters With Counts**: Language (All/Hindi), Quality (4K/1080p/720p), Season, Pack, and Episode filters are pills with live counts — no more blind dropdowns.
+- **Compact Cards**: Best-match star, quality badge, seed health, HEVC/Hindi tags, and one-tap Stream or Download in half the space, with shimmer skeletons while scanning.
+
+### Picture-in-Picture That Respects You
+- **Minimizes With You**: Hitting PiP opens the floating window and minimizes MyCinema; Back to tab (or closing PiP) restores the app straight into fullscreen.
+- **Skip From The Taskbar**: While PiP floats, hovering the taskbar icon gives −10s, play/pause, and +10s buttons.
+- **Media Keys Too**: Play/pause, ±10s, next episode, and scrubbing work through OS media controls.
+
+### Calmer Window Controls
+- **Hidden Until Needed**: The top-right minimize/fullscreen/close capsule only appears when your cursor lingers in the corner — smaller, tighter, and never covering panel buttons.
+
+### Smoother Scrolling
+- **Only The Active Page Renders**: Background tabs no longer keep timers, images, and scroll listeners alive behind your current view.
+- **Lighter Cards**: Heavy blurs, clip-paths, and oversized shadows were removed from cards and collections — same look, far less GPU work.
+
+### Security & Privacy
+- **PiP-Only Popups**: The popup guard now allows only the video PiP window; every other popup type stays denied, and external links remain https-only.
+- **Same Safe Pipelines**: Downloads, shares, and media serving are unchanged — only how windows restore changed, not what files can be served.
+
+***
+
+# MyCinema v1.34.0
+
+Collections arrive: hand-built lists with file-only sharing, and a watchlist that is finally just one inbox.
+
+### Collections
+- **Hand-Built Lists**: New Collections tab — create a list, pin titles from your library, and add any movie or show online via TMDB search. Hold a card to pick it up and drag it anywhere to reorder.
+- **Online Titles Stay Complete**: Titles you don't own arrive as online entries that stay playable via source search, with ratings, posters, and one-tap remove.
+- **Old Lists Preserved**: Existing custom watchlist categories migrate into Collections automatically, and leftover smart collections convert to manual ones — nothing you saved is lost.
+
+### File-Only Sharing
+- **Save, Then Send**: Sharing is a guided 2-step flow — save the collection as a `.json` file (Downloads preselected), then send it from step 2. No links, ever.
+- **WhatsApp Opens Directly**: With WhatsApp installed, the chat picker opens straight in the app with your message pre-written — no browser detour. Otherwise it falls back to WhatsApp Web.
+- **Telegram Via Web**: Telegram opens Telegram Web with one tap from the dialog, plus a copy-message button for pasting into any chat.
+- **Receiver Imports In One Tap**: Shared files open through IMPORT in Collections — library matches pin automatically, unknown titles arrive as online entries.
+
+### Simpler Watchlist
+- **One Inbox Everywhere**: Removed the category picker from Home search, title pages, the Watchlist page, and Downloads — saving is now one tap into a single Watchlist.
+- **Dialogs Stay Visible**: File dialogs are now parented to the app window, so save/open popups can no longer hide behind MyCinema on Windows.
+
+### Security & Privacy
+- **Validated Imports**: Shared collection files are validated (app, type, and name) before anything touches your library — invalid files are rejected with an error, never half-imported.
+- **No Surprise Downloads**: Importing never downloads files; unmatched titles become online-only entries you explicitly choose to play.
+- **Constrained App Opening**: The renderer can only open `https` links externally; launching the WhatsApp app goes through a dedicated main-process channel that first verifies the OS protocol registration.
+
+***
+
 # MyCinema v1.33.1
 
 Correct audio language on every track switch, plus a cleaner update badge in the collapsed sidebar.

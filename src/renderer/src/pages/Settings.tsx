@@ -1,8 +1,26 @@
 import React, { useEffect, useState } from 'react'
-import { FolderOpen, Trash2, Plus, HardDrive, AlertTriangle, Check, X as CloseIcon, Maximize2, Download, Upload, Image as ImageIcon, Subtitles, Sun, Moon } from 'lucide-react'
+import { FolderOpen, Trash2, Plus, HardDrive, AlertTriangle, Check, X as CloseIcon, Maximize2, Download, Upload, Image as ImageIcon, Subtitles, Wifi, Bell, Compass, RotateCcw, Layers, Sun, Moon } from 'lucide-react'
 import ProfilePictureModal from '../components/ProfilePictureModal'
+import { normalizeProfileImage, resolveProfileImageUrl } from '../utils/profileImage'
 import { SUBTITLE_STYLE_KEY, SUBTITLE_FONT_SIZE_KEY, SUBTITLE_POSITION_KEY, type SubtitleStyle } from '../components/player/SubtitleOverlay'
 import { useTheme } from '../theme/ThemeContext'
+import { ONLINE_PROGRESS_STORAGE_KEY, setOnlineProgressEnabledLocal, NOTIFY_NEW_EPISODES_KEY, setNewEpisodeNotifyLocal } from '../utils/streamResume'
+import { cleanIpcError } from '../utils/ipcError'
+
+interface DownloadDirInfo {
+  currentPath: string
+  defaultPath: string
+  isCustom: boolean
+}
+
+interface DownloadStorageInfo {
+  path: string
+  free: number
+  total: number
+  used: number
+  percentUsed: number
+  error?: string
+}
 
 const Settings: React.FC = () => {
   const { theme, setTheme } = useTheme()
@@ -10,10 +28,35 @@ const Settings: React.FC = () => {
   const [scanning, setScanning] = useState<string | null>(null)
   const [userName, setUserName] = useState(() => localStorage.getItem('mycinema_user_name') || 'User')
   const [profileImage, setProfileImage] = useState<string | null>(() => localStorage.getItem('mycinema_profile_image'))
+  const [profileImageFailed, setProfileImageFailed] = useState(false)
   const [isProfileModalOpen, setIsProfileModalOpen] = useState(false)
   const [isEditingName, setIsEditingName] = useState(false)
   const [tempName, setTempName] = useState(userName)
   const [launchFullscreen, setLaunchFullscreen] = useState(true)
+  const [rememberOnlineProgress, setRememberOnlineProgress] = useState(() => {
+    try {
+      return localStorage.getItem(ONLINE_PROGRESS_STORAGE_KEY) !== 'false'
+    } catch {
+      return true
+    }
+  })
+  const [notifyNewEpisodes, setNotifyNewEpisodes] = useState(() => {
+    try {
+      return localStorage.getItem(NOTIFY_NEW_EPISODES_KEY) !== 'false'
+    } catch {
+      return true
+    }
+  })
+  // Focus Tube. Defaults to on; the main process owns the persisted value in
+  // app-settings.json and mirrors it here so the toggle can never disagree.
+  const [focusTubeEnabled, setFocusTubeEnabled] = useState(true)
+  const [showDownloadTray, setShowDownloadTray] = useState(() => {
+    try {
+      return localStorage.getItem('mycinema_show_download_tray') !== 'false'
+    } catch {
+      return true
+    }
+  })
   const [backupBusy, setBackupBusy] = useState(false)
   const [backupMessage, setBackupMessage] = useState<string | null>(null)
   const [subtitleStyle, setSubtitleStyle] = useState<SubtitleStyle>(() => {
@@ -26,43 +69,277 @@ const Settings: React.FC = () => {
     return parseInt(localStorage.getItem(SUBTITLE_POSITION_KEY) || '0', 10)
   })
 
+  // Download Directory state
+  const [downloadDirInfo, setDownloadDirInfo] = useState<DownloadDirInfo | null>(null)
+  const [downloadDirStorage, setDownloadDirStorage] = useState<DownloadStorageInfo | null>(null)
+  const [downloadDirBusy, setDownloadDirBusy] = useState(false)
+  const [downloadDirMessage, setDownloadDirMessage] = useState<{ text: string; isError?: boolean } | null>(null)
+
+  const formatStorageBytes = (bytes?: number) => {
+    if (!bytes || !Number.isFinite(bytes) || bytes <= 0) return '0 B'
+    const units = ['B', 'KB', 'MB', 'GB', 'TB']
+    const i = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1)
+    return `${(bytes / Math.pow(1024, i)).toFixed(1)} ${units[i]}`
+  }
+
+  const fetchDownloadDir = async () => {
+    try {
+      const api = (window as any)?.api
+      if (typeof api?.getDownloadDir === 'function') {
+        const info = await api.getDownloadDir()
+        setDownloadDirInfo(info)
+      }
+      if (typeof api?.getDownloadsStorage === 'function') {
+        const storage = await api.getDownloadsStorage()
+        setDownloadDirStorage(storage)
+      }
+    } catch (err) {
+      console.error('Failed to load download directory info:', err)
+    }
+  }
+
+  const handleChangeDownloadDir = async () => {
+    if (downloadDirBusy) return
+    setDownloadDirMessage(null)
+    try {
+      const selected = await window.api.selectFolder()
+      if (!selected) return // canceled by user
+      setDownloadDirBusy(true)
+      const res = await (window as any).api.setDownloadDir(selected)
+      setDownloadDirInfo(res)
+      setDownloadDirMessage({ text: 'Download location updated successfully!' })
+      const storage = await window.api.getDownloadsStorage().catch(() => null)
+      if (storage) setDownloadDirStorage(storage)
+    } catch (err: any) {
+      setDownloadDirMessage({ text: cleanIpcError(err, 'Failed to update download folder'), isError: true })
+    } finally {
+      setDownloadDirBusy(false)
+    }
+  }
+
+  const handleResetDownloadDir = async () => {
+    if (downloadDirBusy) return
+    setDownloadDirMessage(null)
+    setDownloadDirBusy(true)
+    try {
+      const res = await (window as any).api.resetDownloadDir()
+      setDownloadDirInfo(res)
+      setDownloadDirMessage({ text: 'Reset to default download location.' })
+      const storage = await window.api.getDownloadsStorage().catch(() => null)
+      if (storage) setDownloadDirStorage(storage)
+    } catch (err: any) {
+      setDownloadDirMessage({ text: cleanIpcError(err, 'Failed to reset download folder'), isError: true })
+    } finally {
+      setDownloadDirBusy(false)
+    }
+  }
+
+  const handleOpenDownloadDir = async () => {
+    try {
+      await window.api.openDownloadsFolder()
+    } catch (err: any) {
+      setDownloadDirMessage({ text: cleanIpcError(err, 'Could not open folder in Explorer'), isError: true })
+    }
+  }
+  // Web download sites — manual domain override when auto-resolve fails.
+  interface DownloadSiteStatus {
+    id: string
+    name: string
+    shortLabel: string
+    portalUrl: string
+    accent: string
+    domain: string | null
+    updatedAt: string | null
+    manual: boolean
+    stale: boolean
+  }
+  const [downloadSites, setDownloadSites] = useState<DownloadSiteStatus[]>([])
+  const [downloadSiteDrafts, setDownloadSiteDrafts] = useState<Record<string, string>>({})
+  const [downloadSiteBusyId, setDownloadSiteBusyId] = useState<string | null>(null)
+  const [downloadSiteMessage, setDownloadSiteMessage] = useState<string | null>(null)
+
+  const fetchDownloadSites = async () => {
+    try {
+      const api = (window as any)?.api
+      if (typeof api?.getDownloadSites !== 'function') return // stale preload
+      const sites = await api.getDownloadSites()
+      setDownloadSites(sites || [])
+    } catch (err) {
+      console.error('Failed to load download sites:', err)
+    }
+  }
+
+  const handleSaveDownloadSiteDomain = async (siteId: string) => {
+    const draft = (downloadSiteDrafts[siteId] || '').trim()
+    if (!draft || downloadSiteBusyId) return
+    setDownloadSiteBusyId(siteId)
+    setDownloadSiteMessage(null)
+    try {
+      await (window as any).api.setDownloadSiteDomain(siteId, draft)
+      setDownloadSiteMessage('Saved. Detail screen will use your link.')
+      await fetchDownloadSites()
+    } catch (err: any) {
+      setDownloadSiteMessage(cleanIpcError(err, 'Could not save that link.'))
+    } finally {
+      setDownloadSiteBusyId(null)
+    }
+  }
+
+  const handleRefreshDownloadSiteDomain = async (siteId: string) => {
+    if (downloadSiteBusyId) return
+    setDownloadSiteBusyId(siteId)
+    setDownloadSiteMessage(null)
+    try {
+      const result = await (window as any).api.refreshDownloadSiteDomain(siteId)
+      setDownloadSiteMessage(
+        result?.stale
+          ? `Live link verify nahi hua — ${result.domain} khola jayega (stale).`
+          : `Fresh link mil gaya: ${result.domain}`
+      )
+      await fetchDownloadSites()
+    } catch (err: any) {
+      setDownloadSiteMessage(cleanIpcError(err, 'Refresh failed. Try again later.'))
+    } finally {
+      setDownloadSiteBusyId(null)
+    }
+  }
+
+  const handleResetDownloadSiteDomain = async (siteId: string) => {
+    if (downloadSiteBusyId) return
+    setDownloadSiteBusyId(siteId)
+    setDownloadSiteMessage(null)
+    try {
+      await (window as any).api.resetDownloadSiteDomain(siteId)
+      setDownloadSiteDrafts(prev => ({ ...prev, [siteId]: '' }))
+      setDownloadSiteMessage('Reset. App will auto-find the latest link again.')
+      await fetchDownloadSites()
+    } catch (err) {
+      console.error('Failed to reset download site:', err)
+    } finally {
+      setDownloadSiteBusyId(null)
+    }
+  }
+
   const fetchFolders = async () => {
     const f = await window.api.getFolders()
     setFolders(f)
   }
 
-  const handleSaveName = () => {
+  const handleSaveName = async () => {
     const trimmed = tempName.trim() || 'User'
     setUserName(trimmed)
     localStorage.setItem('mycinema_user_name', trimmed)
     setIsEditingName(false)
-    // Dispatch custom event to notify other components (like Sidebar/Home)
     window.dispatchEvent(new Event('mycinema_name_updated'))
+    try {
+      await window.api.setUserProfile({ userName: trimmed })
+    } catch (err) {
+      console.error('Failed to persist user name:', err)
+    }
   }
 
-  const handleProfileImageChange = (newImage: string | null) => {
-    setProfileImage(newImage)
-    if (newImage) {
-      localStorage.setItem('mycinema_profile_image', newImage)
+  const handleProfileImageChange = async (newImage: string | null) => {
+    const normalizedImage = normalizeProfileImage(newImage) ?? null
+    setProfileImage(normalizedImage)
+    if (normalizedImage) {
+      localStorage.setItem('mycinema_profile_image', normalizedImage)
     } else {
       localStorage.removeItem('mycinema_profile_image')
     }
     window.dispatchEvent(new Event('mycinema_profile_updated'))
+    try {
+      const res = await window.api.setUserProfile({ profileImage: normalizedImage })
+      if (res?.profileImage) {
+        const savedImage = normalizeProfileImage(res.profileImage) ?? null
+        setProfileImage(savedImage)
+        if (savedImage) {
+          localStorage.setItem('mycinema_profile_image', savedImage)
+        } else {
+          localStorage.removeItem('mycinema_profile_image')
+        }
+      }
+    } catch (err) {
+      console.error('Failed to persist profile image:', err)
+    }
   }
 
   useEffect(() => {
     const handleProfileUpdate = () => {
-      setProfileImage(localStorage.getItem('mycinema_profile_image'))
+      setProfileImage(normalizeProfileImage(localStorage.getItem('mycinema_profile_image')) ?? null)
     }
     window.addEventListener('mycinema_profile_updated', handleProfileUpdate)
     return () => window.removeEventListener('mycinema_profile_updated', handleProfileUpdate)
   }, [])
 
   useEffect(() => {
+    setProfileImageFailed(false)
+  }, [profileImage])
+
+  useEffect(() => {
     fetchFolders()
+    fetchDownloadSites()
+    fetchDownloadDir()
+    const api = (window as any)?.api
+    const unsubDir = api?.onDownloadDirChanged?.((info: DownloadDirInfo) => {
+      setDownloadDirInfo(info)
+      void api?.getDownloadsStorage?.().then(setDownloadDirStorage).catch(() => {})
+    })
+    const unsubSettings = api?.onAppSettingsChanged?.((settings: any) => {
+      if (typeof settings?.showDownloadTray === 'boolean') {
+        setShowDownloadTray(settings.showDownloadTray)
+        try {
+          localStorage.setItem('mycinema_show_download_tray', String(settings.showDownloadTray))
+        } catch {}
+      }
+      if (typeof settings?.userName === 'string') {
+        setUserName(settings.userName)
+        setTempName(settings.userName)
+        localStorage.setItem('mycinema_user_name', settings.userName)
+      }
+      if (settings?.profileImage !== undefined) {
+        const normalizedImage = normalizeProfileImage(settings.profileImage) ?? null
+        setProfileImage(normalizedImage)
+        if (normalizedImage) localStorage.setItem('mycinema_profile_image', normalizedImage)
+        else localStorage.removeItem('mycinema_profile_image')
+      }
+    })
+
     window.api.getAppSettings().then(settings => {
       setLaunchFullscreen(settings.launchFullscreen)
+      if (typeof settings.rememberOnlineProgress === 'boolean') {
+        setRememberOnlineProgress(settings.rememberOnlineProgress)
+        setOnlineProgressEnabledLocal(settings.rememberOnlineProgress)
+      }
+      if (typeof settings.notifyNewEpisodes === 'boolean') {
+        setNotifyNewEpisodes(settings.notifyNewEpisodes)
+        setNewEpisodeNotifyLocal(settings.notifyNewEpisodes)
+      }
+      if (typeof settings.focusTubeEnabled === 'boolean') {
+        setFocusTubeEnabled(settings.focusTubeEnabled)
+      }
+      if (typeof (settings as any).showDownloadTray === 'boolean') {
+        setShowDownloadTray((settings as any).showDownloadTray)
+        try {
+          localStorage.setItem('mycinema_show_download_tray', String((settings as any).showDownloadTray))
+        } catch {}
+      }
+      if (settings.userName) {
+        setUserName(settings.userName)
+        setTempName(settings.userName)
+        localStorage.setItem('mycinema_user_name', settings.userName)
+      }
+      if (settings.profileImage !== undefined) {
+        const normalizedImage = normalizeProfileImage(settings.profileImage) ?? null
+        setProfileImage(normalizedImage)
+        if (normalizedImage) localStorage.setItem('mycinema_profile_image', normalizedImage)
+        else localStorage.removeItem('mycinema_profile_image')
+      }
     }).catch(() => {})
+
+    return () => {
+      unsubDir?.()
+      unsubSettings?.()
+    }
   }, [])
 
   const handleLaunchFullscreenChange = async (enabled: boolean) => {
@@ -73,6 +350,75 @@ const Settings: React.FC = () => {
     } catch (err) {
       console.error('Failed to update fullscreen launch setting:', err)
       setLaunchFullscreen(!enabled)
+    }
+  }
+
+  const handleNotifyNewEpisodesChange = async (enabled: boolean) => {
+    setNotifyNewEpisodes(enabled)
+    setNewEpisodeNotifyLocal(enabled)
+    try {
+      const setter = (window as any)?.api?.setNotifyNewEpisodes
+      if (typeof setter !== 'function') return // stale preload: keep local-only value
+      const settings = await setter.call((window as any).api, enabled)
+      setNotifyNewEpisodes(settings.notifyNewEpisodes)
+      setNewEpisodeNotifyLocal(settings.notifyNewEpisodes)
+    } catch (err) {
+      console.error('Failed to update new-episode alert setting:', err)
+      setNotifyNewEpisodes(!enabled)
+      setNewEpisodeNotifyLocal(!enabled)
+    }
+  }
+
+  const handleRememberOnlineProgressChange = async (enabled: boolean) => {
+    setRememberOnlineProgress(enabled)
+    setOnlineProgressEnabledLocal(enabled)
+    try {
+      const setter = (window as any)?.api?.setRememberOnlineProgress
+      if (typeof setter !== 'function') return // stale preload: keep local-only value
+      const settings = await setter.call((window as any).api, enabled)
+      setRememberOnlineProgress(settings.rememberOnlineProgress)
+      setOnlineProgressEnabledLocal(settings.rememberOnlineProgress)
+    } catch (err) {
+      console.error('Failed to update online resume setting:', err)
+      setRememberOnlineProgress(!enabled)
+      setOnlineProgressEnabledLocal(!enabled)
+    }
+  }
+
+  const handleFocusTubeChange = async (enabled: boolean) => {
+    setFocusTubeEnabled(enabled)
+    try {
+      const setter = (window as any)?.api?.setFocusTubeEnabled
+      if (typeof setter !== 'function') return // stale preload: keep local-only value
+      const settings = await setter.call((window as any).api, enabled)
+      setFocusTubeEnabled(settings.focusTubeEnabled)
+    } catch (err) {
+      console.error('Failed to update Focus Tube setting:', err)
+      setFocusTubeEnabled(!enabled)
+    }
+  }
+
+  const handleShowDownloadTrayChange = async (enabled: boolean) => {
+    setShowDownloadTray(enabled)
+    try {
+      localStorage.setItem('mycinema_show_download_tray', String(enabled))
+      window.dispatchEvent(new CustomEvent('mycinema_download_tray_changed', { detail: { enabled } }))
+    } catch {}
+    try {
+      const setter = (window as any)?.api?.setShowDownloadTray
+      if (typeof setter === 'function') {
+        const settings = await setter.call((window as any).api, enabled)
+        if (typeof settings?.showDownloadTray === 'boolean') {
+          setShowDownloadTray(settings.showDownloadTray)
+        }
+      }
+    } catch (err) {
+      console.error('Failed to update download overlay setting:', err)
+      setShowDownloadTray(!enabled)
+      try {
+        localStorage.setItem('mycinema_show_download_tray', String(!enabled))
+        window.dispatchEvent(new CustomEvent('mycinema_download_tray_changed', { detail: { enabled: !enabled } }))
+      } catch {}
     }
   }
 
@@ -103,7 +449,7 @@ const Settings: React.FC = () => {
         return
       }
 
-      setBackupMessage(`Exported ${result.folders || 0} folders, ${(result.externalWatchlist || 0) + (result.localWatchlist || 0)} watchlist items, and ${result.favorites || 0} favorites.`)
+      setBackupMessage(`Exported ${result.folders || 0} folders, ${(result.externalWatchlist || 0) + (result.localWatchlist || 0)} watchlist items, ${result.favorites || 0} favorites, ${result.streamProgress || 0} online resumes and ${result.followedSeries || 0} followed series.`)
     } finally {
       setBackupBusy(false)
     }
@@ -123,7 +469,7 @@ const Settings: React.FC = () => {
       await fetchFolders()
       const watchlistCount = (result.externalWatchlistImported || 0) + (result.localWatchlistRestored || 0)
       const missingText = result.foldersMissing ? ` ${result.foldersMissing} folder${result.foldersMissing === 1 ? '' : 's'} not found.` : ''
-      setBackupMessage(`Imported ${result.foldersAdded || 0} folders, scanned ${result.foldersScanned || 0}, restored ${watchlistCount} watchlist items and ${result.favoritesRestored || 0} favorites.${missingText}`)
+      setBackupMessage(`Imported ${result.foldersAdded || 0} folders, scanned ${result.foldersScanned || 0}, restored ${watchlistCount} watchlist items, ${result.favoritesRestored || 0} favorites, ${result.streamProgressRestored || 0} online resumes and ${result.followedSeriesRestored || 0} followed series.${missingText}`)
     } finally {
       setBackupBusy(false)
     }
@@ -161,12 +507,17 @@ const Settings: React.FC = () => {
           <h3 className={sectionTitleClass}>User Profile</h3>
           <div className={`${panelClass} flex items-center gap-6 p-6 group`}>
             <div 
-              className={`relative flex h-16 w-16 cursor-pointer items-center justify-center overflow-hidden rounded-2xl ${profileImage ? 'bg-transparent' : 'bg-red-600'} text-2xl font-black text-white shadow-xl shadow-red-950/20 transition-transform duration-300 group-hover:scale-105`}
+              className={`relative flex h-16 w-16 cursor-pointer items-center justify-center overflow-hidden rounded-2xl ${profileImage && !profileImageFailed ? 'bg-transparent' : 'bg-red-600'} text-2xl font-black text-white shadow-xl shadow-red-950/20 transition-transform duration-300 group-hover:scale-105`}
               onClick={() => setIsProfileModalOpen(true)}
               title="Change Profile Picture"
             >
-              {profileImage ? (
-                <img src={profileImage} alt={userName} className="h-full w-full object-cover" />
+              {profileImage && !profileImageFailed ? (
+                <img
+                  src={resolveProfileImageUrl(profileImage) ?? undefined}
+                  alt={userName}
+                  className="h-full w-full object-cover"
+                  onError={() => setProfileImageFailed(true)}
+                />
               ) : (
                 userName.charAt(0).toUpperCase()
               )}
@@ -282,6 +633,114 @@ const Settings: React.FC = () => {
                 Light
               </button>
             </div>
+          </div>
+        </section>
+
+        <section>
+          <h3 className={sectionTitleClass}>Streaming</h3>
+          <div className={`${panelClass} flex items-center justify-between gap-6 p-6`}>
+            <div className="flex items-center gap-4 min-w-0">
+              <div className={iconBoxClass}>
+                <Wifi size={17} />
+              </div>
+              <div className="min-w-0">
+                <h4 className="text-xs font-black text-white uppercase tracking-tight">Remember Online Progress</h4>
+                <p className="mt-0.5 text-[11px] font-medium leading-4 text-white/35">
+                  Resume streamed movies and episodes from where you left off, right from Home. Positions stay on this device only — turn off to stay fully offline.
+                </p>
+              </div>
+            </div>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={rememberOnlineProgress}
+              onClick={() => handleRememberOnlineProgressChange(!rememberOnlineProgress)}
+              className={`relative h-6 w-11 flex-shrink-0 rounded-full border transition-all ${
+                rememberOnlineProgress
+                  ? 'border-red-500/50 bg-red-600 shadow-lg shadow-red-950/30'
+                  : 'border-white/10 bg-white/5'
+              }`}
+            >
+              <span
+                className={`absolute top-1 h-4 w-4 rounded-full bg-white shadow-lg transition-all ${
+                  rememberOnlineProgress ? 'left-6' : 'left-1'
+                }`}
+              />
+            </button>
+          </div>
+          <div className={`${panelClass} mt-3 flex items-center justify-between gap-6 p-6`}>
+            <div className="flex items-center gap-4 min-w-0">
+              <div className={iconBoxClass}>
+                <Bell size={17} />
+              </div>
+              <div className="min-w-0">
+                <h4 className="text-xs font-black text-white uppercase tracking-tight">New Episode Alerts</h4>
+                <p className="mt-0.5 text-[11px] font-medium leading-4 text-white/35">
+                  Flag series you follow when a new episode drops — with a badge on Home and a heads-up here. Checked at most once a day, on this device only.
+                </p>
+              </div>
+            </div>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={notifyNewEpisodes}
+              onClick={() => handleNotifyNewEpisodesChange(!notifyNewEpisodes)}
+              className={`relative h-6 w-11 flex-shrink-0 rounded-full border transition-all ${
+                notifyNewEpisodes
+                  ? 'border-red-500/50 bg-red-600 shadow-lg shadow-red-950/30'
+                  : 'border-white/10 bg-white/5'
+              }`}
+            >
+              <span
+                className={`absolute top-1 h-4 w-4 rounded-full bg-white shadow-lg transition-all ${
+                  notifyNewEpisodes ? 'left-6' : 'left-1'
+                }`}
+              />
+            </button>
+          </div>
+        </section>
+
+        <section>
+          <h3 className={sectionTitleClass}>Features</h3>
+          <div data-tour="settings-focustube" className={`${panelClass} flex items-center justify-between gap-6 p-6`}>
+            <div className="flex items-center gap-4 min-w-0">
+              <div className={iconBoxClass}>
+                <Compass size={17} />
+              </div>
+              <div className="min-w-0">
+                <h4 className="text-xs font-black text-white uppercase tracking-tight flex items-center gap-2">Focus Tube
+                  <span
+                    title="Focus Tube is in beta — some things may still change"
+                    className="inline-flex items-center rounded border border-amber-300/20 bg-amber-400/10 px-1 py-[1px] text-[8px] font-bold uppercase leading-none tracking-[0.08em] text-amber-200/90"
+                  >
+                    Beta
+                  </span>
+                </h4>
+                <p className="mt-0.5 text-[11px] font-medium leading-4 text-white/35">
+                  A YouTube tab driven by your own channels and categories instead of an algorithm. Turn it off to hide
+                  the tab and stop all background refreshing. Nothing is deleted — your categories, channels and watch
+                  progress are still here when you switch it back on.
+                </p>
+              </div>
+            </div>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={focusTubeEnabled}
+              aria-label="Enable Focus Tube"
+              onClick={() => handleFocusTubeChange(!focusTubeEnabled)}
+              className={`relative h-6 w-11 flex-shrink-0 rounded-full border transition-all ${
+                focusTubeEnabled
+                  ? 'border-red-500/50 bg-red-600 shadow-lg shadow-red-950/30'
+                  : 'border-white/10 bg-white/5'
+              }`}
+            >
+              <span
+                className={`absolute top-1 h-4 w-4 rounded-full bg-white shadow-lg transition-all ${
+                  focusTubeEnabled ? 'left-6' : 'left-1'
+                }`}
+              />
+            </button>
           </div>
         </section>
 
@@ -432,6 +891,221 @@ const Settings: React.FC = () => {
         </section>
 
         <section>
+          <div className="flex items-center justify-between mb-3">
+            <h3 className={sectionTitleClass}>Downloads</h3>
+          </div>
+
+          <div className="space-y-3">
+          <div className={`${panelClass} p-6 space-y-5`}>
+            <div className="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
+              <div className="flex items-center gap-4 min-w-0">
+                <div className={iconBoxClass}>
+                  <Download size={18} className="text-primary" />
+                </div>
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2.5">
+                    <h4 className="text-xs font-black text-white uppercase tracking-tight">Downloads Directory</h4>
+                    {downloadDirInfo && (
+                      <span className={`inline-flex items-center rounded-md px-2 py-0.5 text-[9px] font-black uppercase tracking-wider ${
+                        downloadDirInfo.isCustom
+                          ? 'bg-amber-400/10 text-amber-300 border border-amber-400/20'
+                          : 'bg-primary/10 text-primary border border-primary/20'
+                      }`}>
+                        {downloadDirInfo.isCustom ? 'Custom Location' : 'Default Location'}
+                      </span>
+                    )}
+                  </div>
+                  <p className="mt-1 text-[11px] font-medium leading-4 text-white/40 max-w-xl">
+                    Unified download destination for all movies and episodes — whether downloaded via Magnets/Torrents or Direct Download websites (such as HDHub4u, KatmovieHD, etc.).
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2.5 flex-shrink-0">
+                <button
+                  type="button"
+                  onClick={handleChangeDownloadDir}
+                  disabled={downloadDirBusy}
+                  className={`${compactButtonClass} bg-red-600 text-white shadow-lg shadow-red-950/20 hover:bg-red-700`}
+                  title="Browse and select a folder on your computer"
+                >
+                  <FolderOpen size={15} />
+                  <span>{downloadDirBusy ? 'Saving…' : 'Change Location'}</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={handleOpenDownloadDir}
+                  className={`${compactButtonClass} border border-white/10 bg-white/5 text-white hover:bg-white/10`}
+                  title="Open this folder in File Explorer"
+                >
+                  <Maximize2 size={14} />
+                  <span>Open Folder</span>
+                </button>
+                {downloadDirInfo?.isCustom && (
+                  <button
+                    type="button"
+                    onClick={handleResetDownloadDir}
+                    disabled={downloadDirBusy}
+                    className={`${compactButtonClass} border border-white/10 bg-transparent text-white/50 hover:text-white hover:bg-white/5`}
+                    title="Reset back to default Downloads/MyCinema"
+                  >
+                    <RotateCcw size={14} />
+                    <span>Reset Default</span>
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {/* Folder path & drive storage display card */}
+            <div className="rounded-2xl border border-white/10 bg-black/30 p-4 space-y-3">
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                <div className="flex items-center gap-2.5 min-w-0">
+                  <HardDrive size={16} className="text-white/40 flex-shrink-0" />
+                  <p className="truncate font-mono text-[11px] font-medium text-white/90 select-all" title={downloadDirInfo?.currentPath || 'Loading path…'}>
+                    {downloadDirInfo?.currentPath || 'Checking download location…'}
+                  </p>
+                </div>
+                {downloadDirStorage && downloadDirStorage.total > 0 && (
+                  <div className="flex items-center gap-2 text-[11px] font-semibold text-white/50 flex-shrink-0">
+                    <span className="text-white/80">{formatStorageBytes(downloadDirStorage.free)}</span> free of {formatStorageBytes(downloadDirStorage.total)}
+                  </div>
+                )}
+              </div>
+
+              {downloadDirStorage && downloadDirStorage.total > 0 && (
+                <div className="space-y-1">
+                  <div className="h-1.5 w-full overflow-hidden rounded-full bg-white/10">
+                    <div
+                      className={`h-full rounded-full transition-all duration-500 ${
+                        downloadDirStorage.percentUsed >= 90 ? 'bg-red-400' :
+                        downloadDirStorage.percentUsed >= 75 ? 'bg-amber-400' :
+                        'bg-primary'
+                      }`}
+                      style={{ width: `${Math.min(100, Math.max(0, downloadDirStorage.percentUsed))}%` }}
+                    />
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {downloadDirMessage && (
+              <div className={`flex items-center gap-2 text-[11px] font-bold ${
+                downloadDirMessage.isError ? 'text-red-400' : 'text-primary'
+              }`}>
+                {downloadDirMessage.isError ? <AlertTriangle size={14} /> : <Check size={14} />}
+                <span>{downloadDirMessage.text}</span>
+              </div>
+            )}
+          </div>
+
+          <div className={`${panelClass} flex items-center justify-between gap-6 p-6`}>
+            <div className="flex items-center gap-4 min-w-0">
+              <div className={iconBoxClass}>
+                <Layers size={17} />
+              </div>
+              <div className="min-w-0">
+                <h4 className="text-xs font-black text-white uppercase tracking-tight">Floating Download Progress HUD</h4>
+                <p className="mt-0.5 text-[11px] font-medium leading-4 text-white/35">
+                  Show the floating mini-progress card in the bottom corner while downloads are active.
+                </p>
+              </div>
+            </div>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={showDownloadTray}
+              aria-label="Toggle floating download progress overlay"
+              onClick={() => handleShowDownloadTrayChange(!showDownloadTray)}
+              className={`relative h-6 w-11 flex-shrink-0 rounded-full border transition-all ${
+                showDownloadTray
+                  ? 'border-red-500/50 bg-red-600 shadow-lg shadow-red-950/30'
+                  : 'border-white/10 bg-white/5'
+              }`}
+            >
+              <span
+                className={`absolute top-1 h-4 w-4 rounded-full bg-white shadow-lg transition-all ${
+                  showDownloadTray ? 'left-6' : 'left-1'
+                }`}
+              />
+            </button>
+          </div>
+          </div>
+        </section>
+
+        <section>
+          <h3 className={sectionTitleClass}>Download Sites</h3>
+          <div className={`${panelClass} p-6 space-y-4`}>
+            <p className="max-w-2xl text-xs font-medium leading-5 text-white/30">
+              Detail screen cards auto-find the latest working link. If auto-find fails, paste the current site link here manually.
+            </p>
+            {downloadSiteMessage && (
+              <p className="text-[11px] font-bold text-primary">{downloadSiteMessage}</p>
+            )}
+            <div className="grid grid-cols-1 gap-3">
+              {downloadSites.map(site => (
+                <div key={site.id} className="flex flex-col gap-3 rounded-2xl border border-white/10 bg-black/20 p-4 md:flex-row md:items-center">
+                  <div className="flex min-w-0 flex-1 items-center gap-3">
+                    <div
+                      className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-xl text-[11px] font-black"
+                      style={{ backgroundColor: `${site.accent}1a`, color: site.accent }}
+                    >
+                      {site.shortLabel}
+                    </div>
+                    <div className="min-w-0">
+                      <p className="text-xs font-black text-white">{site.name}</p>
+                      <p className="truncate text-[11px] font-medium text-white/35" title={site.domain || site.portalUrl}>
+                        {site.domain ? `${site.domain}${site.manual ? ' · manual' : site.stale ? ' · needs refresh' : ' · auto'}` : 'No link yet — opens on first use'}
+                      </p>
+                    </div>
+                  </div>
+                  <div className="flex flex-1 flex-col gap-2 sm:flex-row">
+                    <input
+                      type="text"
+                      value={downloadSiteDrafts[site.id] ?? ''}
+                      onChange={e => setDownloadSiteDrafts(prev => ({ ...prev, [site.id]: e.target.value }))}
+                      onKeyDown={e => { if (e.key === 'Enter') void handleSaveDownloadSiteDomain(site.id) }}
+                      placeholder="https://current-mirror.example"
+                      disabled={downloadSiteBusyId === site.id}
+                      className="h-9 min-w-0 flex-1 rounded-lg border border-white/10 bg-black/30 px-2.5 text-[12px] font-semibold text-white outline-none placeholder:text-white/25 focus:border-primary/50 disabled:opacity-60"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => void handleSaveDownloadSiteDomain(site.id)}
+                      disabled={!((downloadSiteDrafts[site.id] || '').trim()) || downloadSiteBusyId === site.id}
+                      className={`${compactButtonClass} border border-white/10 bg-white/5 text-white hover:bg-white/10`}
+                    >
+                      <span>{downloadSiteBusyId === site.id ? 'Saving…' : 'Save'}</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => void handleRefreshDownloadSiteDomain(site.id)}
+                      disabled={downloadSiteBusyId === site.id}
+                      className={`${compactButtonClass} border border-white/10 bg-transparent text-white/50 hover:text-white hover:bg-white/5`}
+                      title="Re-check the live link right now"
+                    >
+                      <span>{downloadSiteBusyId === site.id ? 'Checking…' : 'Refresh'}</span>
+                    </button>
+                    {(site.domain || site.manual) && (
+                      <button
+                        type="button"
+                        onClick={() => void handleResetDownloadSiteDomain(site.id)}
+                        disabled={downloadSiteBusyId === site.id}
+                        className={`${compactButtonClass} border border-white/10 bg-transparent text-white/50 hover:text-white hover:bg-white/5`}
+                      >
+                        <span>Auto</span>
+                      </button>
+                    )}
+                  </div>
+                </div>
+              ))}
+              {downloadSites.length === 0 && (
+                <p className="text-[11px] font-bold text-white/30">Loading sites…</p>
+              )}
+            </div>
+          </div>
+        </section>
+
+        <section>
           <h3 className={sectionTitleClass}>Backup & Restore</h3>
           <div className={`${panelClass} flex flex-col justify-between gap-6 p-6 md:flex-row md:items-center`}>
             <div className="flex items-center gap-4 min-w-0">
@@ -504,4 +1178,4 @@ const Settings: React.FC = () => {
   )
 }
 
-export default Settings
+export default React.memo(Settings)

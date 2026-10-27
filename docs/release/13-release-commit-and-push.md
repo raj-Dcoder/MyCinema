@@ -23,7 +23,8 @@ The release commit must include:
 3. `package-lock.json`
 4. `src/renderer/src/components/WhatsNewOnboarding.tsx`
 5. `RELEASE_NOTES.md`
-6. any build or release configuration changes intentionally part of the release
+6. when gate 10 added a tour: `src/renderer/src/components/ProductTour.tsx` plus any `data-tour` anchor edits (`App.tsx`, pages) — the tour and its anchors ship in the same commit as the dialog that starts it
+7. any build or release configuration changes intentionally part of the release
 
 Do not stage:
 

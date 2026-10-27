@@ -274,4 +274,4 @@ const Series: React.FC<SeriesProps> = ({ onPlay, onShowDetail }) => {
   )
 }
 
-export default Series
+export default React.memo(Series)

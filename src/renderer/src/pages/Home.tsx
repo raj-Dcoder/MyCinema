@@ -5,13 +5,15 @@ import HeroCarousel from '../components/HeroCarousel'
 import HorizontalScrollRow, { type HorizontalScrollRowHandle } from '../components/HorizontalScrollRow'
 import { groupSeriesCards } from '../utils/seriesCards'
 import { groupMovieCards } from '../utils/mediaVersions'
-import { Search as SearchIcon, Bookmark, ChevronLeft, ChevronRight, Play, X, Loader2, Star, Film, Tv, HardDrive, Cloud, CheckCircle2 } from 'lucide-react'
+import { streamRowToVideo, resumeOnlineStream, isOnlineProgressEnabled, isNewEpisodeNotifyEnabled, groupOnlineStreamRows, resolveOnlineNextEpisode, buildOnlineSeriesCard, formatSeasonEpisode, getOnlineResumeKey, safeGetStreamHistory, safeGetFollowedSeries, safeMarkFollowedSeen, safeCheckFollowedUpdates, shouldRunFollowCheck, stampFollowCheck, FOLLOW_TOAST_EVENT } from '../utils/streamResume'
+import { Search as SearchIcon, Bookmark, ChevronLeft, ChevronRight, Play, X, Loader2, Star, Film, Tv, HardDrive, Cloud, CheckCircle2, Bell } from 'lucide-react'
 
 interface HomeProps {
   onPlay: (video: Video) => void
   onShowDetail: (video: Video) => void
-  onNavigate: (tab: 'movies' | 'series' | 'history' | 'settings') => void
+  onNavigate: (tab: 'movies' | 'series' | 'settings') => void
   refreshKey: number
+  isActive?: boolean
 }
 
 const TRENDING_RAIL_LIMIT = 10
@@ -238,7 +240,8 @@ const ContinueWatchingCard: React.FC<{
   video: Video
   onPlay: (video: Video) => void
   onShowDetail: (video: Video) => void
-}> = ({ video, onPlay, onShowDetail }) => {
+  resuming?: boolean
+}> = ({ video, onPlay, onShowDetail, resuming }) => {
   const imageUrl = getImageUrl(video.backdrop_path) || getImageUrl(video.poster_path)
   const progressPercent = getProgressPercent(video)
   const remainingTime = getRemainingTime(video)
@@ -272,6 +275,12 @@ const ContinueWatchingCard: React.FC<{
               {episodeLabel}
             </div>
           )}
+          {video.isOnlineResume && (
+            <div className="inline-flex items-center gap-1 rounded-md bg-sky-500/80 px-2 py-1 text-[9px] font-black uppercase tracking-widest text-white shadow-lg shadow-black/30 backdrop-blur-md">
+              <Cloud size={10} />
+              {video.onlineNewEpisode ? 'New Episode' : video.onlineNextEpisode ? 'Up Next · Online' : 'Online'}
+            </div>
+          )}
         </div>
 
         <div className="space-y-2">
@@ -284,14 +293,24 @@ const ContinueWatchingCard: React.FC<{
             </p>
           )}
           <button
-            className="inline-flex w-fit items-center justify-center gap-2 rounded-full bg-red-600 px-4 py-2 text-[10px] font-black uppercase tracking-widest text-white opacity-0 shadow-lg shadow-red-950/40 transition-all duration-300 hover:bg-red-500 group-hover:opacity-100"
+            disabled={resuming}
+            className="inline-flex w-fit items-center justify-center gap-2 rounded-full bg-red-600 px-4 py-2 text-[10px] font-black uppercase tracking-widest text-white opacity-0 shadow-lg shadow-red-950/40 transition-all duration-300 hover:bg-red-500 group-hover:opacity-100 disabled:cursor-wait disabled:opacity-100"
             onClick={(event) => {
               event.stopPropagation()
               onPlay(video)
             }}
           >
-            <Play fill="white" size={15} />
-            Resume
+            {resuming ? (
+              <>
+                <Loader2 size={15} className="animate-spin" />
+                Loading…
+              </>
+            ) : (
+              <>
+                <Play fill="white" size={15} />
+                {(video.last_watched_time || 0) > 0 ? 'Resume' : video.onlineNextEpisode ? `Play ${formatSeasonEpisode(video.season, video.episode)}` : 'Resume'}
+              </>
+            )}
           </button>
         </div>
       </div>
@@ -483,7 +502,7 @@ const SectionHeader: React.FC<{
   )
 }
 
-const Home: React.FC<HomeProps> = ({ onPlay, onShowDetail, onNavigate, refreshKey }) => {
+const Home: React.FC<HomeProps> = ({ onPlay, onShowDetail, onNavigate, refreshKey, isActive = true }) => {
   const initialSnapshotRef = useRef<HomeSnapshot | null>(readHomeSnapshot())
   const [continueWatching, setContinueWatching] = useState<Video[]>(() => initialSnapshotRef.current?.continueWatching || [])
   const [recentMovies, setRecentMovies] = useState<Video[]>(() => initialSnapshotRef.current?.recentMovies || [])
@@ -531,10 +550,9 @@ const Home: React.FC<HomeProps> = ({ onPlay, onShowDetail, onNavigate, refreshKe
   const [isSearching, setIsSearching] = useState(false)
   const [searchError, setSearchError] = useState<string | null>(null)
   const [watchlistItems, setWatchlistItems] = useState<Video[]>([])
-  const [categorizingItem, setCategorizingItem] = useState<Video | null>(null)
-  const [newCategoryName, setNewCategoryName] = useState('')
-  const [isCreatingCategory, setIsCreatingCategory] = useState(false)
   const [savingWatchlist, setSavingWatchlist] = useState(false)
+  const [followedSeries, setFollowedSeries] = useState<any[]>([])
+  const [followToast, setFollowToast] = useState<string | null>(null)
   const searchInputRef = useRef<HTMLInputElement>(null)
   const searchBoxRef = useRef<HTMLDivElement>(null)
   const searchCacheRef = useRef<Map<string, SearchResultVideo[]>>(new Map())
@@ -543,6 +561,7 @@ const Home: React.FC<HomeProps> = ({ onPlay, onShowDetail, onNavigate, refreshKe
   const suppressContentClickUntilRef = useRef(0)
   const didRunInitialRefreshRef = useRef(false)
   const discoveryTimersRef = useRef<number[]>([])
+  const lastDiscoveryFetchTimeRef = useRef<number>(0)
 
   const refresh = (fetcher: () => Promise<any[]>, setter: (data: any[]) => void) => async () => {
     try {
@@ -555,13 +574,98 @@ const Home: React.FC<HomeProps> = ({ onPlay, onShowDetail, onNavigate, refreshKe
 
   const refreshLocalHomeData = useCallback(async () => {
     try {
-      const [allVideos, cw] = await Promise.all([
+      const [allVideos, cw, streamHistory, followed] = await Promise.all([
         window.api.getVideos(),
-        window.api.getContinueWatching()
+        window.api.getContinueWatching(),
+        (async () => {
+          if (!isOnlineProgressEnabled()) return []
+          return await safeGetStreamHistory(100)
+        })(),
+        (async () => {
+          if (!isOnlineProgressEnabled() || !isNewEpisodeNotifyEnabled()) return []
+          return await safeGetFollowedSeries()
+        })()
       ])
+      setFollowedSeries(followed as any[])
 
       setAllLibraryVideos(allVideos)
-      setContinueWatching(groupContinueWatching(cw))
+      // Merge local progress with online stream resumes (offline-first: when the
+      // same TMDB title exists locally, the local row wins and online hides).
+      const TEN_DAYS_MS = 10 * 24 * 3600 * 1000
+      const isFresh = (ts?: string | null) => (
+        Date.now() - new Date(ts || 0).getTime() < TEN_DAYS_MS
+      )
+      const localKeys = new Set(
+        (cw as Video[]).filter(v => v.tmdb_id).map(v => (
+          `${v.type}:${v.tmdb_id}:${v.type === 'series' ? `${v.season ?? 0}:${v.episode ?? 0}` : ''}`
+        ))
+      )
+      const localSeriesIds = new Set(
+        (cw as Video[]).filter(v => v.tmdb_id && v.type === 'series').map(v => Number(v.tmdb_id))
+      )
+      const { movieRows, seriesGroups } = groupOnlineStreamRows(streamHistory as any[])
+      const onlineMovies = movieRows
+        .filter(r => !r.completed && (Number(r.position) || 0) >= 10 && isFresh(r.updated_at))
+        .map(streamRowToVideo)
+        .filter(v => !v.tmdb_id || !localKeys.has(`${v.type}:${v.tmdb_id}:`))
+      // One card per online series: resume in-progress ep, else jump to next
+      // released episode (catalog is memory-cached 6h in main, resolved in parallel).
+      const newDropIds = new Set(
+        (followed as any[]).filter(f => f?.has_unseen_new).map(f => Number(f.tmdb_id))
+      )
+      const stampNewDrop = (card: Video | null): Video | null => {
+        if (!card || !card.tmdb_id || !newDropIds.has(Number(card.tmdb_id))) return card
+        return {
+          ...card,
+          onlineNewEpisode: true,
+          tagline: card.onlineNextEpisode
+            ? `${formatSeasonEpisode(card.season, card.episode)} just dropped`
+            : card.tagline
+        }
+      }
+      const onlineSeriesCards = (await Promise.all(
+        seriesGroups
+          .filter(g => isFresh(g.latestUpdate) && !localSeriesIds.has(g.tmdb_id))
+          .map(async g => {
+            const next = await resolveOnlineNextEpisode(g.tmdb_id, g.maxSeason, g.maxEpisode)
+            return stampNewDrop(buildOnlineSeriesCard(g, next))
+          })
+      )).filter((v): v is Video => Boolean(v))
+      // #3: resurface stale groups hidden by the 10-day rule when a new
+      // episode dropped since the user last caught up.
+      const cardTmdbIds = new Set(
+        onlineSeriesCards.filter(c => c.tmdb_id).map(c => Number(c.tmdb_id))
+      )
+      const resurfacedCards = (await Promise.all(
+        seriesGroups
+          .filter(g => !isFresh(g.latestUpdate) && !localSeriesIds.has(g.tmdb_id) && !cardTmdbIds.has(g.tmdb_id) && newDropIds.has(g.tmdb_id))
+          .map(async g => {
+            const next = await resolveOnlineNextEpisode(g.tmdb_id, g.maxSeason, g.maxEpisode)
+            return stampNewDrop(buildOnlineSeriesCard(g, next))
+          })
+      )).filter((v): v is Video => Boolean(v))
+      // New drops outrank plain recency (the Netflix model: the hero answers
+      // "what needs you now"). Among drops, most-recently-detected wins; the
+      // boost expires the moment the card is opened (flag cleared).
+      const dropDetectedAt = new Map(
+        (followed as any[])
+          .filter(f => f?.has_unseen_new)
+          .map(f => [Number(f.tmdb_id), new Date(f.last_checked || 0).getTime()])
+      )
+      const merged = [...groupContinueWatching(cw), ...onlineMovies, ...onlineSeriesCards, ...resurfacedCards]
+        .sort((a, b) => {
+          const aDrop = a.onlineNewEpisode ? 1 : 0
+          const bDrop = b.onlineNewEpisode ? 1 : 0
+          if (aDrop !== bDrop) return bDrop - aDrop
+          if (aDrop && bDrop) {
+            const aAt = (a.tmdb_id && dropDetectedAt.get(Number(a.tmdb_id))) || 0
+            const bAt = (b.tmdb_id && dropDetectedAt.get(Number(b.tmdb_id))) || 0
+            if (aAt !== bAt) return bAt - aAt
+          }
+          return new Date(b.updated_at || 0).getTime() - new Date(a.updated_at || 0).getTime()
+        })
+        .slice(0, 5)
+      setContinueWatching(merged)
 
       const moviesOnly = allVideos.filter(v => v.type === 'movie')
       setRecentMovies(groupMovieCards(moviesOnly).slice(0, 10))
@@ -574,7 +678,14 @@ const Home: React.FC<HomeProps> = ({ onPlay, onShowDetail, onNavigate, refreshKe
     }
   }, [])
 
-  const fetchDiscoveryData = useCallback(async () => {
+  const fetchDiscoveryData = useCallback(async (force = false) => {
+    const DISCOVERY_CACHE_TTL_MS = 20 * 60 * 1000 // 20 minutes
+    const isCacheFresh = (Date.now() - lastDiscoveryFetchTimeRef.current) < DISCOVERY_CACHE_TTL_MS
+    if (!force && isCacheFresh && (trendingMovies.length > 0 || trendingSeries.length > 0)) {
+      return
+    }
+    lastDiscoveryFetchTimeRef.current = Date.now()
+
     discoveryTimersRef.current.forEach(clearTimeout)
     discoveryTimersRef.current = []
 
@@ -631,8 +742,20 @@ const Home: React.FC<HomeProps> = ({ onPlay, onShowDetail, onNavigate, refreshKe
     discoveryTimersRef.current.push(t2)
   }, [])
 
+  // #3: throttled new-episode check (max ~1/day). Runs before the home
+  // refresh so fresh drop flags are visible immediately.
+  const runFollowCheck = useCallback(async () => {
+    try {
+      if (!isOnlineProgressEnabled() || !isNewEpisodeNotifyEnabled() || !shouldRunFollowCheck()) return
+      stampFollowCheck()
+      const updated = await safeCheckFollowedUpdates()
+      if (updated) setFollowedSeries(updated)
+    } catch { /* best-effort */ }
+  }, [])
+
   const fetchData = useCallback(async () => {
     try {
+      await runFollowCheck()
       await Promise.all([
         refreshLocalHomeData(),
         fetchDiscoveryData(),
@@ -641,7 +764,7 @@ const Home: React.FC<HomeProps> = ({ onPlay, onShowDetail, onNavigate, refreshKe
     } catch (err) {
       console.error('Home fetchData error:', err)
     }
-  }, [fetchDiscoveryData, refreshLocalHomeData])
+  }, [fetchDiscoveryData, refreshLocalHomeData, runFollowCheck])
 
   useEffect(() => {
     fetchData()
@@ -652,13 +775,33 @@ const Home: React.FC<HomeProps> = ({ onPlay, onShowDetail, onNavigate, refreshKe
     }
     window.addEventListener('mycinema_name_updated', handleNameUpdate)
 
+    const handleFollowToast = (event: Event) => {
+      const detail = (event as CustomEvent).detail
+      if (detail && typeof detail === 'object') {
+        const drop = detail.dropSeason != null && detail.dropEpisode != null
+          ? ` — ${formatSeasonEpisode(detail.dropSeason, detail.dropEpisode)} just dropped`
+          : ' — new episodes will be flagged here'
+        setFollowToast(`Following ${detail.title || 'series'}${drop}`)
+        return
+      }
+      setFollowToast(detail ? `Following ${detail} — new episodes will be flagged here` : 'Following series — new episodes will be flagged here')
+    }
+    window.addEventListener(FOLLOW_TOAST_EVENT, handleFollowToast)
+
     return () => {
       discoveryTimersRef.current.forEach(clearTimeout)
       discoveryTimersRef.current = []
       cleanupLibraryUpdates()
       window.removeEventListener('mycinema_name_updated', handleNameUpdate)
+      window.removeEventListener(FOLLOW_TOAST_EVENT, handleFollowToast)
     }
   }, [fetchData, refreshLocalHomeData])
+
+  useEffect(() => {
+    if (!followToast) return
+    const timer = window.setTimeout(() => setFollowToast(null), 5000)
+    return () => window.clearTimeout(timer)
+  }, [followToast])
 
   useEffect(() => {
     if (!didRunInitialRefreshRef.current) {
@@ -778,13 +921,66 @@ const Home: React.FC<HomeProps> = ({ onPlay, onShowDetail, onNavigate, refreshKe
     }
   }
 
+  const [resumingOnlineKey, setResumingOnlineKey] = useState<string | null>(null)
+
+  const clearNewDropFlag = (tmdbId?: number | null) => {
+    if (!tmdbId) return
+    void safeMarkFollowedSeen(tmdbId)
+    setFollowedSeries(prev => prev.map(f => (
+      Number(f.tmdb_id) === Number(tmdbId) ? { ...f, has_unseen_new: 0 } : f
+    )))
+    setContinueWatching(prev => prev.map(v => (
+      v.tmdb_id && Number(v.tmdb_id) === Number(tmdbId) && v.isOnlineResume
+        ? { ...v, onlineNewEpisode: false }
+        : v
+    )))
+  }
+
+  const handleOnlineResume = async (video: Video) => {
+    if (!video.tmdb_id) {
+      onShowDetail(video)
+      return
+    }
+    if (video.onlineNewEpisode) clearNewDropFlag(video.tmdb_id)
+    const key = getOnlineResumeKey(video)
+    if (resumingOnlineKey) return
+    setResumingOnlineKey(key)
+    try {
+      const played = await resumeOnlineStream({
+        tmdb_id: video.tmdb_id,
+        media_type: video.type as 'movie' | 'series',
+        season: video.season ?? null,
+        episode: video.episode ?? null,
+        title: video.type === 'series' && video.series_name ? video.series_name : video.title,
+        release_year: video.release_year ?? null,
+        position: video.last_watched_time || 0,
+        poster_path: video.poster_path ?? null,
+        backdrop_path: video.backdrop_path ?? null,
+        overview: video.overview ?? null,
+        source_magnet: video.sourceMagnet ?? null,
+        file_index: video.fileIndex ?? null
+      })
+      onPlay(played)
+    } catch (err) {
+      console.warn('[StreamResume] one-click resume failed, opening detail:', err)
+      onShowDetail(video)
+    } finally {
+      setResumingOnlineKey(null)
+    }
+  }
+
   const handlePlayFromHome = (video: Video) => {
     if (shouldSuppressHomeClick()) return
+    if (video.isOnlineResume) {
+      void handleOnlineResume(video)
+      return
+    }
     onPlay(video)
   }
 
   const handleShowDetailFromHome = (video: Video) => {
     if (shouldSuppressHomeClick()) return
+    if (video.onlineNewEpisode) clearNewDropFlag(video.tmdb_id)
     onShowDetail(video)
   }
 
@@ -933,30 +1129,18 @@ const Home: React.FC<HomeProps> = ({ onPlay, onShowDetail, onNavigate, refreshKe
     onShowDetail(video)
   }
 
-  const watchlistCategories = Array.from(new Set(watchlistItems.map(item => item.category || 'Watchlist'))).sort((a, b) => {
-    if (a === 'Watchlist') return -1
-    if (b === 'Watchlist') return 1
-    return a.localeCompare(b)
-  })
-
-  const openWatchlistCategoryPicker = (video: SearchResultVideo) => {
-    setCategorizingItem(video)
-    setNewCategoryName('')
-    setIsCreatingCategory(false)
-  }
-
-  const saveToWatchlist = async (video: SearchResultVideo, category: string = 'Watchlist') => {
+  const saveToWatchlist = async (video: SearchResultVideo) => {
+    if (savingWatchlist) return
     setSavingWatchlist(true)
     try {
       if (video.isExternal || video.id < 0) {
-        await window.api.addToWatchlistExternal({ ...video, category })
+        await window.api.addToWatchlistExternal({ ...video, category: 'Watchlist' })
       } else {
-        await window.api.addLocalToWatchlist(video.id, category)
+        await window.api.addLocalToWatchlist(video.id, 'Watchlist')
       }
 
       const updated = await window.api.getWatchlist()
       setWatchlistItems(updated)
-      setCategorizingItem(null)
       setIsSearchOpen(false)
       setSearchQuery('')
       setSearchResults([])
@@ -1039,7 +1223,7 @@ const Home: React.FC<HomeProps> = ({ onPlay, onShowDetail, onNavigate, refreshKe
   const fallbackHeroItems = [...recentMovies, ...recentSeries].slice(0, TRENDING_RAIL_LIMIT)
   const heroItems = hasContinueWatching ? continueWatching : fallbackHeroItems
   const showHero = heroItems.length > 0
-  const heroTitle = hasContinueWatching ? 'Continue Watching' : 'Recently Added'
+  const heroTitle = hasContinueWatching ? 'Continue Watching' : 'Your Library'
 
   return (
     <div onClickCapture={handleHomeClickCapture}>
@@ -1131,7 +1315,7 @@ const Home: React.FC<HomeProps> = ({ onPlay, onShowDetail, onNavigate, refreshKe
                                   video={result}
                                   onSelect={openSearchResult}
                                   onWarm={warmSearchResult}
-                                  onAddToWatchlist={openWatchlistCategoryPicker}
+                                  onAddToWatchlist={saveToWatchlist}
                                 />
                               ))}
                             </div>
@@ -1169,15 +1353,9 @@ const Home: React.FC<HomeProps> = ({ onPlay, onShowDetail, onNavigate, refreshKe
                   items={heroItems}
                   onPlay={handlePlayFromHome}
                   onShowDetail={handleShowDetailFromHome}
+                  resumingKey={resumingOnlineKey}
+                  isActive={isActive}
                 />
-                {hasContinueWatching && (
-                  <button
-                    className="absolute bottom-8 left-8 z-30 flex items-center gap-1 text-[10px] font-black uppercase tracking-widest text-white/70 transition-all hover:gap-2 hover:text-primary md:left-16"
-                    onClick={() => onNavigate('history')}
-                  >
-                    View all continue watching <ChevronRight size={14} />
-                  </button>
-                )}
               </>
             ) : showLocalEmptyState ? (
               <div className="relative flex min-h-[570px] h-[73vh] max-h-[800px] flex-col items-start justify-end overflow-hidden bg-[#05080d] px-8 pb-20 pt-32 md:px-16">
@@ -1216,11 +1394,11 @@ const Home: React.FC<HomeProps> = ({ onPlay, onShowDetail, onNavigate, refreshKe
         </section>
       )}
 
-      {/* 2. Recently Added Movies */}
+      {/* 2. Library Movies */}
       <section className="mx-auto mt-7 max-w-[1600px] px-8">
         <SectionHeader
           eyebrow=""
-          title="Recently Added Movies"
+          title="Your Library Movies"
           icon={<Film size={18} />}
           tone="emerald"
           action={(
@@ -1251,11 +1429,11 @@ const Home: React.FC<HomeProps> = ({ onPlay, onShowDetail, onNavigate, refreshKe
         )}
       </section>
 
-      {/* 3. Recently Added Series */}
+      {/* 3. Library Series */}
       <section className="mx-auto mt-7 max-w-[1600px] px-8">
         <SectionHeader
           eyebrow=""
-          title="Recently Added Series"
+          title="Your Library Series"
           icon={<Tv size={18} />}
           tone="cyan"
           action={(
@@ -1562,101 +1740,25 @@ const Home: React.FC<HomeProps> = ({ onPlay, onShowDetail, onNavigate, refreshKe
         </HorizontalScrollRow>
       </section>
 
-      {categorizingItem && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-200">
-          <div className="w-full max-w-sm overflow-hidden rounded-2xl border border-secondary bg-surface shadow-2xl animate-in zoom-in-95 duration-200">
-            <div className="flex items-center justify-between border-b border-secondary px-6 py-5">
-              <div>
-                <h3 className="text-base font-bold text-text">Save to...</h3>
-                <p className="mt-0.5 max-w-[220px] truncate text-[11px] text-muted">
-                  {categorizingItem.title}
-                </p>
-              </div>
-              <button
-                onClick={() => setCategorizingItem(null)}
-                className="rounded-xl p-2 text-muted transition-colors hover:bg-white/5 hover:text-text"
-              >
-                <X size={18} />
-              </button>
-            </div>
-
-            <div className="max-h-[300px] space-y-1.5 overflow-y-auto p-4">
-              <button
-                onClick={() => saveToWatchlist(categorizingItem, 'Watchlist')}
-                disabled={savingWatchlist}
-                className="group flex w-full items-center gap-3 rounded-xl p-3 text-muted transition-all hover:bg-amber-500/10 hover:text-amber-400 disabled:opacity-50"
-              >
-                <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-secondary/50 group-hover:bg-amber-500/20">
-                  <Bookmark size={14} />
-                </div>
-                <span className="text-sm font-medium">Watchlist</span>
-                <span className="ml-auto text-[10px] font-bold uppercase tracking-widest opacity-0 group-hover:opacity-100">Default</span>
-              </button>
-
-              {watchlistCategories.filter(category => category !== 'Watchlist').map(category => (
-                <button
-                  key={category}
-                  onClick={() => saveToWatchlist(categorizingItem, category)}
-                  disabled={savingWatchlist}
-                  className="group flex w-full items-center gap-3 rounded-xl p-3 text-muted transition-all hover:bg-primary/10 hover:text-primary disabled:opacity-50"
-                >
-                  <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-secondary/50 group-hover:bg-primary/20">
-                    <Bookmark size={14} />
-                  </div>
-                  <span className="text-sm font-medium">{category}</span>
-                  {savingWatchlist && <Loader2 size={14} className="ml-auto animate-spin" />}
-                </button>
-              ))}
-            </div>
-
-            <div className="border-t border-secondary bg-secondary/20 p-4">
-              {!isCreatingCategory ? (
-                <button
-                  onClick={() => setIsCreatingCategory(true)}
-                  className="flex w-full items-center justify-center gap-2 rounded-xl border border-dashed border-muted/30 py-2.5 text-sm font-medium text-muted transition-all hover:border-primary/50 hover:text-text"
-                >
-                  <Bookmark size={14} className="opacity-50" />
-                  Create New Category
-                </button>
-              ) : (
-                <div className="space-y-3 animate-in slide-in-from-bottom-2 duration-200">
-                  <input
-                    autoFocus
-                    type="text"
-                    value={newCategoryName}
-                    onChange={(event) => setNewCategoryName(event.target.value)}
-                    onKeyDown={(event) => {
-                      if (event.key === 'Enter' && newCategoryName.trim()) {
-                        saveToWatchlist(categorizingItem, newCategoryName.trim())
-                      }
-                      if (event.key === 'Escape') setIsCreatingCategory(false)
-                    }}
-                    placeholder="Category name"
-                    className="w-full rounded-xl border border-primary/30 bg-surface px-4 py-2.5 text-sm outline-none placeholder:text-muted/40 focus:ring-2 focus:ring-primary/20"
-                  />
-                  <div className="flex gap-2">
-                    <button
-                      onClick={() => setIsCreatingCategory(false)}
-                      className="flex-1 py-2 text-xs font-medium text-muted transition-colors hover:text-text"
-                    >
-                      Cancel
-                    </button>
-                    <button
-                      disabled={!newCategoryName.trim() || savingWatchlist}
-                      onClick={() => saveToWatchlist(categorizingItem, newCategoryName.trim())}
-                      className="flex-[2] rounded-lg bg-primary py-2 text-xs font-bold text-black transition-all disabled:opacity-50"
-                    >
-                      {savingWatchlist ? <Loader2 size={14} className="mx-auto animate-spin" /> : 'Create & Save'}
-                    </button>
-                  </div>
-                </div>
-              )}
-            </div>
+      {/* Follow confirmation toast */}
+      {followToast && (
+        <div className="pointer-events-none fixed bottom-8 left-1/2 z-[90] -translate-x-1/2">
+          <div className="pointer-events-auto flex items-center gap-2.5 rounded-2xl border border-white/10 bg-[#0b111c]/95 px-5 py-3.5 shadow-[0_24px_70px_rgba(0,0,0,0.6)] backdrop-blur-xl animate-in fade-in slide-in-from-bottom-4 duration-300">
+            <Bell size={16} className="shrink-0 text-sky-300" />
+            <p className="whitespace-nowrap text-[12px] font-bold text-white/85">{followToast}</p>
+            <button
+              aria-label="Dismiss"
+              onClick={() => setFollowToast(null)}
+              className="ml-1 rounded-lg p-1 text-white/40 transition-colors hover:bg-white/10 hover:text-white"
+            >
+              <X size={14} />
+            </button>
           </div>
         </div>
       )}
+
     </div>
   )
 }
 
-export default Home
+export default React.memo(Home)

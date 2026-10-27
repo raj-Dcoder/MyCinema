@@ -2,154 +2,130 @@
 
 Use this gate to draft and apply the in-app What's New content.
 
-The goal is to make the first-launch popup accurate before the user sees it in the packaged release.
+The goal: the first thing a user sees after updating is a small, plain,
+scannable changelog — in the style of VS Code release notes / Slack
+"What's new" / Linear changelogs — followed (only for flagship features)
+by a short spotlight tour that walks them to the new control.
 
-## File To Update
+## Files To Update
 
 ```text
-src/renderer/src/components/WhatsNewOnboarding.tsx
+src/renderer/src/components/WhatsNewOnboarding.tsx   # LATEST_RELEASE data only
+src/renderer/src/components/ProductTour.tsx          # only when a tour is needed
 ```
 
-Update the `LATEST_RELEASE` object only unless the release genuinely needs a new visual metaphor.
+Update the `LATEST_RELEASE` data object only. Do not restyle the dialog
+component unless the template itself is broken.
 
 ## Required Updates
 
 1. Set `LATEST_RELEASE.version` to `X.Y.Z`.
-2. Update `slides` from the same real changes described in `RELEASE_NOTES.md`.
-3. Include a security/privacy slide when `09-release-notes.md` required one.
-4. Keep the existing `WhatsNewOnboarding` component architecture, interactions, and visual system.
+2. Rewrite `title`, `highlight`, `description`, and `updates` from the same
+   real changes described in `RELEASE_NOTES.md` (gate 09). Nothing else —
+   the modal renders entirely from this data object.
+3. Set `tourId` only when this release adds a tour in `ProductTour.tsx`;
+   otherwise set it to `null`.
 
-The dialog appears once per version through `getWhatsNewStorageKey(LATEST_RELEASE.version)`, so changing the version is required.
+The dialog appears once per version through
+`getWhatsNewStorageKey(LATEST_RELEASE.version)`, so changing the version
+is required.
 
 ## Experience Direction
 
-The What's New experience is a premium Gen Z streaming/media onboarding reveal.
+Compact dark cinematic card. "WHAT'S NEW" pill plus version badge, one
+short prominent heading with an accent-gradient highlighted word, one
+description line, and a vertical list of soft update rows (tinted icon
+tile + title + one short description + chevron). Subtle ambient glow
+behind the card. Footer: "Don't show again for this version" toggle plus
+one gradient "Continue →" pill button.
 
-Keep:
+Do not rebuild it as full-screen cinematic slides, neon/particle
+onboarding, marketing reveal copy, large illustrations, or heavy
+glassmorphism.
 
-1. full-screen dark cinematic reveal
-2. neon/glassmorphism mood per slide
-3. distinct layouts using the existing `layout` values
-4. animated progress indicators
-5. cursor-follow glow, particles, floating visuals, and motion cues
-6. one emotional message per slide
-7. energetic CTA labels
+## Writing Rules
 
-Do not replace it with alerts, native dialogs, plain text lists, corporate changelog modals, or the older `steps` object in `App.tsx`.
+1. Max 5 updates, most user-visible first. Bug-fix-only or security-only
+   releases get 1-2 updates, not filler.
+2. Every update is `Title. One short clause.` Title = outcome in 6 words
+   or fewer (never the mechanism). Description = a single clause, max
+   ~12 words, saying what changed plus where to find it ("in the
+   Downloads tab", "under Settings > Features").
+3. The heading `title` is short and prominent (one line), `highlight` is
+   one word from it, and `description` is 1-2 plain sentences framing the
+   release.
+4. `icon` must be one of the existing `UPDATE_ICONS` keys — pick the
+   closest match. Never add one-off icons per release.
+5. Write for a non-technical user. Never lead with implementation details,
+   APIs, validation names, storage keys, IPC, refactors, or internal
+   service names.
+6. Never use hype adjectives or slang (`seamless`, `insane`,
+   `mind-blowing`, `supercharge`, Gen Z slang). Never use vague fillers
+   (`various improvements`, `bug fixes and performance`,
+   `stability updates`) unless the diff truly cannot be summarized more
+   specifically.
+7. If the release has ONE flagship feature needing orientation (new
+   tab/screen/workflow), do not explain it all in text — add a tour
+   (Step 5B of `RELEASE_GUIDE.md`) instead.
 
-## Analysis Rules
-
-1. Analyze release notes and local diff context first.
-2. Group updates into emotional categories: speed, sharing, discovery, reliability, personalization, quality of life, fixes, and community requests.
-3. Prioritize meaningful user-visible improvements.
-4. Ignore low-impact technical changes unless they remove a visible user problem.
-5. Convert every technical detail into a user benefit.
-
-Benefit-first examples:
+Good vs bad:
 
 ```text
-Bad: TMDB validation added.
-Good: No more broken links.
+Bad:  No more broken links. (vague — what links, where?)
+Good: True season-pack sizes. Season packs now show the full-season total.
 
-Bad: Season filters improved.
-Good: Finding episodes is cleaner now.
+Bad:  Audio pipeline resync hardened. (jargon)
+Good: Audio stays in sync. External audio now starts at the right moment.
+
+Bad:  Insane new download experience!!! (hype, says nothing)
+Good: Download queue control. Set a limit and manage multiple downloads
+      at once.
 ```
-
-## Slide Fields
-
-For every slide, decide:
-
-1. `layout`: one of `reveal`, `share`, `discovery`, `downloads`, `security`, or `celebrate`
-2. `kicker`: tiny category label, 1 to 3 words
-3. `headline`: primary headline, 3 to 8 words
-4. `highlight`: exact word or phrase from `headline` that should receive gradient emphasis
-5. `support`: supporting text, 8 to 16 words
-6. `signal`: tiny status/progress label, 1 to 3 words
-7. `cta`: energetic action label
-8. `icon`: a matching `lucide-react` icon already imported or deliberately added
-9. `mood`: emotional color system with `name`, `gradient`, `text`, `border`, `shadow`, `backdrop`, and `cursor`
-
-## Content Rules
-
-1. Use 3 slides for small patch releases.
-2. Use 4 to 6 slides for feature releases with distinct user-visible stories.
-3. Do not force filler slides.
-4. Every slide needs one dominant focal point and one emotional message.
-5. Primary headline must be 3 to 8 words.
-6. Supporting copy must be 8 to 16 words.
-7. Never lead with implementation details, APIs, validation names, storage keys, IPC, refactors, or internal services.
-8. Ask what problem was removed, what became faster, what became smoother, or what feels cooler now.
-
-## Visual And Layout Rules
-
-1. Every slide should feel different.
-2. Never repeat the same layout energy more than twice consecutively.
-3. Favor 1-second comprehension: oversized typography, bold focal visuals, high contrast, glows, cinematic lighting, glassmorphism, particles, stickers, doodle arrows, holographic accents, and animated indicators.
-4. Use characters selectively when they add emotion: stylized mascots, anime-inspired characters, cyberpunk avatars, expressive illustrated personas, or playful 3D figures.
-5. Do not use generic stock-model character direction.
-6. Keep the modal compact and stable in height even when copy has launch energy.
-
-## CTA Rules
-
-Avoid boring CTA labels like:
-
-- `Next`
-- `Continue`
-- `Get Started`
-
-Prefer energetic labels such as:
-
-- `Let's go`
-- `Watch now`
-- `Try it`
-- `I'm in`
-- `Nice`
-- `Show me`
-- `Cool`
-
-Match CTA energy to the slide emotion.
 
 ## Reference Shape
 
 ```ts
-const LATEST_RELEASE = {
+const LATEST_RELEASE: ReleaseNotes = {
   version: 'X.Y.Z',
-  eyebrow: 'What\'s New',
-  slides: [
+  title: 'A better watching experience.',
+  highlight: 'experience.',
+  description: "We've made some improvements and added new features to make the app faster, smoother and more reliable.",
+  tourId: 'focus-tube', // or null when no tour was added
+  updates: [
     {
-      id: 'share',
-      layout: 'share',
-      icon: Sparkles,
-      kicker: 'Sharing',
-      headline: 'Share the EXACT source.',
-      highlight: 'EXACT',
-      support: 'Send the same movie, series, or source without making friends search.',
-      signal: 'Source locked',
-      cta: 'Send it',
-      mood: {
-        name: 'sharing',
-        gradient: 'from-blue-400 via-cyan-300 to-teal-300',
-        text: 'text-cyan-200',
-        border: 'border-cyan-300/30',
-        shadow: 'shadow-[0_0_72px_rgba(34,211,238,0.32)]',
-        backdrop: 'linear-gradient(120deg, rgba(37,99,235,0.24), transparent 36%)',
-        cursor: 'rgba(34,211,238,0.24)'
-      }
-    }
-  ]
+      icon: 'download', // download | layers | bell | audio | shield | sparkles | fix | play
+      title: 'Download queue control',
+      description: 'Set how many downloads run at once in the Downloads tab.',
+    },
+  ],
 }
 ```
 
+## Tour Decision (Step 5B)
+
+- New tab / screen / multi-click workflow the user must be walked to →
+  add a spotlight tour in `ProductTour.tsx` (`TOURS` registry, max 4
+  steps, last step ends at the off-switch/Settings), anchor targets with
+  `data-tour="..."`, set `LATEST_RELEASE.tourId`.
+- One small new button/menu/toggle with no workflow around it → single
+  static hint in `FeatureGuides.tsx` (`InlineFeatureGuide`), no tour.
+- Fixes, polish, performance, or security-only changes → dialog alone,
+  no tour, no hint.
+
+Preview the tour in dev with `?tour=<id>` and click through every step,
+including Skip and Back, before packaging.
+
 ## Approval Gate
 
-Show the final slide data before release packaging.
+Show the final dialog data (and tour steps, if any) before release packaging.
 
 Report:
 
 ```text
 Completed gate: 10 What's New Onboarding
 Version:
-Slides:
+Updates (count):
+Tour:
 Files changed:
 Risks:
 Next suggested gate: 11 Local Release Verification

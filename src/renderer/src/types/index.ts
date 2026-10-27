@@ -1,3 +1,5 @@
+export type WatchlistIntent = 'asap' | 'weekend' | 'someday'
+
 export interface Video {
   id: number
   title: string
@@ -29,11 +31,30 @@ export interface Video {
   is_favorite?: boolean
   is_watchlist?: boolean
   category?: string
+  // Watch-later intent lane: ASAP (up next) · Weekend (cozy binge) · Someday (backlog).
+  // External rows use `priority`; local rows use `watchlist_priority`. Both are
+  // normalized into `priority` by getWatchlist — the extras below are aliases
+  // for rows built before normalization (trending cards, restored backups).
+  priority?: WatchlistIntent | string
+  watchlist_priority?: WatchlistIntent | string
+  watchlistPriority?: WatchlistIntent | string
   media_type?: 'movie' | 'tv'
   keywords?: string[]
   streamSourceId?: string
   sourceMagnet?: string
   fetchedSources?: any[]
+  // Online resume (#1): explicit seek target + whether the magnet was re-found.
+  resumeFrom?: number
+  sourceRefreshed?: boolean
+  isOnlineResume?: boolean
+  // #2: card points at the computed next episode (unwatched) rather than a
+  // partially-watched one.
+  onlineNextEpisode?: boolean
+  // #3: that next episode dropped since the user last caught up.
+  onlineNewEpisode?: boolean
+  // Original torrent file position (?file=) — pins resume to the exact file
+  // for packs whose filenames carry no parseable S/E tags.
+  fileIndex?: number
 }
 
 export interface TmdbProvider {
@@ -45,4 +66,112 @@ export interface TmdbReleaseInfo {
   releaseDate: string | null
   providers: TmdbProvider[]
   type: 'theatrical' | 'digital' | 'tv' | null
+}
+
+// ─── Focus Tube ───────────────────────────────────────────────────────────────
+
+export interface FtCategory {
+  id: number
+  name: string
+  color: string
+  position: number
+  channelCount?: number
+  unseenCount?: number
+}
+
+export interface FtChannel {
+  channelId: string
+  title: string
+  handle: string | null
+  avatarUrl: string | null
+  url: string
+  hideShorts: boolean
+  position: number
+  lastFetched: string | null
+  lastError: string | null
+  categoryIds: number[]
+}
+
+export interface FtYouTubeImportChannel {
+  channelId: string
+  title: string
+  handle: null
+  avatarUrl: string | null
+}
+
+export interface FtYouTubeImportStatus {
+  configured: boolean
+  secureStorage: boolean
+  connected: boolean
+  hasSavedCredentials?: boolean
+  error?: string
+}
+
+export interface FtYouTubeImportLoadResult {
+  channels: FtYouTubeImportChannel[]
+  complete: boolean
+  pages: number
+  error?: string
+  cancelled?: boolean
+}
+
+export interface FtYouTubeImportRefreshProgress {
+  requestId: string
+  completed: number
+  total: number
+  channelId: string
+  ok: boolean
+  added: number
+  error?: string
+}
+
+export interface FtVideo {
+  videoId: string
+  channelId: string
+  channelTitle: string
+  channelAvatarUrl?: string | null
+  channelHandle?: string | null
+  title: string
+  thumbnail?: string | null
+  publishedAt: string
+  duration: number | null
+  isLive: boolean
+  isShort: boolean
+  views: number | null
+  description: string | null
+  embeddable: boolean
+  firstSeenAt: string
+  seen: boolean
+  seenAt: string | null
+  saved: boolean
+  position: number
+}
+
+export interface FtFeedOptions {
+  categoryId: number | null
+  includeSeen?: boolean
+  includeSavedOnly?: boolean
+  hideShorts?: boolean
+  limit?: number
+  search?: string | null
+  sortOrder?: 'newest' | 'oldest'
+}
+
+export interface FtComment {
+  commentId: string | null
+  author: string
+  authorId: string | null
+  avatarUrl: string | null
+  content: string
+  publishedText: string | null
+  likeCount: number | null
+  replyCount: number
+  replyContinuation: string | null
+}
+
+export interface FtVideoDetails {
+  videoId: string
+  description: string | null
+  duration?: number | null
+  chapters?: Array<{ start: number; title: string }>
 }

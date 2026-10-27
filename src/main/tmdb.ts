@@ -137,6 +137,15 @@ const TMDB_TITLE_LOGO_CACHE_TTL = 1000 * 60 * 60 * 24 * 30
 const TMDB_TITLE_LOGO_NEGATIVE_CACHE_TTL = 1000 * 60 * 60 * 24
 const tmdbKeywordsCache = new Map<string, { keywords: string[], timestamp: number }>()
 const TMDB_KEYWORDS_CACHE_TTL = 1000 * 60 * 60 * 12
+const tmdbLatestReleasedCache = new Map<number, { latest: TmdbLatestReleased | null, timestamp: number }>()
+const TMDB_LATEST_RELEASED_CACHE_TTL = 1000 * 60 * 60 * 6
+
+export interface TmdbLatestReleased {
+  seasonNumber: number
+  episodeNumber: number
+  airDate: string | null
+  released: boolean
+}
 
 type TmdbTitleLogoDiskCache = {
   logoPath: string | null
@@ -1021,6 +1030,56 @@ export async function fetchTmdbMetadata(
   } catch (err: any) {
     console.error(`[TMDB] Error for "${title}" ${year ? `(${year})` : ''}:`, err.message)
     return empty
+  }
+}
+
+/**
+ * Lightweight latest-release lookup: ONE /tv/{id} request instead of the full
+ * per-season catalog crawl. Used by follow checks/baselines where only the
+ * newest released episode matters (50x cheaper on long-runners like SNL).
+ */
+export async function fetchTmdbLatestReleased(tmdbId: number): Promise<TmdbLatestReleased | null> {
+  const normalizedId = Number(tmdbId)
+  if (!Number.isFinite(normalizedId) || normalizedId <= 0) return null
+
+  const cached = tmdbLatestReleasedCache.get(normalizedId)
+  if (cached && Date.now() - cached.timestamp < TMDB_LATEST_RELEASED_CACHE_TTL) {
+    return cached.latest
+  }
+
+  const apiKey = getTmdbApiKey()
+  if (!apiKey) return cached?.latest ?? null
+
+  try {
+    if (!cachedTmdbIp) await resolveDnsDoH('api.themoviedb.org')
+
+    const response = await fetch(`${TMDB_BASE}/tv/${normalizedId}?api_key=${apiKey}&language=en-US`, {
+      dispatcher: tmdbDispatcher,
+      headers: { 'User-Agent': 'MyCinema/1.25.3', 'Accept': 'application/json' },
+      signal: AbortSignal.timeout(TMDB_FETCH_TIMEOUT_MS)
+    })
+    if (!response.ok) throw new Error(`HTTP ${response.status}`)
+    const details = await response.json() as any
+    const last = details?.last_episode_to_air
+    const seasonNumber = Number(last?.season_number)
+    const episodeNumber = Number(last?.episode_number)
+    if (!Number.isFinite(seasonNumber) || !Number.isFinite(episodeNumber)) {
+      tmdbLatestReleasedCache.set(normalizedId, { latest: null, timestamp: Date.now() })
+      return null
+    }
+    const airDate = typeof last?.air_date === 'string' && last.air_date ? last.air_date : null
+    const today = new Date().toISOString().slice(0, 10)
+    const latest: TmdbLatestReleased = {
+      seasonNumber,
+      episodeNumber,
+      airDate,
+      released: Boolean(airDate && airDate <= today)
+    }
+    tmdbLatestReleasedCache.set(normalizedId, { latest, timestamp: Date.now() })
+    return latest
+  } catch (err: any) {
+    console.warn(`[TMDB] Latest-release lookup failed for ${normalizedId}: ${err.message}`)
+    return cached?.latest ?? null
   }
 }
 

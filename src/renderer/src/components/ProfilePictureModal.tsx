@@ -1,18 +1,6 @@
-import React, { useState, useRef } from 'react'
+import React, { useRef } from 'react'
 import { X, Upload, Check, ImageIcon } from 'lucide-react'
-
-// Import assets
-import animeAvatar from '../assets/avatars/anime.png'
-import clayAvatar from '../assets/avatars/clay.png'
-import vectorAvatar from '../assets/avatars/vector.png'
-import y2kAvatar from '../assets/avatars/y2k.png'
-
-export const DEFAULT_AVATARS = [
-  { id: 'anime', src: animeAvatar, label: 'Anime Cyberpunk' },
-  { id: 'clay', src: clayAvatar, label: '3D Claymorphism' },
-  { id: 'vector', src: vectorAvatar, label: 'Minimalist Vector' },
-  { id: 'y2k', src: y2kAvatar, label: 'Y2K Retro' },
-]
+import { BUILTIN_PROFILE_AVATAR_PREFIX, DEFAULT_AVATARS, getBuiltinProfileAvatarId } from '../utils/profileImage'
 
 interface ProfilePictureModalProps {
   isOpen: boolean
@@ -22,11 +10,6 @@ interface ProfilePictureModalProps {
 }
 
 const ProfilePictureModal: React.FC<ProfilePictureModalProps> = ({ isOpen, onClose, currentImage, onSelectImage }) => {
-  const [selectedId, setSelectedId] = useState<string | null>(() => {
-    const avatar = DEFAULT_AVATARS.find(a => a.src === currentImage)
-    return avatar ? avatar.id : null
-  })
-  
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   if (!isOpen) return null
@@ -44,11 +27,12 @@ const ProfilePictureModal: React.FC<ProfilePictureModalProps> = ({ isOpen, onClo
     }
   }
 
-  const handleSelectAvatar = (avatar: typeof DEFAULT_AVATARS[0]) => {
-    setSelectedId(avatar.id)
-    onSelectImage(avatar.src)
+  const handleSelectAvatar = (avatar: (typeof DEFAULT_AVATARS)[number]) => {
+    onSelectImage(`${BUILTIN_PROFILE_AVATAR_PREFIX}${avatar.id}`)
     onClose()
   }
+
+  const selectedAvatarId = getBuiltinProfileAvatarId(currentImage)
 
   const handleRemove = () => {
     onSelectImage(null)
@@ -108,7 +92,7 @@ const ProfilePictureModal: React.FC<ProfilePictureModalProps> = ({ isOpen, onClo
                   key={avatar.id}
                   onClick={() => handleSelectAvatar(avatar)}
                   className={`relative cursor-pointer overflow-hidden rounded-2xl border-2 transition-all ${
-                    currentImage === avatar.src || selectedId === avatar.id
+                    selectedAvatarId === avatar.id
                       ? 'border-primary shadow-[0_0_20px_rgba(59,130,246,0.3)]' 
                       : 'border-transparent hover:border-white/20'
                   }`}
@@ -118,7 +102,7 @@ const ProfilePictureModal: React.FC<ProfilePictureModalProps> = ({ isOpen, onClo
                     alt={avatar.label} 
                     className="w-full aspect-square object-cover hover:scale-105 transition-transform duration-300" 
                   />
-                  {(currentImage === avatar.src || selectedId === avatar.id) && (
+                  {selectedAvatarId === avatar.id && (
                     <div className="absolute top-2 right-2 flex h-6 w-6 items-center justify-center rounded-full bg-primary text-white shadow-lg">
                       <Check size={14} strokeWidth={3} />
                     </div>

@@ -7,7 +7,7 @@ import fs from 'fs'
 const require = createRequire(import.meta.url)
 const Database = require('better-sqlite3')
 
-const dbRoot = process.env.MYCINEMA_USER_DATA_DIR || app.getPath('userData')
+const dbRoot = (!app.isPackaged && process.env.MYCINEMA_USER_DATA_DIR) || app.getPath('userData')
 fs.mkdirSync(dbRoot, { recursive: true })
 const dbPath = join(dbRoot, 'mycinema.db')
 const db = new Database(dbPath, { 
@@ -45,6 +45,11 @@ function ensureTypeAllowsVideo(tableName: 'videos' | 'watchlist') {
   }
 }
 
+// Raw handle for feature modules (e.g. collections) that own their own tables.
+export function getRawDb() {
+  return db
+}
+
 // Initialize database
 export function initDb() {
   db.pragma('journal_mode = WAL') // Write-Ahead Logging for better concurrency
@@ -69,6 +74,7 @@ export function initDb() {
       is_favorite BOOLEAN DEFAULT 0,
       is_watchlist BOOLEAN DEFAULT 0,
       watchlist_category TEXT DEFAULT 'Watchlist',
+      watchlist_priority TEXT DEFAULT 'someday',
       added_at DATETIME DEFAULT CURRENT_TIMESTAMP
     );
 
@@ -83,6 +89,7 @@ export function initDb() {
       vote_average REAL,
       release_year INTEGER,
       category TEXT DEFAULT 'Watchlist',
+      priority TEXT DEFAULT 'someday',
       added_at DATETIME DEFAULT CURRENT_TIMESTAMP
     );
 
@@ -121,6 +128,9 @@ export function initDb() {
   if (!columnNames.includes('watchlist_category')) {
     db.exec("ALTER TABLE videos ADD COLUMN watchlist_category TEXT DEFAULT 'Watchlist'")
   }
+  if (!columnNames.includes('watchlist_priority')) {
+    db.exec("ALTER TABLE videos ADD COLUMN watchlist_priority TEXT DEFAULT 'someday'")
+  }
   if (!columnNames.includes('is_preferred')) {
     db.exec("ALTER TABLE videos ADD COLUMN is_preferred BOOLEAN DEFAULT 0")
   }
@@ -130,10 +140,21 @@ export function initDb() {
   if (!watchlistColumnNames.includes('category')) {
     db.exec("ALTER TABLE watchlist ADD COLUMN category TEXT DEFAULT 'Watchlist'")
   }
+  if (!watchlistColumnNames.includes('priority')) {
+    db.exec("ALTER TABLE watchlist ADD COLUMN priority TEXT DEFAULT 'someday'")
+  }
 
   if (!columnNames.includes('keywords')) {
     db.exec("ALTER TABLE videos ADD COLUMN keywords TEXT")
   }
+
+  // Backfill any legacy NULL priorities so every saved title has an intent.
+  try {
+    db.exec("UPDATE videos SET watchlist_priority = 'someday' WHERE is_watchlist = 1 AND TRIM(COALESCE(watchlist_priority, '')) = ''")
+  } catch { /* older schema without the column is handled above */ }
+  try {
+    db.exec("UPDATE watchlist SET priority = 'someday' WHERE TRIM(COALESCE(priority, '')) = ''")
+  } catch { /* older schema without the column is handled above */ }
 
   db.exec(`
     CREATE TABLE IF NOT EXISTS progress (
@@ -169,6 +190,45 @@ export function initDb() {
       error_message TEXT,
       added_at DATETIME DEFAULT CURRENT_TIMESTAMP
     );
+
+    -- Online (streamed, not downloaded) resume positions, keyed by stable
+    -- TMDB identity so they survive dead magnets / re-searched sources.
+    CREATE TABLE IF NOT EXISTS stream_progress (
+      id TEXT PRIMARY KEY,
+      tmdb_id INTEGER NOT NULL,
+      media_type TEXT CHECK(media_type IN ('movie', 'series')) NOT NULL,
+      season INTEGER,
+      episode INTEGER,
+      title TEXT NOT NULL,
+      poster_path TEXT,
+      backdrop_path TEXT,
+      overview TEXT,
+      release_year INTEGER,
+      position REAL DEFAULT 0,
+      duration REAL DEFAULT 0,
+      completed BOOLEAN DEFAULT 0,
+      source_magnet TEXT,
+      file_index INTEGER,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE INDEX IF NOT EXISTS idx_stream_progress_updated
+      ON stream_progress(updated_at DESC);
+
+    -- Series the user follows for new-episode alerts (#3). last_known_* is the
+    -- latest RELEASED episode seen by the checker; has_unseen_new flags a drop
+    -- the user hasn't opened yet.
+    CREATE TABLE IF NOT EXISTS followed_series (
+      tmdb_id INTEGER PRIMARY KEY,
+      title TEXT NOT NULL,
+      poster_path TEXT,
+      backdrop_path TEXT,
+      overview TEXT,
+      last_known_season INTEGER,
+      last_known_episode INTEGER,
+      has_unseen_new BOOLEAN DEFAULT 0,
+      last_checked DATETIME,
+      added_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
   `)
 
   // Check and add columns for downloads if they don't exist
@@ -192,6 +252,29 @@ export function initDb() {
   if (!dlColumnNames.includes('download_path')) {
     db.exec("ALTER TABLE downloads ADD COLUMN download_path TEXT")
   }
+  // queue_order is a monotonic sequence used for true FIFO queue order.
+  // added_at only has second granularity (CURRENT_TIMESTAMP), so downloads
+  // started in the same second had no deterministic order — the queue came
+  // out shuffled/stacked instead of chronological.
+  if (!dlColumnNames.includes('queue_order')) {
+    db.exec("ALTER TABLE downloads ADD COLUMN queue_order INTEGER")
+    // Backfill existing rows in chronological order (added_at, then rowid).
+    db.exec(`
+      UPDATE downloads SET queue_order = (
+        SELECT COUNT(*) FROM downloads d2
+        WHERE d2.added_at < downloads.added_at
+           OR (d2.added_at = downloads.added_at AND d2.rowid <= downloads.rowid)
+      )
+      WHERE queue_order IS NULL
+    `)
+  }
+
+  // file_index pins an unparsed pack file so resume lands on the exact file.
+  const streamColumns = db.prepare("PRAGMA table_info(stream_progress)").all()
+  const streamColumnNames = streamColumns.map((c: any) => c.name)
+  if (!streamColumnNames.includes('file_index')) {
+    db.exec("ALTER TABLE stream_progress ADD COLUMN file_index INTEGER")
+  }
 }
 
 export function addVideo(video: any) {
@@ -214,8 +297,9 @@ export function addVideo(video: any) {
         WHEN excluded.type = 'video' THEN NULL
         ELSE videos.tmdb_id
       END
+    RETURNING id;
   `)
-  return stmt.run(
+  const row = stmt.get(
     video.title,
     video.file_path,
     video.type,
@@ -227,7 +311,8 @@ export function addVideo(video: any) {
     video.vote_average || null,
     video.release_year || null,
     video.tmdb_id || null
-  )
+  ) as { id: number } | undefined
+  return row || { id: 0 }
 }
 
 export function getVideos() {
@@ -428,6 +513,19 @@ export function toggleFavorite(id: number) {
   return newValue
 }
 
+// ─── Watchlist intent (ASAP / Weekend / Someday) ────────────────────────────
+// The watchlist is still exactly one inbox ("Watchlist" category). The intent
+// is a separate priority lane stored alongside it so the tab can filter and
+// group without resurrecting custom categories (which live in Collections).
+export type WatchlistPriority = 'asap' | 'weekend' | 'someday'
+
+export function normalizeWatchlistPriority(value: unknown): WatchlistPriority {
+  const v = String(value ?? '').trim().toLowerCase()
+  if (v === 'asap' || v === 'now' || v === 'urgent') return 'asap'
+  if (v === 'weekend' || v === 'week-end' || v === 'this-weekend') return 'weekend'
+  return 'someday'
+}
+
 export function toggleWatchlist(id: number) {
   const current = db.prepare('SELECT is_watchlist FROM videos WHERE id = ?').get(id) as any
   if (!current) return null
@@ -435,25 +533,76 @@ export function toggleWatchlist(id: number) {
   db.prepare(`
     UPDATE videos
     SET is_watchlist = ?,
-        watchlist_category = CASE WHEN ? = 1 THEN COALESCE(watchlist_category, 'Watchlist') ELSE watchlist_category END
+        watchlist_category = CASE WHEN ? = 1 THEN COALESCE(watchlist_category, 'Watchlist') ELSE watchlist_category END,
+        watchlist_priority = CASE
+          WHEN ? = 1 THEN COALESCE(NULLIF(TRIM(watchlist_priority), ''), 'someday')
+          ELSE watchlist_priority
+        END
     WHERE id = ?
-  `).run(newValue, newValue, id)
+  `).run(newValue, newValue, newValue, id)
   return newValue
 }
 
-export function addLocalVideoToWatchlist(id: number, category: string = 'Watchlist') {
+// The watchlist is exactly one inbox. The category parameter is kept for
+// backwards compatibility but always normalizes to 'Watchlist' — curated
+// lists live in Collections now. Priority selects the ASAP/Weekend/Someday lane.
+export function addLocalVideoToWatchlist(id: number, _category: string = 'Watchlist', priority?: unknown) {
+  const lane = normalizeWatchlistPriority(
+    priority ?? (_category && _category !== 'Watchlist' ? _category : undefined) ?? 'someday'
+  )
   return db.prepare(`
     UPDATE videos
     SET is_watchlist = 1,
-        watchlist_category = ?
+        watchlist_category = 'Watchlist',
+        watchlist_priority = ?
     WHERE id = ?
-  `).run(category || 'Watchlist', id)
+  `).run(lane, id)
+}
+
+export function setLocalWatchlistPriority(id: number, priority: unknown) {
+  const lane = normalizeWatchlistPriority(priority)
+  return db.prepare(`
+    UPDATE videos SET watchlist_priority = ? WHERE id = ?
+  `).run(lane, Number(id))
+}
+
+export function setExternalWatchlistPriority(tmdbId: number, priority: unknown) {
+  const lane = normalizeWatchlistPriority(priority)
+  return db.prepare(`
+    UPDATE watchlist SET priority = ? WHERE tmdb_id = ?
+  `).run(lane, Number(tmdbId))
+}
+
+export function setWatchlistPriority(input: { videoId?: number | null; tmdbId?: number | null; isExternal?: boolean; priority: unknown }) {
+  const lane = normalizeWatchlistPriority((input as any)?.priority)
+  const videoId = (input as any)?.videoId != null ? Number((input as any).videoId) : null
+  const tmdbId = (input as any)?.tmdbId != null ? Number((input as any).tmdbId) : null
+  const isExternal = Boolean((input as any)?.isExternal)
+
+  if (isExternal && tmdbId != null) {
+    return setExternalWatchlistPriority(tmdbId, lane)
+  }
+  if (!isExternal && videoId != null) {
+    return setLocalWatchlistPriority(videoId, lane)
+  }
+  // Fallback: try both keys so legacy callers can't strand an intent.
+  if (tmdbId != null) {
+    const res = setExternalWatchlistPriority(tmdbId, lane) as any
+    if (res?.changes > 0) return res
+  }
+  if (videoId != null) {
+    return setLocalWatchlistPriority(videoId, lane)
+  }
+  return { changes: 0 }
 }
 
 export function addToWatchlistExternal(item: any) {
+  const lane = normalizeWatchlistPriority(
+    item?.priority ?? item?.watchlist_priority ?? item?.watchlistPriority ?? 'someday'
+  )
   const stmt = db.prepare(`
-    INSERT INTO watchlist (tmdb_id, title, type, poster_path, backdrop_path, overview, vote_average, release_year, category)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO watchlist (tmdb_id, title, type, poster_path, backdrop_path, overview, vote_average, release_year, category, priority)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(tmdb_id) DO UPDATE SET
       title = excluded.title,
       type = excluded.type,
@@ -462,7 +611,8 @@ export function addToWatchlistExternal(item: any) {
       overview = excluded.overview,
       vote_average = excluded.vote_average,
       release_year = excluded.release_year,
-      category = excluded.category
+      category = excluded.category,
+      priority = excluded.priority
   `)
   return stmt.run(
     item.tmdb_id,
@@ -473,7 +623,8 @@ export function addToWatchlistExternal(item: any) {
     item.overview,
     item.vote_average,
     item.release_year,
-    item.category || 'Watchlist'
+    'Watchlist',
+    lane
   )
 }
 
@@ -482,13 +633,17 @@ export function removeFromWatchlistExternal(tmdbId: number) {
 }
 
 export function getWatchlist() {
-  const external = db.prepare('SELECT *, 1 as isExternal, 1 as is_watchlist FROM watchlist').all()
+  const external = db.prepare('SELECT *, 1 as isExternal, 1 as is_watchlist FROM watchlist').all() as any[]
   const internal = db.prepare(`
-    SELECT v.*, COALESCE(v.watchlist_category, 'Watchlist') as category, 0 as isExternal
-    FROM videos v 
+    SELECT v.*, COALESCE(v.watchlist_category, 'Watchlist') as category, COALESCE(v.watchlist_priority, 'someday') as priority, 0 as isExternal
+    FROM videos v
     WHERE v.is_watchlist = 1
-  `).all()
-  return [...external, ...internal].sort((a, b) => new Date(b.added_at).getTime() - new Date(a.added_at).getTime())
+  `).all() as any[]
+  const normalizeRow = (row: any) => {
+    const lane = normalizeWatchlistPriority(row?.priority ?? row?.watchlist_priority)
+    return { ...row, priority: lane, watchlist_priority: lane }
+  }
+  return [...external.map(normalizeRow), ...internal.map(normalizeRow)].sort((a, b) => new Date(b.added_at).getTime() - new Date(a.added_at).getTime())
 }
 
 export function getBackupData() {
@@ -499,13 +654,13 @@ export function getBackupData() {
   `).all()
 
   const externalWatchlist = db.prepare(`
-    SELECT tmdb_id, title, type, poster_path, backdrop_path, overview, vote_average, release_year, category, added_at
+    SELECT tmdb_id, title, type, poster_path, backdrop_path, overview, vote_average, release_year, category, COALESCE(priority, 'someday') as priority, added_at
     FROM watchlist
     ORDER BY added_at DESC
   `).all()
 
   const localWatchlist = db.prepare(`
-    SELECT file_path, tmdb_id, title, type, series_name, season, episode, watchlist_category as category, added_at
+    SELECT file_path, tmdb_id, title, type, series_name, season, episode, watchlist_category as category, COALESCE(watchlist_priority, 'someday') as priority, added_at
     FROM videos
     WHERE is_watchlist = 1
     ORDER BY added_at DESC
@@ -518,20 +673,78 @@ export function getBackupData() {
     ORDER BY added_at DESC
   `).all()
 
+  const streamProgress = db.prepare(`
+    SELECT tmdb_id, media_type, season, episode, title, poster_path, backdrop_path,
+           overview, release_year, position, duration, completed, source_magnet,
+           file_index, updated_at
+    FROM stream_progress
+    ORDER BY updated_at DESC
+  `).all()
+
+  const followedSeries = db.prepare(`
+    SELECT tmdb_id, title, poster_path, backdrop_path, overview,
+           last_known_season, last_known_episode, has_unseen_new, last_checked, added_at
+    FROM followed_series
+    ORDER BY added_at DESC
+  `).all()
+
   return {
     folders,
     watchlist: {
       external: externalWatchlist,
       local: localWatchlist
     },
-    favorites
+    favorites,
+    streamProgress,
+    followedSeries
   }
 }
 
+export function restoreStreamProgressRow(item: any) {
+  const tmdbId = Number(item?.tmdb_id)
+  if (!tmdbId || (item.media_type !== 'movie' && item.media_type !== 'series')) return { changes: 0 }
+  const id = buildStreamProgressId(tmdbId, item.media_type, item.season, item.episode)
+  return db.prepare(`
+    INSERT INTO stream_progress
+      (id, tmdb_id, media_type, season, episode, title, poster_path, backdrop_path, overview,
+       release_year, position, duration, completed, source_magnet, file_index, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE(?, CURRENT_TIMESTAMP))
+    ON CONFLICT(id) DO NOTHING
+  `).run(
+    id, tmdbId, item.media_type,
+    item.season ?? null, item.episode ?? null,
+    item.title || 'Unknown Title',
+    item.poster_path || null, item.backdrop_path || null, item.overview || null,
+    item.release_year ?? null,
+    Math.max(0, Number(item.position) || 0), Math.max(0, Number(item.duration) || 0),
+    item.completed ? 1 : 0, item.source_magnet || null,
+    Number.isFinite(Number(item.file_index)) ? Number(item.file_index) : null,
+    item.updated_at || null
+  )
+}
+
+export function restoreFollowedSeriesRow(item: any) {
+  const tmdbId = Number(item?.tmdb_id)
+  if (!tmdbId || !item.title) return { changes: 0 }
+  return db.prepare(`
+    INSERT INTO followed_series
+      (tmdb_id, title, poster_path, backdrop_path, overview, last_known_season,
+       last_known_episode, has_unseen_new, last_checked, added_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE(?, CURRENT_TIMESTAMP))
+    ON CONFLICT(tmdb_id) DO NOTHING
+  `).run(
+    tmdbId, item.title,
+    item.poster_path || null, item.backdrop_path || null, item.overview || null,
+    item.last_known_season ?? null, item.last_known_episode ?? null,
+    item.has_unseen_new ? 1 : 0, item.last_checked || null, item.added_at || null
+  )
+}
+
 export function importExternalWatchlistItem(item: any) {
+  const lane = normalizeWatchlistPriority(item?.priority ?? item?.watchlist_priority ?? 'someday')
   const stmt = db.prepare(`
-    INSERT INTO watchlist (tmdb_id, title, type, poster_path, backdrop_path, overview, vote_average, release_year, category)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO watchlist (tmdb_id, title, type, poster_path, backdrop_path, overview, vote_average, release_year, category, priority)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(tmdb_id) DO UPDATE SET
       title = excluded.title,
       type = excluded.type,
@@ -540,7 +753,8 @@ export function importExternalWatchlistItem(item: any) {
       overview = excluded.overview,
       vote_average = excluded.vote_average,
       release_year = excluded.release_year,
-      category = excluded.category
+      category = excluded.category,
+      priority = excluded.priority
   `)
 
   return stmt.run(
@@ -552,18 +766,22 @@ export function importExternalWatchlistItem(item: any) {
     item.overview || null,
     item.vote_average || null,
     item.release_year || null,
-    item.category || 'Watchlist'
+    item.category || 'Watchlist',
+    lane
   )
 }
 
 export function restoreLocalWatchlistItem(item: any) {
+  const lane = normalizeWatchlistPriority(item?.priority ?? item?.watchlist_priority ?? 'someday')
+  const category = item.category || 'Watchlist'
   if (item.file_path) {
     const byPath = db.prepare(`
       UPDATE videos
       SET is_watchlist = 1,
-          watchlist_category = ?
+          watchlist_category = ?,
+          watchlist_priority = ?
       WHERE file_path = ?
-    `).run(item.category || 'Watchlist', path.normalize(item.file_path))
+    `).run(category, lane, path.normalize(item.file_path))
 
     if (byPath.changes > 0) return byPath
   }
@@ -572,9 +790,10 @@ export function restoreLocalWatchlistItem(item: any) {
     const byTmdb = db.prepare(`
       UPDATE videos
       SET is_watchlist = 1,
-          watchlist_category = ?
+          watchlist_category = ?,
+          watchlist_priority = ?
       WHERE tmdb_id = ?
-    `).run(item.category || 'Watchlist', item.tmdb_id)
+    `).run(category, lane, item.tmdb_id)
 
     if (byTmdb.changes > 0) return byTmdb
   }
@@ -583,22 +802,24 @@ export function restoreLocalWatchlistItem(item: any) {
     return db.prepare(`
       UPDATE videos
       SET is_watchlist = 1,
-          watchlist_category = ?
+          watchlist_category = ?,
+          watchlist_priority = ?
       WHERE type = 'series'
         AND series_name = ?
         AND COALESCE(season, -1) = COALESCE(?, -1)
         AND COALESCE(episode, -1) = COALESCE(?, -1)
-    `).run(item.category || 'Watchlist', item.series_name, item.season ?? null, item.episode ?? null)
+    `).run(category, lane, item.series_name, item.season ?? null, item.episode ?? null)
   }
 
   if (item.title && item.type) {
     return db.prepare(`
       UPDATE videos
       SET is_watchlist = 1,
-          watchlist_category = ?
+          watchlist_category = ?,
+          watchlist_priority = ?
       WHERE title = ?
         AND type = ?
-    `).run(item.category || 'Watchlist', item.title, item.type)
+    `).run(category, lane, item.title, item.type)
   }
 
   return { changes: 0 }
@@ -670,8 +891,8 @@ export function removeFolder(folderPath: string) {
 
 export function addDownload(dl: any) {
   const stmt = db.prepare(`
-    INSERT INTO downloads (id, title, name, magnet, progress, download_speed, time_remaining, status, size, downloaded, tmdb_id, media_type, season, episode, download_path, error_message)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO downloads (id, title, name, magnet, progress, download_speed, time_remaining, status, size, downloaded, tmdb_id, media_type, season, episode, download_path, error_message, queue_order)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(id) DO UPDATE SET
       title = excluded.title,
       name = excluded.name,
@@ -689,8 +910,18 @@ export function addDownload(dl: any) {
       error_message = excluded.error_message
   `)
   return stmt.run(
-    dl.id, dl.title, dl.name || null, dl.magnet, dl.progress || 0, dl.downloadSpeed || '0 B/s', dl.timeRemaining || '—', dl.status || 'pending', dl.size || '—', dl.downloaded || '0 B', dl.tmdbId || null, dl.mediaType || null, dl.season || null, dl.episode || null, dl.downloadPath || null, dl.errorMessage || null
+    dl.id, dl.title, dl.name || null, dl.magnet, dl.progress || 0, dl.downloadSpeed || '0 B/s', dl.timeRemaining || '—', dl.status || 'pending', dl.size || '—', dl.downloaded || '0 B', dl.tmdbId || null, dl.mediaType || null, dl.season || null, dl.episode || null, dl.downloadPath || null, dl.errorMessage || null, dl.queueOrder ?? getNextDownloadQueueOrder()
   )
+}
+
+// Next FIFO position for a newly queued download (back of the line).
+export function getNextDownloadQueueOrder(): number {
+  try {
+    const row = db.prepare('SELECT COALESCE(MAX(queue_order), 0) AS maxOrder FROM downloads').get() as any
+    return Number(row?.maxOrder || 0) + 1
+  } catch {
+    return Date.now()
+  }
 }
 
 export function updateDownload(dl: any) {
@@ -705,7 +936,7 @@ export function updateDownload(dl: any) {
 }
 
 export function getDownloads() {
-  return db.prepare('SELECT * FROM downloads ORDER BY added_at DESC').all().map((row: any) => ({
+  return db.prepare('SELECT * FROM downloads ORDER BY queue_order ASC, added_at ASC').all().map((row: any) => ({
     id: row.id,
     title: row.title,
     name: row.name,
@@ -722,8 +953,13 @@ export function getDownloads() {
     episode: row.episode,
     downloadPath: row.download_path,
     errorMessage: row.error_message,
+    queueOrder: row.queue_order ?? null,
     addedAt: row.added_at
   }))
+}
+
+export function setDownloadQueueOrder(id: string, order: number) {
+  return db.prepare('UPDATE downloads SET queue_order = ? WHERE id = ?').run(Number(order), id)
 }
 
 export function removeDownloadRow(id: string) {
@@ -809,6 +1045,181 @@ export function deleteVideoAndProgress(id: number) {
     db.prepare('DELETE FROM videos WHERE id = ?').run(id)
   })
   tx()
+}
+
+// ─── Online stream resume (source-agnostic, TMDB-keyed) ──────────────────────
+// id format: `${tmdb_id}:${media_type}:s${season ?? 0}:e${episode ?? 0}`
+// Hero visibility: 10 days. Data retention: 30 days (purged lazily on read).
+export function buildStreamProgressId(tmdbId: number, mediaType: string, season?: number | null, episode?: number | null) {
+  return `${tmdbId}:${mediaType}:s${season ?? 0}:e${episode ?? 0}`
+}
+
+export function upsertStreamProgress(entry: any) {
+  const tmdbId = Number(entry.tmdb_id)
+  if (!tmdbId || (entry.media_type !== 'movie' && entry.media_type !== 'series')) return null
+  const id = buildStreamProgressId(tmdbId, entry.media_type, entry.season, entry.episode)
+  const position = Math.max(0, Number(entry.position) || 0)
+  const duration = Math.max(0, Number(entry.duration) || 0)
+  const completed = entry.completed ? 1 : 0
+  // Positions under 10s carry no resume value (accidental tap, or rewound to
+  // the start). Drop the row — unless it already marks the episode watched,
+  // in which case the watched marker must survive (#2 next-episode needs it).
+  if (!completed && position < 10) {
+    const existing = db.prepare('SELECT completed FROM stream_progress WHERE id = ?').get(id) as any
+    if (existing?.completed) return existing
+    db.prepare('DELETE FROM stream_progress WHERE id = ?').run(id)
+    return { deleted: true, id }
+  }
+  // Completed rows are KEPT (completed=1): excluded from Continue Watching but
+  // used to derive "watched till E3 → next E4". Purged after 30 days like rest.
+  const fileIndex = Number.isFinite(Number(entry.file_index)) ? Number(entry.file_index) : null
+  return db.prepare(`
+    INSERT INTO stream_progress
+      (id, tmdb_id, media_type, season, episode, title, poster_path, backdrop_path, overview, release_year, position, duration, completed, source_magnet, file_index, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+    ON CONFLICT(id) DO UPDATE SET
+      title = excluded.title,
+      poster_path = COALESCE(excluded.poster_path, stream_progress.poster_path),
+      backdrop_path = COALESCE(excluded.backdrop_path, stream_progress.backdrop_path),
+      overview = COALESCE(excluded.overview, stream_progress.overview),
+      release_year = COALESCE(excluded.release_year, stream_progress.release_year),
+      position = excluded.position,
+      duration = CASE WHEN excluded.duration > 0 THEN excluded.duration ELSE stream_progress.duration END,
+      completed = excluded.completed,
+      source_magnet = COALESCE(excluded.source_magnet, stream_progress.source_magnet),
+      file_index = excluded.file_index,
+      updated_at = CURRENT_TIMESTAMP
+  `).run(
+    id, tmdbId, entry.media_type,
+    entry.season ?? null, entry.episode ?? null,
+    entry.title || 'Unknown Title',
+    entry.poster_path || null, entry.backdrop_path || null,
+    entry.overview || null, entry.release_year ?? null,
+    position, duration, completed, entry.source_magnet || null, fileIndex
+  )
+}
+
+export function clearAllFollowedNewFlags() {
+  return db.prepare('UPDATE followed_series SET has_unseen_new = 0').run()
+}
+
+export function getStreamProgress(tmdbId: number, mediaType: string, season?: number | null, episode?: number | null) {
+  const id = buildStreamProgressId(Number(tmdbId), mediaType, season, episode)
+  return db.prepare('SELECT * FROM stream_progress WHERE id = ?').get(id) as any
+}
+
+export function getStreamContinueWatching(limit: number = 10) {
+  try {
+    // Lazily purge rows older than 30 days on every read (cheap, indexed).
+    db.prepare(`DELETE FROM stream_progress WHERE updated_at < datetime('now', '-30 days')`).run()
+  } catch (err) {
+    console.error('[DB] stream_progress purge failed:', err)
+  }
+  // Hero visibility window: 10 days of inactivity hides the card (per UX decision),
+  // but DetailScreen can still resume via getStreamProgress until the 30-day purge.
+  return db.prepare(`
+    SELECT * FROM stream_progress
+    WHERE completed = 0 AND position >= 10
+      AND updated_at > datetime('now', '-10 days')
+    ORDER BY updated_at DESC
+    LIMIT ?
+  `).all(limit) as any[]
+}
+
+export function deleteStreamProgress(tmdbId: number, mediaType: string, season?: number | null, episode?: number | null) {
+  const id = buildStreamProgressId(Number(tmdbId), mediaType, season, episode)
+  return db.prepare('DELETE FROM stream_progress WHERE id = ?').run(id)
+}
+
+// ─── Followed series for new-episode alerts (#3) ─────────────────────────────
+export function getFollowed(tmdbId: number) {
+  return db.prepare('SELECT * FROM followed_series WHERE tmdb_id = ?').get(Number(tmdbId)) as any
+}
+
+export function getFollowedSeries() {
+  return db.prepare('SELECT * FROM followed_series ORDER BY added_at DESC').all() as any[]
+}
+
+export function upsertFollowedSeries(meta: any) {
+  const tmdbId = Number(meta.tmdb_id)
+  if (!tmdbId) return null
+  const prev = getFollowed(tmdbId)
+  db.prepare(`
+    INSERT INTO followed_series (tmdb_id, title, poster_path, backdrop_path, overview)
+    VALUES (?, ?, ?, ?, ?)
+    ON CONFLICT(tmdb_id) DO UPDATE SET
+      title = excluded.title,
+      poster_path = COALESCE(excluded.poster_path, followed_series.poster_path),
+      backdrop_path = COALESCE(excluded.backdrop_path, followed_series.backdrop_path),
+      overview = COALESCE(excluded.overview, followed_series.overview)
+  `).run(
+    tmdbId, meta.title || 'Unknown Title',
+    meta.poster_path || null, meta.backdrop_path || null, meta.overview || null
+  )
+  return { isNew: !prev }
+}
+
+export function setFollowedBaseline(tmdbId: number, season?: number | null, episode?: number | null) {
+  return db.prepare(`
+    UPDATE followed_series
+    SET last_known_season = ?, last_known_episode = ?,
+        has_unseen_new = 0, last_checked = CURRENT_TIMESTAMP
+    WHERE tmdb_id = ?
+  `).run(season ?? null, episode ?? null, Number(tmdbId))
+}
+
+export function touchFollowedChecked(tmdbId: number, season?: number | null, episode?: number | null, hasNew: boolean = false) {
+  return db.prepare(`
+    UPDATE followed_series
+    SET last_known_season = COALESCE(?, last_known_season),
+        last_known_episode = COALESCE(?, last_known_episode),
+        has_unseen_new = CASE WHEN ? = 1 THEN 1 ELSE has_unseen_new END,
+        last_checked = CURRENT_TIMESTAMP
+    WHERE tmdb_id = ?
+  `).run(season ?? null, episode ?? null, hasNew ? 1 : 0, Number(tmdbId))
+}
+
+export function markFollowedSeen(tmdbId: number) {
+  return db.prepare('UPDATE followed_series SET has_unseen_new = 0 WHERE tmdb_id = ?').run(Number(tmdbId))
+}
+
+export function unfollowSeries(tmdbId: number) {
+  return db.prepare('DELETE FROM followed_series WHERE tmdb_id = ?').run(Number(tmdbId))
+}
+
+// Highest S/E with any stream row (watched or in-progress) for a series.
+// Drives #3: a release newer than this is genuinely unwatched news.
+export function getStreamMaxWatched(tmdbId: number) {
+  return db.prepare(`
+    SELECT season, episode FROM stream_progress
+    WHERE tmdb_id = ? AND media_type = 'series'
+    ORDER BY COALESCE(season, 0) DESC, COALESCE(episode, 0) DESC
+    LIMIT 1
+  `).get(Number(tmdbId)) as { season: number | null; episode: number | null } | undefined
+}
+
+// Latest stream activity for a series (any row). Drives the stale-follow rule:
+// series nobody has touched in weeks stop alerting until watched again.
+export function getStreamLatestActivity(tmdbId: number) {
+  return db.prepare(`
+    SELECT MAX(updated_at) AS latest FROM stream_progress
+    WHERE tmdb_id = ?
+  `).get(Number(tmdbId)) as { latest: string | null } | undefined
+}
+
+// Full recent history INCLUDING completed rows (powers #2 series grouping and
+// Detail episode ticks). Continue Watching stays on getStreamContinueWatching.
+export function getStreamHistory(limit: number = 100) {
+  try {
+    db.prepare(`DELETE FROM stream_progress WHERE updated_at < datetime('now', '-30 days')`).run()
+  } catch (err) {
+    console.error('[DB] stream_progress purge failed:', err)
+  }
+  return db.prepare(`
+    SELECT * FROM stream_progress
+    ORDER BY updated_at DESC
+    LIMIT ?
+  `).all(limit) as any[]
 }
 
 export default db

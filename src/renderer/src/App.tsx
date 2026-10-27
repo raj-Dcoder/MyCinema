@@ -1,26 +1,31 @@
-import React, { useState, useEffect, useLayoutEffect, useRef } from 'react'
-import { Home as HomeIcon, Film, Tv, Settings as SettingsIcon, Video as VideoIcon, Download as DownloadIcon, Menu, Bookmark, Clock, Heart, Settings, RefreshCw, Maximize2, Minimize2, Loader2, PauseCircle, AlertCircle, X, Minus, ArrowUpRight, Image as ImageIcon, ChevronLeft, ChevronRight } from 'lucide-react'
+import React, { useState, useEffect, useLayoutEffect, useRef, useCallback } from 'react'
+import { Home as HomeIcon, Film, Tv, Settings as SettingsIcon, Video as VideoIcon, Download as DownloadIcon, Menu, Bookmark, Settings, RefreshCw, Maximize2, Minimize2, Loader2, PauseCircle, AlertCircle, X, Minus, ArrowUpRight, Image as ImageIcon, ChevronLeft, ChevronRight, Layers, Compass, Megaphone } from 'lucide-react'
 import { Video } from './types'
 import Home from './pages/Home'
 import Videos from './pages/Videos'
 import Movies from './pages/Movies'
 import Series from './pages/Series'
+import Collections from './pages/Collections'
 import Watchlist from './pages/Watchlist'
-import Favorites from './pages/Favorites'
-import History from './pages/History'
+
+
 import SettingsPage from './pages/Settings'
 import VideoPlayer from './components/VideoPlayer'
 import DetailScreen from './components/DetailScreen'
 import WhatsNewOnboarding, { LATEST_RELEASE } from './components/WhatsNewOnboarding'
+import ProductTour, { TOURS, isTourSeen, markTourSeen } from './components/ProductTour'
 import { WindowControlsGuide } from './components/FeatureGuides'
 import Download from './pages/Download'
+import FocusTube from './pages/FocusTube'
+import Updates from './pages/Updates'
 import appLogo from './assets/mycinema-logo.png'
 import { useTheme } from './theme/ThemeContext'
+import { normalizeProfileImage, resolveProfileImageUrl } from './utils/profileImage'
 
 const getWhatsNewStorageKey = (version: string) => `mycinema_whats_new_seen_${version}`
 const SIDEBAR_EXPANDED_STORAGE_KEY = 'mycinema_sidebar_expanded'
 const DOUBLE_TAP_WINDOW_MS = 300
-type AppTab = 'home' | 'videos' | 'movies' | 'series' | 'download' | 'settings' | 'watchlist' | 'history' | 'favorites'
+type AppTab = 'home' | 'videos' | 'movies' | 'series' | 'collections' | 'download' | 'settings' | 'watchlist' | 'focustube' | 'updates'
 
 type ActiveDownload = {
   id: string
@@ -56,12 +61,30 @@ const sortDownloadsForTray = (items: ActiveDownload[]) => (
 const App: React.FC = () => {
   const { theme } = useTheme()
   const [activeTab, setActiveTab] = useState<AppTab>('home')
+  // Focus Tube is opt-out. While off the tab is not rendered at all, which also
+  // means its page never mounts and therefore issues no feed requests. The
+  // main process has already stopped the background polling.
+  const [focusTubeEnabled, setFocusTubeEnabled] = useState(true)
+  // Once visited, FocusTube stays mounted (hidden) so its mini-player keeps
+  // playing across tabs. Gated on first visit so app startup issues no feed
+  // requests for users who never open the tab.
+  const [focusTubeMounted, setFocusTubeMounted] = useState(false)
+  useEffect(() => {
+    if (!focusTubeEnabled) {
+      setFocusTubeMounted(false)
+      return
+    }
+    if (activeTab === 'focustube') setFocusTubeMounted(true)
+  }, [activeTab, focusTubeEnabled])
   const [isSidebarExpanded, setIsSidebarExpanded] = useState(() => {
     return localStorage.getItem(SIDEBAR_EXPANDED_STORAGE_KEY) !== 'false'
   })
   const [showWhatsNew, setShowWhatsNew] = useState(() => {
     return localStorage.getItem(getWhatsNewStorageKey(LATEST_RELEASE.version)) !== 'true'
   })
+  // Spotlight product tour. Starts chained after What's New closes (when the
+  // release defines LATEST_RELEASE.tourId), or via ?tour=<id> preview.
+  const [activeTourId, setActiveTourId] = useState<string | null>(null)
 
   const [playingVideo, setPlayingVideo] = useState<Video | null>(null)
   const [selectedVideo, setSelectedVideo] = useState<Video | null>(null)
@@ -70,18 +93,27 @@ const App: React.FC = () => {
   const [watchlistRefreshKey, setWatchlistRefreshKey] = useState(0)
   const [userName, setUserName] = useState(() => localStorage.getItem('mycinema_user_name') || 'User')
   const [profileImage, setProfileImage] = useState<string | null>(() => localStorage.getItem('mycinema_profile_image'))
+  const [profileImageFailed, setProfileImageFailed] = useState(false)
   const [isFullscreen, setIsFullscreen] = useState(true)
   const [launchFullscreen, setLaunchFullscreen] = useState(true)
   const [showWindowControls, setShowWindowControls] = useState(false)
   const [videoControlsVisible, setVideoControlsVisible] = useState(false)
   const [activeDownloads, setActiveDownloads] = useState<ActiveDownload[]>([])
   const [dismissedDownloadTrayIds, setDismissedDownloadTrayIds] = useState<Set<string>>(() => new Set())
+  const [showDownloadTray, setShowDownloadTray] = useState(() => {
+    try {
+      return localStorage.getItem('mycinema_show_download_tray') !== 'false'
+    } catch {
+      return true
+    }
+  })
   const [webPopupOpen, setWebPopupOpen] = useState(false)
   const homeScrollRef = useRef<HTMLDivElement | null>(null)
   const activePageScrollRef = useRef<HTMLDivElement | null>(null)
   const activeTabRef = useRef<AppTab>('home')
   const tabScrollPositionsRef = useRef<Partial<Record<AppTab, number>>>({})
   const windowControlsHideTimerRef = useRef<number | null>(null)
+  const windowControlsShowTimerRef = useRef<number | null>(null)
   const appFullscreenTapTimerRef = useRef<number | null>(null)
   const appFullscreenToggleInFlightRef = useRef(false)
   const activeTempStreamRef = useRef<string | null>(null)
@@ -90,14 +122,27 @@ const App: React.FC = () => {
     return tab === 'home' ? homeScrollRef.current : activePageScrollRef.current
   }
 
-  const navigateToTab = (tab: AppTab) => {
+  const navigateToTab = useCallback((tab: AppTab) => {
+    setSelectedVideo(null)
+    setSharedSource(null)
+
+    if (tab === activeTabRef.current) {
+      if (tab === 'home') {
+        homeScrollRef.current?.scrollTo({ top: 0, behavior: 'smooth' })
+      }
+      if (tab === 'focustube') {
+        window.dispatchEvent(new CustomEvent('focustube-tab-changed', { detail: { activeTab: 'focustube' } }))
+      }
+      return
+    }
+
     const currentScroller = getScrollElement(activeTabRef.current)
     if (currentScroller) {
       tabScrollPositionsRef.current[activeTabRef.current] = currentScroller.scrollTop
     }
 
     setActiveTab(tab)
-  }
+  }, [])
 
   useLayoutEffect(() => {
     activeTabRef.current = activeTab
@@ -127,9 +172,24 @@ const App: React.FC = () => {
     }
   }, [])
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     localStorage.setItem(SIDEBAR_EXPANDED_STORAGE_KEY, String(isSidebarExpanded))
+    document.documentElement.style.setProperty('--sidebar-width', isSidebarExpanded ? '16rem' : '5rem')
   }, [isSidebarExpanded])
+
+  useEffect(() => {
+    window.dispatchEvent(new CustomEvent('focustube-tab-changed', { detail: { activeTab } }))
+  }, [activeTab])
+
+  useEffect(() => {
+    const handleRequestTab = (e: any) => {
+      if (e.detail?.tab) {
+        navigateToTab(e.detail.tab)
+      }
+    }
+    window.addEventListener('focustube-request-tab', handleRequestTab)
+    return () => window.removeEventListener('focustube-request-tab', handleRequestTab)
+  }, [navigateToTab])
 
 
 
@@ -149,17 +209,159 @@ const App: React.FC = () => {
     }
   }, [])
 
+  // If Focus Tube is switched off while its tab is open, that tab stops
+  // rendering, so move somewhere real rather than leaving a blank pane.
   useEffect(() => {
+    if (!focusTubeEnabled && activeTab === 'focustube') {
+      setActiveTab('home')
+    }
+  }, [focusTubeEnabled, activeTab])
+
+  const startTourIfPending = useCallback((tourId?: string | null) => {
+    if (!tourId || !TOURS[tourId] || isTourSeen(tourId)) return
+    setActiveTourId(tourId)
+  }, [])
+
+  const closeWhatsNew = useCallback(
+    (startTour: boolean) => {
+      localStorage.setItem(getWhatsNewStorageKey(LATEST_RELEASE.version), 'true')
+      setShowWhatsNew(false)
+      if (startTour) {
+        // Breather: let the dialog fade and the home screen settle before
+        // the dim + spotlight drops in, so it never feels like an ambush.
+        window.setTimeout(() => {
+          startTourIfPending(LATEST_RELEASE.tourId)
+        }, 900)
+      }
+    },
+    [startTourIfPending],
+  )
+
+  // Preview a tour without touching release state: open the app with
+  // ?tour=<id> (e.g. ?tour=focus-tube), or run this in the console:
+  //   localStorage.setItem('mycinema_preview_tour', 'focus-tube'); location.reload()
+  // Clear it with: localStorage.removeItem('mycinema_preview_tour')
+  useEffect(() => {
+    try {
+      const previewId =
+        new URLSearchParams(window.location.search).get('tour') ||
+        localStorage.getItem('mycinema_preview_tour')
+      if (previewId && TOURS[previewId]) {
+        setActiveTourId(previewId)
+      }
+    } catch {
+      /* ignore */
+    }
+  }, [])
+
+  useEffect(() => {
+    const syncStreamingMirrors = (settings: { rememberOnlineProgress?: boolean; notifyNewEpisodes?: boolean }) => {
+      try {
+        if (typeof settings.rememberOnlineProgress === 'boolean') {
+          localStorage.setItem(
+            'mycinema_remember_online_progress',
+            settings.rememberOnlineProgress ? 'true' : 'false'
+          )
+        }
+        if (typeof settings.notifyNewEpisodes === 'boolean') {
+          localStorage.setItem(
+            'mycinema_notify_new_episodes',
+            settings.notifyNewEpisodes ? 'true' : 'false'
+          )
+        }
+      } catch { /* ignore */ }
+    }
     window.api.getAppSettings().then(settings => {
       setLaunchFullscreen(settings.launchFullscreen)
+      setFocusTubeEnabled(settings.focusTubeEnabled !== false)
+      if (typeof settings.showDownloadTray === 'boolean') {
+        setShowDownloadTray(settings.showDownloadTray)
+        try {
+          localStorage.setItem('mycinema_show_download_tray', String(settings.showDownloadTray))
+        } catch {}
+      }
+
+      // Sync and migrate user profile
+      let finalName = settings.userName
+      let finalImage = settings.profileImage
+
+      if (!finalName || finalName === 'User') {
+        const localName = localStorage.getItem('mycinema_user_name')
+        if (localName && localName !== 'User') {
+          finalName = localName
+        }
+      }
+
+      if (!finalImage) {
+        const localImage = localStorage.getItem('mycinema_profile_image')
+        if (localImage) finalImage = localImage
+      }
+      finalImage = normalizeProfileImage(finalImage)
+
+      if (finalName && finalName !== 'User' && finalName !== settings.userName) {
+        window.api.setUserProfile({ userName: finalName, profileImage: finalImage ?? undefined }).catch(() => {})
+      }
+
+      if (finalName) {
+        setUserName(finalName)
+        localStorage.setItem('mycinema_user_name', finalName)
+        window.dispatchEvent(new Event('mycinema_name_updated'))
+      }
+      if (finalImage !== undefined) {
+        setProfileImage(finalImage ?? null)
+        if (finalImage) localStorage.setItem('mycinema_profile_image', finalImage)
+        else localStorage.removeItem('mycinema_profile_image')
+        window.dispatchEvent(new Event('mycinema_profile_updated'))
+      }
+
+      // Keep the renderer's sync online-progress gates aligned with main.
+      syncStreamingMirrors(settings)
     }).catch(() => {})
 
     return window.api.onAppSettingsChanged(settings => {
       setLaunchFullscreen(settings.launchFullscreen)
+      setFocusTubeEnabled(settings.focusTubeEnabled !== false)
+      if (typeof settings.showDownloadTray === 'boolean') {
+        setShowDownloadTray(settings.showDownloadTray)
+        try {
+          localStorage.setItem('mycinema_show_download_tray', String(settings.showDownloadTray))
+        } catch {}
+      }
+      if (typeof settings.userName === 'string') {
+        setUserName(settings.userName)
+        localStorage.setItem('mycinema_user_name', settings.userName)
+        window.dispatchEvent(new Event('mycinema_name_updated'))
+      }
+      if (settings.profileImage !== undefined) {
+        const normalizedImage = normalizeProfileImage(settings.profileImage)
+        setProfileImage(normalizedImage ?? null)
+        if (normalizedImage) localStorage.setItem('mycinema_profile_image', normalizedImage)
+        else localStorage.removeItem('mycinema_profile_image')
+        window.dispatchEvent(new Event('mycinema_profile_updated'))
+      }
       if (!settings.launchFullscreen) {
         setShowWindowControls(false)
       }
+      syncStreamingMirrors(settings)
     })
+  }, [])
+
+  useEffect(() => {
+    setProfileImageFailed(false)
+  }, [profileImage])
+
+  useEffect(() => {
+    const handleTrayToggle = (e: any) => {
+      if (typeof e?.detail?.enabled === 'boolean') {
+        setShowDownloadTray(e.detail.enabled)
+      } else {
+        try {
+          setShowDownloadTray(localStorage.getItem('mycinema_show_download_tray') !== 'false')
+        } catch {}
+      }
+    }
+    window.addEventListener('mycinema_download_tray_changed', handleTrayToggle)
+    return () => window.removeEventListener('mycinema_download_tray_changed', handleTrayToggle)
   }, [])
 
   useEffect(() => {
@@ -180,6 +382,17 @@ const App: React.FC = () => {
       setActiveDownloads(prev => {
         const index = prev.findIndex(download => download.id === data.id)
         if (index === -1) return [data, ...prev]
+        const current = prev[index]
+        const currentPct = Math.round(current.progress || 0)
+        const nextPct = Math.round(data.progress || 0)
+        if (
+          currentPct === nextPct &&
+          current.status === data.status &&
+          current.downloadSpeed === data.downloadSpeed &&
+          current.timeRemaining === data.timeRemaining
+        ) {
+          return prev
+        }
         const next = [...prev]
         next[index] = { ...next[index], ...data }
         return next
@@ -197,6 +410,7 @@ const App: React.FC = () => {
   useEffect(() => {
     return () => {
       clearWindowControlsHideTimer()
+      clearWindowControlsShowTimer()
       if (appFullscreenTapTimerRef.current) {
         window.clearTimeout(appFullscreenTapTimerRef.current)
       }
@@ -234,6 +448,41 @@ const App: React.FC = () => {
     }
   }, [])
 
+  const [sharedCollectionFocus, setSharedCollectionFocus] = useState<{ id: number; nonce: number } | null>(null)
+
+  useEffect(() => {
+    let cancelled = false
+
+    const openSharedCollection = async (payload: any) => {
+      try {
+        const result = await window.api.importSharedCollection(payload)
+        if (cancelled || !result?.imported) return
+
+        setPlayingVideo(null)
+        setSelectedVideo(null)
+        setActiveTab('collections')
+        if (typeof result.id === 'number') {
+          setSharedCollectionFocus({ id: result.id, nonce: Date.now() })
+        }
+      } catch (err) {
+        console.error('[DeepLink] Failed to open shared collection:', err)
+      }
+    }
+
+    window.api.getPendingSharedCollectionTarget()
+      .then(target => {
+        if (target) openSharedCollection(target)
+      })
+      .catch(err => console.error('[DeepLink] Pending shared collection lookup failed:', err))
+
+    const cleanup = window.api.onOpenSharedCollection(openSharedCollection)
+
+    return () => {
+      cancelled = true
+      cleanup()
+    }
+  }, [])
+
   const [updateState, setUpdateState] = useState<{
     status: 'idle' | 'available' | 'downloading' | 'ready'
     version?: string
@@ -256,7 +505,8 @@ const App: React.FC = () => {
             title: filePath.split(/[\\/]/).pop() || 'Unknown Video',
             file_path: filePath,
             type: 'video',
-            duration: 0
+            duration: 0,
+            isExternal: true
           }
           setPlayingVideo(fakeVideo)
         }
@@ -276,21 +526,36 @@ const App: React.FC = () => {
     }
   }, [])
 
+  // ─── Download Tab Indicators ───────────────────────────────────────────────
+  const dlActiveDownloads = activeDownloads.filter(
+    d => d.status === 'downloading' || d.status === 'connecting'
+  )
+  const dlActiveCount = dlActiveDownloads.length
+  const dlQueuedCount = activeDownloads.filter(d => d.status === 'queued').length
+  const dlTotalActive = dlActiveCount + dlQueuedCount
+  // Average progress of all actively-downloading items
+  const dlAvgProgress = dlActiveCount > 0
+    ? dlActiveDownloads.reduce((s, d) => s + Math.max(0, Math.min(100, Number(d.progress || 0))), 0) / dlActiveCount
+    : 0
+  // Top download for speed label
+  const dlTopDownload = dlActiveDownloads[0]
+
   const navItems = [
     { id: 'home' as const,     label: 'Home',         icon: <HomeIcon size={20} /> },
+    // Hidden entirely while the feature is off in Settings.
+    ...(focusTubeEnabled
+      ? [{ id: 'focustube' as const, label: 'Focus Tube', icon: <Compass size={20} />, badge: 'Beta' }]
+      : []),
     { id: 'movies' as const,   label: 'Movies',       icon: <Film size={20} /> },
     { id: 'series' as const,   label: 'Web Series',   icon: <Tv size={20} /> },
     { id: 'videos' as const,   label: 'Videos',       icon: <VideoIcon size={20} /> },
+    { id: 'collections' as const, label: 'Collections', icon: <Layers size={20} /> },
     { id: 'watchlist' as const, label: 'Watchlist',    icon: <Bookmark size={20} /> },
     { id: 'download' as const,  label: 'Downloads',    icon: <DownloadIcon size={20} /> },
   ]
 
-  const libraryItems = [
-    { id: 'history' as const,   label: 'History',      icon: <Clock size={20} /> },
-    { id: 'favorites' as const, label: 'Favorites',    icon: <Heart size={20} /> },
-  ]
 
-  const handlePlayVideo = (video: Video) => {
+  const handlePlayVideo = useCallback((video: Video) => {
     if (video.streamSourceId) {
       const previousStreamId = activeTempStreamRef.current
       // Switching to a different temp stream (e.g. next episode's magnet):
@@ -301,7 +566,7 @@ const App: React.FC = () => {
       activeTempStreamRef.current = video.streamSourceId
     }
     setPlayingVideo(video)
-  }
+  }, [])
 
   const handleStartUpdateDownload = async () => {
     setUpdateState(prev => ({ ...prev, status: 'downloading', percent: 0 }))
@@ -320,18 +585,49 @@ const App: React.FC = () => {
     }
   }
 
+  const clearWindowControlsShowTimer = () => {
+    if (windowControlsShowTimerRef.current) {
+      window.clearTimeout(windowControlsShowTimerRef.current)
+      windowControlsShowTimerRef.current = null
+    }
+  }
+
   const revealWindowControls = () => {
+    clearWindowControlsShowTimer()
     clearWindowControlsHideTimer()
     setShowWindowControls(true)
   }
 
+  // Hover-intent reveal: only pop the capsule after the cursor lingers in
+  // the corner (~250ms), so brush-by mouse passes — e.g. reaching for a
+  // panel close button just below — never flash it. A deliberate move to
+  // the corner always lands it.
+  const scheduleWindowControlsReveal = () => {
+    clearWindowControlsHideTimer()
+    if (windowControlsShowTimerRef.current) return
+    windowControlsShowTimerRef.current = window.setTimeout(() => {
+      windowControlsShowTimerRef.current = null
+      setShowWindowControls(true)
+    }, 250)
+  }
+
   const hideWindowControlsSoon = () => {
+    clearWindowControlsShowTimer()
     clearWindowControlsHideTimer()
     windowControlsHideTimerRef.current = window.setTimeout(() => {
       setShowWindowControls(false)
       windowControlsHideTimerRef.current = null
-    }, 700)
+    }, 800)
   }
+
+  // Briefly flash the auto-hide window capsule on launch / fullscreen change
+  // so users discover it, then let it melt away until they hover top-right.
+  useEffect(() => {
+    if (!launchFullscreen) return
+    revealWindowControls()
+    const timer = window.setTimeout(() => setShowWindowControls(false), 3500)
+    return () => window.clearTimeout(timer)
+  }, [launchFullscreen, isFullscreen])
 
   const handleToggleFullscreen = async () => {
     if (appFullscreenToggleInFlightRef.current) return
@@ -372,48 +668,50 @@ const App: React.FC = () => {
     if (!launchFullscreen) return null
 
     const controlsVisible = showWindowControls || (!!playingVideo && videoControlsVisible)
-    const controlButtonClass = 'flex h-6 w-7 items-center justify-center text-white/60 transition-[color,opacity,transform] duration-150 hover:text-white/95 active:scale-90 focus:outline-none focus:text-white focus:ring-1 focus:ring-white/35'
+    const capsuleClass = `pointer-events-auto flex items-center gap-px rounded-full bg-black/50 py-0.5 pl-1 pr-0.5 shadow-[0_12px_40px_rgba(0,0,0,0.55)] ring-1 ring-white/10 backdrop-blur-2xl transition-all duration-300 ease-[cubic-bezier(0.16,1,0.3,1)] ${
+      controlsVisible ? 'translate-y-0 scale-100 opacity-100' : 'pointer-events-none -translate-y-2 scale-95 opacity-0'
+    }`
+    const controlButtonClass = 'flex h-6 w-7 items-center justify-center rounded-full text-white/65 transition-all duration-150 hover:bg-white/10 hover:text-white active:scale-90 focus:outline-none focus-visible:ring-1 focus-visible:ring-white/40'
 
     if (isFullscreen) {
       return (
         <div
-          className="fixed right-2 top-0 z-[260] flex h-6 w-24 items-center justify-end"
-          onMouseEnter={revealWindowControls}
+          className="fixed right-0 top-0 z-[260] flex h-8 w-28 items-start justify-end pr-1.5 pt-1"
+          onMouseEnter={scheduleWindowControlsReveal}
           onMouseLeave={hideWindowControlsSoon}
           onFocus={revealWindowControls}
           onBlur={hideWindowControlsSoon}
         >
-          <div
-            className={`flex items-center gap-1 transition-opacity duration-200 ${
-              controlsVisible ? 'opacity-100' : 'opacity-55'
-            }`}
-          >
+          <div className={capsuleClass} aria-hidden={!controlsVisible}>
             <button
               type="button"
               title="Minimize"
               aria-label="Minimize"
+              tabIndex={controlsVisible ? 0 : -1}
               onClick={() => window.api.minimizeWindow()}
               className={controlButtonClass}
             >
-              <Minus size={17} strokeWidth={2.5} />
+              <Minus size={12} strokeWidth={2.4} />
             </button>
             <button
               type="button"
               title="Exit fullscreen"
               aria-label="Exit fullscreen"
+              tabIndex={controlsVisible ? 0 : -1}
               onClick={handleToggleFullscreen}
               className={controlButtonClass}
             >
-              <Minimize2 size={15} strokeWidth={2.2} />
+              <Minimize2 size={11} strokeWidth={2.2} />
             </button>
             <button
               type="button"
               title="Close"
               aria-label="Close"
+              tabIndex={controlsVisible ? 0 : -1}
               onClick={() => window.api.closeWindow()}
-              className={`${controlButtonClass} hover:text-red-300 focus:ring-red-300/50 focus:text-red-200`}
+              className={`${controlButtonClass} hover:bg-red-500 hover:text-white focus-visible:ring-red-300/60`}
             >
-              <X size={17} strokeWidth={2.3} />
+              <X size={12} strokeWidth={2.4} />
             </button>
           </div>
         </div>
@@ -422,30 +720,24 @@ const App: React.FC = () => {
 
     return (
       <div
-        className="fixed right-3 top-0 z-[260] flex h-6 w-28 items-center justify-end gap-1"
-        onMouseEnter={revealWindowControls}
+        className="fixed right-0 top-0 z-[260] flex h-8 w-16 items-start justify-end pr-1.5 pt-1"
+        onMouseEnter={scheduleWindowControlsReveal}
         onMouseLeave={hideWindowControlsSoon}
         onFocus={revealWindowControls}
         onBlur={hideWindowControlsSoon}
       >
-        <span
-          className={`pointer-events-none text-[9px] font-bold uppercase tracking-[0.14em] text-white/50 transition-opacity duration-150 ${
-            controlsVisible ? 'opacity-100' : 'opacity-0'
-          }`}
-        >
-          Fullscreen
-        </span>
-        <button
-          type="button"
-          title="Enter fullscreen"
-          aria-label="Enter fullscreen"
-          onClick={handleToggleFullscreen}
-          className={`flex h-6 w-7 items-center justify-center text-white/60 transition-[color,opacity,transform] duration-150 hover:text-white/95 active:scale-90 focus:outline-none focus:text-white focus:ring-1 focus:ring-white/35 ${
-            controlsVisible ? 'opacity-100' : 'opacity-55'
-          }`}
-        >
-          <Maximize2 size={15} strokeWidth={2.2} />
-        </button>
+        <div className={capsuleClass} aria-hidden={!controlsVisible}>
+          <button
+            type="button"
+            title="Enter fullscreen"
+            aria-label="Enter fullscreen"
+            tabIndex={controlsVisible ? 0 : -1}
+            onClick={handleToggleFullscreen}
+            className={controlButtonClass}
+          >
+            <Maximize2 size={11} strokeWidth={2.2} />
+          </button>
+        </div>
       </div>
     )
   }
@@ -460,7 +752,7 @@ const App: React.FC = () => {
   const trayDownload = visibleDownloads[0]
   const trayProgress = Math.max(0, Math.min(100, Math.round(Number(trayDownload?.progress || 0))))
   const trayTitle = trayDownload ? (trayDownload.name || trayDownload.title || 'Download') : ''
-  const shouldShowDownloadTray = Boolean(trayDownload && activeTab !== 'download' && !playingVideo)
+  const shouldShowDownloadTray = Boolean(showDownloadTray && trayDownload && activeTab !== 'download' && !playingVideo)
 
   return (
     <div
@@ -476,7 +768,7 @@ const App: React.FC = () => {
       />
 
       {/* Sidebar */}
-      <div className={`group/sidebar relative bg-white/[0.02] backdrop-blur-2xl flex flex-col border-r border-white/5 transition-[width] duration-300 ease-in-out z-40 ${isSidebarExpanded ? 'w-64' : 'w-20'}`}>
+      <div className={`group/sidebar relative bg-white/[0.02] backdrop-blur-2xl flex flex-col border-r border-white/5 transition-[width] duration-300 ease-in-out z-[85] ${isSidebarExpanded ? 'w-64' : 'w-20'}`}>
         
         {/* Toggle Button */}
         <button
@@ -503,50 +795,121 @@ const App: React.FC = () => {
         <div className="flex-1 overflow-y-auto scrollbar-hide px-4 space-y-8">
           {/* Main Nav */}
           <nav className="space-y-1">
-            {navItems.map(item => (
-              <button
-                key={item.id}
-                onClick={() => navigateToTab(item.id)}
-                className={`relative w-full flex items-center h-12 rounded-xl transition-colors duration-200 group ${
-                  activeTab === item.id ? 'bg-primary/10 text-primary' : 'text-white/40 hover:bg-white/5 hover:text-white'
-                }`}
-              >
-                <div className="w-12 h-full flex items-center justify-center flex-shrink-0 text-current">
-                  {item.icon}
-                </div>
-                <div className={`absolute left-12 whitespace-nowrap text-sm font-bold transition-all duration-300 ${isSidebarExpanded ? 'opacity-100 translate-x-0' : 'opacity-0 -translate-x-2 pointer-events-none'}`}>
-                  {item.label}
-                </div>
-              </button>
-            ))}
-          </nav>
+            {navItems.map(item => {
+              const isDownloadTab = item.id === 'download'
+              const showDlIndicator = isDownloadTab && dlTotalActive > 0
+              // SVG ring constants
+              const ringR = 13
+              const ringC = 2 * Math.PI * ringR
 
-          {/* Library Section */}
-          <div className="space-y-1">
-            <div className="h-6 relative overflow-hidden">
-              <h3 className={`absolute left-3 top-2 text-[10px] font-black uppercase tracking-[0.2em] text-white/20 whitespace-nowrap transition-all duration-300 ${isSidebarExpanded ? 'opacity-100 translate-x-0' : 'opacity-0 -translate-x-2 pointer-events-none'}`}>
-                Library
-              </h3>
-            </div>
-            <nav className="space-y-1">
-              {libraryItems.map(item => (
+              return (
                 <button
                   key={item.id}
+                  data-tour={item.id === 'focustube' ? 'sidebar-focustube' : undefined}
                   onClick={() => navigateToTab(item.id)}
-                  className={`relative w-full flex items-center h-12 rounded-xl transition-colors duration-200 group ${
+                  className={`relative w-full flex items-center rounded-xl transition-colors duration-200 group ${
+                    showDlIndicator && isSidebarExpanded ? 'h-auto py-2' : 'h-12'
+                  } ${
                     activeTab === item.id ? 'bg-primary/10 text-primary' : 'text-white/40 hover:bg-white/5 hover:text-white'
                   }`}
                 >
-                  <div className="w-12 h-full flex items-center justify-center flex-shrink-0 text-current">
-                    {item.icon}
+                  <div className="w-12 h-12 flex flex-col items-center justify-center flex-shrink-0 text-current relative">
+                    {/* Progress ring around icon when downloads are active */}
+                    {showDlIndicator ? (
+                      <span className="relative flex items-center justify-center" style={{ width: 30, height: 30 }}>
+                        {/* Background track */}
+                        <svg
+                          width="30" height="30"
+                          className="absolute inset-0 -rotate-90"
+                          viewBox="0 0 30 30"
+                          style={{ overflow: 'visible' }}
+                        >
+                          <circle cx="15" cy="15" r={ringR} fill="none" stroke="rgba(255,255,255,0.08)" strokeWidth="2" />
+                          <circle
+                            cx="15" cy="15" r={ringR}
+                            fill="none"
+                            stroke={activeTab === item.id ? 'var(--color-primary, #e50914)' : 'rgba(34,211,238,0.7)'}
+                            strokeWidth="2"
+                            strokeLinecap="round"
+                            strokeDasharray={ringC}
+                            strokeDashoffset={ringC * (1 - dlAvgProgress / 100)}
+                            className="transition-all duration-500"
+                          />
+                        </svg>
+                        <span className="relative z-10 flex items-center justify-center" style={{ width: 20, height: 20 }}>
+                          {item.icon}
+                        </span>
+                        {/* Count badge */}
+                        <span
+                          className="absolute -top-1.5 -right-1.5 flex h-[14px] min-w-[14px] items-center justify-center rounded-full bg-cyan-400 px-[3px] text-[8px] font-black text-black leading-none shadow-[0_0_6px_rgba(34,211,238,0.6)]"
+                        >
+                          {dlTotalActive}
+                        </span>
+                      </span>
+                    ) : (
+                      <>
+                        <span className="flex items-center justify-center leading-none">{item.icon}</span>
+                        {'badge' in item && (item as { badge?: string }).badge && !isSidebarExpanded && (
+                          <span
+                            title={`${item.label} is in beta`}
+                            className="mt-[3px] inline-flex items-center justify-center rounded border border-amber-300/25 bg-amber-400/15 px-[3px] py-px text-[6px] font-bold uppercase leading-none tracking-[0.08em] text-amber-200/90"
+                          >
+                            {(item as { badge?: string }).badge}
+                          </span>
+                        )}
+                      </>
+                    )}
                   </div>
-                  <div className={`absolute left-12 whitespace-nowrap text-sm font-bold transition-all duration-300 ${isSidebarExpanded ? 'opacity-100 translate-x-0' : 'opacity-0 -translate-x-2 pointer-events-none'}`}>
-                    {item.label}
+                  <div className={`absolute left-12 right-3 transition-all duration-300 ${
+                    isSidebarExpanded ? 'opacity-100 translate-x-0' : 'opacity-0 -translate-x-2 pointer-events-none'
+                  }`}>
+                    <div className="flex items-center gap-1.5">
+                      <span className="whitespace-nowrap text-sm font-bold">{item.label}</span>
+                      {'badge' in item && (item as { badge?: string }).badge && (
+                        <span
+                          title={`${item.label} is in beta — some things may still change`}
+                          className="inline-flex items-center rounded border border-amber-300/20 bg-amber-400/10 px-1 py-[1px] text-[8px] font-bold uppercase leading-none tracking-[0.08em] text-amber-200/90"
+                        >
+                          {(item as { badge?: string }).badge}
+                        </span>
+                      )}
+                      {/* Inline download status when sidebar is expanded */}
+                      {showDlIndicator && (
+                        <span className="ml-auto flex items-center gap-1 shrink-0">
+                          <span className="h-1.5 w-1.5 rounded-full bg-cyan-400 animate-pulse" />
+                          <span className="text-[10px] font-bold text-cyan-400">
+                            {dlActiveCount > 0 ? `${Math.round(dlAvgProgress)}%` : `${dlQueuedCount} queued`}
+                          </span>
+                        </span>
+                      )}
+                    </div>
+                    {/* Progress bar — only when downloads active */}
+                    {showDlIndicator && (
+                      <div className="mt-1.5 space-y-1">
+                        <div className="h-[3px] w-full overflow-hidden rounded-full bg-white/8">
+                          <div
+                            className="h-full rounded-full transition-all duration-500 bg-gradient-to-r from-cyan-400 to-primary"
+                            style={{ width: `${dlAvgProgress}%` }}
+                          />
+                        </div>
+                        {dlTopDownload?.downloadSpeed && dlTopDownload.downloadSpeed !== '0 B/s' && (
+                          <p className="text-[9px] font-semibold text-white/35 leading-none">
+                            {dlTopDownload.downloadSpeed}{dlActiveCount > 1 ? ` · ${dlActiveCount} active` : ''}{dlQueuedCount > 0 ? ` · ${dlQueuedCount} queued` : ''}
+                          </p>
+                        )}
+                        {(dlTopDownload?.downloadSpeed === '0 B/s' || !dlTopDownload?.downloadSpeed) && (
+                          <p className="text-[9px] font-semibold text-white/35 leading-none">
+                            {dlActiveCount > 0 ? `${dlActiveCount} downloading` : ''}{dlQueuedCount > 0 ? `${dlActiveCount > 0 ? ' · ' : ''}${dlQueuedCount} queued` : ''}
+                          </p>
+                        )}
+                      </div>
+                    )}
                   </div>
                 </button>
-              ))}
-            </nav>
-          </div>
+              )
+            })}
+          </nav>
+
         </div>
 
         <div className={`overflow-hidden px-4 transition-all duration-300 ${!isSidebarExpanded && updateState.status !== 'idle' ? 'max-h-16 pb-3 opacity-100' : 'max-h-0 pb-0 opacity-0'}`}>
@@ -668,18 +1031,46 @@ const App: React.FC = () => {
         </div>
 
         {/* User Profile */}
-        <div className="p-4 mt-auto">
+        {/* Updates Tab - Positioned directly above Profile / Settings */}
+        <div className="px-4 pb-2 mt-auto">
+          <button
+            onClick={() => navigateToTab('updates')}
+            className={`relative w-full flex items-center h-12 rounded-xl transition-colors duration-200 group ${
+              activeTab === 'updates' ? 'bg-primary/10 text-primary' : 'text-white/40 hover:bg-white/5 hover:text-white'
+            }`}
+            title="Updates & Changelog"
+          >
+            <div className="w-12 h-full flex items-center justify-center flex-shrink-0 text-current">
+              <Megaphone size={19} strokeWidth={2.2} />
+            </div>
+            <div className={`absolute left-12 right-2 flex items-center justify-between whitespace-nowrap transition-all duration-300 ${
+              isSidebarExpanded ? 'opacity-100 translate-x-0' : 'opacity-0 -translate-x-2 pointer-events-none'
+            }`}>
+              <span className="text-sm font-bold">Updates</span>
+              <span className="rounded border border-primary/30 bg-primary/10 px-1.5 py-0.5 text-[9px] font-black uppercase text-primary">
+                v{LATEST_RELEASE.version}
+              </span>
+            </div>
+          </button>
+        </div>
+
+        <div className="p-4 pt-0">
           <div className="relative flex items-center bg-white/5 rounded-2xl border border-white/5 h-[52px] w-full overflow-hidden transition-all duration-300">
             
             {/* Avatar (Fixed Left) */}
             <div className="absolute left-1 w-10 h-10 flex-shrink-0 flex items-center justify-center">
               <div 
-                className={`relative w-full h-full rounded-xl ${profileImage ? 'bg-transparent' : 'bg-red-600'} flex items-center justify-center text-white font-black text-lg shadow-lg italic cursor-pointer hover:scale-105 transition-transform overflow-hidden`}
+                className={`relative w-full h-full rounded-xl ${profileImage && !profileImageFailed ? 'bg-transparent' : 'bg-red-600'} flex items-center justify-center text-white font-black text-lg shadow-lg italic cursor-pointer hover:scale-105 transition-transform overflow-hidden`}
                 onClick={() => navigateToTab('settings')}
                 title="Settings & Profile"
               >
-                {profileImage ? (
-                  <img src={profileImage} alt={userName} className="w-full h-full object-cover" />
+                {profileImage && !profileImageFailed ? (
+                  <img
+                    src={resolveProfileImageUrl(profileImage) ?? undefined}
+                    alt={userName}
+                    className="w-full h-full object-cover"
+                    onError={() => setProfileImageFailed(true)}
+                  />
                 ) : (
                   userName.charAt(0).toUpperCase()
                 )}
@@ -705,29 +1096,49 @@ const App: React.FC = () => {
       </div>
 
       {/* Main Content */}
+      {/* NOTE: only the active page is mounted. Home used to stay mounted with
+          opacity-0 (HeroCarousel timers, decoded images, scroll listeners all
+          kept running behind Collections/Movies/etc. and caused scroll jank). */}
       <main className="relative flex-1 overflow-hidden">
-        <div
-          ref={homeScrollRef}
-          className={activeTab === 'home' ? 'absolute inset-0 overflow-y-auto scrollbar-hide pt-6 pb-14 opacity-100 transition-opacity duration-300' : 'pointer-events-none absolute inset-0 overflow-y-auto scrollbar-hide pt-6 pb-14 opacity-0 transition-opacity duration-300'}
-          aria-hidden={activeTab !== 'home'}
-        >
-          <Home onPlay={handlePlayVideo} onShowDetail={setSelectedVideo} onNavigate={navigateToTab} refreshKey={homeRefreshKey} />
-        </div>
-
-        {activeTab !== 'home' && (
-          <div ref={activePageScrollRef} className="absolute inset-0 overflow-y-auto scrollbar-hide animate-in fade-in duration-300">
+        {/* The non-home container stays mounted (hidden) when Home is active.
+            Home used to own the other branch of this ternary, so visiting it
+            unmounted everything — including FocusTube's keep-alive wrapper —
+            and killed a minimized FocusTube dock. Every inner page keeps its
+            exact conditional mount, so only visibility changed, not lifecycles. */}
+        <div ref={activePageScrollRef} className={`absolute inset-0 overflow-y-auto scrollbar-hide ${activeTab === 'home' ? 'hidden' : ''}`}>
             <div className="px-8 pt-6 pb-14 max-w-[1600px] mx-auto">
               {activeTab === 'videos'  && <Videos onPlay={handlePlayVideo} />}
+              {/* FocusTube stays mounted (hidden) when you leave its tab so its
+                  mini-player dock — portalled to document.body — keeps playing
+                  across the whole app. `hidden` (display:none) only hides the
+                  feed; portal content is unaffected. State (feed, queue,
+                  player) is preserved, so coming back resumes where you left. */}
+              {focusTubeEnabled && focusTubeMounted && (
+                <div className={activeTab === 'focustube' ? 'contents' : 'hidden'}>
+                  <FocusTube />
+                </div>
+              )}
               {activeTab === 'movies'  && <Movies onPlay={handlePlayVideo} onShowDetail={setSelectedVideo} />}
               {activeTab === 'series'  && <Series onPlay={handlePlayVideo} onShowDetail={setSelectedVideo} />}
+              {activeTab === 'collections' && <Collections onPlay={handlePlayVideo} onShowDetail={setSelectedVideo} focusCollectionId={sharedCollectionFocus?.id ?? null} focusNonce={sharedCollectionFocus?.nonce ?? 0} />}
               {activeTab === 'watchlist' && <Watchlist onPlay={handlePlayVideo} onShowDetail={setSelectedVideo} refreshKey={watchlistRefreshKey} />}
-              {activeTab === 'history' && <History onPlay={handlePlayVideo} onShowDetail={setSelectedVideo} />}
-              {activeTab === 'favorites' && <Favorites onPlay={handlePlayVideo} onShowDetail={setSelectedVideo} />}
               {activeTab === 'download' && <Download onShowDetail={setSelectedVideo} />}
+              {activeTab === 'updates' && <Updates />}
               {activeTab === 'settings' && <SettingsPage />}
             </div>
-          </div>
-        )}
+        </div>
+        <div
+          ref={homeScrollRef}
+          className={`absolute inset-0 overflow-y-auto scrollbar-hide pt-6 pb-14 ${activeTab === 'home' ? '' : 'hidden'}`}
+        >
+          <Home
+            isActive={activeTab === 'home'}
+            onPlay={handlePlayVideo}
+            onShowDetail={setSelectedVideo}
+            onNavigate={navigateToTab}
+            refreshKey={homeRefreshKey}
+          />
+        </div>
       </main>
 
       {shouldShowDownloadTray && (
@@ -858,9 +1269,23 @@ const App: React.FC = () => {
 
       {showWhatsNew && (
         <WhatsNewOnboarding
-          onClose={() => {
-            localStorage.setItem(getWhatsNewStorageKey(LATEST_RELEASE.version), 'true')
-            setShowWhatsNew(false)
+          onClose={() => closeWhatsNew(false)}
+          onSkipSession={() => setShowWhatsNew(false)}
+          onStartTour={() => closeWhatsNew(true)}
+          onViewAllUpdates={() => {
+            closeWhatsNew(false)
+            navigateToTab('updates')
+          }}
+        />
+      )}
+
+      {activeTourId && TOURS[activeTourId] && (
+        <ProductTour
+          tour={TOURS[activeTourId]}
+          onNavigate={(tab) => navigateToTab(tab as AppTab)}
+          onDone={() => {
+            markTourSeen(activeTourId)
+            setActiveTourId(null)
           }}
         />
       )}

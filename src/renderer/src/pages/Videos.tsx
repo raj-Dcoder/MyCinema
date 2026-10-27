@@ -386,4 +386,4 @@ const Videos: React.FC<VideosProps> = ({ onPlay }) => {
   )
 }
 
-export default Videos
+export default React.memo(Videos)

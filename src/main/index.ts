@@ -2,8 +2,16 @@ import { app, shell, BrowserWindow, ipcMain, dialog, protocol, net, session } fr
 import { join } from 'path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import * as db from './db'
+import * as collections from './collections'
+import * as focusTube from './focusTube'
+import * as focusTubeFeed from './focusTubeFeed'
+import * as focusTubeYouTubeImport from './focusTubeYouTubeImport'
+import * as sponsorBlock from './sponsorBlock'
+import * as downloadSites from './downloadSites'
+import { POPUP_PARTITION, POPUP_COSMETIC_CSS, isBlockedAdUrl, registerPopupAdblock } from './popupAdblock'
 import { scanFolder, getEmbeddedSubtitles, getEmbeddedAudio } from './scanner'
 import * as tmdb from './tmdb'
+import * as httpDownloader from './httpDownloader'
 import fs from 'fs'
 import crypto from 'crypto'
 import ffmpeg from 'fluent-ffmpeg'
@@ -15,6 +23,7 @@ import { pathToFileURL } from 'url'
 import https from 'https'
 import dns from 'dns'
 import { AsyncLocalStorage } from 'async_hooks'
+import { execFileSync } from 'child_process'
 
 function isExpectedCloseAbort(error: unknown): boolean {
   const message = error instanceof Error
@@ -315,8 +324,10 @@ function isSafeFilePath(inputPath: string): boolean {
     const allowedRoots = [
       // User's registered library folders (dynamically checked each call)
       ...(db.getFolders() as any[]).map((f: any) => path.normalize(f.path).toLowerCase()),
-      // The MyCinema torrent download destination
+      // The MyCinema default download destination
       path.normalize(path.join(app.getPath('downloads'), 'MyCinema')).toLowerCase(),
+      // Configured download destination (custom or default)
+      path.normalize(getDownloadPath()).toLowerCase(),
       // App userData: poster cache, subtitle cache, window state, db
       path.normalize(app.getPath('userData')).toLowerCase(),
       // Temp dir used by subtitle pre-conversion
@@ -380,6 +391,64 @@ ffmpeg.setFfmpegPath(ffmpegExecPath)
 ffmpeg.setFfprobePath(ffprobeExecPath)
 
 const YOUTUBE_EMBED_ORIGIN = 'https://mycinema.app'
+
+/**
+ * True for the sign-in / account-creation flows YouTube can raise from an
+ * embed. Anything that is just a video, channel or help page is a normal
+ * external link and still goes to the user's browser.
+ */
+function isYouTubeAuthUrl(url: string): boolean {
+  if (url.startsWith('https://accounts.google.com')) return true
+  if (!/^https?:\/\/([\w-]+\.)*(youtube\.com|youtube-nocookie\.com)\//i.test(url)) return false
+  return /\/(accounts|signin|login|serviceLogin|o\/oauth|get_account_info)/i.test(url)
+}
+
+/**
+ * In-app YouTube sign-in. Shares the default session (no custom partition) so
+ * the cookies it sets are the ones the embed player will read, and deliberately
+ * runs with no preload and no node integration since it renders a Google page.
+ */
+function openYouTubeAuthWindow(parent: BrowserWindow, url: string): void {
+  try {
+    const auth = new BrowserWindow({
+      parent,
+      modal: false,
+      show: true,
+      width: 520,
+      height: 720,
+      title: 'Sign in to YouTube',
+      autoHideMenuBar: true,
+      backgroundColor: '#0f0f0f',
+      webPreferences: {
+        nodeIntegration: false,
+        contextIsolation: true,
+        sandbox: true,
+        // No preload: this window renders a Google account page, so it must
+        // never see the MyCinema IPC bridge.
+      },
+    })
+
+    // Keep any secondary popups (2FA, recovery) inside the app too, and never
+    // let this window spawn arbitrary children.
+    auth.webContents.setWindowOpenHandler(({ url: childUrl }) => {
+      if (/^https:\/\//i.test(childUrl)) shell.openExternal(childUrl)
+      return { action: 'deny' }
+    })
+    auth.webContents.on('will-navigate', (event, target) => {
+      // Allow the auth flow to move between Google/YouTube pages only.
+      if (!/^https:\/\/([\w-]+\.)*(youtube\.com|youtube-nocookie\.com|google\.com|accounts\.google\.com|gstatic\.com)\//i.test(target)) {
+        event.preventDefault()
+        shell.openExternal(target)
+      }
+    })
+
+    auth.loadURL(url)
+    auth.on('closed', () => { /* session cookies persist on their own */ })
+  } catch (err: any) {
+    console.error('[YouTube] Failed to open in-app sign-in window:', err?.message)
+    shell.openExternal(url)
+  }
+}
 
 function setupYoutubeEmbedHeaders(): void {
   const filter = {
@@ -479,10 +548,49 @@ function saveWindowState(win: BrowserWindow) {
 
 type AppSettings = {
   launchFullscreen: boolean
+  rememberOnlineProgress: boolean
+  notifyNewEpisodes: boolean
+  // Max simultaneous persistent downloads. 0 (or <= 0) = unlimited.
+  // Extras wait with status 'queued' and auto-start oldest-first.
+  maxConcurrentDownloads: number
+  // Focus Tube visibility. Turning this off hides the tab and stops all of its
+  // background work, but never deletes anything: categories, subscriptions,
+  // watch progress and seen state all stay in the database and come straight
+  // back when it is switched on again.
+  focusTubeEnabled: boolean
+  // Custom directory for all file downloads (magnets, torrents, web downloads)
+  downloadPath?: string
+  // Floating download progress HUD in bottom right corner
+  showDownloadTray?: boolean
+  // User profile
+  userName?: string
+  profileImage?: string | null
 }
 
 const defaultAppSettings: AppSettings = {
-  launchFullscreen: true
+  launchFullscreen: true,
+  rememberOnlineProgress: true,
+  notifyNewEpisodes: true,
+  maxConcurrentDownloads: 0,
+  focusTubeEnabled: true,
+  downloadPath: '',
+  showDownloadTray: true,
+  userName: 'User',
+  profileImage: null
+}
+
+const BUILTIN_PROFILE_AVATAR_PREFIX = 'mycinema-avatar:'
+const BUILTIN_PROFILE_AVATAR_IDS = ['anime', 'clay', 'vector', 'y2k'] as const
+
+function normalizeBuiltinProfileImage(image: string | null | undefined): string | null | undefined {
+  if (typeof image !== 'string') return image
+  if (image.startsWith(BUILTIN_PROFILE_AVATAR_PREFIX)) return image
+
+  const avatarId = BUILTIN_PROFILE_AVATAR_IDS.find((id) =>
+    new RegExp(`(?:^|[/\\\\])${id}(?:--[^/\\\\?#]+)?\\.png(?:[?#].*)?$`, 'i').test(image)
+  )
+
+  return avatarId ? `${BUILTIN_PROFILE_AVATAR_PREFIX}${avatarId}` : image
 }
 
 function getAppSettingsPath() {
@@ -492,7 +600,14 @@ function getAppSettingsPath() {
 function loadAppSettings(): AppSettings {
   try {
     const raw = fs.readFileSync(getAppSettingsPath(), 'utf8')
-    return { ...defaultAppSettings, ...JSON.parse(raw) }
+    const settings = { ...defaultAppSettings, ...JSON.parse(raw) }
+    const profileImage = normalizeBuiltinProfileImage(settings.profileImage)
+    if (profileImage !== settings.profileImage) {
+      const migratedSettings = { ...settings, profileImage }
+      saveAppSettings(migratedSettings)
+      return migratedSettings
+    }
+    return settings
   } catch {
     return defaultAppSettings
   }
@@ -501,6 +616,28 @@ function loadAppSettings(): AppSettings {
 function saveAppSettings(settings: AppSettings) {
   fs.writeFileSync(getAppSettingsPath(), JSON.stringify(settings))
 }
+
+function getDownloadPath(): string {
+  try {
+    const settings = loadAppSettings()
+    const custom = settings.downloadPath?.trim()
+    if (custom) {
+      if (!fs.existsSync(custom)) {
+        fs.mkdirSync(custom, { recursive: true })
+      }
+      return custom
+    }
+  } catch (err) {
+    console.warn('[Download Path] Failed to access or create custom path, falling back:', err)
+  }
+  const defaultPath = path.join(app.getPath('downloads'), 'MyCinema')
+  if (!fs.existsSync(defaultPath)) {
+    try { fs.mkdirSync(defaultPath, { recursive: true }) } catch {}
+  }
+  return defaultPath
+}
+
+let thirdPartyCookieNoticeShown = false
 
 function createWindow(): void {
   const state = loadWindowState()
@@ -560,19 +697,72 @@ function createWindow(): void {
     // Kick off startup scan after window is visible (non-blocking)
     setImmediate(() => {
       runStartupScan().catch(err => console.error('[Startup] Scan error:', err))
+      backfillDownloadQueueOrder()
       autoResumeDownloads().catch(err => console.error('[Startup] Auto-resume error:', err))
     })
+    // Keep the simultaneous-download limit enforced even if extra downloads
+    // slipped past the gate (stale rows, races). No-op when Unlimited.
+    setInterval(() => enforceDownloadConcurrency(), 5000)
     handleCommandLine(process.argv, mainWindow)
   })
 
   mainWindow.webContents.setWindowOpenHandler((details) => {
+    if (details.url.startsWith('magnet:')) {
+      void handleStartTorrentDownload(details.url)
+      return { action: 'deny' }
+    }
     // Only allow safe external URLs — block javascript:, file:, data: etc.
     if (details.url.startsWith('https://') || details.url.startsWith('http://')) {
+      // The YouTube embed raises a sign-in flow when it wants to verify the
+      // viewer. Handing that to the external browser is pointless: a login
+      // completed there cannot satisfy the embed inside this app, so the video
+      // would stay blocked. Run it in an in-app window on the default session
+      // instead, so the resulting cookies land in the session the embed uses.
+      if (isYouTubeAuthUrl(details.url)) {
+        openYouTubeAuthWindow(mainWindow, details.url)
+        return { action: 'deny' }
+      }
       shell.openExternal(details.url)
+    } else if (details.url === 'about:blank') {
+      // Document Picture-in-Picture (video mini-player) opens an about:blank
+      // popup from our own renderer — nothing else in the app opens
+      // about:blank, so this can only be the PiP window. Allowed plainly
+      // (no option overrides) so Chromium adopts it as a genuine PiP
+      // window instead of discarding it.
+      return { action: 'allow' }
     } else {
       console.warn(`[Security] Blocked unsafe openExternal URL: ${details.url.slice(0, 80)}`)
     }
     return { action: 'deny' }
+  })
+
+  mainWindow.webContents.on('will-navigate', (event, navUrl) => {
+    if (navUrl.startsWith('magnet:')) {
+      event.preventDefault()
+      void handleStartTorrentDownload(navUrl)
+    }
+  })
+
+  // Mirror renderer console output into the main-process terminal so UI
+  // errors are visible without opening DevTools.
+  mainWindow.webContents.on('console-message', (_event, level, message, line, sourceId) => {
+    if (level < 1) return
+    // Electron refuses to store third-party cookies and exposes no API to
+    // allow them (electron/electron#39021), so the YouTube embed logs one
+    // "Third-party cookie will be blocked" notice per cookie it attempts.
+    // This is expected platform behaviour, not an app fault: the embed lives in
+    // a cross-site context, playback is unaffected (verified end-to-end), and
+    // only YouTube's ad/analytics/consent cookies are dropped. Deduplicated to
+    // a single line so it cannot flood the terminal. Every other message,
+    // including real errors, still passes through untouched.
+    if (/third-party cookie will be blocked/i.test(String(message))) {
+      if (thirdPartyCookieNoticeShown) return
+      thirdPartyCookieNoticeShown = true
+      console.log('[Renderer] Third-party cookie notices suppressed (Electron blocks 3p cookies; playback is unaffected)')
+      return
+    }
+    const tag = sourceId ? String(sourceId).split('/').pop() : 'renderer'
+    console.log(`[Renderer:${tag}:${line}] ${message}`)
   })
 
   mainWindow.on('close', (e) => {
@@ -656,7 +846,11 @@ function getContentTypeForPath(filePath: string): string {
 
 function waitForTorrentReady(torrent: any, timeoutMs = 25000): Promise<void> {
   if (!torrent || torrent.destroyed) return Promise.reject(new Error('Torrent is not active'))
-  if (torrent.ready || (Array.isArray(torrent.files) && torrent.files.length > 0)) return Promise.resolve()
+  if (torrent.ready || (Array.isArray(torrent.files) && torrent.files.length > 0)) {
+    // Metadata is in — record the ground-truth total size (see learnedTorrentSizes).
+    rememberTorrentSize(torrent.infoHash, torrent.length)
+    return Promise.resolve()
+  }
 
   return new Promise((resolve, reject) => {
     const cleanup = () => {
@@ -666,6 +860,7 @@ function waitForTorrentReady(torrent: any, timeoutMs = 25000): Promise<void> {
     }
     const onReady = () => {
       cleanup()
+      rememberTorrentSize(torrent.infoHash, torrent.length)
       resolve()
     }
     const onError = (err: Error) => {
@@ -827,9 +1022,9 @@ function registerMediaProtocol(): void {
   protocol.handle('media', (request) => {
     try {
       const prefix = 'media://file/'
-      const encodedPath = request.url.startsWith(prefix) 
-        ? request.url.slice(prefix.length) 
-        : request.url.slice('media://'.length)
+      const encodedPath = request.url.startsWith(prefix)
+        ? request.url.slice(prefix.length).split('?')[0].split('#')[0]
+        : request.url.slice('media://'.length).split('?')[0].split('#')[0]
       
       let normalizedPath = decodeURIComponent(encodedPath)
       if (normalizedPath.startsWith('/') && normalizedPath.includes(':')) {
@@ -1273,9 +1468,22 @@ function registerAudioProtocol(): void {
       const pass = new PassThrough()
 
       const cmd = ffmpeg(sourcePath)
+      // Sample-accurate seek: a pure input seek (`-ss` before `-i`) can land
+      // on a packet boundary before/after `start`, baking a constant A/V
+      // offset into the MP3 stream (heard as permanently early/late audio
+      // that the renderer's drift corrector can never fully remove).
+      // Combine a fast coarse input seek with an accurate output seek
+      // (decode-and-drop) so the stream starts EXACTLY at `start`.
       if (Number.isFinite(start) && start > 0) {
-        cmd.seekInput(start)
+        const ACCURATE_WINDOW = 5
+        if (start > ACCURATE_WINDOW) {
+          cmd.seekInput(Math.max(0, start - ACCURATE_WINDOW))
+          cmd.seekOutput(ACCURATE_WINDOW)
+        } else {
+          cmd.seekOutput(start)
+        }
       }
+      cmd.inputOptions('-accurate_seek')
       cmd.outputOptions([
         `-map ${mapArg}`,
         '-vn',
@@ -1283,6 +1491,7 @@ function registerAudioProtocol(): void {
         '-c:a libmp3lame',
         '-b:a 192k',
         '-ac 2',
+        '-avoid_negative_ts make_zero',
         '-preset ultrafast',
         '-threads 2',
         '-f mp3'
@@ -1418,12 +1627,45 @@ function dispatchSharedMediaTarget(target: SharedMediaTarget, mainWindow: Browse
   }
 }
 
+let pendingSharedCollectionTarget: any | null = null
+
+function parseSharedCollectionUrl(rawUrl: string): any | null {
+  try {
+    const parsed = new URL(rawUrl)
+    if (parsed.protocol !== `${APP_PROTOCOL}:`) return null
+    if (parsed.hostname.toLowerCase() !== 'collection') return null
+    const encoded = parsed.searchParams.get('data')
+    if (!encoded) return null
+    const normalized = encoded.replace(/-/g, '+').replace(/_/g, '/')
+    const padded = normalized.padEnd(Math.ceil(normalized.length / 4) * 4, '=')
+    const payload = JSON.parse(Buffer.from(padded, 'base64').toString('utf8'))
+    if (!payload || payload.app !== 'MyCinema' || payload.kind !== 'collection') return null
+    if (!payload.collection || typeof payload.collection.name !== 'string') return null
+    if (!Array.isArray(payload.snapshot)) return null
+    return payload
+  } catch {
+    return null
+  }
+}
+
+function dispatchSharedCollectionTarget(payload: any, mainWindow: BrowserWindow | null) {
+  pendingSharedCollectionTarget = payload
+  if (mainWindow && mainWindow.webContents && !mainWindow.webContents.isLoading()) {
+    mainWindow.webContents.send('open-shared-collection', payload)
+  }
+}
+
 function handleCommandLine(argv: string[], mainWindow: BrowserWindow | null) {
   const sharedUrl = argv.find(arg => arg.startsWith(`${APP_PROTOCOL}://`))
   if (sharedUrl) {
     const target = parseSharedMediaUrl(sharedUrl)
     if (target) {
       dispatchSharedMediaTarget(target, mainWindow)
+      return
+    }
+    const collectionPayload = parseSharedCollectionUrl(sharedUrl)
+    if (collectionPayload) {
+      dispatchSharedCollectionTarget(collectionPayload, mainWindow)
       return
     }
   }
@@ -1446,10 +1688,15 @@ function handleCommandLine(argv: string[], mainWindow: BrowserWindow | null) {
 
 app.on('open-url', (event, url) => {
   event.preventDefault()
-  const target = parseSharedMediaUrl(url)
-  if (!target) return
   const mainWindow = BrowserWindow.getAllWindows()[0] || null
-  dispatchSharedMediaTarget(target, mainWindow)
+  const target = parseSharedMediaUrl(url)
+  if (target) {
+    dispatchSharedMediaTarget(target, mainWindow)
+  } else {
+    const collectionPayload = parseSharedCollectionUrl(url)
+    if (!collectionPayload) return
+    dispatchSharedCollectionTarget(collectionPayload, mainWindow)
+  }
   if (mainWindow) {
     if (mainWindow.isMinimized()) mainWindow.restore()
     mainWindow.focus()
@@ -1540,6 +1787,8 @@ type BackupImportSummary = {
   externalWatchlistImported: number
   localWatchlistRestored: number
   favoritesRestored: number
+  streamProgressRestored: number
+  followedSeriesRestored: number
 }
 
 const BACKUP_FORMAT = 'mycinema.backup'
@@ -1569,7 +1818,154 @@ function parseBackupFile(filePath: string): any {
 
 
 
+// File dialogs MUST be parented to the app window. An ownerless dialog on
+// Windows opens behind the app, forcing users to hunt it via the taskbar.
+const getDialogParentWindow = (): BrowserWindow | undefined =>
+  BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0]
+
+const showAppOpenDialog = (options: any) => {
+  const parent = getDialogParentWindow()
+  return parent ? dialog.showOpenDialog(parent, options) : dialog.showOpenDialog(options)
+}
+
+const showAppSaveDialog = (options: any) => {
+  const parent = getDialogParentWindow()
+  return parent ? dialog.showSaveDialog(parent, options) : dialog.showSaveDialog(options)
+}
+
+// Focus Tube poll cadence. Hoisted so before-quit can clear it; created in
+// app.whenReady() once the database is up.
+let focusTubePollTimer: NodeJS.Timeout | null = null
+
+// ─── Active Popup Windows Registry & Notification Banner ────────────────────
+const activePopupWindows = new Set<BrowserWindow>()
+
+function getDownloadAddedBannerScript(fileName: string, isPopup: boolean): string {
+  const safeName = JSON.stringify(fileName || 'Download')
+  const safeCaption = JSON.stringify(
+    isPopup
+      ? 'Downloading in background • Safe to close window'
+      : 'Downloading in background • Check the Downloads tab'
+  )
+  return `
+    (() => {
+      try {
+        const fileName = ${safeName};
+        const caption = ${safeCaption};
+        const render = () => {
+          if (!document.body) {
+            setTimeout(render, 80);
+            return;
+          }
+          let banner = document.getElementById('mycinema-added-banner');
+          if (!banner) {
+            banner = document.createElement('div');
+            banner.id = 'mycinema-added-banner';
+            Object.assign(banner.style, {
+              position: 'fixed',
+              top: '24px',
+              left: '50%',
+              transform: 'translateX(-50%) translateY(-10px)',
+              zIndex: '2147483647',
+              padding: '14px 24px',
+              backgroundColor: 'rgba(15, 23, 42, 0.95)',
+              backdropFilter: 'blur(16px)',
+              webkitBackdropFilter: 'blur(16px)',
+              border: '1px solid #06b6d4',
+              borderRadius: '16px',
+              color: '#ffffff',
+              boxShadow: '0 12px 36px rgba(0, 0, 0, 0.75), 0 0 24px rgba(6, 182, 212, 0.3)',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '14px',
+              fontFamily: 'system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+              pointerEvents: 'none',
+              transition: 'opacity 0.3s ease, transform 0.3s cubic-bezier(0.16, 1, 0.3, 1)',
+              opacity: '0',
+              maxWidth: '90vw'
+            });
+            document.body.appendChild(banner);
+            requestAnimationFrame(() => {
+              if (banner) {
+                banner.style.opacity = '1';
+                banner.style.transform = 'translateX(-50%) translateY(0)';
+              }
+            });
+          } else {
+            banner.style.opacity = '1';
+            banner.style.transform = 'translateX(-50%) translateY(0)';
+          }
+          banner.innerHTML = \`
+            <div style="width:36px;height:36px;border-radius:50%;background:rgba(6,182,212,0.2);display:flex;align-items:center;justify-content:center;color:#22d3ee;font-size:18px;flex-shrink:0;">📥</div>
+            <div style="min-width:0;">
+              <div style="font-size:13px;font-weight:700;color:#22d3ee;letter-spacing:0.02em;">Added to MyCinema Downloads!</div>
+              <div id="mycinema-added-banner-name" style="font-size:11px;color:#cbd5e1;margin-top:2px;max-width:340px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"></div>
+              <div style="font-size:10px;color:#94a3b8;margin-top:3px;">\${caption}</div>
+            </div>
+          \`;
+          const nameEl = document.getElementById('mycinema-added-banner-name');
+          if (nameEl) {
+            nameEl.textContent = fileName;
+          }
+          if (banner.__dismissTimer) clearTimeout(banner.__dismissTimer);
+          banner.__dismissTimer = setTimeout(() => {
+            if (banner && banner.parentNode) {
+              banner.style.opacity = '0';
+              banner.style.transform = 'translateX(-50%) translateY(-10px)';
+              setTimeout(() => {
+                if (banner && banner.parentNode) banner.parentNode.removeChild(banner);
+              }, 350);
+            }
+          }, 7000);
+        };
+        render();
+      } catch (e) {
+        console.error('[MyCinema Banner] Render error:', e);
+      }
+    })();
+  `
+}
+
+function notifyDownloadAdded(fileName: string, triggeringWc?: Electron.WebContents | null): void {
+  // Only inject the in-page download banner into popup browser windows (not into the main React UI)
+  for (const win of activePopupWindows) {
+    if (win.isDestroyed()) continue
+    const script = getDownloadAddedBannerScript(fileName, true)
+    try {
+      win.webContents.executeJavaScript(script).catch(() => {})
+    } catch {}
+  }
+
+  if (triggeringWc && !triggeringWc.isDestroyed()) {
+    const ownerWin = BrowserWindow.fromWebContents(triggeringWc)
+    if (ownerWin && activePopupWindows.has(ownerWin)) {
+      try {
+        triggeringWc.executeJavaScript(getDownloadAddedBannerScript(fileName, true)).catch(() => {})
+      } catch {}
+    }
+  }
+}
+
 app.whenReady().then(() => {
+  // Configure Chromium DNS-over-HTTPS (DoH) with Google & Cloudflare to bypass ISP blocks on download portals
+  try {
+    app.configureHostResolver({
+      enableBuiltInResolver: true,
+      secureDnsMode: 'automatic',
+      secureDnsServers: [
+        'https://dns.google/dns-query',
+        'https://cloudflare-dns.com/dns-query'
+      ]
+    })
+  } catch (e) {
+    console.warn('[Main] Host resolver DoH setup failed:', e)
+  }
+
+  // Pre-warm download site mirrors in background so button clicks on detail screen are always instant
+  setTimeout(() => {
+    downloadSites.prewarmDownloadSites().catch(() => {})
+  }, 2500)
+
   // Purge any stale temporary stream folders left over from previous ungraceful exits
   purgeStaleTempStreamFolder()
 
@@ -1579,6 +1975,18 @@ app.whenReady().then(() => {
   registerAudioProtocol()
   setupYoutubeEmbedHeaders()
   db.initDb()
+  collections.initCollections()
+  focusTube.initFocusTube()
+  try {
+    const { migrated } = collections.migrateWatchlistCategoriesToCollections()
+    if (migrated.length > 0) console.log(`[Collections] Migrated watchlist lists to collections: ${migrated.join(', ')}`)
+    const retired = collections.retireSmartCollections()
+    if (retired.converted.length > 0 || retired.deleted.length > 0) {
+      console.log(`[Collections] Retired smart collections — kept: ${retired.converted.join(', ') || 'none'}, removed empty: ${retired.deleted.join(', ') || 'none'}`)
+    }
+  } catch (err) {
+    console.error('[Collections] Watchlist migration failed:', err)
+  }
   electronApp.setAppUserModelId('com.electron')
 
   if (process.defaultApp && process.argv.length >= 2) {
@@ -1587,15 +1995,56 @@ app.whenReady().then(() => {
     app.setAsDefaultProtocolClient(APP_PROTOCOL)
   }
 
+  // Attach default session download handler to catch file downloads from any window
+  if (!(session.defaultSession as any).__downloadHandlerAttached) {
+    (session.defaultSession as any).__downloadHandlerAttached = true
+    session.defaultSession.on('will-download', (_event, item, webContents) => {
+      const downloadUrl = item.getURL()
+      const fileName = item.getFilename()
+      const totalBytes = item.getTotalBytes()
+      item.cancel()
+      console.log(`[DefaultSession Download] Intercepted "${fileName}", routing to MyCinema Downloads: ${downloadUrl}`)
+
+      // Show instant notification feedback
+      notifyDownloadAdded(fileName, webContents)
+
+      httpDownloader.startHttpDownload({
+        url: downloadUrl,
+        fileName,
+        totalBytes
+      }).then(() => {
+        BrowserWindow.getAllWindows().forEach(w => {
+          if (!w.isDestroyed()) w.webContents.send('downloads-changed')
+        })
+        notifyDownloadAdded(fileName, webContents)
+      }).catch(err => {
+        console.error('[DefaultSession Download] Failed to start HTTP download:', err)
+      })
+    })
+  }
+
   // Attach file-system watchers for all already-saved folders
   const savedFolders = db.getFolders() as any[]
   savedFolders.forEach(f => attachFolderWatcher(f.path))
+  try {
+    const downloadFolder = getDownloadPath()
+    if (downloadFolder && fs.existsSync(downloadFolder)) {
+      attachFolderWatcher(downloadFolder)
+    }
+  } catch (err) {
+    console.warn('[Watcher] Failed to watch download folder:', err)
+  }
 
   app.on('browser-window-created', (_, window) => {
     optimizer.watchWindowShortcuts(window)
   })
 
   createWindow()
+
+  // Focus Tube polls only while the user has the feature switched on. Its tables
+  // are always created (see focusTube.initFocusTube) so that turning the feature
+  // off and on again never loses categories, subscriptions or watch progress.
+  startFocusTubePolling()
 
   app.on('activate', function () {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()
@@ -1605,6 +2054,7 @@ app.whenReady().then(() => {
 app.on('before-quit', () => {
   folderWatchers.forEach(w => w.close())
   folderWatchers.clear()
+  stopFocusTubePolling()
   // Gracefully destroy all active torrents
   torrentProgressIntervals.forEach(interval => clearInterval(interval))
   torrentProgressIntervals.clear()
@@ -1634,6 +2084,21 @@ ipcMain.handle('window-minimize', (event) => {
   BrowserWindow.fromWebContents(event.sender)?.minimize()
 })
 
+ipcMain.handle('window-restore', (event, opts?: { enterFullscreen?: boolean }) => {
+  const win = BrowserWindow.fromWebContents(event.sender)
+  if (!win) return
+  if (win.isMinimized()) win.restore()
+  win.show()
+  win.focus()
+  // Enforce fullscreen after the restore settles: issuing setFullScreen
+  // while the window is still minimized gets dropped on Windows.
+  if (opts?.enterFullscreen && !win.isFullScreen()) {
+    setTimeout(() => {
+      if (!win.isDestroyed() && !win.isFullScreen()) win.setFullScreen(true)
+    }, 200)
+  }
+})
+
 ipcMain.handle('window-toggle-fullscreen', (event) => {
   const win = BrowserWindow.fromWebContents(event.sender)
   if (!win) return false
@@ -1651,11 +2116,446 @@ ipcMain.handle('window-close', (event) => {
   BrowserWindow.fromWebContents(event.sender)?.close()
 })
 
-ipcMain.handle('open-web-popup', (event, url: string, title?: string) => {
+// PiP companion: Windows taskbar thumbnail buttons (-10s / play-pause /
+// +10s) shown while the overlay PiP window floats and the app is minimized.
+// Icons arrive as dataURLs generated by the renderer (no asset files needed).
+ipcMain.handle('pip-thumbar-update', (event, payload?: { isPlaying?: boolean; icons?: { play?: string; pause?: string; back?: string; fwd?: string } }) => {
+  try {
+    const win = BrowserWindow.fromWebContents(event.sender)
+    if (!win) return
+    const { nativeImage } = require('electron')
+    const toImage = (dataUrl?: string) => {
+      try {
+        return dataUrl ? nativeImage.createFromDataURL(dataUrl) : null
+      } catch (err) {
+        return null
+      }
+    }
+    const isPlaying = !!payload?.isPlaying
+    const icons = payload?.icons || {}
+    const sendCmd = (cmd: string) => {
+      try { win.webContents.send('thumbar-command', cmd) } catch (err) { /* ignore */ }
+    }
+    const buttons: any[] = []
+    const backIcon = toImage(icons.back)
+    if (backIcon && !backIcon.isEmpty()) {
+      buttons.push({ tooltip: 'Back 10 seconds', icon: backIcon, click: () => sendCmd('seek-back') })
+    }
+    const playPauseIcon = toImage(isPlaying ? icons.pause : icons.play)
+    if (playPauseIcon && !playPauseIcon.isEmpty()) {
+      buttons.push({ tooltip: isPlaying ? 'Pause' : 'Play', icon: playPauseIcon, click: () => sendCmd('toggle-play') })
+    }
+    const fwdIcon = toImage(icons.fwd)
+    if (fwdIcon && !fwdIcon.isEmpty()) {
+      buttons.push({ tooltip: 'Forward 10 seconds', icon: fwdIcon, click: () => sendCmd('seek-forward') })
+    }
+    win.setThumbarButtons(buttons)
+  } catch (err) {
+    // Taskbar buttons are Windows-only niceties — never break playback.
+  }
+})
+
+ipcMain.handle('pip-thumbar-clear', (event) => {
+  try {
+    BrowserWindow.fromWebContents(event.sender)?.setThumbarButtons([])
+  } catch (err) { /* ignore */ }
+})
+
+// Types the query into the page's own search box and submits it — for JS-only
+// (SPA) sites whose URL query params are ignored. Runs on first load only,
+// retried a few times while the app hydrates. Harmless on pages that already
+// show server-side results (same query, same page).
+const POPUP_AUTO_SEARCH_FN = `(() => {
+  try {
+    const q = %%QUERY%%;
+    const input = document.querySelector('input[placeholder*="earch" i], input[type="search"], input[name="s"], input[aria-label*="earch" i]');
+    if (!input) return 'no-input';
+    if (input.value === q && input.dataset.mycinemaSearched === '1') return 'already';
+    input.focus();
+    const proto = (window.HTMLInputElement && window.HTMLInputElement.prototype) || Object.getPrototypeOf(input);
+    const setter = proto && Object.getOwnPropertyDescriptor(proto, 'value') && Object.getOwnPropertyDescriptor(proto, 'value').set;
+    if (setter) setter.call(input, q); else input.value = q;
+    input.dataset.mycinemaSearched = '1';
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    input.dispatchEvent(new Event('change', { bubbles: true }));
+    const form = input.closest('form');
+    if (form) { if (form.requestSubmit) form.requestSubmit(); else form.submit(); return 'form-submitted'; }
+    ['keydown', 'keypress', 'keyup'].forEach(t => input.dispatchEvent(new KeyboardEvent(t, { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true, cancelable: true })));
+    const btn = (input.parentElement && input.parentElement.querySelector('button')) || document.querySelector('button[type="submit"]');
+    if (btn) btn.click();
+    return 'submitted';
+  } catch (e) { return 'error'; }
+})()`;
+
+function schedulePopupAutoSearch(popup: BrowserWindow, query: string): void {
+  const script = POPUP_AUTO_SEARCH_FN.replace('%%QUERY%%', JSON.stringify(query))
+  let settled = false
+  const attempt = () => {
+    if (settled || popup.isDestroyed()) return
+    popup.webContents.executeJavaScript(script, true)
+      .then(result => {
+        if (result === 'submitted' || result === 'form-submitted' || result === 'already') {
+          settled = true
+        }
+      })
+      .catch(() => {})
+  }
+  popup.webContents.once('did-finish-load', () => {
+    for (const delay of [800, 2500, 4500]) {
+      setTimeout(attempt, delay)
+    }
+  })
+}
+
+const POPUP_ANTI_AD_SCRIPT = `(() => {
+  try {
+    if (window.__mycinema_anti_ad_installed) return;
+    window.__mycinema_anti_ad_installed = true;
+
+    // 1. Defuse popunder window.open spawners & intercept magnet window.open
+    const _origOpen = window.open;
+    window.open = function(url, target, features) {
+      if (!url) return null;
+      try {
+        const strUrl = String(url).trim();
+        if (strUrl.toLowerCase().startsWith('magnet:')) {
+          window.location.href = 'mycinema-action://magnet?url=' + encodeURIComponent(strUrl);
+          return null;
+        }
+        const u = new URL(strUrl, window.location.href);
+        const host = u.hostname.toLowerCase().replace(/^www\\./, '');
+        // Block if popunder geometry is specified (ad popunder fingerprint)
+        if (features && /width=|height=|top=|left=|toolbar=|menubar=/i.test(features)) {
+          console.warn('[MyCinema AdBlock] Blocked window.open popunder features:', features, url);
+          return null;
+        }
+        // Block if host looks like an ad / tracker rotator domain, but allow trusted download & mediator domains
+        const isTrustedHost = /hub|drive|cloud|stream|movie|kat|greenmotors|hblinks|gamerxyt|cryptonewz|fast|storage|drain|file/i.test(host);
+        if (!isTrustedHost && /\b(ad|ads|pop|bet|affiliate|promo|banner|bonus)\b/i.test(host)) {
+          console.warn('[MyCinema AdBlock] Blocked window.open ad domain:', host);
+          return null;
+        }
+        // Legitimate URL (download host, file host, etc.) — let Electron's
+        // setWindowOpenHandler receive it so it can navigate the popup in-place.
+        return _origOpen.call(window, url, target || '_self', features);
+      } catch (e) {
+        return null;
+      }
+    };
+
+    // 2. Prevent malicious back-button hijacking (e.g. bonuscaf onpopstate)
+    try {
+      window.onpopstate = null;
+      Object.defineProperty(window, 'onpopstate', {
+        get: () => null,
+        set: () => {
+          console.warn('[MyCinema AdBlock] Prevented onpopstate back-button hijack attempt');
+        },
+        configurable: true
+      });
+    } catch (e) {}
+
+    // 3. Intercept clicks on magnet links anywhere on the page
+    document.addEventListener('click', (e) => {
+      try {
+        const anchor = e.target && e.target.closest ? e.target.closest('a') : null;
+        if (!anchor) return;
+        const href = anchor.getAttribute('href') || anchor.href || '';
+        if (typeof href === 'string' && href.trim().toLowerCase().startsWith('magnet:')) {
+          e.preventDefault();
+          e.stopPropagation();
+          window.location.href = 'mycinema-action://magnet?url=' + encodeURIComponent(href.trim());
+        }
+      } catch (err) {}
+    }, true);
+
+    // 3. Remove transparent / full-screen clickjack overlays and ad banners
+    const defuseOverlays = () => {
+      try {
+        const winW = window.innerWidth;
+        const winH = window.innerHeight;
+        const adSelectors = [
+          '#bb-overlay-x7m4q2', '.bb-overlay-x7m4q2',
+          '#banner-container', '.banner-container',
+          '.popunder', '#popunder', '[id*="popunder"]',
+          '.ad-banner', '.ads-banner', '.advertisement',
+          'iframe[src*="agl002"]', 'iframe[src*="ads"]',
+          'a[href*="bonuscaf"]', 'a[href*="adsboosters"]',
+          '[class*="code-block"]', '[class*="ai-viewport"]'
+        ];
+        document.querySelectorAll(adSelectors.join(',')).forEach(el => {
+          try { el.remove(); } catch (e) {}
+        });
+
+        // Scan for invisible full-page click interceptor layers (top-level elements only)
+        const elements = document.querySelectorAll('body > div, body > a, body > span, [style*="z-index"], [style*="position: fixed"]');
+        for (const el of elements) {
+          if (el.id === 'mycinema-back-btn' || el.id === 'mycinema-popup-toolbar' || el.id === 'mycinema-download-hud' || el.id === 'mycinema-added-banner') continue;
+          const style = window.getComputedStyle(el);
+          if (style.position === 'fixed' || style.position === 'absolute') {
+            const z = parseInt(style.zIndex, 10);
+            if (z >= 500) {
+              const w = el.offsetWidth;
+              const h = el.offsetHeight;
+              if (w > winW * 0.7 && h > winH * 0.7) {
+                const op = parseFloat(style.opacity);
+                const bg = style.backgroundColor;
+                if (op < 0.1 || bg === 'transparent' || bg.includes('rgba(0, 0, 0, 0)')) {
+                  console.warn('[MyCinema AdBlock] Removed invisible clickjack overlay');
+                  el.remove();
+                }
+              }
+            }
+          }
+        }
+      } catch (e) {}
+    };
+
+    defuseOverlays();
+    setInterval(defuseOverlays, 2500);
+  } catch (e) {}
+})()`;
+
+const TRUSTED_DOWNLOAD_DOMAINS = [
+  // HDHub4u ecosystem (mirrors, mediator pages, link generators, storage)
+  'hdhub',
+  'hub4u',
+  '4khdhub',
+  'greenmotors',
+  'hblinks',
+  'hubdrive',
+  'hubcdn',
+  'hubcloud',
+  'gamerxyt',
+  'cryptonewz',
+  'hdstream4u',
+  'vidaraa',
+  'snvhost',
+
+  // KatmovieHD ecosystem
+  'katmovie',
+  'katmoviehd',
+  'katmovieshd',
+  'katworld',
+  'katdrive',
+  'kmhd',
+  'katlinks',
+
+  // Vegamovies / Dotmovies / Bolly4u / Moviesflix ecosystem
+  'vegamovies',
+  'dotmovies',
+  'bolly4u',
+  'moviesflix',
+  'vcloud',
+  'v-cloud',
+  'vegalinks',
+
+  // Fast direct download CDNs & Cloud Object Storage
+  'cloudflarestorage.com',
+  'r2.cloudflarestorage.com',
+  'pixeldrain.com',
+  'pixeldrain.dev',
+  'pixeldrain',
+  'fuckingfast.net',
+  'fuckingfast.co',
+  'fuckingfast',
+  'fastdl',
+  'gdflix',
+  'gdtot',
+  'gdlink',
+  'filepress',
+  'filelions',
+  'buzzheavier.com',
+  'buzzheavier',
+
+  // Cloud & File Hosting
+  'drive.google.com',
+  'google.com',
+  'mega.nz',
+  'mediafire.com',
+  '1fichier.com',
+  'gofile.io',
+  'krakenfiles.com',
+  'streamtape',
+  'doodstream',
+  'sendcm',
+  'send.cm',
+  'streamwish',
+  'mixdrop',
+  'hxfile',
+  'droplink',
+  'shareus',
+  'technorozen',
+  'rezahub',
+  'bestlinks',
+  'links.hub',
+  'workers.dev',
+  'pages.dev',
+  'terabox.com',
+  'terabox.app',
+  'terabox'
+]
+
+function isTrustedPopupDestination(destUrl: string, currentUrl: string): boolean {
+  try {
+    const dest = new URL(destUrl)
+    const cur = new URL(currentUrl)
+    const destHost = dest.hostname.toLowerCase().replace(/^www\./, '')
+    const curHost = cur.hostname.toLowerCase().replace(/^www\./, '')
+
+    // Never allow known ad/tracker URLs
+    if (isBlockedAdUrl(destUrl)) {
+      return false
+    }
+
+    // 1. Same host or same base domain
+    if (destHost === curHost || destHost.endsWith(`.${curHost}`) || curHost.endsWith(`.${destHost}`)) {
+      return true
+    }
+
+    // 2. Any download site mirror / brand hints (e.g. katmovie, hdhub, hub4u)
+    for (const site of downloadSites.DOWNLOAD_SITES) {
+      if (site.domainHints.some(hint => destHost.includes(hint.toLowerCase()))) return true
+      try {
+        const portalHost = new URL(site.portalUrl).hostname.toLowerCase().replace(/^www\./, '')
+        if (destHost === portalHost || destHost.endsWith(`.${portalHost}`)) return true
+      } catch {}
+    }
+
+    // 3. Trusted download & cloud hosting services
+    if (TRUSTED_DOWNLOAD_DOMAINS.some(trusted => destHost.includes(trusted.toLowerCase()))) {
+      return true
+    }
+
+    // 4. Direct video or archive file downloads (e.g. .mkv, .mp4, .zip)
+    if (/\.(mkv|mp4|avi|webm|mov|m4v|zip|rar|7z|tar|gz|iso)(\?|$)/i.test(dest.pathname + dest.search)) {
+      return true
+    }
+
+    // 5. Common file-sharing & mediator link signatures from legitimate download / mediator pages
+    const pathname = dest.pathname.toLowerCase()
+    const isCurDownloadSite =
+      downloadSites.DOWNLOAD_SITES.some(s => s.domainHints.some(h => curHost.includes(h.toLowerCase()))) ||
+      TRUSTED_DOWNLOAD_DOMAINS.some(t => curHost.includes(t.toLowerCase()))
+
+    if (isCurDownloadSite) {
+      if (
+        pathname.startsWith('/file/') ||
+        pathname.startsWith('/drive/') ||
+        pathname.startsWith('/archives/') ||
+        pathname.startsWith('/download/') ||
+        pathname.startsWith('/homelander/') ||
+        pathname.startsWith('/d/') ||
+        pathname.startsWith('/u/') ||
+        dest.searchParams.has('id') ||
+        dest.searchParams.has('token') ||
+        dest.searchParams.has('host')
+      ) {
+        return true
+      }
+    }
+
+    return false
+  } catch {
+    return false
+  }
+}
+
+const POPUP_LOADING_BAR_SCRIPT = `(() => {
+  try {
+    if (window.__mycinemaLoadingBarInstalled) return;
+    window.__mycinemaLoadingBarInstalled = true;
+
+    let progressTimer = null;
+    let currentProgress = 0;
+
+    function ensureBar() {
+      let bar = document.getElementById('mycinema-top-progress-bar');
+      if (!bar) {
+        bar = document.createElement('div');
+        bar.id = 'mycinema-top-progress-bar';
+        Object.assign(bar.style, {
+          position: 'fixed',
+          top: '0',
+          left: '0',
+          height: '3px',
+          width: '0%',
+          background: 'linear-gradient(90deg, #06b6d4, #e50914, #38bdf8)',
+          boxShadow: '0 0 10px rgba(6, 182, 212, 0.8), 0 0 5px rgba(229, 9, 20, 0.6)',
+          zIndex: '2147483647',
+          pointerEvents: 'none',
+          opacity: '0',
+          transition: 'width 0.25s cubic-bezier(0.1, 0.9, 0.2, 1), opacity 0.3s ease'
+        });
+        (document.body || document.documentElement).appendChild(bar);
+      }
+      return bar;
+    }
+
+    window.__mycinemaStartLoading = function() {
+      try {
+        const bar = ensureBar();
+        if (progressTimer) clearInterval(progressTimer);
+        currentProgress = Math.max(currentProgress, 25);
+        bar.style.transition = 'width 0.25s cubic-bezier(0.1, 0.9, 0.2, 1), opacity 0.2s ease';
+        bar.style.opacity = '1';
+        bar.style.width = currentProgress + '%';
+
+        progressTimer = setInterval(() => {
+          if (currentProgress < 85) {
+            const step = Math.max(1, Math.floor((90 - currentProgress) / 7));
+            currentProgress += step;
+            bar.style.width = currentProgress + '%';
+          }
+        }, 220);
+      } catch {}
+    };
+
+    window.__mycinemaFinishLoading = function() {
+      try {
+        const bar = ensureBar();
+        if (progressTimer) {
+          clearInterval(progressTimer);
+          progressTimer = null;
+        }
+        currentProgress = 100;
+        bar.style.transition = 'width 0.18s ease-out, opacity 0.3s ease 0.18s';
+        bar.style.width = '100%';
+        bar.style.opacity = '0';
+        setTimeout(() => {
+          if (currentProgress === 100) {
+            bar.style.transition = 'none';
+            bar.style.width = '0%';
+            currentProgress = 0;
+          }
+        }, 500);
+      } catch {}
+    };
+
+    // Instant click listener on interactive elements to give zero-latency feedback
+    document.addEventListener('click', (e) => {
+      try {
+        const el = e.target;
+        if (!el || typeof el.closest !== 'function') return;
+        const clickable = el.closest('a, button, input[type="submit"], input[type="button"], [role="button"], form');
+        if (clickable) {
+          window.__mycinemaStartLoading();
+          setTimeout(() => {
+            if (currentProgress > 0 && currentProgress < 100) {
+              window.__mycinemaFinishLoading();
+            }
+          }, 9000);
+        }
+      } catch {}
+    }, true);
+  } catch {}
+})();`
+
+ipcMain.handle('open-web-popup', (event, url: string, title?: string, autoSearch?: string) => {
   const parent = BrowserWindow.fromWebContents(event.sender) || BrowserWindow.getAllWindows()[0]
   const popup = new BrowserWindow({
     parent,
-    modal: true,
+    modal: false,
     show: false,
     width: 1000,
     height: 700,
@@ -1664,59 +2564,270 @@ ipcMain.handle('open-web-popup', (event, url: string, title?: string) => {
     backgroundColor: '#0f172a',
     webPreferences: {
       nodeIntegration: false,
-      contextIsolation: true
+      contextIsolation: true,
+      // Dedicated partition: the popup adblocker only touches this session,
+      // never the main window (YouTube embeds, TMDB, streaming stay intact).
+      partition: POPUP_PARTITION
     }
   })
 
+  activePopupWindows.add(popup)
+  popup.on('closed', () => {
+    activePopupWindows.delete(popup)
+  })
+
+  // Clean User-Agent so mediator verification and DDoS protection pages treat the popup like standard Chrome
+  const popupSession = popup.webContents.session
+  try {
+    const defaultUa = popupSession.getUserAgent()
+    const cleanUa = defaultUa.replace(/Electron\/\S+\s*/i, '').replace(/MyCinema\/\S+\s*/i, '')
+    popupSession.setUserAgent(cleanUa)
+  } catch {}
+
+  // Lightweight uBlock-style filtering for the popup only.
+  registerPopupAdblock(popup.webContents.session)
+
+  // Automatic file download handler: route all web downloads into MyCinema's resilient background Downloads manager
+  if (!(popupSession as any).__downloadHandlerAttached) {
+    (popupSession as any).__downloadHandlerAttached = true
+    popupSession.on('will-download', (_event, item, webContents) => {
+      const downloadUrl = item.getURL()
+      const fileName = item.getFilename()
+      const totalBytes = item.getTotalBytes()
+
+      // Cancel the fragile Chromium window-bound download so closing the popup doesn't abort it
+      item.cancel()
+
+      console.log(`[Popup Download] Intercepted "${fileName}", routing to MyCinema Downloads tab: ${downloadUrl}`)
+
+      // Show immediate notification banner in all active popup windows and source webContents
+      notifyDownloadAdded(fileName, webContents)
+
+      httpDownloader.startHttpDownload({
+        url: downloadUrl,
+        fileName,
+        totalBytes
+      }).then(() => {
+        // Notify all windows that downloads list updated
+        BrowserWindow.getAllWindows().forEach(w => {
+          if (!w.isDestroyed()) {
+            w.webContents.send('downloads-changed')
+          }
+        })
+
+        // Re-confirm banner in case of any micro-navigation delay
+        notifyDownloadAdded(fileName, webContents)
+      }).catch(err => {
+        console.error('[Popup Download] Failed to start HTTP download:', err)
+      })
+    })
+  }
+
   const updateBackButton = () => {
-    if (popup.webContents.canGoBack()) {
-      popup.webContents.executeJavaScript(`
-        if (!document.getElementById('mycinema-back-btn')) {
-          const btn = document.createElement('div');
-          btn.id = 'mycinema-back-btn';
-          btn.innerHTML = '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,0.9)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>';
-          Object.assign(btn.style, {
+    const canGoBack = popup.webContents.canGoBack()
+    popup.webContents.executeJavaScript(`
+      (() => {
+        let bar = document.getElementById('mycinema-popup-toolbar');
+        if (!bar) {
+          bar = document.createElement('div');
+          bar.id = 'mycinema-popup-toolbar';
+          Object.assign(bar.style, {
             position: 'fixed',
             bottom: '24px',
             left: '24px',
-            width: '44px',
-            height: '44px',
-            backgroundColor: 'rgba(15, 23, 42, 0.75)',
-            backdropFilter: 'blur(12px)',
-            webkitBackdropFilter: 'blur(12px)',
-            border: '1px solid rgba(255, 255, 255, 0.1)',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '8px',
+            padding: '6px',
+            backgroundColor: 'rgba(15, 23, 42, 0.85)',
+            backdropFilter: 'blur(16px)',
+            webkitBackdropFilter: 'blur(16px)',
+            border: '1px solid rgba(255, 255, 255, 0.15)',
+            borderRadius: '28px',
+            zIndex: '2147483647',
+            boxShadow: '0 8px 32px rgba(0, 0, 0, 0.5)',
+            transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+            fontFamily: 'system-ui, -apple-system, sans-serif'
+          });
+          document.body.appendChild(bar);
+        }
+
+        bar.innerHTML = '';
+
+        // Back button (shown only if previous history exists)
+        if (${canGoBack}) {
+          const backBtn = document.createElement('button');
+          backBtn.title = 'Go back';
+          backBtn.innerHTML = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>';
+          Object.assign(backBtn.style, {
+            width: '36px',
+            height: '36px',
             borderRadius: '50%',
+            border: 'none',
+            background: 'rgba(255, 255, 255, 0.08)',
+            color: '#fff',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
-            cursor: 'pointer',
-            zIndex: '2147483647',
-            boxShadow: '0 8px 24px rgba(0, 0, 0, 0.4)',
-            transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+            cursor: 'pointer'
           });
-          btn.onmouseover = () => { 
-            btn.style.transform = 'scale(1.1) translateY(-2px)'; 
-            btn.style.backgroundColor = 'rgba(15, 23, 42, 0.95)'; 
-            btn.style.borderColor = 'rgba(6, 182, 212, 0.5)'; 
-            btn.style.boxShadow = '0 12px 28px rgba(6, 182, 212, 0.2)'; 
-          };
-          btn.onmouseout = () => { 
-            btn.style.transform = 'scale(1) translateY(0)'; 
-            btn.style.backgroundColor = 'rgba(15, 23, 42, 0.75)'; 
-            btn.style.borderColor = 'rgba(255, 255, 255, 0.1)'; 
-            btn.style.boxShadow = '0 8px 24px rgba(0, 0, 0, 0.4)'; 
-          };
-          btn.onclick = () => window.history.back();
-          document.body.appendChild(btn);
+          backBtn.onclick = () => window.history.back();
+          bar.appendChild(backBtn);
         }
-      `).catch(() => {})
-    } else {
-      popup.webContents.executeJavaScript(`
-        const btn = document.getElementById('mycinema-back-btn');
-        if (btn) btn.remove();
-      `).catch(() => {})
-    }
+
+        // Open in Browser button
+        const openExtBtn = document.createElement('button');
+        openExtBtn.title = 'Open this page in your default browser (Chrome/Edge)';
+        openExtBtn.innerHTML = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg><span style="margin-left:6px;font-size:11px;font-weight:700;letter-spacing:0.04em;">Browser</span>';
+        Object.assign(openExtBtn.style, {
+          height: '36px',
+          padding: '0 12px',
+          borderRadius: '18px',
+          border: '1px solid rgba(6, 182, 212, 0.3)',
+          background: 'rgba(6, 182, 212, 0.15)',
+          color: '#22d3ee',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          cursor: 'pointer'
+        });
+        openExtBtn.onclick = () => {
+          window.location.href = 'mycinema-action://open-external?url=' + encodeURIComponent(window.location.href);
+        };
+        bar.appendChild(openExtBtn);
+
+        // Copy Link button
+        const copyBtn = document.createElement('button');
+        copyBtn.title = 'Copy link';
+        copyBtn.innerHTML = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>';
+        Object.assign(copyBtn.style, {
+          width: '36px',
+          height: '36px',
+          borderRadius: '50%',
+          border: 'none',
+          background: 'rgba(255, 255, 255, 0.08)',
+          color: '#cbd5e1',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          cursor: 'pointer'
+        });
+        copyBtn.onclick = () => {
+          navigator.clipboard.writeText(window.location.href).then(() => {
+            copyBtn.style.color = '#34d399';
+            setTimeout(() => { copyBtn.style.color = '#cbd5e1'; }, 1500);
+          });
+        };
+        bar.appendChild(copyBtn);
+
+        // Download HUD handler
+        if (!window.__downloadHudInstalled) {
+          window.__downloadHudInstalled = true;
+          window.__updateDownloadHud = (name, pct, recv, total) => {
+            let hud = document.getElementById('mycinema-download-hud');
+            if (!hud) {
+              hud = document.createElement('div');
+              hud.id = 'mycinema-download-hud';
+              Object.assign(hud.style, {
+                position: 'fixed',
+                top: '20px',
+                right: '20px',
+                zIndex: '2147483647',
+                padding: '12px 18px',
+                backgroundColor: 'rgba(15, 23, 42, 0.95)',
+                border: '1px solid rgba(6, 182, 212, 0.4)',
+                borderRadius: '14px',
+                color: '#fff',
+                fontFamily: 'system-ui, -apple-system, sans-serif',
+                boxShadow: '0 10px 30px rgba(0,0,0,0.6)',
+                minWidth: '280px'
+              });
+              document.body.appendChild(hud);
+            }
+            const mbRecv = (recv / (1024 * 1024)).toFixed(1);
+            const mbTotal = (total / (1024 * 1024)).toFixed(1);
+            hud.innerHTML = \`
+              <div style="font-size:12px;font-weight:700;color:#22d3ee;margin-bottom:6px;display:flex;justify-content:space-between;">
+                <span>Downloading File</span>
+                <span>\${pct}%</span>
+              </div>
+              <div style="font-size:11px;color:#94a3b8;margin-bottom:8px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:260px;">\${name}</div>
+              <div style="width:100%;height:6px;background:rgba(255,255,255,0.1);border-radius:3px;overflow:hidden;">
+                <div style="width:\${pct}%;height:100%;background:#06b6d4;border-radius:3px;transition:width 0.3s ease;"></div>
+              </div>
+              <div style="font-size:10px;color:#64748b;margin-top:6px;text-align:right;">\${mbRecv} MB / \${mbTotal} MB (Saving to Downloads)</div>
+            \`;
+          };
+
+          window.__downloadDone = (name, path) => {
+            const hud = document.getElementById('mycinema-download-hud');
+            if (hud) {
+              hud.innerHTML = \`
+                <div style="font-size:12px;font-weight:700;color:#34d399;margin-bottom:4px;">Download Complete!</div>
+                <div style="font-size:11px;color:#94a3b8;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:260px;">\${name}</div>
+                <div style="font-size:10px;color:#64748b;margin-top:4px;">Saved to Downloads folder</div>
+              \`;
+              setTimeout(() => { hud.remove(); }, 6000);
+            }
+          };
+
+          window.__showDownloadAddedBanner = (name) => {
+            let banner = document.getElementById('mycinema-added-banner');
+            if (!banner) {
+              banner = document.createElement('div');
+              banner.id = 'mycinema-added-banner';
+              Object.assign(banner.style, {
+                position: 'fixed',
+                top: '24px',
+                left: '50%',
+                transform: 'translateX(-50%)',
+                zIndex: '2147483647',
+                padding: '12px 20px',
+                backgroundColor: 'rgba(15, 23, 42, 0.95)',
+                backdropFilter: 'blur(16px)',
+                webkitBackdropFilter: 'blur(16px)',
+                border: '1px solid #06b6d4',
+                borderRadius: '16px',
+                color: '#fff',
+                boxShadow: '0 12px 36px rgba(0,0,0,0.7)',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '12px',
+                fontFamily: 'system-ui, -apple-system, sans-serif'
+              });
+              document.body.appendChild(banner);
+            }
+            banner.innerHTML = \`
+              <div style="width:32px;height:32px;border-radius:50%;background:rgba(6,182,212,0.2);display:flex;align-items:center;justify-content:center;color:#22d3ee;font-size:16px;">📥</div>
+              <div>
+                <div style="font-size:13px;font-weight:700;color:#22d3ee;">Added to MyCinema Downloads!</div>
+                <div style="font-size:11px;color:#cbd5e1;margin-top:2px;max-width:320px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">\${name}</div>
+                <div style="font-size:10px;color:#64748b;margin-top:3px;">Downloading in background • Safe to close window</div>
+              </div>
+            \`;
+            setTimeout(() => { if (banner) banner.remove(); }, 7000);
+          };
+        }
+      })();
+    `).catch(() => {})
   }
+
+  const injectAntiAd = () => {
+    popup.webContents.executeJavaScript(POPUP_ANTI_AD_SCRIPT).catch(() => {})
+    popup.webContents.executeJavaScript(POPUP_LOADING_BAR_SCRIPT).catch(() => {})
+  }
+
+  popup.webContents.on('did-start-loading', () => {
+    popup.webContents.executeJavaScript('if (typeof window.__mycinemaStartLoading === "function") window.__mycinemaStartLoading();').catch(() => {})
+  })
+
+  popup.webContents.on('did-stop-loading', () => {
+    popup.webContents.executeJavaScript('if (typeof window.__mycinemaFinishLoading === "function") window.__mycinemaFinishLoading();').catch(() => {})
+  })
+
+  popup.webContents.on('did-fail-load', () => {
+    popup.webContents.executeJavaScript('if (typeof window.__mycinemaFinishLoading === "function") window.__mycinemaFinishLoading();').catch(() => {})
+  })
 
   popup.webContents.on('dom-ready', () => {
     popup.webContents.insertCSS(`
@@ -1724,17 +2835,98 @@ ipcMain.handle('open-web-popup', (event, url: string, title?: string) => {
       ::-webkit-scrollbar-track { background: transparent; }
       ::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.2); border-radius: 4px; }
       ::-webkit-scrollbar-thumb:hover { background: rgba(255, 255, 255, 0.3); }
+      ${POPUP_COSMETIC_CSS}
     `).catch(() => {})
+    injectAntiAd()
+    updateBackButton()
+    popup.webContents.executeJavaScript('if (typeof window.__mycinemaFinishLoading === "function") window.__mycinemaFinishLoading();').catch(() => {})
+  })
+
+  popup.webContents.on('did-navigate-in-page', () => {
+    injectAntiAd()
+    updateBackButton()
+  })
+  popup.webContents.on('did-navigate', () => {
+    injectAntiAd()
     updateBackButton()
   })
 
-  popup.webContents.on('did-navigate-in-page', updateBackButton)
-  popup.webContents.on('did-navigate', updateBackButton)
-
-  // Force links that would open in a new window to open in the current popup instead
+  // Prevent popup window ad hijacking on click (popunders / ad rotators)
   popup.webContents.setWindowOpenHandler(({ url }) => {
-    popup.loadURL(url)
+    if (url.startsWith('magnet:')) {
+      console.log('[Popup] Intercepted magnet link popup request:', url.slice(0, 80))
+      const magnetName = getMagnetDisplayName(url) || 'Torrent Download'
+      notifyDownloadAdded(magnetName, popup.webContents)
+      void handleStartTorrentDownload(url).then(() => {
+        notifyDownloadAdded(magnetName, popup.webContents)
+      })
+      return { action: 'deny' }
+    }
+    if (isBlockedAdUrl(url)) {
+      console.log('[Popup] Blocked ad window:', url)
+      return { action: 'deny' }
+    }
+    const currentUrl = popup.webContents.getURL() || ''
+    // Only allow new-window navigations to trusted download hosts or the site itself
+    if (isTrustedPopupDestination(url, currentUrl)) {
+      console.log('[Popup] Allowed trusted navigation to:', url)
+      popup.loadURL(url).catch(() => {})
+    } else {
+      console.log('[Popup] Denied untrusted new window (prevented ad navigation):', url)
+    }
     return { action: 'deny' }
+  })
+
+  // Ad hijacks that steer the page itself (script redirects, link shortener
+  // chains landing on ad networks) are stopped. Legit download hosts pass through.
+  popup.webContents.on('will-redirect', (event, redirectUrl) => {
+    if (isBlockedAdUrl(redirectUrl)) {
+      console.log('[Popup] Prevented ad redirect to:', redirectUrl)
+      event.preventDefault()
+    }
+  })
+  popup.webContents.on('will-navigate', (event, navUrl) => {
+    if (navUrl.startsWith('mycinema-action://magnet')) {
+      event.preventDefault()
+      try {
+        const u = new URL(navUrl)
+        const magnetUrl = u.searchParams.get('url')
+        if (magnetUrl) {
+          console.log('[Popup] Intercepted mycinema magnet action:', magnetUrl.slice(0, 80))
+          const magnetName = getMagnetDisplayName(magnetUrl) || 'Torrent Download'
+          notifyDownloadAdded(magnetName, popup.webContents)
+          void handleStartTorrentDownload(magnetUrl).then(() => {
+            notifyDownloadAdded(magnetName, popup.webContents)
+          })
+        }
+      } catch (e) {
+        console.error('[Popup] Failed to process mycinema magnet action:', e)
+      }
+      return
+    }
+    if (navUrl.startsWith('magnet:')) {
+      event.preventDefault()
+      console.log('[Popup] Intercepted navigation to magnet link:', navUrl.slice(0, 80))
+      const magnetName = getMagnetDisplayName(navUrl) || 'Torrent Download'
+      notifyDownloadAdded(magnetName, popup.webContents)
+      void handleStartTorrentDownload(navUrl).then(() => {
+        notifyDownloadAdded(magnetName, popup.webContents)
+      })
+      return
+    }
+    if (navUrl.startsWith('mycinema-action://open-external')) {
+      event.preventDefault()
+      try {
+        const u = new URL(navUrl)
+        const target = u.searchParams.get('url')
+        if (target) shell.openExternal(target)
+      } catch {}
+      return
+    }
+    if (isBlockedAdUrl(navUrl)) {
+      console.log('[Popup] Prevented ad navigation to:', navUrl)
+      event.preventDefault()
+    }
   })
 
   // Handle hardware/mouse back buttons
@@ -1744,9 +2936,78 @@ ipcMain.handle('open-web-popup', (event, url: string, title?: string) => {
     }
   })
 
+  // Prevent guest pages from trapping the user with `beforeunload` dialogs / close blocking
+  popup.webContents.on('will-prevent-unload', (e) => {
+    e.preventDefault()
+  })
+
+  // Allow closing easily with Escape key
+  popup.webContents.on('before-input-event', (_event, input) => {
+    if (input.key === 'Escape' && input.type === 'keyDown') {
+      popup.close()
+    }
+  })
+
   popup.loadURL(url)
-  popup.once('ready-to-show', () => popup.show())
+  let popupShown = false
+  const showPopup = () => {
+    if (!popupShown && !popup.isDestroyed()) {
+      popupShown = true
+      popup.show()
+    }
+  }
+  popup.once('ready-to-show', showPopup)
+  setTimeout(showPopup, 800)
+  if (autoSearch && autoSearch.trim()) {
+    schedulePopupAutoSearch(popup, autoSearch.trim())
+  }
   return true
+})
+
+// ─── Download sites (portal-resolved mirrors + search deep-links) ───────────
+// Domains rotate/ban often, so the renderer never hardcodes one: it asks main
+// to resolve the live domain from the site's portal page (cached 12h), with a
+// manual Settings override as backup.
+ipcMain.handle('get-download-sites', () => {
+  return downloadSites.getDownloadSitesStatus()
+})
+
+ipcMain.handle('resolve-download-site-url', async (_event, siteId: string, title: string, year?: string | number | null) => {
+  return downloadSites.resolveDownloadSiteUrl(siteId, title, year)
+})
+
+ipcMain.handle('set-download-site-domain', (_event, siteId: string, domain: string) => {
+  return downloadSites.setDownloadSiteDomain(siteId, domain)
+})
+
+ipcMain.handle('reset-download-site-domain', (_event, siteId: string) => {
+  downloadSites.resetDownloadSiteDomain(siteId)
+  return true
+})
+
+ipcMain.handle('refresh-download-site-domain', (_event, siteId: string) => {
+  return downloadSites.refreshDownloadSiteDomain(siteId)
+})
+
+ipcMain.handle('set-focus-tube-enabled', (event, enabled: boolean) => {
+  const settings = { ...loadAppSettings(), focusTubeEnabled: enabled !== false }
+  saveAppSettings(settings)
+
+  // Start or stop the background polling to match the new state. No user data
+  // is touched either way — the tables stay exactly as they are.
+  if (settings.focusTubeEnabled) {
+    console.log('[FocusTube] enabled — background polling started')
+    startFocusTubePolling()
+  } else {
+    console.log('[FocusTube] disabled — tab hidden, background polling stopped (saved data kept)')
+    stopFocusTubePolling()
+  }
+
+  BrowserWindow.getAllWindows().forEach(window => {
+    window.webContents.send('app-settings-changed', settings)
+  })
+
+  return settings
 })
 
 ipcMain.handle('get-app-settings', () => {
@@ -1769,8 +3030,446 @@ ipcMain.handle('set-launch-fullscreen', (event, launchFullscreen: boolean) => {
   return settings
 })
 
+ipcMain.handle('set-remember-online-progress', (event, rememberOnlineProgress: boolean) => {
+  const settings = { ...loadAppSettings(), rememberOnlineProgress }
+  saveAppSettings(settings)
+
+  BrowserWindow.getAllWindows().forEach(window => {
+    window.webContents.send('app-settings-changed', settings)
+  })
+
+  return settings
+})
+
+ipcMain.handle('set-notify-new-episodes', (event, notifyNewEpisodes: boolean) => {
+  const settings = { ...loadAppSettings(), notifyNewEpisodes }
+  saveAppSettings(settings)
+  // Turning alerts off clears pending flags so re-enabling doesn't resurface
+  // stale drops.
+  if (!notifyNewEpisodes) {
+    try { db.clearAllFollowedNewFlags() } catch { /* best-effort */ }
+  }
+
+  BrowserWindow.getAllWindows().forEach(window => {
+    window.webContents.send('app-settings-changed', settings)
+  })
+
+  return settings
+})
+
+ipcMain.handle('set-show-download-tray', (_event, enabled: boolean) => {
+  const settings = { ...loadAppSettings(), showDownloadTray: enabled !== false }
+  saveAppSettings(settings)
+
+  BrowserWindow.getAllWindows().forEach(window => {
+    if (!window.isDestroyed()) {
+      window.webContents.send('app-settings-changed', settings)
+    }
+  })
+
+  return settings
+})
+
+ipcMain.handle('set-user-profile', (_event, { userName, profileImage }: { userName?: string; profileImage?: string | null }) => {
+  const current = loadAppSettings()
+  let processedImage = current.profileImage
+
+  if (profileImage !== undefined) {
+    const normalizedBuiltinImage = normalizeBuiltinProfileImage(profileImage)
+    if (normalizedBuiltinImage !== profileImage) {
+      processedImage = normalizedBuiltinImage
+    } else if (!profileImage) {
+      processedImage = null
+      try {
+        const avatarPath = join(app.getPath('userData'), 'user-avatar.png')
+        if (fs.existsSync(avatarPath)) fs.unlinkSync(avatarPath)
+      } catch {}
+    } else if (profileImage.startsWith('data:image/')) {
+      try {
+        const match = profileImage.match(/^data:image\/([a-zA-Z0-9]+);base64,(.+)$/)
+        if (match) {
+          const ext = match[1] === 'jpeg' ? 'jpg' : match[1]
+          const avatarPath = join(app.getPath('userData'), `user-avatar.${ext}`)
+          fs.writeFileSync(avatarPath, Buffer.from(match[2], 'base64'))
+          processedImage = `media://file/${avatarPath.replace(/\\/g, '/')}?t=${Date.now()}`
+        } else {
+          processedImage = profileImage
+        }
+      } catch (err) {
+        console.error('[Profile] Failed to save avatar to disk:', err)
+        processedImage = profileImage
+      }
+    } else {
+      processedImage = profileImage
+    }
+  }
+
+  const settings: AppSettings = {
+    ...current,
+    ...(userName !== undefined ? { userName: userName.trim() || 'User' } : {}),
+    ...(profileImage !== undefined ? { profileImage: processedImage } : {})
+  }
+  saveAppSettings(settings)
+
+  BrowserWindow.getAllWindows().forEach(window => {
+    if (!window.isDestroyed()) {
+      window.webContents.send('app-settings-changed', settings)
+    }
+  })
+
+  return settings
+})
+
+ipcMain.handle('get-max-concurrent-downloads', () => {
+  return getMaxConcurrentDownloads()
+})
+
+ipcMain.handle('set-max-concurrent-downloads', (_, value: number) => {
+  const parsed = Math.floor(Number(value))
+  const settings = {
+    ...loadAppSettings(),
+    maxConcurrentDownloads: Number.isFinite(parsed) && parsed > 0 ? Math.min(parsed, 99) : 0
+  }
+  saveAppSettings(settings)
+
+  BrowserWindow.getAllWindows().forEach(window => {
+    window.webContents.send('app-settings-changed', settings)
+  })
+
+  // Converge on the new budget right away: raising it starts waiting items,
+  // lowering it parks the newest extras.
+  void pumpDownloadQueue()
+  setTimeout(() => enforceDownloadConcurrency(), 50)
+  return settings.maxConcurrentDownloads
+})
+
+ipcMain.handle('get-download-dir', () => {
+  const defaultPath = path.join(app.getPath('downloads'), 'MyCinema')
+  const currentPath = getDownloadPath()
+  const settings = loadAppSettings()
+  const customPath = (settings.downloadPath || '').trim()
+  return {
+    currentPath,
+    defaultPath,
+    isCustom: Boolean(customPath && path.resolve(customPath) !== path.resolve(defaultPath))
+  }
+})
+
+ipcMain.handle('set-download-dir', async (_, targetPath: string) => {
+  const trimmed = (targetPath || '').trim()
+  if (!trimmed) {
+    throw new Error('Download folder path cannot be empty')
+  }
+  const resolved = path.resolve(trimmed)
+  if (!fs.existsSync(resolved)) {
+    try {
+      fs.mkdirSync(resolved, { recursive: true })
+    } catch (err: any) {
+      throw new Error(`Cannot create folder at "${resolved}": ${err.message}`)
+    }
+  }
+
+  // Verify write permission
+  const testFile = path.join(resolved, `.mycinema-test-${Date.now()}`)
+  try {
+    fs.writeFileSync(testFile, 'test')
+    fs.unlinkSync(testFile)
+  } catch (err: any) {
+    throw new Error(`Folder is not writable: ${err.message}`)
+  }
+
+  const oldPath = getDownloadPath()
+  const isOldLibraryFolder = (db.getFolders() as any[]).some(f => path.resolve(f.path) === path.resolve(oldPath))
+  if (!isOldLibraryFolder) {
+    detachFolderWatcher(oldPath)
+  }
+
+  const defaultPath = path.join(app.getPath('downloads'), 'MyCinema')
+  const isCustom = path.resolve(resolved) !== path.resolve(defaultPath)
+  const settings = { ...loadAppSettings(), downloadPath: isCustom ? resolved : '' }
+  saveAppSettings(settings)
+  attachFolderWatcher(resolved)
+
+  const payload = {
+    currentPath: isCustom ? resolved : defaultPath,
+    defaultPath,
+    isCustom
+  }
+
+  BrowserWindow.getAllWindows().forEach(window => {
+    if (!window.isDestroyed()) {
+      window.webContents.send('app-settings-changed', settings)
+      window.webContents.send('download-dir-changed', payload)
+    }
+  })
+
+  return payload
+})
+
+ipcMain.handle('reset-download-dir', async () => {
+  const oldPath = getDownloadPath()
+  const isOldLibraryFolder = (db.getFolders() as any[]).some(f => path.resolve(f.path) === path.resolve(oldPath))
+  if (!isOldLibraryFolder) {
+    detachFolderWatcher(oldPath)
+  }
+
+  const defaultPath = path.join(app.getPath('downloads'), 'MyCinema')
+  if (!fs.existsSync(defaultPath)) {
+    try { fs.mkdirSync(defaultPath, { recursive: true }) } catch {}
+  }
+
+  const settings = { ...loadAppSettings(), downloadPath: '' }
+  saveAppSettings(settings)
+  attachFolderWatcher(defaultPath)
+
+  const payload = {
+    currentPath: defaultPath,
+    defaultPath,
+    isCustom: false
+  }
+
+  BrowserWindow.getAllWindows().forEach(window => {
+    if (!window.isDestroyed()) {
+      window.webContents.send('app-settings-changed', settings)
+      window.webContents.send('download-dir-changed', payload)
+    }
+  })
+
+  return payload
+})
+
+// Assign FIFO positions to rows that predate the queue_order migration.
+function backfillDownloadQueueOrder(): void {
+  try {
+    const rows = db.getDownloads().filter((d: any) => d.queueOrder == null)
+    if (rows.length === 0) return
+    let order = db.getDownloads().reduce((max: number, d: any) => {
+      const v = Number(d.queueOrder)
+      return Number.isFinite(v) && v > max ? v : max
+    }, 0)
+    for (const row of rows.sort((a: any, b: any) => new Date(a.addedAt || 0).getTime() - new Date(b.addedAt || 0).getTime())) {
+      order += 1
+      db.setDownloadQueueOrder(row.id, order)
+    }
+  } catch (err: any) {
+    console.warn('[Torrent] Queue order backfill failed:', err?.message || err)
+  }
+}
+
+// ─── Followed series: new-episode alerts (#3) ────────────────────────────────
+const FOLLOW_CHECK_THROTTLE_MS = 20 * 3600 * 1000 // max one TMDB check per series per 20h
+
+function isFollowCheckDue(lastChecked?: string | null) {
+  if (!lastChecked) return true
+  return Date.now() - new Date(lastChecked).getTime() > FOLLOW_CHECK_THROTTLE_MS
+}
+
+ipcMain.handle('follow-series', async (_, input) => {
+  const tmdbId = Number(input?.tmdb_id)
+  if (!tmdbId) return { followed: false }
+  const followResult = db.upsertFollowedSeries({
+    tmdb_id: tmdbId,
+    title: input.title,
+    poster_path: input.poster_path,
+    backdrop_path: input.backdrop_path,
+    overview: input.overview
+  })
+  // Baseline to the latest RELEASED episode so only future drops alert.
+  // Lightweight single-request lookup (not the full catalog crawl).
+  // Following is ALWAYS silent: everything already released becomes the
+  // baseline, never an alert — even if it aired recently and is unwatched
+  // (flagging it would claim something "just dropped" that was out before
+  // the user started watching). If the lookup fails, the baseline stays
+  // unknown (NULL) and the first successful check adopts it silently instead
+  // of falling back to the watched position (which would false-alert every
+  // already-aired episode in between).
+  let latest: { seasonNumber: number; episodeNumber: number; airDate?: string | null } | null = null
+  try {
+    const lookedUp = await tmdb.fetchTmdbLatestReleased(tmdbId)
+    if (lookedUp?.released) latest = lookedUp
+  } catch { /* baseline stays unknown; first check adopts silently */ }
+  if (latest) db.setFollowedBaseline(tmdbId, latest.seasonNumber, latest.episodeNumber)
+  return {
+    followed: true,
+    isNew: Boolean(followResult?.isNew),
+    hasNewDrop: false
+  }
+})
+
+ipcMain.handle('unfollow-series', (_, tmdbId) => {
+  db.unfollowSeries(Number(tmdbId))
+  return { unfollowed: true }
+})
+
+ipcMain.handle('get-followed-series', () => {
+  return db.getFollowedSeries()
+})
+
+ipcMain.handle('mark-followed-seen', (_, tmdbId) => {
+  db.markFollowedSeen(Number(tmdbId))
+  return { seen: true }
+})
+
+type EpisodeCursor = { season: number; episode: number }
+
+function isEpisodeAfter(a: EpisodeCursor, b: EpisodeCursor) {
+  return a.season > b.season || (a.season === b.season && a.episode > b.episode)
+}
+
+// Episodes become alertable a few hours after their air date — TMDB flips
+// "released" at UTC midnight but the episode airs that evening and torrents
+// land later. Alerting immediately would point at unwatchable episodes.
+const ALERT_AVAILABILITY_GRACE_MS = 6 * 3600 * 1000
+
+function isAlertAvailable(airDate?: string | null) {
+  if (!airDate) return false
+  const airTime = new Date(airDate).getTime()
+  if (!Number.isFinite(airTime)) return false
+  return Date.now() - airTime >= ALERT_AVAILABILITY_GRACE_MS
+}
+
+// Candidate-only source check: is the newly-dropped episode actually
+// watchable right now (single episode or covering season pack, any
+// provider)? Only runs when an alert would otherwise fire, so the daily
+// sweep stays cheap. Inconclusive (lookup/provider failure) fails OPEN —
+// better a banner with few sources than a swallowed real drop. A successful
+// round with no match fails CLOSED (hold until sources appear).
+async function hasWatchableFollowedEpisode(f: any, ep: EpisodeCursor): Promise<boolean> {
+  const title = String(f.title || '').trim()
+  if (!title) return true
+  try {
+    const imdbId = await Promise.race([
+      getImdbIdForTmdb('series', Number(f.tmdb_id)),
+      new Promise<null>((_, reject) => setTimeout(() => reject(new Error('imdb lookup timeout')), 8000))
+    ]).catch(() => null)
+    if (!imdbId) return true
+    const settled = await Promise.allSettled([
+      fetchEztvSources(imdbId),
+      fetchTorrentioSources(imdbId, title, 'series')
+    ])
+    const raw: any[] = []
+    for (const s of settled) {
+      if (s.status !== 'fulfilled' || !Array.isArray(s.value)) return true
+      raw.push(...s.value)
+    }
+    if (raw.length === 0) return false
+    return raw.some(r => {
+      const seeds = Number(r?.seeds) || 0
+      if (seeds <= 0) return false
+      const meta = parseTvTorrentMetadata(String(r?.title || ''))
+      return (meta.parsedSeason === ep.season && meta.parsedEpisode === ep.episode) ||
+        (Boolean(meta.isSeasonPack) && meta.parsedSeason === ep.season)
+    })
+  } catch {
+    return true
+  }
+}
+
+// Single-series check shared by the throttled bulk pass and explicit UI
+// refreshes. Alert rule: the latest released episode must be newer than the
+// baseline captured at follow time AND newer than anything watched — i.e.
+// it dropped AFTER the user started following — plus engaged, past the
+// availability grace, and backed by at least one watchable source.
+async function checkOneFollowedSeries(f: any, opts: { explicit?: boolean } = {}): Promise<{ hasNew: boolean; season?: number; episode?: number }> {
+  const latest = await tmdb.fetchTmdbLatestReleased(f.tmdb_id)
+  if (!latest || !latest.released) {
+    db.touchFollowedChecked(f.tmdb_id)
+    return { hasNew: false }
+  }
+  const newest: EpisodeCursor = { season: latest.seasonNumber, episode: latest.episodeNumber }
+  const watchedRow = db.getStreamMaxWatched(f.tmdb_id)
+  const watched: EpisodeCursor | null = watchedRow && watchedRow.season != null && watchedRow.episode != null
+    ? { season: Number(watchedRow.season), episode: Number(watchedRow.episode) }
+    : null
+  const known: EpisodeCursor | null = f.last_known_season != null && f.last_known_episode != null
+    ? { season: Number(f.last_known_season), episode: Number(f.last_known_episode) }
+    : null
+  const newerThanWatched = !watched || isEpisodeAfter(newest, watched)
+  const newerThanKnown = !known || isEpisodeAfter(newest, known)
+  // Stale follows never alert: no stream activity in 14 days and the follow
+  // itself is older than that means the show was abandoned — pinging every
+  // daily drop would just be spam. Watching again re-arms automatically.
+  const STALE_FOLLOW_MS = 14 * 24 * 3600 * 1000
+  const lastActivity = db.getStreamLatestActivity(f.tmdb_id)?.latest
+  const followedAt = f.added_at
+  // Explicit refreshes (user opened the show) always count as engagement.
+  const engaged = Boolean(opts.explicit) ||
+    (lastActivity && Date.now() - new Date(lastActivity).getTime() < STALE_FOLLOW_MS) ||
+    (followedAt && Date.now() - new Date(followedAt).getTime() < STALE_FOLLOW_MS)
+
+  // Never-baselined (followed while the TMDB lookup failed): adopt silently —
+  // everything already out predates the user. Exception: the newest episode
+  // aired AFTER the follow, i.e. a genuine drop happened before the first
+  // check could baseline — treat it as a candidate below.
+  if (!known) {
+    const followedAtMs = followedAt ? new Date(followedAt).getTime() : 0
+    const airedAtMs = latest.airDate ? new Date(latest.airDate).getTime() : 0
+    const droppedAfterFollow = followedAtMs > 0 && Number.isFinite(airedAtMs) && airedAtMs > followedAtMs
+    if (!droppedAfterFollow || !newerThanWatched || !engaged || !isAlertAvailable(latest.airDate)) {
+      db.setFollowedBaseline(f.tmdb_id, newest.season, newest.episode)
+      return { hasNew: false }
+    }
+  } else if (!(newerThanWatched && newerThanKnown && engaged && isAlertAvailable(latest.airDate))) {
+    // Caught up (or nothing watched yet with an existing baseline): keep the
+    // baseline fresh silently.
+    db.touchFollowedChecked(f.tmdb_id, newest.season, newest.episode, false)
+    return { hasNew: false }
+  }
+
+  // Candidate: verify a watchable source exists before crying "new episode".
+  // If not, hold — advance only the clock (never the baseline past the held
+  // episode) so the next check retries instead of swallowing it forever.
+  const watchable = await hasWatchableFollowedEpisode(f, newest)
+  if (!watchable) {
+    console.log(`[Followed] Holding alert for ${f.tmdb_id} S${newest.season}E${newest.episode} — no watchable source yet`)
+    db.touchFollowedChecked(f.tmdb_id, null, null, false)
+    return { hasNew: false }
+  }
+  db.touchFollowedChecked(f.tmdb_id, newest.season, newest.episode, true)
+  return { hasNew: true, season: newest.season, episode: newest.episode }
+}
+
+ipcMain.handle('check-followed-updates', async () => {
+  try {
+    if (!loadAppSettings().rememberOnlineProgress || !loadAppSettings().notifyNewEpisodes) {
+      return db.getFollowedSeries()
+    }
+  } catch { /* fall through and check */ }
+  const followed = db.getFollowedSeries()
+  for (const f of followed) {
+    if (!isFollowCheckDue(f.last_checked)) continue
+    try {
+      await checkOneFollowedSeries(f)
+    } catch (err) {
+      console.warn('[Followed] update check failed for', f.tmdb_id, err)
+    }
+  }
+  return db.getFollowedSeries()
+})
+
+// Explicit per-series refresh (e.g. opening a show's Detail screen).
+// Bypasses the daily throttle — the user asked for it right now.
+ipcMain.handle('check-series-updates', async (_, tmdbId) => {
+  const id = Number(tmdbId)
+  if (!id) return { checked: false }
+  const f = db.getFollowed(id)
+  if (!f) return { checked: false, followed: false }
+  try {
+    if (!loadAppSettings().rememberOnlineProgress || !loadAppSettings().notifyNewEpisodes) {
+      return { checked: false }
+    }
+  } catch { /* fall through and check */ }
+  try {
+    const result = await checkOneFollowedSeries(f, { explicit: true })
+    return { checked: true, ...result }
+  } catch (err) {
+    console.warn('[Followed] explicit check failed for', id, err)
+    return { checked: false }
+  }
+})
+
 ipcMain.handle('select-folder', async () => {
-  const result = await dialog.showOpenDialog({
+  const result = await showAppOpenDialog({
     properties: ['openDirectory']
   })
   if (result.canceled) return null
@@ -1797,6 +3496,40 @@ ipcMain.handle('get-continue-watching', () => {
   return db.getContinueWatching();
 })
 
+ipcMain.handle('get-stream-progress', (_, tmdbId, mediaType, season, episode) => {
+  return db.getStreamProgress(Number(tmdbId), mediaType, season ?? null, episode ?? null)
+})
+
+ipcMain.on('update-stream-progress', (_, entry) => {
+  if (!entry || !entry.tmdb_id) return
+  // Gate on the persisted toggle so "off" means zero writes.
+  try {
+    if (!loadAppSettings().rememberOnlineProgress) return
+  } catch { /* default to writing if settings unreadable */ }
+  db.upsertStreamProgress(entry)
+  if (entry.isClosing) {
+    BrowserWindow.getAllWindows().forEach(w => w.webContents.send('library-updated'))
+  }
+})
+
+ipcMain.handle('get-stream-continue-watching', () => {
+  try {
+    if (!loadAppSettings().rememberOnlineProgress) return []
+  } catch { /* fall through and return rows */ }
+  return db.getStreamContinueWatching(10)
+})
+
+ipcMain.handle('delete-stream-progress', (_, tmdbId, mediaType, season, episode) => {
+  return db.deleteStreamProgress(Number(tmdbId), mediaType, season ?? null, episode ?? null)
+})
+
+ipcMain.handle('get-stream-history', (_, limit) => {
+  try {
+    if (!loadAppSettings().rememberOnlineProgress) return []
+  } catch { /* fall through and return rows */ }
+  return db.getStreamHistory(Math.max(1, Math.min(200, Number(limit) || 100)))
+})
+
 ipcMain.handle('get-series-info', (_, seriesName) => {
   return db.getSeriesInfo(seriesName)
 })
@@ -1815,7 +3548,7 @@ ipcMain.handle('get-folders', () => {
 
 ipcMain.handle('export-user-backup', async () => {
   try {
-    const result = await dialog.showSaveDialog({
+    const result = await showAppSaveDialog({
       title: 'Export MyCinema Backup',
       defaultPath: getBackupDefaultPath(),
       filters: [
@@ -1827,12 +3560,20 @@ ipcMain.handle('export-user-backup', async () => {
       return { exported: false, canceled: true }
     }
 
+    // Focus Tube is included even while the feature is switched off: turning it
+    // off hides the tab and stops polling, but the user's categories,
+    // subscriptions and watch progress are theirs and must survive a backup.
+    // db.ts cannot import focusTube (focusTube already imports db), so the
+    // snapshot is attached here where both are in scope.
     const backup = {
       app: 'MyCinema',
       format: BACKUP_FORMAT,
       version: BACKUP_VERSION,
       exportedAt: new Date().toISOString(),
-      data: db.getBackupData()
+      data: {
+        ...db.getBackupData(),
+        focusTube: focusTube.getBackupData()
+      }
     }
 
     fs.writeFileSync(result.filePath, JSON.stringify(backup, null, 2), 'utf8')
@@ -1843,7 +3584,9 @@ ipcMain.handle('export-user-backup', async () => {
       folders: backup.data.folders.length,
       externalWatchlist: backup.data.watchlist.external.length,
       localWatchlist: backup.data.watchlist.local.length,
-      favorites: backup.data.favorites.length
+      favorites: backup.data.favorites.length,
+      streamProgress: (backup.data.streamProgress || []).length,
+      followedSeries: (backup.data.followedSeries || []).length
     }
   } catch (err) {
     console.error('[Backup] Export failed:', err)
@@ -1856,7 +3599,7 @@ ipcMain.handle('export-user-backup', async () => {
 
 ipcMain.handle('import-user-backup', async (): Promise<BackupImportSummary | { imported: false; canceled?: boolean; error?: string }> => {
   try {
-    const result = await dialog.showOpenDialog({
+    const result = await showAppOpenDialog({
       title: 'Import MyCinema Backup',
       properties: ['openFile'],
       filters: [
@@ -1874,6 +3617,8 @@ ipcMain.handle('import-user-backup', async (): Promise<BackupImportSummary | { i
     const externalWatchlist = Array.isArray(backup.data.watchlist?.external) ? backup.data.watchlist.external : []
     const localWatchlist = Array.isArray(backup.data.watchlist?.local) ? backup.data.watchlist.local : []
     const favorites = Array.isArray(backup.data.favorites) ? backup.data.favorites : []
+    const streamProgress = Array.isArray(backup.data.streamProgress) ? backup.data.streamProgress : []
+    const followedSeries = Array.isArray(backup.data.followedSeries) ? backup.data.followedSeries : []
 
     const summary: BackupImportSummary = {
       imported: true,
@@ -1883,7 +3628,9 @@ ipcMain.handle('import-user-backup', async (): Promise<BackupImportSummary | { i
       foldersMissing: 0,
       externalWatchlistImported: 0,
       localWatchlistRestored: 0,
-      favoritesRestored: 0
+      favoritesRestored: 0,
+      streamProgressRestored: 0,
+      followedSeriesRestored: 0
     }
 
     for (const folder of folders) {
@@ -1924,6 +3671,39 @@ ipcMain.handle('import-user-backup', async (): Promise<BackupImportSummary | { i
       summary.favoritesRestored += restoreResult.changes > 0 ? 1 : 0
     }
 
+    for (const item of streamProgress) {
+      if (!item || typeof item.tmdb_id !== 'number' || !['movie', 'series'].includes(item.media_type)) continue
+      const restoreResult = db.restoreStreamProgressRow(item)
+      summary.streamProgressRestored += restoreResult.changes > 0 ? 1 : 0
+    }
+
+    for (const item of followedSeries) {
+      if (!item || typeof item.tmdb_id !== 'number' || !item.title) continue
+      const restoreResult = db.restoreFollowedSeriesRow(item)
+      summary.followedSeriesRestored += restoreResult.changes > 0 ? 1 : 0
+    }
+
+    // Focus Tube, when the backup contains it. Restored regardless of whether
+    // the feature is currently switched on, so a restore never quietly drops it.
+    try {
+      const focusTubeData = (backup as any)?.data?.focusTube
+      if (focusTubeData && Array.isArray(focusTubeData.categories)) {
+        focusTube.restoreBackupData(focusTubeData)
+        console.log(`[Backup] Restored Focus Tube: ${focusTubeData.categories.length} categories, ${focusTubeData.channels?.length || 0} channels`)
+      }
+    } catch (err) {
+      console.error('[Backup] Focus Tube restore failed:', err)
+    }
+
+    // Legacy backups may carry watchlist categories — absorb them into
+    // collections the same way the startup migration does.
+    try {
+      const { migrated } = collections.migrateWatchlistCategoriesToCollections()
+      if (migrated.length > 0) console.log(`[Collections] Absorbed restored watchlist lists: ${migrated.join(', ')}`)
+    } catch (err) {
+      console.error('[Collections] Post-restore migration failed:', err)
+    }
+
     BrowserWindow.getAllWindows().forEach(w => w.webContents.send('library-updated'))
     return summary
   } catch (err) {
@@ -1953,9 +3733,12 @@ ipcMain.handle('delete-video-file', async (_, video: any) => {
 
     // Stop any active torrents associated with these files before deleting
     const downloadRoot = getDownloadPath()
+    const defaultDownloadRoot = path.join(app.getPath('downloads'), 'MyCinema')
+    const allowedRoots = [downloadRoot, defaultDownloadRoot].filter(Boolean)
     for (const item of itemsToDelete) {
-      if (item.file_path && isPathInsideRoot(item.file_path, downloadRoot)) {
-        const relative = path.relative(downloadRoot, item.file_path)
+      if (item.file_path && allowedRoots.some(root => isPathInsideRoot(item.file_path, root))) {
+        const root = allowedRoots.find(r => isPathInsideRoot(item.file_path, r))!
+        const relative = path.relative(root, item.file_path)
         const torrentId = relative.split(path.sep)[0]
         if (torrentId) {
           const torrent = activeTorrents.get(torrentId)
@@ -2012,6 +3795,21 @@ ipcMain.handle('delete-video-file', async (_, video: any) => {
         try {
           db.deleteVideoAndProgress(item.id)
           deletedAny = true
+          // Auto-remove corresponding download row so Downloads stays 100% clean
+          try {
+            const allDownloads = db.getDownloads()
+            for (const dl of allDownloads) {
+              const matchesPath = dl.downloadPath && (dl.downloadPath === item.file_path || isPathInsideRoot(item.file_path, dl.downloadPath))
+              const matchesTmdb = dl.tmdbId && video?.tmdb_id && Number(dl.tmdbId) === Number(video.tmdb_id)
+              const matchesTitle = dl.title && video?.title && dl.title.trim().toLowerCase() === video.title.trim().toLowerCase()
+              if (matchesPath || matchesTmdb || matchesTitle) {
+                db.removeDownloadRow(dl.id)
+                downloadRecordsCache.delete(dl.id)
+              }
+            }
+          } catch (dlErr) {
+            console.warn('[DeleteVideo] Error cleaning download rows:', dlErr)
+          }
         } catch (err) {
           console.error('Error removing DB record:', err)
         }
@@ -2019,7 +3817,10 @@ ipcMain.handle('delete-video-file', async (_, video: any) => {
     }
     
     if (deletedAny) {
-      BrowserWindow.getAllWindows().forEach(w => w.webContents.send('library-updated'))
+      BrowserWindow.getAllWindows().forEach(w => {
+        w.webContents.send('library-updated')
+        w.webContents.send('downloads-changed')
+      })
     }
     return deletedAny
   } catch (error) {
@@ -2314,6 +4115,7 @@ ipcMain.handle('open-folder', (_event, filePath: string) => {
     return false
   }
   if (!fs.existsSync(filePath)) {
+    console.warn(`[IPC] open-folder missing file: ${filePath}`)
     return false
   }
   shell.showItemInFolder(filePath)
@@ -2321,13 +4123,13 @@ ipcMain.handle('open-folder', (_event, filePath: string) => {
 })
 
 ipcMain.handle('open-downloads-folder', () => {
-  const dlPath = path.join(app.getPath('downloads'), 'MyCinema')
+  const dlPath = getDownloadPath()
   if (!fs.existsSync(dlPath)) fs.mkdirSync(dlPath, { recursive: true })
   shell.openPath(dlPath)
 })
 
 ipcMain.handle('get-downloads-storage', async () => {
-  const dlPath = path.join(app.getPath('downloads'), 'MyCinema')
+  const dlPath = getDownloadPath()
   try {
     if (!fs.existsSync(dlPath)) fs.mkdirSync(dlPath, { recursive: true })
     const stats = await fs.promises.statfs(dlPath)
@@ -2584,6 +4386,27 @@ const pausedTorrentIds = new Set<string>()
 // ─── Temp Stream (watch & forget) Engine ────────────────────────────────────
 const tempStreams = new Map<string, { torrent: any; folder: string; magnetUrl: string }>()
 
+// Ground-truth torrent sizes (infohash -> total bytes) learned when metadata
+// resolves. Provider-reported sizes are estimates and sometimes badly wrong
+// (e.g. a per-file size stamped on a whole season pack: "5.82 GB" on a
+// 50.5 GB torrent). Learned values override them in source lists.
+const learnedTorrentSizes = new Map<string, number>()
+function rememberTorrentSize(infoHash: string | undefined | null, length: number): void {
+  if (!infoHash || !Number.isFinite(length) || length <= 0) return
+  learnedTorrentSizes.set(infoHash.toLowerCase(), Math.floor(length))
+  if (learnedTorrentSizes.size > 500) {
+    const oldest = learnedTorrentSizes.keys().next().value
+    if (oldest) learnedTorrentSizes.delete(oldest)
+  }
+}
+function getLearnedTorrentSizeBytes(infoHash?: string | null, magnet?: string | null): number | null {
+  const rawHash = (typeof infoHash === 'string' && infoHash)
+    ? infoHash
+    : getMagnetInfoHash(typeof magnet === 'string' ? magnet : null)
+  if (!rawHash) return null
+  return learnedTorrentSizes.get(rawHash.toLowerCase()) ?? null
+}
+
 // Persistent downloads that completed get their torrent destroyed — but a video
 // element may still be streaming from them. Record their disk layout so the
 // torrent:// and audio:// handlers can serve the files straight from disk.
@@ -2757,6 +4580,8 @@ function clearTorrentProgressInterval(id: string): void {
 
 function markTorrentInactive(id: string): void {
   clearTorrentProgressInterval(id)
+  // A finished/errored/cancelled torrent frees its slot reservation too.
+  claimedDownloadSlots.delete(id)
   activeTorrents.delete(id)
 }
 
@@ -2783,14 +4608,20 @@ async function getWebTorrentClient(): Promise<any> {
   return webtorrentClient
 }
 
-function getDownloadPath(): string {
-  const dlPath = path.join(app.getPath('downloads'), 'MyCinema')
-  if (!fs.existsSync(dlPath)) fs.mkdirSync(dlPath, { recursive: true })
-  return dlPath
-}
 
 function formatBytes(bytes: any): string {
-  if (typeof bytes === 'string') return bytes
+  // Some provider APIs (notably EZTV's size_bytes) return raw byte counts as
+  // STRINGS. The old code passed strings straight through, so the UI showed
+  // "3868391446" instead of "3.6 GB". Coerce numeric strings; leave already-
+  // formatted values ("1.2 GB", "—") untouched.
+  if (typeof bytes === 'string') {
+    const trimmed = bytes.trim()
+    if (trimmed !== '' && Number.isFinite(Number(trimmed))) {
+      bytes = Number(trimmed)
+    } else {
+      return bytes
+    }
+  }
   if (typeof bytes !== 'number' || isNaN(bytes)) return '—'
   if (bytes === 0) return '0 B'
   const k = 1024
@@ -2810,9 +4641,20 @@ function formatTime(seconds: any): string {
   return `${s}s`
 }
 
+const downloadRecordsCache = new Map<string, any>()
+const downloadLastDbSaveTime = new Map<string, number>()
+
 function broadcastProgress(id: string, torrent: any, status: string, errorMessage?: string): void {
-  // Try to get existing data from DB to avoid UI flickers (0/0 size when pausing/resuming)
-  const existing = db.getDownloads().find((d: any) => d.id === id)
+  // Use memory cache first to avoid synchronous full-table disk SELECT * on every progress tick
+  let existing = downloadRecordsCache.get(id)
+  if (!existing) {
+    try {
+      existing = db.getDownloadById(id)
+      if (existing) downloadRecordsCache.set(id, existing)
+    } catch {
+      existing = null
+    }
+  }
 
   // Calculate new progress percentage
   let newProgress = existing?.progress || 0
@@ -2857,13 +4699,42 @@ function broadcastProgress(id: string, torrent: any, status: string, errorMessag
     downloaded: (torrent.downloaded && torrent.downloaded > 0) 
       ? formatBytes(torrent.downloaded) 
       : (existing?.downloaded || '0 B'),
-    tmdbId: existing?.tmdbId || null
+    tmdbId: existing?.tmdbId || null,
+    downloadPath: (torrent as any).path || (torrent as any)._myCinemaPath || existing?.downloadPath || null
   }
   if (errorMessage) data.errorMessage = errorMessage
-  
-  db.updateDownload(data)
-  BrowserWindow.getAllWindows().forEach(w => w.webContents.send('torrent-progress', data))
+
+  // Keep memory cache updated synchronously so lookups are 0ms
+  downloadRecordsCache.set(id, { ...existing, ...data })
+
+  // Throttle SQLite disk writes:
+  // Write immediately on state changes or completion; throttle progress updates to disk every 5s.
+  const now = Date.now()
+  const lastSave = downloadLastDbSaveTime.get(id) || 0
+  const isStateChange = existing?.status !== displayStatus || displayStatus === 'done' || displayStatus === 'error' || displayStatus === 'paused'
+  if (isStateChange || now - lastSave >= 5000) {
+    downloadLastDbSaveTime.set(id, now)
+    try {
+      db.updateDownload(data)
+    } catch (err) {
+      console.warn('[Downloads] Failed to persist progress to DB:', err)
+    }
+  }
+
+  BrowserWindow.getAllWindows().forEach(w => {
+    if (!w.isDestroyed()) w.webContents.send('torrent-progress', data)
+  })
 }
+
+httpDownloader.registerHttpProgressBroadcaster(broadcastProgress)
+httpDownloader.registerDownloadDirResolver(getDownloadPath)
+httpDownloader.registerHttpCompleteCallback((item) => {
+  void pumpDownloadQueue()
+  const targetDir = path.dirname(item.savePath) || getDownloadPath()
+  void scanFolder(targetDir).catch(err => {
+    console.error('[HttpDownloader] Post-download library scan error:', err)
+  })
+})
 
 // ─── IPC: Search TMDB ────────────────────────────────────────────────────────
 // Read the key from the environment (injected by electron-vite from .env at build time).
@@ -3051,6 +4922,41 @@ ipcMain.handle('get-pending-shared-media-target', () => {
   return target
 })
 
+ipcMain.handle('get-pending-shared-collection-target', () => {
+  const target = pendingSharedCollectionTarget
+  pendingSharedCollectionTarget = null
+  return target
+})
+
+ipcMain.handle('get-collection-share-data', (_, collectionId: number) => {
+  return collections.buildShareData(Number(collectionId))
+})
+
+ipcMain.handle('get-collection-share-file', (_, collectionId: number) => {
+  try {
+    const payload = collections.buildSharePayload(Number(collectionId))
+    const safeName = String(payload.collection.name || 'collection')
+      .toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'collection'
+    return {
+      filename: `mycinema-collection-${safeName}.json`,
+      json: JSON.stringify(payload, null, 2),
+      items: payload.snapshot.length,
+    }
+  } catch (err: any) {
+    return { error: err?.message || String(err) }
+  }
+})
+
+ipcMain.handle('import-shared-collection', (_, payload: any) => {
+  try {
+    const result = collections.importSharePayload(payload)
+    broadcastLibraryUpdated()
+    return { imported: true, ...result }
+  } catch (err: any) {
+    return { imported: false, error: err?.message || String(err) }
+  }
+})
+
 ipcMain.handle('get-shared-media-by-tmdb-id', async (_, type: 'movie' | 'series', tmdbId: number) => {
   try {
     return await fetchSharedMediaByTmdbId(type, tmdbId)
@@ -3068,8 +4974,8 @@ ipcMain.handle('toggle-watchlist', (_, id: number) => {
   return db.toggleWatchlist(id)
 })
 
-ipcMain.handle('add-local-to-watchlist', (_, id: number, category: string) => {
-  return db.addLocalVideoToWatchlist(id, category)
+ipcMain.handle('add-local-to-watchlist', (_, id: number, category: string, priority?: unknown) => {
+  return db.addLocalVideoToWatchlist(id, category, priority)
 })
 
 ipcMain.handle('add-to-watchlist-external', (_, item: any) => {
@@ -3080,12 +4986,155 @@ ipcMain.handle('remove-from-watchlist-external', (_, tmdbId: number) => {
   return db.removeFromWatchlistExternal(tmdbId)
 })
 
+ipcMain.handle('set-watchlist-priority', (_, input: { videoId?: number | null; tmdbId?: number | null; isExternal?: boolean; priority: unknown }) => {
+  const result = db.setWatchlistPriority(input || ({} as any))
+  try {
+    BrowserWindow.getAllWindows().forEach(w => w.webContents.send('library-updated'))
+  } catch { /* broadcast is best-effort */ }
+  return result
+})
+
 ipcMain.handle('get-watchlist', () => {
   return db.getWatchlist()
 })
 
 ipcMain.handle('get-favorites', () => {
   return db.getFavorites()
+})
+
+// ─── Collections Auto-Curator ───────────────────────────────────────────────
+const broadcastLibraryUpdated = () => {
+  BrowserWindow.getAllWindows().forEach(w => w.webContents.send('library-updated'))
+}
+
+ipcMain.handle('get-collections', () => {
+  return collections.getCollections()
+})
+
+ipcMain.handle('get-collection-members', (_, collectionId: number) => {
+  return collections.getCollectionMembers(Number(collectionId))
+})
+
+ipcMain.handle('create-collection', (_, input: any) => {
+  const created = collections.createCollection(input || {})
+  broadcastLibraryUpdated()
+  return created
+})
+
+ipcMain.handle('update-collection', (_, collectionId: number, patch: any) => {
+  const updated = collections.updateCollection(Number(collectionId), patch || {})
+  broadcastLibraryUpdated()
+  return updated
+})
+
+ipcMain.handle('delete-collection', (_, collectionId: number) => {
+  const deleted = collections.deleteCollection(Number(collectionId))
+  broadcastLibraryUpdated()
+  return deleted
+})
+
+ipcMain.handle('reorder-collections', (_, ids: number[]) => {
+  const reordered = collections.reorderCollections(ids || [])
+  broadcastLibraryUpdated()
+  return reordered
+})
+
+ipcMain.handle('pin-collection-video', (_, collectionId: number, videoId: number) => {
+  const pinned = collections.pinVideoToCollection(Number(collectionId), Number(videoId))
+  broadcastLibraryUpdated()
+  return pinned
+})
+
+ipcMain.handle('unpin-collection-video', (_, collectionId: number, videoId: number) => {
+  const unpinned = collections.unpinVideoFromCollection(Number(collectionId), Number(videoId))
+  broadcastLibraryUpdated()
+  return unpinned
+})
+
+ipcMain.handle('add-collection-external', (_, collectionId: number, item: any) => {
+  const added = collections.addExternalToCollection(Number(collectionId), item || {})
+  broadcastLibraryUpdated()
+  return added
+})
+
+ipcMain.handle('remove-collection-external', (_, externalId: number) => {
+  const removed = collections.removeExternalFromCollection(Number(externalId))
+  broadcastLibraryUpdated()
+  return removed
+})
+
+ipcMain.handle('export-collection', async (_, collectionId: number) => {
+  try {
+    const payload = collections.buildSharePayload(Number(collectionId))
+    const safeName = String(payload.collection.name || 'collection')
+      .toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'collection'
+    const result = await showAppSaveDialog({
+      title: 'Save Collection File',
+      defaultPath: path.join(app.getPath('downloads'), `mycinema-collection-${safeName}.json`),
+      filters: [{ name: 'MyCinema Collection', extensions: ['json'] }]
+    })
+    if (result.canceled || !result.filePath) return { exported: false, canceled: true }
+    fs.writeFileSync(result.filePath, JSON.stringify(payload, null, 2))
+    // The user explicitly chose this location in the save dialog, so it is
+    // trusted for reveal-in-folder afterwards (same principle as opening a
+    // file from the shell).
+    try {
+      allowedExternalDirs.add(path.normalize(path.dirname(result.filePath)))
+    } catch { /* reveal is best-effort */ }
+    return { exported: true, filePath: result.filePath, items: payload.snapshot.length }
+  } catch (err: any) {
+    return { exported: false, error: err?.message || String(err) }
+  }
+})
+
+// Open WhatsApp directly for sharing (no browser in the middle when the
+// native app is installed). WhatsApp registers the whatsapp:// scheme, so it
+// can be launched straight into the chat picker with pre-filled text,
+// falling back to WhatsApp Web otherwise.
+// (Telegram has no text-only share route — its share page requires a URL and
+// we never share links — so Telegram always opens in the browser and the
+// user hands off to the app from there.)
+function isWindowsProtocolRegistered(scheme: string): boolean {
+  if (process.platform !== 'win32') return false
+  try {
+    execFileSync('reg', ['query', `HKCR\\${scheme}`], { stdio: ['ignore', 'pipe', 'ignore'] })
+    return true
+  } catch {
+    return false
+  }
+}
+
+ipcMain.handle('open-chat-share', async (_, target: 'whatsapp', text: string) => {
+  const encoded = encodeURIComponent(String(text || ''))
+  const candidates: string[] = isWindowsProtocolRegistered('whatsapp')
+    ? [`whatsapp://send?text=${encoded}`, `https://wa.me/?text=${encoded}`]
+    : [`https://wa.me/?text=${encoded}`]
+  for (const url of candidates) {
+    try {
+      await shell.openExternal(url)
+      return { opened: true, via: url.startsWith('https://') ? 'browser' : 'app' }
+    } catch (err: any) {
+      console.warn(`[Share] openExternal failed for ${url.slice(0, 40)}:`, err?.message || String(err))
+    }
+  }
+  return { opened: false, error: 'Could not open the chat app' }
+})
+
+ipcMain.handle('import-collection', async () => {
+  try {
+    const result = await showAppOpenDialog({
+      title: 'Import Shared Collection',
+      filters: [{ name: 'MyCinema Collection', extensions: ['json'] }],
+      properties: ['openFile']
+    })
+    if (result.canceled || result.filePaths.length === 0) return { imported: false, canceled: true }
+    const raw = fs.readFileSync(result.filePaths[0], 'utf-8')
+    const imported = collections.importSharePayload(JSON.parse(raw))
+    broadcastLibraryUpdated()
+    return { imported: true, filePath: result.filePaths[0], ...imported }
+  } catch (err: any) {
+    return { imported: false, error: err?.message || String(err) }
+  }
 })
 
 ipcMain.handle('find-video-by-tmdb-id', (_, tmdbId: number) => {
@@ -3229,9 +5278,32 @@ function parseTorrentioStream(stream: any, fallbackTitle: string, options: { pro
   const qualityMatch = `${streamTitle} ${stream.name || ''}`.match(/(2160p|1080p|720p|480p)/i)
   const quality = qualityMatch ? qualityMatch[1] : (stream.name?.includes('1080p') ? '1080p' : 'HD')
   
-  // Parse size e.g. "💾 2.34 GB" or "💾 980 MB"
-  const sizeMatch = streamTitle.match(/([0-9.]+\s*(GB|MB|KB|GiB|MiB))/i)
-  const size = sizeMatch ? sizeMatch[1] : '—'
+  // Parse size e.g. "💾 2.34 GB" or "💾 980 MB".
+  // Season-pack listings from Stremio aggregators often carry PER-FILE sizes
+  // ("E01 … 1.4 GB … E02 … 1.5 GB …") — taking the first match shows a single
+  // episode's size on a whole-season pack. Combine every mention into the
+  // total; single-file results (one mention) are unchanged.
+  const sizeToBytes = (num: number, unit: string) => {
+    const u = unit.toUpperCase()
+    const k = 1024
+    if (u.charAt(0) === 'T') return num * k * k * k * k
+    if (u.charAt(0) === 'G') return num * k * k * k
+    if (u.charAt(0) === 'M') return num * k * k
+    if (u.charAt(0) === 'K') return num * k
+    return num
+  }
+  const sizeMentions = streamTitle.match(/[0-9.]+\s*(?:TB|GB|MB|KB|TIB|GIB|MIB|KIB)/gi) || []
+  let size = '—'
+  if (sizeMentions.length === 1) {
+    size = sizeMentions[0]
+  } else if (sizeMentions.length > 1) {
+    let totalBytes = 0
+    for (const mention of sizeMentions) {
+      const parts = /([0-9.]+)\s*((?:TB|GB|MB|KB|TIB|GIB|MIB|KIB))/i.exec(mention)
+      if (parts) totalBytes += sizeToBytes(parseFloat(parts[1]), parts[2])
+    }
+    if (totalBytes > 0) size = formatBytes(totalBytes)
+  }
 
   // Parse seeds e.g. "👤 123"
   const seedMatch = streamTitle.match(/(?:👤|Seeders:)\s*([0-9]+)/i)
@@ -3350,11 +5422,14 @@ function getTorrentSourceCacheKey(title: string, year: string, mediaType: string
 }
 
 function parseTvTorrentMetadata(sourceTitle: string): { parsedSeason?: number; parsedEpisode?: number; isSeasonPack?: boolean } {
+  // NOTE: input is often a full torrent-relative path (folders included), e.g.
+  // "Show S01/Show.S01E01.mkv" or "Season 1/E01.mkv" — separators include "/".
   const titleLower = sourceTitle.toLowerCase()
+  const SEP = '[\\s._\\-/]*'
   const seasonEpisodeMatch =
-    titleLower.match(/\bs(\d{1,2})[\s._-]*e(?:p)?[\s._-]*(\d{1,3})\b/i) ||
+    titleLower.match(new RegExp(`\\bs(\\d{1,2})${SEP}e(?:p)?${SEP}(\\d{1,3})(?=e\\d|\\b)`, 'i')) ||
     titleLower.match(/\b(\d{1,2})x(\d{1,3})\b/i) ||
-    titleLower.match(/\bseason[\s._-]*(\d{1,2})[\s._-]*(?:episode|ep)[\s._-]*(\d{1,3})\b/i) ||
+    titleLower.match(new RegExp(`\\bseason${SEP}(\\d{1,2})${SEP}(?:episode|ep)${SEP}(\\d{1,3})\\b`, 'i')) ||
     titleLower.match(/\b(?:episode|ep)\s*(\d{1,3})\b[\s\S]*?\bseason\s*(\d{1,2})\b/i)
 
   if (seasonEpisodeMatch) {
@@ -3362,6 +5437,20 @@ function parseTvTorrentMetadata(sourceTitle: string): { parsedSeason?: number; p
     return {
       parsedSeason: parseInt(seasonEpisodeMatch[episodeFirst ? 2 : 1]),
       parsedEpisode: parseInt(seasonEpisodeMatch[episodeFirst ? 1 : 2]),
+      isSeasonPack: false
+    }
+  }
+
+  // Bare episode token ("E01", "EP 3", "Episode 4") with the season stated
+  // anywhere else in the path ("Season 1/E01.mkv", "Show.S01/E02.mkv").
+  const bareEpisodeMatch = titleLower.match(new RegExp(`\\b(?:e(?:p)?|episode)${SEP}(\\d{1,3})\\b`, 'i'))
+  const seasonTokenMatch =
+    titleLower.match(/\bs(\d{1,2})\b/i) ||
+    titleLower.match(new RegExp(`\\bseason${SEP}(\\d{1,2})\\b`, 'i'))
+  if (bareEpisodeMatch && seasonTokenMatch) {
+    return {
+      parsedSeason: parseInt(seasonTokenMatch[1]),
+      parsedEpisode: parseInt(bareEpisodeMatch[1]),
       isSeasonPack: false
     }
   }
@@ -3382,6 +5471,13 @@ function parseTvTorrentMetadata(sourceTitle: string): { parsedSeason?: number; p
   }
 }
 
+// Sample/proof stubs are unwatchable and often carry the real episode's
+// number ("Show.S01E01.Sample.mkv") — never let them win file selection or
+// pollute the episode roster when real files exist.
+function isSampleVideoFile(filePath?: string | null): boolean {
+  return /\b(sample|proof|samplehd)\b/i.test(filePath || '')
+}
+
 function normalizeTorrentSources(sources: any[], mediaType: string): any[] {
     // Parse Season / Episode metadata
     let enrichedSources = sources.map(src => {
@@ -3394,6 +5490,35 @@ function normalizeTorrentSources(sources: any[], mediaType: string): any[] {
         normalized.isSeasonPack = Boolean(metadata.isSeasonPack)
       }
       return normalized
+    })
+
+    // Correct wrong provider sizes with ground truth. Providers sometimes stamp
+    // a per-file size on a whole pack (e.g. "5.82 GB" on a 50.5 GB season),
+    // but once we've resolved a torrent's metadata — via an earlier download
+    // or stream — we know its real total length. Real data wins.
+    const realSizeByHash = new Map<string, string>()
+    try {
+      for (const dl of db.getDownloads()) {
+        const hash = getMagnetInfoHash((dl as any)?.magnet)
+        const sizeText = String((dl as any)?.size || '').trim()
+        if (hash && sizeText && sizeText !== '—' && sizeText !== '0 B') {
+          realSizeByHash.set(hash.toLowerCase(), sizeText)
+        }
+      }
+    } catch { /* best-effort */ }
+    enrichedSources = enrichedSources.map(src => {
+      const hash = ((src as any).infoHash && String((src as any).infoHash)) ||
+        getMagnetInfoHash(src.magnet)
+      if (!hash) return src
+      const learnedBytes = getLearnedTorrentSizeBytes(hash, null)
+      if (learnedBytes != null && learnedBytes > 0) {
+        return { ...src, size: formatBytes(learnedBytes) }
+      }
+      const knownSize = realSizeByHash.get(hash.toLowerCase())
+      if (knownSize) {
+        return { ...src, size: knownSize }
+      }
+      return src
     })
 
     // Improve quality label using file size when no explicit tag is present
@@ -4838,6 +6963,177 @@ ipcMain.handle('cancel-torrent-source-search', async (event, requestId: string) 
 
 // ΓöÇΓöÇΓöÇ IPC: Start Torrent Download ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
 
+// ─── Download queue: max simultaneous downloads ─────────────────────────────
+// 0 (or <= 0) = unlimited. Anything over the limit waits with status 'queued'
+// and auto-starts oldest-first as slots free up.
+function getMaxConcurrentDownloads(): number {
+  const v = Number(loadAppSettings().maxConcurrentDownloads)
+  if (!Number.isFinite(v) || v <= 0) return 0
+  return Math.min(Math.floor(v), 99)
+}
+
+// Slots claimed synchronously, BEFORE the async start begins. The gate used to
+// read the running count and then await startWebTorrent() — which awaits
+// getWebTorrentClient() before writing any status — so several starts in that
+// window all read the same "nothing running" and ALL launched. That's how
+// extra torrents got past a limit of 1: they resolved metadata (real sizes in
+// the list) and then sat at 0 B/s. A reservation makes the check atomic.
+const claimedDownloadSlots = new Set<string>()
+
+function getDownloadRow(id: string): any | undefined {
+  try {
+    return db.getDownloads().find((d: any) => d.id === id)
+  } catch {
+    return undefined
+  }
+}
+
+function countRunningDownloads(): number {
+  let rows: any[] = []
+  try {
+    rows = db.getDownloads()
+  } catch {
+    return activeTorrents.size + claimedDownloadSlots.size
+  }
+  const running = rows.filter((d: any) => d.status === 'downloading' || d.status === 'connecting').length
+  // Claims whose start hasn't reached the DB yet still hold their slot.
+  const starting = [...claimedDownloadSlots].filter((id) => {
+    const row = rows.find((d: any) => d.id === id)
+    return !row || (row.status !== 'downloading' && row.status !== 'connecting')
+  }).length
+  return running + starting
+}
+
+// True FIFO: monotonic queue_order (set when the download was added), with
+// added_at only as a legacy fallback. Sorting by added_at alone was unstable
+// for downloads created within the same second.
+function getQueuedDownloads(): any[] {
+  try {
+    return db.getDownloads()
+      .filter((d: any) => d.status === 'queued')
+      .sort((a: any, b: any) => {
+        const aOrder = Number(a.queueOrder)
+        const bOrder = Number(b.queueOrder)
+        if (Number.isFinite(aOrder) && Number.isFinite(bOrder) && aOrder !== bOrder) {
+          return aOrder - bOrder
+        }
+        return new Date(a.addedAt || 0).getTime() - new Date(b.addedAt || 0).getTime()
+      })
+  } catch {
+    return []
+  }
+}
+
+function broadcastQueuedState(id: string): void {
+  const row = db.getDownloads().find((d: any) => d.id === id)
+  if (!row) return
+  BrowserWindow.getAllWindows().forEach(w => w.webContents.send('torrent-progress', {
+    ...row,
+    status: 'queued',
+    downloadSpeed: '0 B/s',
+    timeRemaining: '—'
+  }))
+}
+
+// Start now if a slot is free, otherwise park as queued. The slot is claimed
+// synchronously so a burst of starts can't all pass the same check.
+async function startDownloadRespectingQueue(id: string, magnet: string, title: string, progress: number): Promise<'started' | 'queued'> {
+  const max = getMaxConcurrentDownloads()
+  if (max > 0 && countRunningDownloads() >= max) {
+    const row = getDownloadRow(id)
+    if (row) {
+      db.updateDownload({ ...row, status: 'queued', downloadSpeed: '0 B/s', timeRemaining: '—' })
+    }
+    console.log(`[Torrent] Slot full (${countRunningDownloads()}/${max}) — "${title}" queued`)
+    broadcastQueuedState(id)
+    return 'queued'
+  }
+  claimedDownloadSlots.add(id)
+  try {
+    await startWebTorrent(id, magnet, title, progress || 0)
+    return 'started'
+  } finally {
+    // The DB row now carries the running state, so the claim is redundant.
+    claimedDownloadSlots.delete(id)
+  }
+}
+
+// Fill free slots with the oldest queued downloads.
+// Safety net: whatever path started extra downloads (stale rows, races,
+// older builds), the running count converges back to the limit — oldest
+// wins, extras are parked as queued. Runs every few seconds; no-op when
+// unlimited or already within budget.
+function enforceDownloadConcurrency(): void {
+  try {
+    const max = getMaxConcurrentDownloads()
+    if (max <= 0) return
+    const running = db.getDownloads()
+      .filter((d: any) => d.status === 'downloading' || d.status === 'connecting')
+      .sort((a: any, b: any) => new Date(a.addedAt || 0).getTime() - new Date(b.addedAt || 0).getTime())
+    if (running.length <= max) return
+    for (const extra of running.slice(max)) {
+      const live = activeTorrents.get(extra.id)
+      if (live && !live.destroyed) {
+        try { live.destroy() } catch { /* ignore */ }
+        activeTorrents.delete(extra.id)
+      }
+      clearTorrentProgressInterval(extra.id)
+      db.updateDownload({ ...extra, status: 'queued', downloadSpeed: '0 B/s', timeRemaining: '—' })
+      broadcastQueuedState(extra.id)
+      console.log(`[Torrent] Over limit (${running.length}/${max}) — "${extra.title}" requeued`)
+    }
+  } catch (err: any) {
+    console.warn('[Torrent] Concurrency enforce failed:', err?.message || err)
+  }
+}
+
+// Fill free slots with the oldest queued downloads.
+let downloadPumpRunning = false
+async function pumpDownloadQueue(): Promise<void> {
+  if (downloadPumpRunning) return
+  downloadPumpRunning = true
+  try {
+    const max = getMaxConcurrentDownloads()
+    for (;;) {
+      if (max > 0 && countRunningDownloads() >= max) return
+      const next = getQueuedDownloads()[0]
+      if (!next) return
+      const live = activeTorrents.get(next.id)
+      if (live && !live.destroyed) {
+        // Already running (race) — fix the stale flag and move on.
+        try { db.updateDownload({ ...next, status: 'connecting' }) } catch { /* ignore */ }
+        continue
+      }
+      if (next.magnet?.startsWith('http://') || next.magnet?.startsWith('https://')) {
+        console.log(`[HttpDownloader] Starting queued download: "${next.title}"`)
+        claimedDownloadSlots.add(next.id)
+        try {
+          await httpDownloader.resumeHttpDownload(next.id)
+        } catch (err: any) {
+          console.error(`[HttpDownloader] Queued start failed for "${next.title}":`, err?.message || err)
+        } finally {
+          claimedDownloadSlots.delete(next.id)
+        }
+        continue
+      }
+
+      console.log(`[Torrent] Starting queued download: "${next.title}" (${countRunningDownloads()}/${max || '∞'})`)
+      // Claim before the await so a concurrent start/pump can't double-start it.
+      claimedDownloadSlots.add(next.id)
+      try {
+        await startWebTorrent(next.id, next.magnet, next.title, next.progress || 0)
+      } catch (err: any) {
+        console.error(`[Torrent] Queued start failed for "${next.title}":`, err?.message || err)
+        return
+      } finally {
+        claimedDownloadSlots.delete(next.id)
+      }
+    }
+  } finally {
+    downloadPumpRunning = false
+  }
+}
+
 async function startWebTorrent(torrentId: string, magnetUrl: string, title: string, initialProgress: number = 0, initialName?: string | null) {
   pausedTorrentIds.delete(torrentId)
   clearTorrentProgressInterval(torrentId)
@@ -4892,6 +7188,13 @@ async function startWebTorrent(torrentId: string, magnetUrl: string, title: stri
     clearTorrentProgressInterval(torrentId)
     broadcastProgress(torrentId, torrent, 'done')
     console.log(`[Torrent] Download complete: ${title}`)
+    // A slot just freed up — start the next queued download.
+    void pumpDownloadQueue()
+    // Scan download destination to ingest media into library immediately
+    const dlFolder = torrent.path || downloadPath || getDownloadPath()
+    void scanFolder(dlFolder).catch(err => {
+      console.error('[Torrent] Post-download library scan error:', err)
+    })
     // Remember the disk layout so an in-flight video stream can keep reading
     // after the torrent instance is destroyed below.
     if (torrent.path) {
@@ -4919,47 +7222,78 @@ async function startWebTorrent(torrentId: string, magnetUrl: string, title: stri
       torrent.destroy()
     }
     markTorrentInactive(torrentId)
+    void pumpDownloadQueue()
   })
 
   return torrent
 }
 
 async function autoResumeDownloads() {
-  const downloads = db.getDownloads()
+  const downloads = [...db.getDownloads()].sort(
+    (a: any, b: any) => new Date(a.addedAt || 0).getTime() - new Date(b.addedAt || 0).getTime()
+  )
+  // Stale 'downloading' rows from the last session aren't actually running —
+  // if left as-is they'd occupy phantom slots and deadlock the queue.
+  // Requeue everything, then fill slots oldest-first.
+  let requeued = false
   for (const dl of downloads) {
     if (dl.status === 'downloading' || dl.status === 'connecting') {
-      console.log(`[AutoResume] Resuming incomplete download: ${dl.title}`)
+      console.log(`[AutoResume] Requeueing incomplete download: ${dl.title}`)
       try {
-        await startWebTorrent(dl.id, dl.magnet, dl.title, dl.progress || 0)
+        db.updateDownload({ ...dl, status: 'queued', downloadSpeed: '0 B/s', timeRemaining: '—' })
+        requeued = true
       } catch (e: any) {
-        console.error(`[AutoResume] Failed to resume ${dl.id}:`, e.message)
+        console.error(`[AutoResume] Failed to requeue ${dl.id}:`, e.message)
       }
     }
   }
+  if (requeued || getQueuedDownloads().length > 0) {
+    await pumpDownloadQueue()
+  }
+  // Show the effective budget + outcome so the queue state is verifiable in
+  // the console (mirrored from the renderer terminal).
+  console.log(`[TorrentQueue] Limit: ${getMaxConcurrentDownloads() || 'Unlimited'} · running: ${countRunningDownloads()} · queued: ${getQueuedDownloads().length}`)
 }
 
-ipcMain.handle('start-torrent-download', async (_, magnetUrl: string, title: string, tmdbId?: number, name?: string, media?: {
-  mediaType?: 'movie' | 'series'
-  season?: number
-  episode?: number
-}) => {
+async function handleStartTorrentDownload(
+  magnetUrl: string,
+  title?: string,
+  tmdbId?: number,
+  name?: string,
+  media?: {
+    mediaType?: 'movie' | 'series'
+    season?: number
+    episode?: number
+  }
+): Promise<string | false> {
   try {
     const enrichedMagnetUrl = enrichMagnetWithTrackers(magnetUrl)
     const existingDownload = db.getDownloads().find((download: any) => (
       download.magnet === enrichedMagnetUrl && download.status !== 'error'
     ))
-    if (existingDownload) return existingDownload.id
+    if (existingDownload) {
+      notifyDownloadAdded(existingDownload.name || existingDownload.title || 'Torrent Download')
+      return existingDownload.id
+    }
 
     const torrentId = crypto.randomUUID()
-    const displayName = name || getMagnetDisplayName(enrichedMagnetUrl) || title
+    const magnetDisplayName = getMagnetDisplayName(enrichedMagnetUrl)
+    const finalTitle = title || magnetDisplayName || 'Torrent Download'
+    const displayName = name || magnetDisplayName || finalTitle
     const downloadPath = path.join(getDownloadPath(), torrentId)
     
+    // Broadcast notification to all active windows
+    notifyDownloadAdded(displayName)
+
     db.addDownload({
       id: torrentId,
-      title,
+      title: finalTitle,
       name: displayName,
       magnet: enrichedMagnetUrl,
-      status: 'downloading',
+      // Park as queued FIRST — the gate starts it if a slot is free. Writing
+      // 'downloading' here would make the row count itself as running and
+      // deadlock the queue (everything queues, nothing starts).
+      status: 'queued',
       tmdbId,
       mediaType: media?.mediaType,
       season: media?.season,
@@ -4967,17 +7301,36 @@ ipcMain.handle('start-torrent-download', async (_, magnetUrl: string, title: str
       downloadPath
     })
 
-    await startWebTorrent(torrentId, enrichedMagnetUrl, title, 0, displayName)
+    await startDownloadRespectingQueue(torrentId, enrichedMagnetUrl, finalTitle, 0)
+    BrowserWindow.getAllWindows().forEach(w => {
+      if (!w.isDestroyed()) {
+        w.webContents.send('downloads-changed')
+      }
+    })
     return torrentId
   } catch (err) {
     console.error('[Torrent] Start download error:', err)
     return false
   }
+}
+
+ipcMain.handle('start-torrent-download', async (_, magnetUrl: string, title?: string, tmdbId?: number, name?: string, media?: {
+  mediaType?: 'movie' | 'series'
+  season?: number
+  episode?: number
+}) => {
+  return handleStartTorrentDownload(magnetUrl, title, tmdbId, name, media)
 })
 
 // ─── IPC: Cancel Torrent ─────────────────────────────────────────────────────
 ipcMain.handle('cancel-torrent-download', async (_, id: string) => {
   try {
+    if (httpDownloader.isHttpDownload(id)) {
+      const res = httpDownloader.pauseHttpDownload(id)
+      void pumpDownloadQueue()
+      return res
+    }
+
     const torrent = activeTorrents.get(id)
     pausedTorrentIds.add(id)
     clearTorrentProgressInterval(id)
@@ -5006,6 +7359,8 @@ ipcMain.handle('cancel-torrent-download', async (_, id: string) => {
         name: dlDbData.name || getMagnetDisplayName(dlDbData.magnet) || dlDbData.title
       } as any, 'paused')
     }
+    // Cancelling freed a slot — start the next queued download.
+    void pumpDownloadQueue()
     return true
   } catch (err) {
     console.error('[Torrent] Cancel error:', err)
@@ -5016,6 +7371,28 @@ ipcMain.handle('cancel-torrent-download', async (_, id: string) => {
 // ─── IPC: Pause / Resume Torrent ─────────────────────────────────────────────
 ipcMain.handle('pause-resume-torrent', async (_, id: string) => {
   try {
+    if (httpDownloader.isHttpDownload(id)) {
+      const existing = db.getDownloads().find((d: any) => d.id === id)
+      if (existing?.status === 'paused' || existing?.status === 'error') {
+        const res = await httpDownloader.resumeHttpDownload(id)
+        void pumpDownloadQueue()
+        return res
+      } else {
+        const res = httpDownloader.pauseHttpDownload(id)
+        void pumpDownloadQueue()
+        return res
+      }
+    }
+
+    // Dequeue: a queued item goes back to paused (it never started).
+    const existing = db.getDownloads().find((d: any) => d.id === id)
+    if (existing && existing.status === 'queued') {
+      const updated = { ...existing, status: 'paused', downloadSpeed: '0 B/s', timeRemaining: '—' }
+      db.updateDownload(updated)
+      BrowserWindow.getAllWindows().forEach(w => w.webContents.send('torrent-progress', updated))
+      return true
+    }
+
     const torrent = activeTorrents.get(id)
     
     // Resume Logic
@@ -5024,7 +7401,8 @@ ipcMain.handle('pause-resume-torrent', async (_, id: string) => {
       if (dbDl) {
         pausedTorrentIds.delete(id)
         console.log(`[Torrent] Resuming "${dbDl.title}" from ${dbDl.progress}%`)
-        await startWebTorrent(id, dbDl.magnet, dbDl.title, dbDl.progress || 0)
+        // Queues when slots are full instead of forcing an extra download.
+        await startDownloadRespectingQueue(id, dbDl.magnet, dbDl.title, dbDl.progress || 0)
         return true
       }
       return false
@@ -5056,6 +7434,9 @@ ipcMain.handle('pause-resume-torrent', async (_, id: string) => {
         name: dlDbData.name || getMagnetDisplayName(dlDbData.magnet) || dlDbData.title
       } as any, 'paused')
     }
+
+    // Pausing freed a slot — start the next queued download.
+    void pumpDownloadQueue()
     
     return true
   } catch (err) {
@@ -5067,6 +7448,10 @@ ipcMain.handle('pause-resume-torrent', async (_, id: string) => {
 // ─── IPC: Retry Failed Torrent ────────────────────────────────────────────────
 ipcMain.handle('retry-torrent-download', async (_, id: string) => {
   try {
+    if (httpDownloader.isHttpDownload(id)) {
+      return await httpDownloader.resumeHttpDownload(id)
+    }
+
     pausedTorrentIds.delete(id)
     const dbDl = db.getDownloads().find((d: any) => d.id === id)
     if (!dbDl) return false
@@ -5088,15 +7473,29 @@ ipcMain.handle('retry-torrent-download', async (_, id: string) => {
       console.warn('[Torrent] Could not clear previous failed torrent before retry:', err.message)
     }
 
-    db.updateDownload({
+    downloadRecordsCache.delete(id)
+    const resetDl = {
       ...dbDl,
+      progress: 0,
+      downloaded: '0 B',
       downloadSpeed: '0 B/s',
       timeRemaining: '—',
-      status: 'connecting',
+      status: 'queued',
       errorMessage: null
-    })
+    }
+    db.updateDownload(resetDl)
+    downloadRecordsCache.set(id, resetDl)
 
-    await startWebTorrent(id, dbDl.magnet, dbDl.title, dbDl.progress || 0)
+    broadcastProgress(id, {
+      downloadSpeed: 0,
+      timeRemaining: 0,
+      length: 0,
+      downloaded: 0,
+      progress: 0,
+      name: dbDl.name || getMagnetDisplayName(dbDl.magnet) || dbDl.title
+    } as any, 'queued')
+
+    await startDownloadRespectingQueue(id, dbDl.magnet, dbDl.title, 0)
     return true
   } catch (err) {
     console.error('[Torrent] Retry error:', err)
@@ -5106,7 +7505,46 @@ ipcMain.handle('retry-torrent-download', async (_, id: string) => {
 
 // ─── IPC: Get Active Downloads ───────────────────────────────────────────────
 ipcMain.handle('get-active-downloads', async () => {
-  return db.getDownloads()
+  const downloads = db.getDownloads()
+  const downloadRoot = getDownloadPath()
+  return downloads.map((dl: any) => {
+    let fileExists = true
+    if (dl.status === 'done') {
+      const candidates: string[] = []
+      if (dl.downloadPath) {
+        candidates.push(dl.downloadPath)
+      }
+      if (dl.name) {
+        candidates.push(path.join(downloadRoot, dl.name))
+        candidates.push(path.join(downloadRoot, dl.id, dl.name))
+      }
+      if (dl.id) {
+        candidates.push(path.join(downloadRoot, dl.id))
+      }
+      fileExists = candidates.some(p => {
+        try {
+          if (!fs.existsSync(p)) return false
+          const stat = fs.statSync(p)
+          if (stat.isDirectory()) {
+            const files = fs.readdirSync(p)
+            return files.length > 0
+          }
+          return stat.size > 0
+        } catch {
+          return false
+        }
+      })
+      if (!fileExists) {
+        // Auto-remove deleted download so downloads list stays 100% clean
+        try {
+          db.removeDownloadRow(dl.id)
+          downloadRecordsCache.delete(dl.id)
+        } catch {}
+        return null
+      }
+    }
+    return { ...dl, fileExists }
+  }).filter(Boolean)
 })
 
 ipcMain.handle('prepare-torrent-stream', async (_, id: string) => {
@@ -5147,10 +7585,13 @@ function selectTorrentVideoFile(
   opts: { fileIndex?: number; season?: number; episode?: number } = {}
 ): { file: any; index: number } | null {
   if (!torrent || !Array.isArray(torrent.files)) return null
-  const videoFiles = (torrent.files as any[])
+  const allVideoFiles = (torrent.files as any[])
     .map((f: any, i: number) => ({ f, i }))
     .filter(({ f }) => isVideoFilePath(f?.path || f?.name))
-  if (videoFiles.length === 0) return null
+  if (allVideoFiles.length === 0) return null
+  // Prefer real episodes over sample/proof stubs (which often spoof S/E tags).
+  const nonSample = allVideoFiles.filter(({ f }) => !isSampleVideoFile(f?.path || f?.name))
+  const videoFiles = nonSample.length > 0 ? nonSample : allVideoFiles
 
   if (typeof opts.fileIndex === 'number' && Number.isFinite(opts.fileIndex)) {
     const exactFile = videoFiles.find(v => v.i === opts.fileIndex)
@@ -5177,6 +7618,13 @@ function selectTorrentVideoFile(
       (a.meta.parsedEpisode as number) - (b.meta.parsedEpisode as number)
     )
   if (withEpisodes.length > 0) return { file: withEpisodes[0].f, index: withEpisodes[0].i }
+
+  // Series with unparseable filenames: torrent order is near-always episode
+  // order — start at the first file, not the largest (which may be any ep).
+  if (opts.episode != null || opts.season != null) {
+    const firstOrdered = [...videoFiles].sort((a, b) => a.i - b.i)[0]
+    if (firstOrdered) return { file: firstOrdered.f, index: firstOrdered.i }
+  }
 
   const bySize = videoFiles.sort((a, b) => (b.f.length || 0) - (a.f.length || 0))[0]
   return { file: bySize.f, index: bySize.i }
@@ -5260,6 +7708,13 @@ ipcMain.handle('stop-temp-stream', async (_, id: string) => {
   return true
 })
 
+ipcMain.handle('prioritize-temp-files', (_, streamId: string, fileIndexes: number[]) => {
+  const entry = tempStreams.get(streamId)
+  const torrent = entry?.torrent
+  if (!torrent || torrent.destroyed) return false
+  return prioritizeUpcomingPackFiles(torrent, fileIndexes)
+})
+
 ipcMain.handle('get-temp-stream-episodes', async (_, streamId: string) => {
   const entry = tempStreams.get(streamId)
   const torrent = entry?.torrent
@@ -5269,8 +7724,16 @@ ipcMain.handle('get-temp-stream-episodes', async (_, streamId: string) => {
   } catch (err: any) {
     return { error: err?.message || 'Torrent metadata is not ready yet' }
   }
+  // NOTE: `index` below must stay the ORIGINAL torrent file position — the
+  // player switches files via `?file=<index>`.
+  const allFiles = (torrent.files || []).map((f: any, index: number) => ({ f, index }))
+  const videoFiles = allFiles.filter(({ f }: any) => isVideoFilePath(f?.path || f?.name || ''))
+  const nonSample = videoFiles.filter(({ f }: any) => !isSampleVideoFile(f?.path || f?.name))
+  const rosterFiles = nonSample.length > 0 ? nonSample : videoFiles
+  const rosterSet = new Set(rosterFiles.map(({ index }: any) => index))
   const episodes: any[] = []
-  ;(torrent.files || []).forEach((f: any, index: number) => {
+  ;(allFiles || []).forEach(({ f, index }: any) => {
+    if (!rosterSet.has(index)) return
     const filePath = f?.path || f?.name || ''
     if (!isVideoFilePath(filePath)) return
     const meta = parseTvTorrentMetadata(filePath)
@@ -5452,6 +7915,28 @@ function prioritizeTorrentPlaybackFiles(torrent: any, playable: any): void {
   }
 }
 
+// Binge helper: keep the upcoming pack file(s) selected so the next episode
+// is already buffered when the player advances. Never deselects — the stream
+// setup owns the baseline selection.
+function prioritizeUpcomingPackFiles(torrent: any, wantedIndexes: number[]): boolean {
+  if (!torrent || torrent.destroyed || !Array.isArray(torrent.files)) return false
+  try {
+    const wanted = new Set((wantedIndexes || []).map(Number).filter(Number.isFinite))
+    if (wanted.size === 0) return false
+    let applied = false
+    torrent.files.forEach((file: any, i: number) => {
+      if (!wanted.has(i)) return
+      if (!isVideoFilePath(file?.path || file?.name)) return
+      file.select?.(50)
+      applied = true
+    })
+    return applied
+  } catch (err) {
+    console.warn('[TorrentStream] Could not prioritize upcoming pack files:', err)
+    return false
+  }
+}
+
 function getDownloadSourceNames(torrent: any, download: any): string[] {
   return [
     torrent?.name,
@@ -5518,6 +8003,8 @@ function getMatchingDownloadedVideos(downloadRoot: string, download: any, tvMeta
 
 function collectDownloadDeleteTargets(id: string, torrent: any, download: any): string[] {
   const downloadRoot = getDownloadPath()
+  const defaultDownloadRoot = path.join(app.getPath('downloads'), 'MyCinema')
+  const allowedRoots = [downloadRoot, defaultDownloadRoot].filter(Boolean)
   const targets = new Set<string>()
   const tvMeta = inferDownloadTvMetadata(torrent, download)
   const isSingleEpisodeDownload = typeof tvMeta.parsedEpisode === 'number' && tvMeta.isSeasonPack === false
@@ -5533,7 +8020,7 @@ function collectDownloadDeleteTargets(id: string, torrent: any, download: any): 
   const addAbsoluteTarget = (candidate?: string | null) => {
     if (!candidate) return
     const resolved = path.resolve(candidate)
-    if (isPathInsideRoot(resolved, downloadRoot) && resolved !== path.resolve(downloadRoot)) {
+    if (allowedRoots.some(r => isPathInsideRoot(resolved, r) && resolved !== path.resolve(r))) {
       targets.add(resolved)
     }
   }
@@ -5614,8 +8101,15 @@ function destroyTorrentForDelete(torrent: any): Promise<void> {
 
 async function hardDeletePaths(pathsToDelete: string[]) {
   const downloadRoot = getDownloadPath()
+  const defaultDownloadRoot = path.join(app.getPath('downloads'), 'MyCinema')
+  const allowedRoots = [downloadRoot, defaultDownloadRoot].filter(Boolean)
+
+  const isSafeDelete = (target: string) => {
+    return allowedRoots.some(root => isPathInsideRoot(target, root) && path.resolve(target) !== path.resolve(root))
+  }
+
   const uniquePaths = Array.from(new Set(pathsToDelete))
-    .filter(target => isPathInsideRoot(target, downloadRoot) && path.resolve(target) !== path.resolve(downloadRoot))
+    .filter(target => isSafeDelete(target))
     .sort((a, b) => b.length - a.length)
 
   for (const target of uniquePaths) {
@@ -5646,6 +8140,17 @@ async function hardDeletePaths(pathsToDelete: string[]) {
 // ─── IPC: Remove Download ────────────────────────────────────────────────────
 ipcMain.handle('remove-download', async (_, id: string, deleteFile: boolean = false) => {
   try {
+    if (httpDownloader.isHttpDownload(id)) {
+      httpDownloader.cancelHttpDownload(id, deleteFile)
+      db.removeDownloadRow(id)
+      BrowserWindow.getAllWindows().forEach(w => w.webContents.send('downloads-changed'))
+      void pumpDownloadQueue()
+      if (deleteFile) {
+        BrowserWindow.getAllWindows().forEach(w => w.webContents.send('library-updated'))
+      }
+      return true
+    }
+
     const torrent = activeTorrents.get(id)
     const download = db.getDownloads().find((d: any) => d.id === id)
     const deleteTargets = deleteFile ? collectDownloadDeleteTargets(id, torrent, download) : []
@@ -5661,6 +8166,8 @@ ipcMain.handle('remove-download', async (_, id: string, deleteFile: boolean = fa
     // 2. Delete download row from DB
     db.removeDownloadRow(id)
     BrowserWindow.getAllWindows().forEach(w => w.webContents.send('downloads-changed'))
+    // Removing a running download frees a slot.
+    void pumpDownloadQueue()
 
     // 3. Optionally hard delete physical files and related library metadata
     if (deleteFile) {
@@ -5874,3 +8381,584 @@ ipcMain.handle('download-opensubtitle', async (_, params: {
     return { error: err.message }
   }
 })
+
+// ─── Focus Tube: user-controlled YouTube ──────────────────────────────────────
+// Categories + subscribed channels, merged latest-first. Playback uses the
+// official YouTube embed; no direct stream extraction anywhere in this feature.
+
+function ftGuard<T>(label: string, fn: () => T): T | { error: string } {
+  try {
+    return fn()
+  } catch (err: any) {
+    console.error(`[FocusTube] ${label} failed:`, err?.message)
+    return { error: err?.message || 'Unknown error' }
+  }
+}
+
+ipcMain.handle('ft-list-categories', () => ftGuard('listCategories', () => focusTube.listCategories()))
+
+ipcMain.handle('ft-create-category', (_e, { name, color }: { name: string; color?: string }) =>
+  ftGuard('createCategory', () => focusTube.createCategory(name, color)))
+
+ipcMain.handle('ft-update-category', (_e, { id, name, color }: { id: number; name: string; color?: string }) =>
+  ftGuard('updateCategory', () => focusTube.renameCategory(id, name, color)))
+
+ipcMain.handle('ft-delete-category', (_e, id: number) =>
+  ftGuard('deleteCategory', () => focusTube.deleteCategory(id)))
+
+ipcMain.handle('ft-reorder-categories', (_e, ids: number[]) =>
+  ftGuard('reorderCategories', () => focusTube.reorderCategories(ids)))
+
+ipcMain.handle('ft-list-channels', (_e, categoryId?: number | null) =>
+  ftGuard('listChannels', () => focusTube.listChannels(categoryId ?? null)))
+
+ipcMain.handle('ft-upsert-channel', (_e, input: { channelId: string; title: string; handle?: string | null; avatarUrl?: string | null; url?: string | null }) =>
+  ftGuard('upsertChannel', () => focusTube.upsertChannel(input)))
+
+ipcMain.handle('ft-delete-channel', (_e, channelId: string) =>
+  ftGuard('deleteChannel', () => focusTube.deleteChannel(channelId)))
+
+ipcMain.handle('ft-set-channel-categories', (_e, { channelId, categoryIds }: { channelId: string; categoryIds: number[] }) =>
+  ftGuard('setChannelCategories', () => focusTube.setChannelCategories(channelId, categoryIds)))
+
+ipcMain.handle('ft-set-channel-hide-shorts', (_e, { channelId, hideShorts }: { channelId: string; hideShorts: boolean }) =>
+  ftGuard('setChannelHideShorts', () => focusTube.setChannelHideShorts(channelId, hideShorts)))
+
+ipcMain.handle('ft-get-feed', (_e, options?: Partial<{
+  categoryId: number | null
+  includeSeen: boolean
+  includeSavedOnly: boolean
+  hideShorts: boolean
+  limit: number
+  search: string | null
+  sortOrder: 'newest' | 'oldest'
+}>) => ftGuard('getFeed', () => focusTube.getFeed({
+  categoryId: options?.categoryId ?? null,
+  includeSeen: options?.includeSeen ?? false,
+  includeSavedOnly: options?.includeSavedOnly ?? false,
+  hideShorts: options?.hideShorts ?? false,
+  limit: options?.limit ?? 60,
+  search: options?.search ?? null,
+  sortOrder: options?.sortOrder ?? 'newest',
+})))
+
+ipcMain.handle('ft-get-video', (_e, videoId: string) =>
+  ftGuard('getVideo', () => focusTube.getVideo(videoId)))
+
+ipcMain.handle('ft-set-video-seen', (_e, { videoId, seen }: { videoId: string; seen: boolean }) =>
+  ftGuard('setVideoSeen', () => focusTube.setVideoSeen(videoId, seen)))
+
+ipcMain.handle('ft-mark-all-seen', (_e, categoryId: number | null) =>
+  ftGuard('markAllSeen', () => ({ changed: focusTube.markAllSeen(categoryId) })))
+
+ipcMain.handle('ft-toggle-saved', (_e, { videoId, saved }: { videoId: string; saved: boolean }) =>
+  ftGuard('toggleSaved', () => focusTube.toggleVideoSaved(videoId, saved)))
+
+ipcMain.handle('ft-get-progress', (_e, videoId: string) =>
+  ftGuard('getProgress', () => ({ position: focusTube.getVideoProgress(videoId) })))
+
+ipcMain.handle('ft-update-progress', (_e, { videoId, position }: { videoId: string; position: number }) =>
+  ftGuard('updateProgress', () => focusTube.updateVideoProgress(videoId, position)))
+
+ipcMain.handle('ft-get-category-summary', (_e, categoryId: number | null) =>
+  ftGuard('getCategorySummary', () => ({
+    unseen: focusTube.getUnseenCount(categoryId),
+    latestPublished: focusTube.getLatestPublished(categoryId),
+  })))
+
+// ─── Focus Tube: network ──────────────────────────────────────────────────────
+
+function broadcastFeedUpdated(payload: { added: number; channelIds: string[] }): void {
+  for (const window of BrowserWindow.getAllWindows()) {
+    if (window.isDestroyed()) continue
+    window.webContents.send('ft-feed-updated', payload)
+  }
+}
+
+let ftPollInFlight = false
+let ftPollStartTimer: NodeJS.Timeout | null = null
+
+function isFocusTubeEnabled(): boolean {
+  return loadAppSettings().focusTubeEnabled !== false
+}
+
+async function runFocusTubePoll(force: boolean): Promise<{ added: number; channelIds: string[]; failed: string[] }> {
+  // Defence in depth: the tab cannot be opened while the feature is off, but
+  // this also guarantees no network request can escape while it is disabled,
+  // whatever calls it.
+  if (!isFocusTubeEnabled()) return { added: 0, channelIds: [], failed: [] }
+  if (ftPollInFlight) return { added: 0, channelIds: [], failed: [] }
+  ftPollInFlight = true
+  try {
+    const result = await focusTubeFeed.pollFeeds({ force })
+    if (result.added > 0) broadcastFeedUpdated({ added: result.added, channelIds: result.channelIds })
+    return result
+  } finally {
+    ftPollInFlight = false
+  }
+}
+
+/** Starts the recurring poll plus the delayed first pass. No-op when disabled. */
+function startFocusTubePolling(): void {
+  if (!isFocusTubeEnabled()) return
+  if (focusTubePollTimer) return
+  // Delayed past the app's initial TMDB burst: the feed request that lands
+  // immediately after a burst of other traffic is the one YouTube's edge tends
+  // to reject once, which would leave the stack empty until the next cycle.
+  ftPollStartTimer = setTimeout(() => {
+    ftPollStartTimer = null
+    runFocusTubePoll(false).catch((err) => console.warn('[FocusTube] Startup poll failed:', err))
+  }, 9000)
+  focusTubePollTimer = setInterval(() => {
+    runFocusTubePoll(false).catch((err) => console.warn('[FocusTube] Scheduled poll failed:', err))
+  }, focusTubeFeed.FEED_MIN_POLL_MINUTES * 60_000)
+  focusTubePollTimer.unref?.()
+}
+
+/** Stops all Focus Tube background work. Touches no user data. */
+function stopFocusTubePolling(): void {
+  if (ftPollStartTimer) {
+    clearTimeout(ftPollStartTimer)
+    ftPollStartTimer = null
+  }
+  if (focusTubePollTimer) {
+    clearInterval(focusTubePollTimer)
+    focusTubePollTimer = null
+  }
+}
+
+ipcMain.handle('ft-refresh-feeds', async (_e, options?: { force?: boolean }) => {
+  console.log(`[FocusTube] Manual refresh (force=${Boolean(options?.force)})`)
+  return await runFocusTubePoll(options?.force ?? true)
+})
+
+ipcMain.handle('ft-resolve-channel', async (_e, query: string) =>
+  ftGuard('resolveChannel', () => focusTubeFeed.resolveChannel(query)))
+
+ipcMain.handle('ft-search-channels', async (_e, query: string) => {
+  try {
+    return await focusTubeFeed.searchChannels(query)
+  } catch (err: any) {
+    console.error('[FocusTube] Search channels failed:', err?.message)
+    return { error: err?.message || 'Search failed' }
+  }
+})
+
+ipcMain.handle('ft-search-videos', async (_e, input: { query: string; limit?: number } | string) => {
+  try {
+    const q = typeof input === 'string' ? input : input?.query
+    const limit = typeof input === 'object' && typeof input?.limit === 'number' ? input.limit : 30
+    return await focusTubeFeed.searchYouTubeVideos(q, limit)
+  } catch (err: any) {
+    console.error('[FocusTube] Video search failed:', err?.message)
+    return []
+  }
+})
+
+ipcMain.handle('ft-get-video-details', async (_e, videoId: string) => {
+  try {
+    return await focusTubeFeed.fetchVideoDetails(videoId)
+  } catch (err: any) {
+    console.error('[FocusTube] Fetch video details failed:', err?.message)
+    return { videoId, description: null }
+  }
+})
+
+// Backfills logos for previously-subscribed channels stored without one.
+ipcMain.handle('ft-refresh-avatars', async () => {
+  try {
+    return await focusTubeFeed.refreshMissingAvatars()
+  } catch (err: any) {
+    console.error('[FocusTube] Avatar refresh failed:', err?.message)
+    return { error: err?.message || 'Avatar refresh failed' }
+  }
+})
+
+// Google OAuth and YouTube API calls stay in the main process. Only reviewed
+// channel metadata and progress counts cross the context bridge; tokens never do.
+ipcMain.handle('ft-youtube-import-status', async () => focusTubeYouTubeImport.getStatus())
+
+ipcMain.handle('ft-youtube-import-connect', async () => {
+  try {
+    return await focusTubeYouTubeImport.connectAndList((progress) => {
+      for (const window of BrowserWindow.getAllWindows()) {
+        if (!window.isDestroyed()) window.webContents.send('ft-youtube-import-progress', progress)
+      }
+    })
+  } catch (err: any) {
+    console.error('[FocusTube] YouTube import connection failed:', err?.message || 'Unknown error')
+    return { error: err?.message || 'Could not connect to Google.' }
+  }
+})
+
+ipcMain.handle('ft-youtube-import-cancel', () => focusTubeYouTubeImport.cancel())
+
+const youtubeImportUndoSnapshots = new Map<string, {
+  channelIds: string[]
+  memberships: Array<{ channelId: string; categoryId: number }>
+}>()
+
+ipcMain.handle('ft-youtube-import-disconnect', async () => {
+  try {
+    return await focusTubeYouTubeImport.disconnect()
+  } catch (err: any) {
+    console.error('[FocusTube] Google disconnect cleanup failed:', err?.message || 'Unknown error')
+    return { disconnected: false, revoked: false, error: 'Could not remove the saved Google credentials.' }
+  }
+})
+
+ipcMain.handle('ft-youtube-import-save', (_event, input: {
+  channels: focusTube.FtImportedChannel[]
+  categoryAssignments: Record<string, number[]>
+}) => {
+  try {
+    const result = focusTube.importChannels(
+      Array.isArray(input?.channels) ? input.channels : [],
+      input?.categoryAssignments && typeof input.categoryAssignments === 'object' ? input.categoryAssignments : {},
+    )
+    const undoId = result.added.length || result.createdMemberships.length ? crypto.randomUUID() : null
+    if (undoId) {
+      youtubeImportUndoSnapshots.set(undoId, { channelIds: result.added, memberships: result.createdMemberships })
+      while (youtubeImportUndoSnapshots.size > 20) {
+        const oldestId = youtubeImportUndoSnapshots.keys().next().value
+        if (!oldestId) break
+        youtubeImportUndoSnapshots.delete(oldestId)
+      }
+    }
+    return { ...result, undoId }
+  } catch (err: any) {
+    console.error('[FocusTube] Local YouTube import save failed:', err?.message || 'Unknown error')
+    return { error: err?.message || 'Could not save the selected channels.' }
+  }
+})
+
+ipcMain.handle('ft-youtube-import-undo', (_event, undoId: string) => {
+  const snapshot = youtubeImportUndoSnapshots.get(String(undoId || ''))
+  if (!snapshot) return { error: 'This import is no longer available to undo.' }
+  try {
+    const result = focusTube.undoImportedChannels(snapshot.channelIds, snapshot.memberships)
+    youtubeImportUndoSnapshots.delete(String(undoId))
+    return result
+  } catch (err: any) {
+    console.error('[FocusTube] YouTube import undo failed:', err?.message || 'Unknown error')
+    return { error: err?.message || 'Could not undo the import.' }
+  }
+})
+
+ipcMain.handle('ft-youtube-import-refresh', async (_event, input: { channelIds?: string[]; requestId?: string }) => {
+  const channelIds = Array.isArray(input?.channelIds)
+    ? [...new Set(input.channelIds.map((id) => String(id || '').trim()).filter((id) => /^UC[A-Za-z0-9_-]{22}$/.test(id)))].slice(0, 10_000)
+    : []
+  const requestId = typeof input?.requestId === 'string' ? input.requestId.slice(0, 100) : ''
+  try {
+    const result = await focusTubeFeed.refreshChannels(channelIds, ({ completed, total, result: item }) => {
+      for (const window of BrowserWindow.getAllWindows()) {
+        if (window.isDestroyed()) continue
+        window.webContents.send('ft-youtube-import-refresh-progress', {
+          requestId,
+          completed,
+          total,
+          channelId: item.channelId,
+          ok: item.ok,
+          added: item.added,
+          error: item.error,
+        })
+        if (item.ok) broadcastFeedUpdated({ added: item.added, channelIds: [item.channelId] })
+      }
+    })
+    return result
+  } catch (err: any) {
+    console.error('[FocusTube] Imported feed refresh failed:', err?.message || 'Unknown error')
+    return { added: 0, failed: channelIds }
+  }
+})
+
+/** Shared subscribe flow: store the channel, file it, backfill its backlog. */
+async function subscribeResolvedChannel(
+  resolved: { channelId: string; title: string; handle?: string | null; avatarUrl?: string | null; url?: string | null },
+  categoryIds: number[],
+) {
+  const channel = focusTube.upsertChannel(resolved)
+  if (Array.isArray(categoryIds) && categoryIds.length) {
+    focusTube.setChannelCategories(channel.channelId, categoryIds)
+  }
+  // Pull this channel's backlog immediately so the stack is not empty.
+  try {
+    const feed = await focusTubeFeed.fetchChannelFeed(channel.channelId)
+    const upsert = focusTube.upsertFeedEntries(channel.channelId, feed.entries)
+    focusTube.setChannelLastFetched(channel.channelId, null)
+    try {
+      focusTube.setVideosShort(await focusTubeFeed.fetchChannelShorts(channel.channelId))
+    } catch (shortsErr: any) {
+      console.warn(`[FocusTube] Shorts tab failed for ${channel.title}: ${shortsErr?.message}`)
+    }
+    broadcastFeedUpdated({ added: upsert.inserted, channelIds: [channel.channelId] })
+  } catch (err: any) {
+    // The channel is subscribed; its feed will be retried on the next poll.
+    console.warn(`[FocusTube] Could not backfill ${channel.title}: ${err?.message}`)
+  }
+  return focusTube.getChannel(channel.channelId)
+}
+
+ipcMain.handle('ft-add-channel', async (_e, input: { query: string; categoryIds: number[] }) => {
+  try {
+    const resolved = await focusTubeFeed.resolveChannel(input.query)
+    return await subscribeResolvedChannel(resolved, input.categoryIds)
+  } catch (err: any) {
+    console.error('[FocusTube] Add channel failed:', err?.message)
+    return { error: err?.message || 'Could not add that channel' }
+  }
+})
+
+// Subscribes directly from a search result (avatar/handle already known — no
+// re-resolve, so the search-list logo is what gets stored).
+ipcMain.handle('ft-subscribe-channel', async (_e, input: {
+  channel: { channelId: string; title: string; handle?: string | null; avatarUrl?: string | null; url?: string | null }
+  categoryIds: number[]
+}) => {
+  try {
+    const picked = input.channel
+    if (!picked || !picked.channelId) throw new Error('Pick a channel from the results first')
+    return await subscribeResolvedChannel(
+      {
+        channelId: picked.channelId,
+        title: picked.title || picked.channelId,
+        handle: picked.handle ?? null,
+        avatarUrl: picked.avatarUrl ?? null,
+        url: picked.url ?? `https://www.youtube.com/channel/${picked.channelId}`,
+      },
+      input.categoryIds,
+    )
+  } catch (err: any) {
+    console.error('[FocusTube] Subscribe channel failed:', err?.message)
+    return { error: err?.message || 'Could not subscribe to that channel' }
+  }
+})
+
+ipcMain.handle('ft-record-playback', (_e, input: { videoId: string; duration?: number | null; ended?: boolean }) =>
+  ftGuard('recordPlayback', () => {
+    focusTubeFeed.recordPlaybackObservation(input.videoId, input)
+    return { ok: true }
+  }))
+
+ipcMain.handle('ft-mark-not-embeddable', (_e, videoId: string) =>
+  ftGuard('markNotEmbeddable', () => {
+    focusTubeFeed.markNotEmbeddable(videoId)
+    return { ok: true }
+  }))
+
+ipcMain.handle('ft-get-sponsor-segments', async (_e, videoId: string) => {
+  try {
+    const segments = await sponsorBlock.getSponsorSegments(videoId)
+    return { segments }
+  } catch (err: any) {
+    console.warn('[FocusTube] SponsorBlock lookup failed:', err?.message)
+    return { segments: [] }
+  }
+})
+
+ipcMain.handle('ft-get-comments', async (_e, input: { videoId: string; sortBy?: 'top' | 'new'; continuation?: string | null }) => {
+  try {
+    const videoId = String(input?.videoId || '')
+    const sortBy = input?.sortBy === 'new' ? 'new' : 'top'
+    const continuation = typeof input?.continuation === 'string' && input.continuation ? input.continuation : null
+    return await focusTubeFeed.fetchVideoComments(videoId, { sortBy, continuation })
+  } catch (err: any) {
+    console.warn('[FocusTube] Comments lookup failed:', err?.message)
+    return { error: err?.message || 'Could not load comments' }
+  }
+})
+
+function getYouTubeEmbedFrames(): Electron.WebFrameMain[] {
+  const result: Electron.WebFrameMain[] = []
+  const wins = BrowserWindow.getAllWindows()
+  for (const win of wins) {
+    if (win.isDestroyed()) continue
+    const collectFrames = (parent: Electron.WebFrameMain) => {
+      for (const child of parent.frames) {
+        if (/youtube(-nocookie)?\.com\/embed/i.test(child.url)) {
+          result.push(child)
+        }
+        collectFrames(child)
+      }
+    }
+    try {
+      collectFrames(win.webContents.mainFrame)
+    } catch {
+      // ignore
+    }
+  }
+  return result
+}
+
+ipcMain.handle('ft-set-frame-quality', async (_e, quality: string) => {
+  try {
+    const frames = getYouTubeEmbedFrames()
+    let applied = false
+    const script = `
+      (() => {
+        try {
+          const p = document.getElementById('movie_player') || document.querySelector('.html5-video-player');
+          if (!p) return false;
+          const target = ${JSON.stringify(quality)};
+          if (target === 'auto') {
+            if (typeof p.setPlaybackQualityRange === 'function') p.setPlaybackQualityRange('auto', 'auto');
+            if (typeof p.setPlaybackQuality === 'function') p.setPlaybackQuality('auto');
+            return true;
+          }
+          const available = typeof p.getAvailableQualityLevels === 'function' ? p.getAvailableQualityLevels() : [];
+          let chosen = target;
+          if (Array.isArray(available) && available.length > 0 && !available.includes(target)) {
+            const order = ['highres', 'hd2880', 'hd2160', 'hd1440', 'hd1080', 'hd720', 'large', 'medium', 'small', 'tiny'];
+            const targetIdx = order.indexOf(target);
+            if (targetIdx !== -1) {
+              const candidates = order.slice(targetIdx).filter((q) => available.includes(q));
+              chosen = candidates[0] || available[0];
+            } else {
+              chosen = available[0];
+            }
+          }
+          if (typeof p.setPlaybackQualityRange === 'function') {
+            p.setPlaybackQualityRange(chosen, chosen);
+          }
+          if (typeof p.setPlaybackQuality === 'function') {
+            p.setPlaybackQuality(chosen);
+          }
+          return true;
+        } catch (e) {
+          return false;
+        }
+      })()
+    `
+    for (const frame of frames) {
+      try {
+        await frame.executeJavaScript(script)
+        applied = true
+      } catch {
+        // frame execution retry/suppress
+      }
+    }
+    return { ok: applied }
+  } catch (err: any) {
+    return { ok: false, error: err?.message }
+  }
+})
+
+ipcMain.handle('ft-get-frame-quality', async () => {
+  try {
+    const frames = getYouTubeEmbedFrames()
+    for (const frame of frames) {
+      try {
+        const res = await frame.executeJavaScript(`
+          (() => {
+            try {
+              const p = document.getElementById('movie_player') || document.querySelector('.html5-video-player');
+              if (!p) return null;
+              const quality = typeof p.getPlaybackQuality === 'function' ? p.getPlaybackQuality() : null;
+              const available = typeof p.getAvailableQualityLevels === 'function' ? p.getAvailableQualityLevels() : [];
+              return { quality, available };
+            } catch {
+              return null;
+            }
+          })()
+        `)
+        const r = res as any;
+        if (r && (typeof r.quality === 'string' || (Array.isArray(r.available) && r.available.length > 0))) {
+          return { quality: r.quality || null, available: Array.isArray(r.available) ? r.available : [] }
+        }
+      } catch {
+        // ignore
+      }
+    }
+    return { quality: null, available: [] }
+  } catch {
+    return { quality: null, available: [] }
+  }
+})
+
+ipcMain.handle('ft-get-ambient-frame', async () => {
+  try {
+    const frames = getYouTubeEmbedFrames()
+    for (const frame of frames) {
+      try {
+        const res = await frame.executeJavaScript(`
+          (() => {
+            try {
+              const v = document.querySelector('video') || document.querySelector('.html5-main-video');
+              if (!v || v.readyState < 2 || !v.videoWidth) return null;
+              let canvas = window._ftAmbientCanvas;
+              if (!canvas) {
+                canvas = document.createElement('canvas');
+                canvas.width = 32;
+                canvas.height = 18;
+                window._ftAmbientCanvas = canvas;
+                window._ftAmbientCtx = canvas.getContext('2d', { willReadFrequently: true });
+              }
+              const ctx = window._ftAmbientCtx;
+              ctx.drawImage(v, 0, 0, 32, 18);
+              return canvas.toDataURL('image/jpeg', 0.5);
+            } catch {
+              return null;
+            }
+          })()
+        `)
+        if (typeof res === 'string' && res.startsWith('data:image/')) {
+          return { dataUrl: res }
+        }
+      } catch {
+        // ignore
+      }
+    }
+    return { dataUrl: null }
+  } catch {
+    return { dataUrl: null }
+  }
+})
+
+const FT_DEVELOPER_NOTIFICATION_EMAIL = process.env.FOCUS_TUBE_NOTIFICATION_EMAIL || 'rajveersinghranaofficial@gmail.com'
+
+ipcMain.handle('ft-request-import-access', async (_e, input: { name: string; email: string }) => {
+  try {
+    const name = String(input?.name || '').trim()
+    const email = String(input?.email || '').trim().toLowerCase()
+    if (!name) return { error: 'Please enter your name.' }
+    if (!email || !email.includes('@')) return { error: 'Please enter a valid Google account email.' }
+
+    const payload = {
+      name,
+      email,
+      _subject: `[Focus Tube] New Test User Whitelist Request: ${name} (${email})`,
+      message: `A MyCinema user has requested to be added to the Focus Tube YouTube Import test users whitelist.\n\nUser Name: ${name}\nGoogle Email: ${email}\nRequested At: ${new Date().toISOString()}\nPlatform: ${process.platform}\nApp Version: ${app.getVersion()}`,
+      Google_Email_To_Whitelist: email,
+      User_Name: name,
+      App_Version: app.getVersion(),
+      Platform: process.platform,
+      _captcha: 'false',
+      _template: 'table'
+    }
+
+    const fetchFn = typeof net?.fetch === 'function' ? net.fetch : fetch
+    const response = await fetchFn(`https://formsubmit.co/ajax/${encodeURIComponent(FT_DEVELOPER_NOTIFICATION_EMAIL)}`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Accept': 'application/json',
+        'User-Agent': `MyCinema/${app.getVersion()} (Electron; FocusTube)`
+      },
+      body: JSON.stringify(payload)
+    })
+
+    if (!response.ok) {
+      const text = await response.text().catch(() => '')
+      return { error: `Failed to submit request (HTTP ${response.status}). ${text || ''}`.trim() }
+    }
+
+    const data: any = await response.json().catch(() => ({ success: 'true' }))
+    return { ok: true, message: data.message || 'Request submitted successfully' }
+  } catch (err: any) {
+    console.error('[FocusTube] Test user request failed:', err?.message)
+    return { error: err?.message || 'Could not submit request. Please check your internet connection.' }
+  }
+})
+
+

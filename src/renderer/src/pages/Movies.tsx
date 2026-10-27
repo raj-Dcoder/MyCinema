@@ -231,4 +231,4 @@ const Movies: React.FC<MoviesProps> = ({ onPlay, onShowDetail }) => {
   )
 }
 
-export default Movies
+export default React.memo(Movies)

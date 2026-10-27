@@ -108,5 +108,6 @@ RELEASE_GUIDE.md
 .tmp-release-body.md
 .release-work/
 .tmp-guest-profile/
+.tmp-dev-profile/
 .tmp-watch-*/
 share-worker/.wrangler/

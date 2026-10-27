@@ -136,7 +136,12 @@ const AIEnhancementRenderer: React.FC<AIEnhancementRendererProps> = ({
   const frameIntervalRef = useRef(1000 / 24)
   const frameDirtyRef = useRef(false)
   const renderStatusRef = useRef(false)
+  const glRetryTimerRef = useRef<number | undefined>(undefined)
   const [isRendering, setIsRendering] = useState(false)
+  // A busy GPU process can fail shader/program creation transiently at
+  // player open (torrent + ffmpeg + decode all spinning up). One delayed
+  // retry beats staying on native video for the whole episode.
+  const [glInitAttempt, setGlInitAttempt] = useState(0)
 
   const locationsRef = useRef<{
     position: number
@@ -287,10 +292,17 @@ const AIEnhancementRenderer: React.FC<AIEnhancementRendererProps> = ({
     } catch (err) {
       console.warn('[AI Enhancements] WebGL initialization failed:', err)
       setRenderStatus(false)
+      if (glInitAttempt === 0) {
+        glRetryTimerRef.current = window.setTimeout(() => setGlInitAttempt(1), 2500)
+      }
     }
 
     return () => {
       setRenderStatus(false)
+      if (glRetryTimerRef.current !== undefined) {
+        window.clearTimeout(glRetryTimerRef.current)
+        glRetryTimerRef.current = undefined
+      }
 
       const gl = glRef.current
       if (gl) {
@@ -309,7 +321,7 @@ const AIEnhancementRenderer: React.FC<AIEnhancementRendererProps> = ({
       textureSizeRef.current = { width: 0, height: 0 }
       geometryKeyRef.current = ''
     }
-  }, [videoRef])
+  }, [videoRef, glInitAttempt])
 
   useEffect(() => {
     const gl = glRef.current

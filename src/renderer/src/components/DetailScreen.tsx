@@ -1760,7 +1760,7 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
 
             {/* Vibe Tags — space is reserved with skeletons while loading so content below never shifts */}
             {(keywordsLoading || visibleVibes.length > 0) && (
-            <div className="flex flex-wrap gap-2 min-h-[28px]" aria-hidden={keywordsLoading}>
+            <div className="flex flex-wrap gap-2 min-h-[28px] max-w-2xl" aria-hidden={keywordsLoading}>
               {keywordsLoading ? (
                 <>
                   <span className="h-[26px] w-24 rounded-full border border-white/10 bg-white/[0.06] animate-pulse" />
@@ -1781,7 +1781,7 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
             )}
 
             {/* Overview */}
-            <div className="relative max-w-3xl">
+            <div className="relative max-w-2xl">
               <p
                 ref={overviewRef}
                 className={`detail-overview-text text-white/75 text-sm md:text-[15px] leading-7 font-medium transition-all duration-300 ${

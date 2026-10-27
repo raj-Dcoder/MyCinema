@@ -1355,7 +1355,7 @@ const Home: React.FC<HomeProps> = ({ onPlay, onShowDetail, onNavigate, refreshKe
                 isActive={isActive}
               />
             ) : showLocalEmptyState ? (
-              <div className="relative flex min-h-[540px] h-[68vh] max-h-[760px] flex-col items-start justify-end overflow-hidden bg-[#05080d] px-8 pb-20 pt-32 md:px-16">
+              <div className="relative flex min-h-[570px] h-[73vh] max-h-[800px] flex-col items-start justify-end overflow-hidden bg-[#05080d] px-8 pb-20 pt-32 md:px-16">
                 <div className="absolute inset-0 bg-[linear-gradient(120deg,rgba(220,38,38,0.16),transparent_38%),linear-gradient(180deg,rgba(255,255,255,0.06),transparent_32%),#05080d]" />
                 <div className="absolute inset-0 bg-gradient-to-r from-black/85 via-black/45 to-transparent" />
                 <div className="relative max-w-xl space-y-4">
@@ -1383,7 +1383,7 @@ const Home: React.FC<HomeProps> = ({ onPlay, onShowDetail, onNavigate, refreshKe
                 </div>
               </div>
             ) : (
-              <div className="flex min-h-[540px] h-[68vh] max-h-[760px] items-center justify-center bg-white/5">
+              <div className="flex min-h-[570px] h-[73vh] max-h-[800px] items-center justify-center bg-white/5">
                 <div className="text-3xl font-black uppercase italic text-white/10">Loading Library...</div>
               </div>
             )}

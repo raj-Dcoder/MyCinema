@@ -118,7 +118,7 @@ const HeroCarousel: React.FC<HeroCarouselProps> = ({ items, onPlay, onShowDetail
 
   if (items.length === 0) {
     return (
-      <div className="keep-dark relative w-full min-h-[540px] h-[68vh] max-h-[760px] overflow-hidden skeleton">
+      <div className="keep-dark relative w-full min-h-[570px] h-[73vh] max-h-[800px] overflow-hidden skeleton">
         <div className="absolute inset-0 bg-gradient-to-t from-black via-black/40 to-transparent">
           <div className="absolute bottom-0 left-0 right-0 p-12 md:p-16 lg:p-24 max-w-4xl space-y-6">
             <div className="h-16 w-3/4 max-w-sm rounded-lg bg-white/10 skeleton" />
@@ -179,7 +179,7 @@ const HeroCarousel: React.FC<HeroCarouselProps> = ({ items, onPlay, onShowDetail
 
   return (
     <div
-      className="keep-dark relative w-full min-h-[540px] h-[68vh] max-h-[760px] overflow-hidden bg-[#05080d] group cursor-pointer"
+      className="keep-dark relative w-full min-h-[570px] h-[73vh] max-h-[800px] overflow-hidden bg-[#05080d] group cursor-pointer"
       onClick={() => onShowDetail(current)}
       role="button"
       tabIndex={0}
@@ -234,7 +234,7 @@ const HeroCarousel: React.FC<HeroCarouselProps> = ({ items, onPlay, onShowDetail
       })}
 
       {/* Content */}
-      <div className="hero-overlay absolute inset-0 flex flex-col justify-end px-8 pb-14 pt-24 md:px-16 md:pb-16 md:pt-28 space-y-3.5 z-20">
+      <div className="hero-overlay absolute inset-0 flex flex-col justify-end px-8 pb-16 pt-24 md:px-16 md:pb-20 md:pt-20 space-y-3 z-20">
         {visibleLogoPath ? (
           <img
             src={getHeroLogoUrl(visibleLogoPath)}

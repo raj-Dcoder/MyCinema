@@ -2320,11 +2320,11 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
         fsActive ? 'left-0' : ''
       } ${
         isFullscreenLayer ? 'z-[100]' : 'z-[70]'
-      } m-0 flex flex-col text-white select-none bg-transparent keep-dark dark ${
+      } m-0 flex flex-col text-white select-none bg-transparent ${
         isMinimized && !isTransitioning
           ? 'pointer-events-none'
           : fsActive
-            ? 'bg-black overflow-hidden'
+            ? 'bg-black overflow-hidden keep-dark dark'
             : 'overflow-hidden'
       }`}
     >
@@ -2486,18 +2486,18 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
               ref={shellRef}
               className={
                 isMinimized
-                  ? `pointer-events-auto fixed bottom-4 right-4 z-[80] aspect-video w-[min(380px,calc(100vw-2rem))] overflow-hidden rounded-xl border border-white/15 bg-black shadow-[0_20px_60px_rgba(0,0,0,0.7)] ${
+                  ? `pointer-events-auto fixed bottom-4 right-4 z-[80] aspect-video w-[min(380px,calc(100vw-2rem))] overflow-hidden rounded-xl border border-white/15 bg-black shadow-[0_20px_60px_rgba(0,0,0,0.7)] keep-dark dark ${
                       isTransitioning ? 'will-change-transform' : ''
                     }`
                   : fsActive
-                    ? `pointer-events-auto fixed inset-0 z-[100] w-full h-full m-0 overflow-hidden rounded-none border-0 bg-black shadow-none ${
+                    ? `pointer-events-auto fixed inset-0 z-[100] w-full h-full m-0 overflow-hidden rounded-none border-0 bg-black shadow-none keep-dark dark ${
                         isTransitioning ? 'will-change-transform' : ''
                       } ${isPlaying && !chromeVisible ? 'cursor-none' : ''}`
                     : isTransitioning && (prevMinimizedRef.current || prevFullscreenRef.current)
-                      ? `pointer-events-auto fixed z-[90] overflow-hidden rounded-2xl border border-white/10 bg-black shadow-2xl will-change-transform ${
+                      ? `pointer-events-auto fixed z-[90] overflow-hidden rounded-2xl border border-white/10 bg-black shadow-2xl will-change-transform keep-dark dark ${
                           isPlaying && !chromeVisible ? 'cursor-none' : ''
                         }`
-                      : `absolute inset-0 h-full w-full overflow-hidden rounded-2xl border border-white/10 bg-black shadow-2xl ${
+                      : `absolute inset-0 h-full w-full overflow-hidden rounded-2xl border border-white/10 bg-black shadow-2xl keep-dark dark ${
                           isPlaying && !chromeVisible ? 'cursor-none' : ''
                         }`
               }

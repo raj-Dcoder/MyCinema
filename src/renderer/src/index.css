@@ -749,6 +749,70 @@
 .light .bg-red-600:hover {
   filter: brightness(1.05);
 }
+.light .bg-primary,
+.light .bg-primary *,
+.light .bg-red-600,
+.light .bg-red-600 *,
+.light .bg-emerald-600,
+.light .bg-emerald-600 *,
+.light .btn-primary,
+.light .btn-primary * {
+  color: #ffffff !important;
+}
+
+/* FocusTube Watch Page — Crisp Modern Light Surfaces */
+.light .bg-\[\#090a0f\] {
+  background-color: #f1f3f6 !important;
+}
+.light .bg-\[\#0c0d12\],
+.light .bg-\[\#0c0d12\]\/95,
+.light aside.group\/sidepanel {
+  background-color: #ffffff !important;
+  border-color: #e5e7eb !important;
+}
+.light .bg-\[\#12131a\],
+.light .bg-\[\#12131a\]\/90 {
+  background-color: #ffffff !important;
+  border-color: #d1d5db !important;
+}
+.light .bg-\[\#161412\],
+.light .bg-\[\#161412\]\/90 {
+  background-color: #fffbeb !important;
+  border-color: #fde68a !important;
+}
+.light .bg-\[\#14161f\],
+.light .bg-\[\#161822\] {
+  background-color: #ffffff !important;
+  border-color: #e5e7eb !important;
+}
+.light .bg-\[\#1a2230\] {
+  background-color: #ffffff !important;
+  color: #111827 !important;
+  border-color: #d1d5db !important;
+}
+.light .hover\:bg-\[\#253040\]:hover {
+  background-color: #f3f4f6 !important;
+  color: #111827 !important;
+}
+.light .text-amber-300 {
+  color: #b45309 !important;
+}
+.light .text-amber-200\/70,
+.light .text-amber-200 {
+  color: #92400e !important;
+}
+.light .text-emerald-300 {
+  color: #047857 !important;
+}
+.light .bg-emerald-500\/15,
+.light .bg-emerald-500\/20 {
+  background-color: #ecfdf5 !important;
+  border-color: #a7f3d0 !important;
+}
+.light .text-sky-300\/80,
+.light .text-sky-400 {
+  color: #0284c7 !important;
+}
 
 
 /* ------------------------------------------------------------------ */
@@ -888,6 +952,51 @@
   box-shadow: inset 0 1px 1px rgba(255, 255, 255, 1), 0 30px 80px -20px rgba(16, 24, 40, 0.22) !important;
 }
 
+/* FocusTube Watch Page — Crystal Glass Mode */
+.glass-light .bg-\[\#090a0f\] {
+  background-color: rgba(241, 243, 246, 0.85) !important;
+  backdrop-filter: blur(24px) saturate(180%) !important;
+  -webkit-backdrop-filter: blur(24px) saturate(180%) !important;
+}
+.glass-light .bg-\[\#0c0d12\],
+.glass-light .bg-\[\#0c0d12\]\/95,
+.glass-light aside.group\/sidepanel {
+  background-color: rgba(255, 255, 255, 0.78) !important;
+  backdrop-filter: blur(24px) saturate(180%) !important;
+  -webkit-backdrop-filter: blur(24px) saturate(180%) !important;
+  border-color: rgba(255, 255, 255, 0.9) !important;
+}
+.glass-light .bg-\[\#12131a\],
+.glass-light .bg-\[\#12131a\]\/90 {
+  background-color: rgba(255, 255, 255, 0.72) !important;
+  backdrop-filter: blur(20px) !important;
+  -webkit-backdrop-filter: blur(20px) !important;
+  border-color: rgba(255, 255, 255, 0.85) !important;
+}
+.glass-light .bg-\[\#161412\],
+.glass-light .bg-\[\#161412\]\/90 {
+  background-color: rgba(254, 243, 199, 0.75) !important;
+  backdrop-filter: blur(20px) !important;
+  -webkit-backdrop-filter: blur(20px) !important;
+  border-color: rgba(251, 191, 36, 0.5) !important;
+}
+.glass-light .bg-\[\#14161f\],
+.glass-light .bg-\[\#161822\] {
+  background-color: rgba(255, 255, 255, 0.85) !important;
+  backdrop-filter: blur(20px) !important;
+  -webkit-backdrop-filter: blur(20px) !important;
+  border-color: rgba(255, 255, 255, 0.9) !important;
+}
+.glass-light .bg-\[\#1a2230\] {
+  background-color: rgba(255, 255, 255, 0.85) !important;
+  color: #111827 !important;
+  border-color: rgba(255, 255, 255, 0.9) !important;
+}
+.glass-light .hover\:bg-\[\#253040\]:hover {
+  background-color: rgba(243, 244, 246, 0.9) !important;
+  color: #111827 !important;
+}
+
 
 /* ------------------------------------------------------------------ */
 /* 4. KEEP-DARK — 100% CINEMATIC ISOLATION FOR VIDEO PLAYERS          */
@@ -906,30 +1015,10 @@
   color: #ffffff !important;
 }
 
-/* Lock Theater Player Containers to Pure Dark in All Themes */
-.light .keep-dark .bg-\[\#090a0f\],
-.glass-light .keep-dark .bg-\[\#090a0f\] {
-  background-color: #090a0f !important;
-}
-.light .keep-dark .bg-\[\#0c0d12\],
-.glass-light .keep-dark .bg-\[\#0c0d12\] {
-  background-color: #0c0d12 !important;
-}
-.light .keep-dark .bg-\[\#0c0d12\]\/95,
-.glass-light .keep-dark .bg-\[\#0c0d12\]\/95 {
-  background-color: rgba(12, 13, 18, 0.95) !important;
-}
-.light .keep-dark .bg-\[\#12131a\]\/90,
-.glass-light .keep-dark .bg-\[\#12131a\]\/90 {
-  background-color: rgba(18, 19, 26, 0.9) !important;
-}
-.light .keep-dark .bg-\[\#161412\]\/90,
-.glass-light .keep-dark .bg-\[\#161412\]\/90 {
-  background-color: rgba(22, 20, 18, 0.9) !important;
-}
-.light .keep-dark .bg-\[\#161822\],
-.glass-light .keep-dark .bg-\[\#161822\] {
-  background-color: #161822 !important;
+/* Movie & Video Player Containers Isolated to Dark */
+.light .keep-dark .bg-black,
+.glass-light .keep-dark .bg-black {
+  background-color: #000000 !important;
 }
 .light .keep-dark .bg-\[\#0b0b0b\],
 .glass-light .keep-dark .bg-\[\#0b0b0b\] {
@@ -938,18 +1027,6 @@
 .light .keep-dark .bg-\[\#141414\],
 .glass-light .keep-dark .bg-\[\#141414\] {
   background-color: #141414 !important;
-}
-.light .keep-dark .bg-\[\#14161f\],
-.glass-light .keep-dark .bg-\[\#14161f\] {
-  background-color: #14161f !important;
-}
-.light .keep-dark .bg-\[\#1a2230\],
-.glass-light .keep-dark .bg-\[\#1a2230\] {
-  background-color: #1a2230 !important;
-}
-.light .keep-dark .bg-\[\#253040\],
-.glass-light .keep-dark .bg-\[\#253040\] {
-  background-color: #253040 !important;
 }
 .light .keep-dark .bg-\[\#05080d\],
 .glass-light .keep-dark .bg-\[\#05080d\] {

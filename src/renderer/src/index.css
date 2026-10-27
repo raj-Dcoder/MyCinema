@@ -1628,6 +1628,9 @@
 .detail-overview-fade {
   background: linear-gradient(to top, #080d16 0%, transparent 100%);
 }
+.detail-overview-text {
+  color: rgba(255, 255, 255, 0.75);
+}
 
 /* Light Mode Detail Screen */
 .light .detail-screen-canvas {
@@ -1643,16 +1646,34 @@
   background: linear-gradient(to bottom, rgba(241, 243, 246, 0.6) 0%, transparent 100%) !important;
 }
 .light .detail-overlay-left {
-  background: linear-gradient(to right, #f1f3f6 0%, rgba(241, 243, 246, 0.96) 28%, rgba(241, 243, 246, 0.65) 55%, transparent 88%) !important;
+  background: linear-gradient(
+    to right,
+    #f1f3f6 0%,
+    rgba(241, 243, 246, 0.98) 36%,
+    rgba(241, 243, 246, 0.92) 55%,
+    rgba(241, 243, 246, 0.5) 75%,
+    transparent 100%
+  ) !important;
 }
 .light .detail-overlay-radial {
-  background: radial-gradient(circle at 15% 55%, rgba(241, 243, 246, 0.85) 0%, rgba(241, 243, 246, 0.35) 45%, transparent 70%) !important;
+  background: radial-gradient(
+    circle at 18% 48%,
+    rgba(241, 243, 246, 0.98) 0%,
+    rgba(241, 243, 246, 0.88) 42%,
+    rgba(241, 243, 246, 0.45) 68%,
+    transparent 85%
+  ) !important;
 }
 .light .detail-overlay-bottom {
   background: linear-gradient(to top, #f1f3f6 0%, rgba(241, 243, 246, 0.75) 40%, transparent 100%) !important;
 }
 .light .detail-overview-fade {
-  background: linear-gradient(to top, #f1f3f6 0%, transparent 100%) !important;
+  display: none !important;
+}
+
+.light .detail-overview-text {
+  color: #1f2937 !important; /* deep slate/charcoal text - high contrast */
+  font-weight: 500 !important;
 }
 
 .light .detail-close-btn {
@@ -1708,6 +1729,46 @@
   color: #0284c7 !important;
 }
 
+/* Meta info pills in Light mode */
+.light .detail-screen-root .text-blue-200 {
+  color: #1d4ed8 !important;
+  font-weight: 800 !important;
+}
+.light .detail-screen-root .text-blue-200\/50 {
+  color: #2563eb !important;
+}
+.light .detail-screen-root .bg-blue-500\/15 {
+  background-color: rgba(59, 130, 246, 0.12) !important;
+}
+.light .detail-screen-root .border-blue-500\/30 {
+  border-color: rgba(59, 130, 246, 0.28) !important;
+}
+
+.light .detail-screen-root .text-amber-200 {
+  color: #b45309 !important;
+  font-weight: 800 !important;
+}
+.light .detail-screen-root .text-amber-200\/50 {
+  color: #d97706 !important;
+}
+.light .detail-screen-root .bg-amber-500\/15 {
+  background-color: rgba(245, 158, 11, 0.12) !important;
+}
+.light .detail-screen-root .border-amber-500\/30 {
+  border-color: rgba(245, 158, 11, 0.28) !important;
+}
+
+.light .detail-screen-root .text-emerald-100 {
+  color: #047857 !important;
+  font-weight: 800 !important;
+}
+.light .detail-screen-root .bg-emerald-500\/15 {
+  background-color: rgba(16, 185, 129, 0.12) !important;
+}
+.light .detail-screen-root .border-emerald-500\/30 {
+  border-color: rgba(16, 185, 129, 0.28) !important;
+}
+
 /* Glass-Light Mode Detail Screen */
 .glass-light .detail-screen-canvas {
   background-color: #f5f5f7 !important;
@@ -1722,16 +1783,34 @@
   background: linear-gradient(to bottom, rgba(245, 245, 247, 0.6) 0%, transparent 100%) !important;
 }
 .glass-light .detail-overlay-left {
-  background: linear-gradient(to right, #f5f5f7 0%, rgba(245, 245, 247, 0.96) 28%, rgba(245, 245, 247, 0.65) 55%, transparent 88%) !important;
+  background: linear-gradient(
+    to right,
+    #f5f5f7 0%,
+    rgba(245, 245, 247, 0.98) 36%,
+    rgba(245, 245, 247, 0.92) 55%,
+    rgba(245, 245, 247, 0.5) 75%,
+    transparent 100%
+  ) !important;
 }
 .glass-light .detail-overlay-radial {
-  background: radial-gradient(circle at 15% 55%, rgba(245, 245, 247, 0.85) 0%, rgba(245, 245, 247, 0.35) 45%, transparent 70%) !important;
+  background: radial-gradient(
+    circle at 18% 48%,
+    rgba(245, 245, 247, 0.98) 0%,
+    rgba(245, 245, 247, 0.88) 42%,
+    rgba(245, 245, 247, 0.45) 68%,
+    transparent 85%
+  ) !important;
 }
 .glass-light .detail-overlay-bottom {
   background: linear-gradient(to top, #f5f5f7 0%, rgba(245, 245, 247, 0.75) 40%, transparent 100%) !important;
 }
 .glass-light .detail-overview-fade {
-  background: linear-gradient(to top, #f5f5f7 0%, transparent 100%) !important;
+  display: none !important;
+}
+
+.glass-light .detail-overview-text {
+  color: #1f2937 !important;
+  font-weight: 500 !important;
 }
 
 .glass-light .detail-close-btn {
@@ -1786,6 +1865,45 @@
   color: #0284c7 !important;
 }
 
+.glass-light .detail-screen-root .text-blue-200 {
+  color: #1d4ed8 !important;
+  font-weight: 800 !important;
+}
+.glass-light .detail-screen-root .text-blue-200\/50 {
+  color: #2563eb !important;
+}
+.glass-light .detail-screen-root .bg-blue-500\/15 {
+  background-color: rgba(59, 130, 246, 0.12) !important;
+}
+.glass-light .detail-screen-root .border-blue-500\/30 {
+  border-color: rgba(59, 130, 246, 0.28) !important;
+}
+
+.glass-light .detail-screen-root .text-amber-200 {
+  color: #b45309 !important;
+  font-weight: 800 !important;
+}
+.glass-light .detail-screen-root .text-amber-200\/50 {
+  color: #d97706 !important;
+}
+.glass-light .detail-screen-root .bg-amber-500\/15 {
+  background-color: rgba(245, 158, 11, 0.12) !important;
+}
+.glass-light .detail-screen-root .border-amber-500\/30 {
+  border-color: rgba(245, 158, 11, 0.28) !important;
+}
+
+.glass-light .detail-screen-root .text-emerald-100 {
+  color: #047857 !important;
+  font-weight: 800 !important;
+}
+.glass-light .detail-screen-root .bg-emerald-500\/15 {
+  background-color: rgba(16, 185, 129, 0.12) !important;
+}
+.glass-light .detail-screen-root .border-emerald-500\/30 {
+  border-color: rgba(16, 185, 129, 0.28) !important;
+}
+
 /* Glass (Dark) Mode Detail Screen */
 .glass .detail-screen-canvas {
   background-color: rgba(7, 9, 14, 0.94) !important;
@@ -1807,6 +1925,10 @@
 }
 .glass .detail-overview-fade {
   background: linear-gradient(to top, #07090e 0%, transparent 100%) !important;
+}
+.glass .detail-overview-text {
+  color: rgba(255, 255, 255, 0.85) !important;
+  font-weight: 500 !important;
 }
 
 /* Detail Screen Source Drawer in Light Mode */

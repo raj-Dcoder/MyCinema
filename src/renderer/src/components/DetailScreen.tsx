@@ -1784,7 +1784,7 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
             <div className="relative max-w-3xl">
               <p
                 ref={overviewRef}
-                className={`text-white/[0.72] text-sm md:text-[15px] leading-7 font-medium transition-all duration-300 ${
+                className={`detail-overview-text text-white/75 text-sm md:text-[15px] leading-7 font-medium transition-all duration-300 ${
                   expandedOverview ? '' : 'line-clamp-3'
                 }`}
               >

@@ -1284,6 +1284,18 @@
 .glass-light .keep-dark .text-white\/35 { color: rgba(255,255,255,0.35) !important; }
 .light .keep-dark .text-white\/40,
 .glass-light .keep-dark .text-white\/40 { color: rgba(255,255,255,0.4) !important; }
+.light .keep-dark .text-white\/45,
+.glass-light .keep-dark .text-white\/45 { color: rgba(255,255,255,0.45) !important; }
+.light .keep-dark .text-white\/60,
+.glass-light .keep-dark .text-white\/60 { color: rgba(255,255,255,0.6) !important; }
+.light .keep-dark .text-white\/70,
+.glass-light .keep-dark .text-white\/70 { color: rgba(255,255,255,0.7) !important; }
+.light .keep-dark .text-white\/75,
+.glass-light .keep-dark .text-white\/75 { color: rgba(255,255,255,0.75) !important; }
+.light .keep-dark .text-white\/80,
+.glass-light .keep-dark .text-white\/80 { color: rgba(255,255,255,0.8) !important; }
+.light .keep-dark .text-white\/85,
+.glass-light .keep-dark .text-white\/85 { color: rgba(255,255,255,0.85) !important; }
 .light .keep-dark .text-white\/50,
 .glass-light .keep-dark .text-white\/50 { color: rgba(255,255,255,0.5) !important; }
 .light .keep-dark .text-white\/55,
@@ -1326,10 +1338,57 @@
 .light .keep-dark .bg-black\/70 { background-color: rgba(0,0,0,0.7) !important; }
 .light .keep-dark .bg-black\/80 { background-color: rgba(0,0,0,0.8) !important; }
 .light .keep-dark .bg-black\/85 { background-color: rgba(0,0,0,0.85) !important; }
+/* Option 2: Full-Bleed Dark Scrims Isolation */
+.light .keep-dark .from-\[\#05080d\],
+.glass-light .keep-dark .from-\[\#05080d\] {
+  --tw-gradient-from: #05080d !important;
+  --tw-gradient-to: rgba(5, 8, 13, 0) !important;
+  --tw-gradient-stops: var(--tw-gradient-from), var(--tw-gradient-to) !important;
+}
+.light .keep-dark .from-black\/90,
+.glass-light .keep-dark .from-black\/90 {
+  --tw-gradient-from: rgba(0, 0, 0, 0.9) !important;
+}
 .light .keep-dark .from-black\/88,
+.glass-light .keep-dark .from-black\/88 {
+  --tw-gradient-from: rgba(0, 0, 0, 0.88) !important;
+}
+.light .keep-dark .from-black\/80,
+.glass-light .keep-dark .from-black\/80 {
+  --tw-gradient-from: rgba(0, 0, 0, 0.8) !important;
+}
 .light .keep-dark .from-black\/55,
+.glass-light .keep-dark .from-black\/55 {
+  --tw-gradient-from: rgba(0, 0, 0, 0.55) !important;
+}
+.light .keep-dark .via-black\/45,
+.glass-light .keep-dark .via-black\/45 {
+  --tw-gradient-stops: var(--tw-gradient-from), rgba(0, 0, 0, 0.45), var(--tw-gradient-to) !important;
+}
 .light .keep-dark .via-black\/42,
-.light .keep-dark .to-black\/5 { --tw-gradient-from: revert !important; }
+.glass-light .keep-dark .via-black\/42 {
+  --tw-gradient-stops: var(--tw-gradient-from), rgba(0, 0, 0, 0.42), var(--tw-gradient-to) !important;
+}
+.light .keep-dark .via-black\/35,
+.glass-light .keep-dark .via-black\/35 {
+  --tw-gradient-stops: var(--tw-gradient-from), rgba(0, 0, 0, 0.35), var(--tw-gradient-to) !important;
+}
+.light .keep-dark .via-black\/30,
+.glass-light .keep-dark .via-black\/30 {
+  --tw-gradient-stops: var(--tw-gradient-from), rgba(0, 0, 0, 0.3), var(--tw-gradient-to) !important;
+}
+.light .keep-dark .to-black\/20,
+.glass-light .keep-dark .to-black\/20 {
+  --tw-gradient-to: rgba(0, 0, 0, 0.2) !important;
+}
+.light .keep-dark .to-black\/5,
+.glass-light .keep-dark .to-black\/5 {
+  --tw-gradient-to: rgba(0, 0, 0, 0.05) !important;
+}
+.light .keep-dark .to-transparent,
+.glass-light .keep-dark .to-transparent {
+  --tw-gradient-to: transparent !important;
+}
 .light .keep-dark .skeleton { background-color: rgba(255,255,255,0.05) !important; }
 .light .keep-dark select option { background-color: #141414; color: #ffffff; }
 .light .keep-dark .group,

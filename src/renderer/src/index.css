@@ -572,6 +572,7 @@
 .light .bg-\[\#0f141d\]\/70,
 .light .bg-\[\#0B0F16\]\/70,
 .light .bg-\[\#111111\]\/90,
+.light .bg-\[\#12161F\]\/90,
 .light .bg-\[\#14161f\]\/95,
 .light .bg-\[\#16181f\]\/95,
 .light .bg-\[\#0e1017\]\/95 {
@@ -2298,4 +2299,340 @@
 }
 .glass .collection-card-overlay-h {
   background: linear-gradient(to right, rgba(14, 18, 27, 0.9) 0%, rgba(14, 18, 27, 0.3) 45%, transparent 100%) !important;
+}
+
+
+/* ------------------------------------------------------------------ */
+/* 9. DOWNLOAD QUEUE & DOWNLOADS PAGE — Clean Modern Light Theme      */
+/* ------------------------------------------------------------------ */
+
+/* Outer Download Queue Container */
+.light .download-queue-container,
+.glass-light .download-queue-container {
+  background-color: #ffffff !important;
+  border: 1px solid #e5e7eb !important;
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.05), 0 1px 3px rgba(0, 0, 0, 0.04) !important;
+  backdrop-filter: none !important;
+}
+
+/* Header Bar */
+.light .download-queue-header,
+.glass-light .download-queue-header {
+  background-color: #fafbfc !important;
+  border-bottom: 1px solid #e5e7eb !important;
+}
+.light .download-queue-header h3,
+.glass-light .download-queue-header h3 {
+  color: #111827 !important;
+}
+
+/* Sub-Navigation Tabs */
+.light .download-queue-tabs,
+.glass-light .download-queue-tabs {
+  background-color: #f1f3f6 !important;
+  border: 1px solid #e5e7eb !important;
+}
+.light .download-queue-tabs button,
+.glass-light .download-queue-tabs button {
+  color: #4b5563 !important;
+  font-weight: 600 !important;
+}
+.light .download-queue-tabs button:hover,
+.glass-light .download-queue-tabs button:hover {
+  color: #111827 !important;
+  background-color: rgba(255, 255, 255, 0.8) !important;
+}
+.light .download-queue-tabs button.active-all,
+.glass-light .download-queue-tabs button.active-all {
+  background-color: #ffffff !important;
+  color: #111827 !important;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08) !important;
+}
+.light .download-queue-tabs button.active-downloading,
+.glass-light .download-queue-tabs button.active-downloading {
+  background-color: #ffffff !important;
+  color: #dc2626 !important;
+  border: 1px solid rgba(220, 38, 38, 0.25) !important;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08) !important;
+}
+.light .download-queue-tabs button.active-queued,
+.glass-light .download-queue-tabs button.active-queued {
+  background-color: #ffffff !important;
+  color: #0284c7 !important;
+  border: 1px solid rgba(2, 132, 199, 0.25) !important;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08) !important;
+}
+.light .download-queue-tabs button.active-completed,
+.glass-light .download-queue-tabs button.active-completed {
+  background-color: #ffffff !important;
+  color: #059669 !important;
+  border: 1px solid rgba(5, 150, 105, 0.25) !important;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08) !important;
+}
+.light .download-queue-tabs button.active-paused,
+.glass-light .download-queue-tabs button.active-paused {
+  background-color: #ffffff !important;
+  color: #d97706 !important;
+  border: 1px solid rgba(217, 119, 6, 0.25) !important;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08) !important;
+}
+
+/* Quick Search Filter inside Queue */
+.light .download-queue-search,
+.glass-light .download-queue-search {
+  background-color: #ffffff !important;
+  border: 1px solid #d1d5db !important;
+  color: #111827 !important;
+}
+.light .download-queue-search input,
+.glass-light .download-queue-search input {
+  color: #111827 !important;
+}
+.light .download-queue-search input::placeholder,
+.glass-light .download-queue-search input::placeholder {
+  color: #9ca3af !important;
+}
+
+/* Batch Action Buttons */
+.light .download-queue-btn,
+.glass-light .download-queue-btn {
+  background-color: #ffffff !important;
+  border: 1px solid #d1d5db !important;
+  color: #374151 !important;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04) !important;
+}
+.light .download-queue-btn:hover,
+.glass-light .download-queue-btn:hover {
+  background-color: #f3f4f6 !important;
+  color: #111827 !important;
+  border-color: #9ca3af !important;
+}
+
+/* Concurrency Selector */
+.light .download-queue-select,
+.glass-light .download-queue-select {
+  background-color: #ffffff !important;
+  border: 1px solid #d1d5db !important;
+  color: #111827 !important;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04) !important;
+}
+.light .download-queue-select option,
+.glass-light .download-queue-select option {
+  background-color: #ffffff !important;
+  color: #111827 !important;
+}
+
+/* Download List & Rows */
+.light .download-queue-list,
+.glass-light .download-queue-list {
+  border-top-color: #e5e7eb !important;
+}
+.light .download-queue-list > :not([hidden]) ~ :not([hidden]),
+.glass-light .download-queue-list > :not([hidden]) ~ :not([hidden]) {
+  border-color: #f3f4f6 !important;
+}
+
+.light .download-queue-row,
+.glass-light .download-queue-row {
+  background-color: #ffffff !important;
+}
+.light .download-queue-row:hover,
+.glass-light .download-queue-row:hover {
+  background-color: #f9fafb !important;
+}
+.light .download-queue-row.is-downloading,
+.glass-light .download-queue-row.is-downloading {
+  background-color: rgba(229, 9, 20, 0.02) !important;
+}
+.light .download-queue-row.is-downloading:hover,
+.glass-light .download-queue-row.is-downloading:hover {
+  background-color: rgba(229, 9, 20, 0.04) !important;
+}
+
+/* Titles & Year */
+.light .download-queue-title,
+.glass-light .download-queue-title {
+  color: #111827 !important;
+  font-weight: 700 !important;
+}
+.light .download-queue-title:hover,
+.glass-light .download-queue-title:hover {
+  color: #e50914 !important;
+}
+.light .download-queue-row .text-white\/45,
+.glass-light .download-queue-row .text-white\/45 {
+  color: #6b7280 !important;
+}
+
+/* Format & Quality Badges */
+.light .download-badge-quality,
+.glass-light .download-badge-quality {
+  background-color: #e0f2fe !important;
+  color: #0369a1 !important;
+  border-color: #bae6fd !important;
+}
+.light .download-badge-source,
+.glass-light .download-badge-source {
+  background-color: #f3f4f6 !important;
+  color: #374151 !important;
+  border-color: #d1d5db !important;
+}
+.light .download-badge-codec,
+.glass-light .download-badge-codec {
+  background-color: #f5f3ff !important;
+  color: #6d28d9 !important;
+  border-color: #ddd6fe !important;
+}
+.light .download-badge-audio,
+.glass-light .download-badge-audio {
+  background-color: #ecfdf5 !important;
+  color: #047857 !important;
+  border-color: #a7f3d0 !important;
+}
+
+/* Status Icons on the left */
+.light .download-queue-resume-btn,
+.glass-light .download-queue-resume-btn {
+  background-color: #fffbeb !important;
+  color: #d97706 !important;
+  border: 1px solid #fde68a !important;
+}
+.light .download-queue-resume-btn:hover,
+.glass-light .download-queue-resume-btn:hover {
+  background-color: #fef3c7 !important;
+  color: #b45309 !important;
+}
+.light .download-queue-retry-btn,
+.glass-light .download-queue-retry-btn {
+  background-color: #fef2f2 !important;
+  color: #dc2626 !important;
+  border: 1px solid #fecaca !important;
+}
+.light .download-queue-row .bg-sky-500\/10,
+.glass-light .download-queue-row .bg-sky-500\/10 {
+  background-color: #f0f9ff !important;
+  color: #0284c7 !important;
+  border-color: #bae6fd !important;
+}
+.light .download-queue-row .bg-amber-500\/10,
+.glass-light .download-queue-row .bg-amber-500\/10 {
+  background-color: #fffbeb !important;
+  color: #d97706 !important;
+  border-color: #fde68a !important;
+}
+.light .download-queue-row .bg-emerald-500\/10,
+.glass-light .download-queue-row .bg-emerald-500\/10 {
+  background-color: #ecfdf5 !important;
+  color: #059669 !important;
+  border-color: #a7f3d0 !important;
+}
+
+/* Actions on the right of each row */
+.light .download-queue-icon-btn,
+.glass-light .download-queue-icon-btn {
+  background-color: #f3f4f6 !important;
+  border: 1px solid #e5e7eb !important;
+  color: #4b5563 !important;
+}
+.light .download-queue-icon-btn:hover,
+.glass-light .download-queue-icon-btn:hover {
+  background-color: #e5e7eb !important;
+  color: #111827 !important;
+  border-color: #d1d5db !important;
+}
+
+/* Progress Track */
+.light .download-queue-progress-track,
+.glass-light .download-queue-progress-track {
+  background-color: #e5e7eb !important;
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.06) !important;
+}
+.light .download-queue-percent,
+.glass-light .download-queue-percent {
+  color: #4b5563 !important;
+  font-weight: 700 !important;
+}
+
+/* Page Level Search, Storage & Action Controls in Download.tsx */
+.light .download-search-box,
+.glass-light .download-search-box {
+  background-color: #ffffff !important;
+  border-color: #d1d5db !important;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05) !important;
+}
+.light .download-search-box:focus-within,
+.glass-light .download-search-box:focus-within {
+  border-color: #9ca3af !important;
+  background-color: #ffffff !important;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08) !important;
+}
+.light .download-search-box input,
+.glass-light .download-search-box input {
+  color: #111827 !important;
+}
+.light .download-search-box input::placeholder,
+.glass-light .download-search-box input::placeholder {
+  color: #9ca3af !important;
+}
+
+.light .download-storage-btn,
+.glass-light .download-storage-btn {
+  background-color: #ffffff !important;
+  border-color: #d1d5db !important;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04) !important;
+}
+.light .download-storage-btn:hover,
+.glass-light .download-storage-btn:hover {
+  background-color: #f9fafb !important;
+  border-color: #9ca3af !important;
+}
+.light .download-storage-btn span.text-white,
+.glass-light .download-storage-btn span.text-white {
+  color: #111827 !important;
+}
+.light .download-storage-btn .bg-white\/10,
+.glass-light .download-storage-btn .bg-white\/10 {
+  background-color: #e5e7eb !important;
+}
+
+.light .download-folder-btn,
+.glass-light .download-folder-btn {
+  background-color: #ffffff !important;
+  border-color: #d1d5db !important;
+  color: #4b5563 !important;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04) !important;
+}
+.light .download-folder-btn:hover,
+.glass-light .download-folder-btn:hover {
+  background-color: #f3f4f6 !important;
+  color: #111827 !important;
+  border-color: #9ca3af !important;
+}
+
+/* Sources Right Drawer in Download.tsx */
+.light .download-sources-panel,
+.glass-light .download-sources-panel {
+  background-color: #ffffff !important;
+  border-left-color: #e5e7eb !important;
+  box-shadow: -16px 0 40px rgba(0, 0, 0, 0.1) !important;
+}
+.light .download-sources-header,
+.glass-light .download-sources-header {
+  background-color: #fafbfc !important;
+  border-bottom-color: #e5e7eb !important;
+}
+.light .download-sources-header h3,
+.glass-light .download-sources-header h3 {
+  color: #111827 !important;
+}
+.light .download-sources-list,
+.glass-light .download-sources-list {
+  background-color: #f9fafb !important;
+}
+
+/* Glass Dark Download Queue */
+.glass .download-queue-container {
+  background-color: rgba(18, 22, 31, 0.8) !important;
+  backdrop-filter: blur(24px) !important;
+  border-color: rgba(255, 255, 255, 0.12) !important;
 }

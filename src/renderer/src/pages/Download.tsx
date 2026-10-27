@@ -1028,7 +1028,7 @@ const Download: React.FC<DownloadProps> = ({ onPlay, onShowDetail }) => {
               <h1 className="text-2xl font-bold tracking-tight">Downloads</h1>
             </div>
             
-            <div className="relative flex-1 max-w-md flex items-center bg-white/[0.035] border border-white/10 rounded-2xl overflow-hidden focus-within:border-white/20 focus-within:bg-white/[0.055] transition-all shadow-sm">
+            <div className="download-search-box relative flex-1 max-w-md flex items-center bg-white/[0.035] border border-white/10 rounded-2xl overflow-hidden focus-within:border-white/20 focus-within:bg-white/[0.055] transition-all shadow-sm">
               <div className="pl-4 text-muted">
                 {searching ? <Loader2 size={16} className="animate-spin text-white" /> : <Search size={16} />}
               </div>
@@ -1051,7 +1051,7 @@ const Download: React.FC<DownloadProps> = ({ onPlay, onShowDetail }) => {
           <div className="flex items-center gap-3">
             <button
               onClick={refreshDownloadsStorage}
-              className="flex items-center gap-3 rounded-xl border border-white/10 bg-white/5 px-4 py-2.5 hover:bg-white/10 transition-colors"
+              className="download-storage-btn flex items-center gap-3 rounded-xl border border-white/10 bg-white/5 px-4 py-2.5 hover:bg-white/10 transition-colors"
               title={downloadsStorage?.path || 'Refresh storage'}
             >
               <HardDrive size={15} className="text-primary" />
@@ -1074,7 +1074,7 @@ const Download: React.FC<DownloadProps> = ({ onPlay, onShowDetail }) => {
 
             <button
               onClick={() => window.api.openDownloadsFolder()}
-              className="p-2.5 rounded-xl bg-white/5 border border-white/10 text-muted hover:text-white hover:bg-white/10 transition-colors"
+              className="download-folder-btn p-2.5 rounded-xl bg-white/5 border border-white/10 text-muted hover:text-white hover:bg-white/10 transition-colors"
               title="Open downloads folder"
             >
               <FolderOpen size={16} />
@@ -1268,13 +1268,13 @@ const Download: React.FC<DownloadProps> = ({ onPlay, onShowDetail }) => {
 
       {/* ─── Right Side Panel ───────────────────────────────────────────────── */}
       <div
-        className={`fixed inset-y-0 right-0 z-50 flex w-full max-w-[580px] flex-col border-l border-white/10 bg-[#0C1017] shadow-[-32px_0_80px_rgba(0,0,0,0.65)] transform transition-transform duration-300 ease-out ${
+        className={`download-sources-panel fixed inset-y-0 right-0 z-50 flex w-full max-w-[580px] flex-col border-l border-white/10 bg-[#0C1017] shadow-[-32px_0_80px_rgba(0,0,0,0.65)] transform transition-transform duration-300 ease-out ${
           panelOpen ? 'translate-x-0' : 'translate-x-full'
         }`}
       >
         {selectedItem && (
           <div className="flex flex-col h-full">
-            <div className="relative border-b border-white/10 bg-[#0C1017]">
+            <div className="download-sources-header relative border-b border-white/10 bg-[#0C1017]">
               {/* scan progress */}
               <div className="absolute inset-x-0 top-0 h-[2px] bg-white/5">
                 {loadingSources && sourceSearchStatus.total > 0 ? (
@@ -1534,7 +1534,7 @@ const Download: React.FC<DownloadProps> = ({ onPlay, onShowDetail }) => {
             </div>
 
             {/* Sources List */}
-            <div className="flex-1 overflow-y-auto bg-[#080B10] px-4 py-4 scrollbar-thin">
+            <div className="download-sources-list flex-1 overflow-y-auto bg-[#080B10] px-4 py-4 scrollbar-thin">
               {(loadingSources || !sourceSearchStatus.done) && filteredSources.length === 0 ? (
                 <div className="flex flex-col gap-3">
                   <div className="flex items-center gap-3 rounded-2xl bg-white/[0.03] px-4 py-3.5 ring-1 ring-white/[0.07]">

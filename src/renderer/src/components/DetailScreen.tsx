@@ -1665,7 +1665,7 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
                   alt={displayTitle}
                   loading="eager"
                   decoding="async"
-                  className="max-h-24 md:max-h-32 w-auto max-w-[min(100%,440px)] object-contain object-left drop-shadow-[0_10px_28px_rgba(0,0,0,0.75)] hero-split-logo"
+                  className="max-h-24 md:max-h-32 w-auto max-w-[min(100%,440px)] object-contain object-left hero-split-logo"
                   onError={() => setLogoLoadFailed(true)}
                 />
               ) : (

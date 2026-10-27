@@ -141,7 +141,7 @@ const VideoCard: React.FC<VideoCardProps> = ({ video, onPlay, onShowDetail, isCo
         }
       }}
     >
-      <div className="relative aspect-[2/3] w-full overflow-hidden rounded-2xl bg-secondary shadow-lg ring-1 ring-white/5 isolate transform-gpu transition-[transform,box-shadow] duration-300 [backface-visibility:hidden] group-hover:-translate-y-2 group-hover:scale-[1.04] group-hover:shadow-2xl group-hover:shadow-red-950/40 group-hover:ring-red-600/70 group-focus-visible:-translate-y-2 group-focus-visible:scale-[1.04] group-focus-visible:outline-none group-focus-visible:ring-2 group-focus-visible:ring-red-600/80">
+      <div className="relative aspect-[2/3] w-full overflow-hidden rounded-2xl bg-secondary shadow-lg ring-1 ring-white/5 isolate transform-gpu transition-[transform,box-shadow] duration-300 [backface-visibility:hidden] group-hover:-translate-y-1.5 group-hover:scale-[1.025] group-hover:shadow-2xl group-hover:shadow-red-950/40 group-hover:ring-red-600/70 group-focus-visible:-translate-y-1.5 group-focus-visible:scale-[1.025] group-focus-visible:outline-none group-focus-visible:ring-2 group-focus-visible:ring-red-600/80">
         {posterUrl ? (
           <img
             src={posterUrl}

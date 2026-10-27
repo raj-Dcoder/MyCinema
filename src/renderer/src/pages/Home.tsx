@@ -485,7 +485,7 @@ const SectionHeader: React.FC<{
   )
 
   return (
-    <div className="mb-4 flex items-center justify-between gap-4">
+    <div className="relative z-10 mb-6 flex items-center justify-between gap-4">
       <div className="flex min-w-0 items-center gap-3">
         {iconTile}
         <div className="min-w-0">
@@ -1411,7 +1411,7 @@ const Home: React.FC<HomeProps> = ({ onPlay, onShowDetail, onNavigate, refreshKe
           )}
         />
         {hasRecentMovies ? (
-          <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-5">
+          <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-5 pt-2">
             {recentMovies.slice(0, 6).map(video => (
               <VideoCard key={video.id} video={video} onPlay={handlePlayFromHome} onShowDetail={handleShowDetailFromHome} />
             ))}
@@ -1446,7 +1446,7 @@ const Home: React.FC<HomeProps> = ({ onPlay, onShowDetail, onNavigate, refreshKe
           )}
         />
         {hasRecentSeries ? (
-          <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-5">
+          <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-5 pt-2">
             {recentSeries.slice(0, 6).map(video => (
               <VideoCard key={video.id} video={video} onPlay={handlePlayFromHome} onShowDetail={handleShowDetailFromHome} />
             ))}

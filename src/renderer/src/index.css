@@ -1769,6 +1769,102 @@
   border-color: rgba(16, 185, 129, 0.28) !important;
 }
 
+/* Watchlist, Collections & Follow action buttons in Light Mode */
+.light .detail-watchlist-badge,
+.light .detail-watchlist-badge *,
+.glass-light .detail-watchlist-badge,
+.glass-light .detail-watchlist-badge * {
+  color: #ffffff !important;
+}
+
+.light .detail-collection-badge,
+.light .detail-collection-badge *,
+.glass-light .detail-collection-badge,
+.glass-light .detail-collection-badge * {
+  color: #ffffff !important;
+}
+
+/* Watchlist active states (Weekend, ASAP, Someday) in Light & Glass-Light */
+.light .detail-screen-root .text-violet-200,
+.glass-light .detail-screen-root .text-violet-200 {
+  color: #6d28d9 !important; /* deep violet-700 - ultra-high contrast */
+  font-weight: 800 !important;
+}
+.light .detail-screen-root .text-violet-300,
+.glass-light .detail-screen-root .text-violet-300 {
+  color: #6d28d9 !important; /* deep violet-700 */
+}
+.light .detail-screen-root .bg-violet-500\/10,
+.glass-light .detail-screen-root .bg-violet-500\/10 {
+  background-color: rgba(139, 92, 246, 0.12) !important;
+}
+.light .detail-screen-root .bg-violet-500\/20,
+.glass-light .detail-screen-root .bg-violet-500\/20 {
+  background-color: rgba(139, 92, 246, 0.14) !important;
+}
+.light .detail-screen-root .border-violet-400,
+.light .detail-screen-root .border-violet-400\/40,
+.glass-light .detail-screen-root .border-violet-400,
+.glass-light .detail-screen-root .border-violet-400\/40 {
+  border-color: rgba(139, 92, 246, 0.38) !important;
+}
+.light .detail-screen-root .hover\:bg-violet-500\/15:hover,
+.glass-light .detail-screen-root .hover\:bg-violet-500\/15:hover {
+  background-color: rgba(139, 92, 246, 0.2) !important;
+}
+
+/* ASAP (Red) */
+.light .detail-screen-root .text-red-300,
+.glass-light .detail-screen-root .text-red-300 {
+  color: #dc2626 !important; /* deep red-600 */
+  font-weight: 800 !important;
+}
+.light .detail-screen-root .bg-red-500\/10,
+.glass-light .detail-screen-root .bg-red-500\/10 {
+  background-color: rgba(239, 68, 68, 0.12) !important;
+}
+.light .detail-screen-root .border-red-500\/40,
+.glass-light .detail-screen-root .border-red-500\/40 {
+  border-color: rgba(239, 68, 68, 0.38) !important;
+}
+.light .detail-screen-root .hover\:bg-red-500\/15:hover,
+.glass-light .detail-screen-root .hover\:bg-red-500\/15:hover {
+  background-color: rgba(239, 68, 68, 0.2) !important;
+}
+
+/* Someday (Teal) */
+.light .detail-screen-root .text-teal-200,
+.glass-light .detail-screen-root .text-teal-200 {
+  color: #0f766e !important; /* deep teal-700 */
+  font-weight: 800 !important;
+}
+.light .detail-screen-root .bg-teal-400\/10,
+.glass-light .detail-screen-root .bg-teal-400\/10,
+.light .detail-screen-root .bg-teal-400\/15,
+.glass-light .detail-screen-root .bg-teal-400\/15 {
+  background-color: rgba(20, 184, 166, 0.12) !important;
+}
+.light .detail-screen-root .border-teal-300\/30,
+.light .detail-screen-root .border-teal-300\/60,
+.glass-light .detail-screen-root .border-teal-300\/30,
+.glass-light .detail-screen-root .border-teal-300\/60 {
+  border-color: rgba(20, 184, 166, 0.38) !important;
+}
+.light .detail-screen-root .hover\:bg-teal-400\/15:hover,
+.glass-light .detail-screen-root .hover\:bg-teal-400\/15:hover {
+  background-color: rgba(20, 184, 166, 0.2) !important;
+}
+
+/* Follow (Sky) */
+.light .detail-screen-root .border-sky-400,
+.glass-light .detail-screen-root .border-sky-400 {
+  border-color: rgba(14, 165, 233, 0.38) !important;
+}
+.light .detail-screen-root .bg-sky-500\/20,
+.glass-light .detail-screen-root .bg-sky-500\/20 {
+  background-color: rgba(14, 165, 233, 0.12) !important;
+}
+
 /* Glass-Light Mode Detail Screen */
 .glass-light .detail-screen-canvas {
   background-color: #f5f5f7 !important;

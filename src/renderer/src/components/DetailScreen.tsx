@@ -1883,7 +1883,7 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
                         <button
                           onClick={handleWatchlistButtonClick}
                           disabled={watchlistBusy}
-                          className={`relative p-3.5 rounded-xl border transition-all hover:-translate-y-0.5 active:scale-95 glass-effect ${
+                          className={`relative p-3.5 rounded-xl border transition-all hover:-translate-y-0.5 active:scale-95 glass-effect detail-watchlist-btn ${
                             isWatchlist
                               ? watchlistIntent === 'asap'
                                 ? 'bg-red-500/20 border-red-500 text-red-400 shadow-[0_8px_24px_rgba(239,68,68,0.25)]'
@@ -1896,7 +1896,7 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
                         >
                           {watchlistBusy ? <Loader2 size={20} className="animate-spin" /> : <Bookmark size={20} fill={isWatchlist ? "currentColor" : "none"} />}
                           {isWatchlist && watchlistIntent && (
-                            <span className={`absolute -right-1.5 -top-1.5 flex h-6 w-6 items-center justify-center rounded-full ring-2 ring-[#080d16] ${
+                            <span className={`absolute -right-1.5 -top-1.5 flex h-6 w-6 items-center justify-center rounded-full ring-2 ring-[#080d16] detail-watchlist-badge ${
                               watchlistIntent === 'asap' ? 'bg-gradient-to-br from-red-500 to-orange-500 text-white'
                               : watchlistIntent === 'weekend' ? 'bg-gradient-to-br from-violet-500 to-indigo-600 text-white'
                               : 'bg-gradient-to-br from-teal-400 to-emerald-600 text-white'
@@ -1910,7 +1910,7 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
                         {isWatchlist && watchlistIntent && (
                           <button
                             onClick={handleWatchlistButtonClick}
-                            className={`flex h-12 items-center gap-2 rounded-xl border px-3.5 text-[10px] font-black uppercase tracking-[0.14em] transition-all hover:-translate-y-0.5 active:scale-95 glass-effect ${
+                            className={`flex h-12 items-center gap-2 rounded-xl border px-3.5 text-[10px] font-black uppercase tracking-[0.14em] transition-all hover:-translate-y-0.5 active:scale-95 glass-effect detail-watchlist-pill ${
                               watchlistIntent === 'asap' ? 'border-red-500/40 bg-red-500/10 text-red-300 hover:bg-red-500/15'
                               : watchlistIntent === 'weekend' ? 'border-violet-400/40 bg-violet-500/10 text-violet-200 hover:bg-violet-500/15'
                               : 'border-teal-300/30 bg-teal-400/10 text-teal-200 hover:bg-teal-400/15'
@@ -1997,7 +1997,7 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
                       >
                         <Layers size={20} />
                         {filedCollectionCount > 0 && (
-                          <span className="absolute -right-1.5 -top-1.5 flex h-5 min-w-[20px] items-center justify-center rounded-full bg-primary px-1 text-[9px] font-black text-white ring-2 ring-[#080d16]">
+                          <span className="absolute -right-1.5 -top-1.5 flex h-5 min-w-[20px] items-center justify-center rounded-full bg-primary px-1 text-[9px] font-black text-white ring-2 ring-[#080d16] detail-collection-badge">
                             {filedCollectionCount}
                           </span>
                         )}
@@ -2134,7 +2134,7 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
                         <button
                           onClick={handleToggleFollow}
                           disabled={followBusy}
-                          className={`p-3.5 rounded-xl border transition-all hover:-translate-y-0.5 active:scale-95 glass-effect ${
+                          className={`p-3.5 rounded-xl border transition-all hover:-translate-y-0.5 active:scale-95 glass-effect detail-follow-btn ${
                             isFollowing ? 'bg-sky-500/20 border-sky-400 text-sky-300' : 'bg-white/5 border-white/10 text-white/40 hover:text-white'
                           } disabled:opacity-50 disabled:cursor-wait`}
                           title={isFollowing ? 'Following — click to unfollow new-episode alerts' : 'Follow for new-episode alerts'}

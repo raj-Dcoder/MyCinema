@@ -1603,26 +1603,26 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
   return (
     <div
       style={{ left: 'var(--sidebar-width, 5rem)' }}
-      className="fixed right-0 top-0 bottom-0 z-50 animate-in fade-in duration-300 transition-[left] duration-300 ease-in-out keep-dark dark"
+      className="fixed right-0 top-0 bottom-0 z-50 animate-in fade-in duration-300 transition-[left] duration-300 ease-in-out detail-screen-root"
     >
-      <div className="relative w-full h-full bg-[#080d16] overflow-hidden flex flex-col">
+      <div className="relative w-full h-full bg-[#080d16] overflow-hidden flex flex-col detail-screen-canvas">
         {/* Close Button */}
         <button 
           onClick={onClose}
-          className="absolute top-6 left-6 md:top-8 md:left-8 z-30 flex h-10 w-10 items-center justify-center rounded-full bg-black/40 text-white/80 transition-all hover:scale-105 hover:bg-white hover:text-black backdrop-blur-md"
+          className="absolute top-6 left-6 md:top-8 md:left-8 z-30 flex h-10 w-10 items-center justify-center rounded-full bg-black/40 text-white/80 transition-all hover:scale-105 hover:bg-white hover:text-black backdrop-blur-md detail-close-btn"
         >
           <X size={22} strokeWidth={2.5} />
         </button>
 
         {/* Full Screen Background */}
-        <div className="absolute inset-0 z-0 bg-[#080d16] pointer-events-none">
+        <div className="absolute inset-0 z-0 bg-[#080d16] pointer-events-none detail-screen-bg">
           {backdropUrl ? (
             <img 
               src={backdropUrl} 
               alt={video.title} 
               loading="eager"
               decoding="async"
-              className="h-full w-full object-cover object-center opacity-70 md:opacity-[0.85] scale-[1.05] translate-x-[2%] md:translate-x-[5%]"
+              className="h-full w-full object-cover object-center opacity-70 md:opacity-[0.85] scale-[1.05] translate-x-[2%] md:translate-x-[5%] detail-screen-backdrop"
             />
           ) : posterUrl ? (
             <img 
@@ -1630,22 +1630,22 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
               alt={video.title} 
               loading="eager"
               decoding="async"
-              className="h-full w-full object-cover object-top opacity-30 blur-3xl scale-110"
+              className="h-full w-full object-cover object-top opacity-30 blur-3xl scale-110 detail-screen-backdrop"
             />
           ) : null}
           
           {/* Cinematic Overlays */}
           {/* 1. Subtle top vignette for edge readability (15%) */}
-          <div className="absolute inset-x-0 top-0 h-[20vh] bg-gradient-to-b from-[#080d16]/20 to-transparent pointer-events-none" />
+          <div className="absolute inset-x-0 top-0 h-[20vh] pointer-events-none detail-overlay-top" />
           
           {/* 2. Strong left linear gradient for content readability */}
-          <div className="absolute inset-y-0 left-0 w-full md:w-[75%] bg-gradient-to-r from-[#080d16] via-[#080d16]/80 to-transparent pointer-events-none" />
+          <div className="absolute inset-y-0 left-0 w-full md:w-[75%] pointer-events-none detail-overlay-left" />
           
           {/* 3. Spotlight radial gradient centered behind text area for readability without paneling */}
-          <div className="absolute inset-0 bg-[radial-gradient(circle_at_15%_55%,rgba(8,13,22,0.8)_0%,rgba(8,13,22,0.3)_35%,transparent_60%)] pointer-events-none" />
+          <div className="absolute inset-0 pointer-events-none detail-overlay-radial" />
 
           {/* 4. Bottom vignette to gently ground the image and improve readability of lower content */}
-          <div className="absolute inset-x-0 bottom-0 h-[35vh] bg-gradient-to-t from-[#080d16] via-[#080d16]/50 to-transparent pointer-events-none" />
+          <div className="absolute inset-x-0 bottom-0 h-[35vh] pointer-events-none detail-overlay-bottom" />
         </div>
 
         {/* Content Section */}
@@ -1665,11 +1665,11 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
                   alt={displayTitle}
                   loading="eager"
                   decoding="async"
-                  className="max-h-24 md:max-h-32 w-auto max-w-[min(100%,440px)] object-contain object-left drop-shadow-[0_10px_28px_rgba(0,0,0,0.75)]"
+                  className="max-h-24 md:max-h-32 w-auto max-w-[min(100%,440px)] object-contain object-left drop-shadow-[0_10px_28px_rgba(0,0,0,0.75)] hero-split-logo"
                   onError={() => setLogoLoadFailed(true)}
                 />
               ) : (
-                <h2 className="text-4xl md:text-6xl font-black tracking-[-0.05em] text-white leading-[0.94] drop-shadow-lg">
+                <h2 className="text-4xl md:text-6xl font-black tracking-[-0.05em] text-white leading-[0.94] drop-shadow-lg detail-title-text">
                   {displayTitle}
                 </h2>
               )}
@@ -1771,7 +1771,7 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
                 visibleVibes.map((vibe, idx) => (
                   <span
                     key={idx}
-                    className={`px-4 py-1.5 text-[9px] font-black uppercase tracking-widest rounded-full border shadow-lg transition-all hover:scale-105 hover:shadow-xl cursor-default bg-gradient-to-br ${getVibeColor(vibe)}`}
+                    className={`px-4 py-1.5 text-[9px] font-black uppercase tracking-widest rounded-full border shadow-lg transition-all hover:scale-105 hover:shadow-xl cursor-default bg-gradient-to-br ${getVibeColor(vibe)} detail-vibe-pill`}
                   >
                     {vibe}
                   </span>
@@ -1792,7 +1792,7 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
               </p>
 
               {!expandedOverview && isOverflowing && (
-                <div className="pointer-events-none absolute bottom-6 left-0 right-0 h-10 bg-gradient-to-t from-[#080d16] to-transparent" />
+                <div className="pointer-events-none absolute bottom-6 left-0 right-0 h-10 detail-overview-fade" />
               )}
 
               {video.overview && video.overview.length > 250 && (
@@ -2677,8 +2677,8 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
             className="fixed inset-0 z-[70] bg-black/60 animate-in fade-in duration-150"
             onClick={handleCloseDownloadOptions}
           />
-          <aside className="fixed inset-y-0 right-0 z-[80] flex w-full max-w-[580px] flex-col border-l border-white/10 bg-[#0C1017] shadow-[-32px_0_80px_rgba(0,0,0,0.65)] animate-in slide-in-from-right duration-300">
-            <div className="relative border-b border-white/10 bg-[#0C1017]">
+          <aside className="fixed inset-y-0 right-0 z-[80] flex w-full max-w-[580px] flex-col border-l border-white/10 bg-[#0C1017] shadow-[-32px_0_80px_rgba(0,0,0,0.65)] animate-in slide-in-from-right duration-300 detail-source-drawer">
+            <div className="relative border-b border-white/10 bg-[#0C1017] detail-source-header">
               {/* scan progress */}
               <div className="absolute inset-x-0 top-0 h-[2px] bg-white/5">
                 {searching && sourceSearchStatus.total > 0 ? (
@@ -2944,7 +2944,7 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
               </div>
             </div>
 
-            <div className="flex-1 overflow-y-auto bg-[#080B10] px-4 py-4 scrollbar-thin">
+            <div className="flex-1 overflow-y-auto bg-[#080B10] px-4 py-4 scrollbar-thin detail-source-body">
               {torrentStreamError && (
                 <div className="mb-3 flex items-start gap-2 rounded-xl border border-red-500/25 bg-red-500/10 px-3.5 py-2.5 text-[10px] font-bold leading-relaxed text-red-300">
                   <AlertTriangle size={14} className="mt-px shrink-0" />

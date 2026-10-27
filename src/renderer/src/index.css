@@ -1600,3 +1600,299 @@
 .light .poster-overlay button.bg-red-600,
 .light .hero-overlay button.bg-red-600 { color: #ffffff !important; }
 .light .hero-overlay .bg-red-600:hover { filter: none !important; }
+
+
+/* ------------------------------------------------------------------ */
+/* 7. DETAIL SCREEN — Light, Dark & Glass Theming                     */
+/* ------------------------------------------------------------------ */
+
+/* Default / Dark Detail Screen */
+.detail-screen-canvas {
+  background-color: #080d16;
+}
+.detail-screen-bg {
+  background-color: #080d16;
+}
+.detail-overlay-top {
+  background: linear-gradient(to bottom, rgba(8, 13, 22, 0.2) 0%, transparent 100%);
+}
+.detail-overlay-left {
+  background: linear-gradient(to right, #080d16 0%, rgba(8, 13, 22, 0.8) 55%, transparent 100%);
+}
+.detail-overlay-radial {
+  background: radial-gradient(circle at 15% 55%, rgba(8, 13, 22, 0.8) 0%, rgba(8, 13, 22, 0.3) 35%, transparent 60%);
+}
+.detail-overlay-bottom {
+  background: linear-gradient(to top, #080d16 0%, rgba(8, 13, 22, 0.5) 40%, transparent 100%);
+}
+.detail-overview-fade {
+  background: linear-gradient(to top, #080d16 0%, transparent 100%);
+}
+
+/* Light Mode Detail Screen */
+.light .detail-screen-canvas {
+  background-color: #f1f3f6 !important;
+}
+.light .detail-screen-bg {
+  background-color: #f1f3f6 !important;
+}
+.light .detail-screen-backdrop {
+  opacity: 0.82 !important;
+}
+.light .detail-overlay-top {
+  background: linear-gradient(to bottom, rgba(241, 243, 246, 0.6) 0%, transparent 100%) !important;
+}
+.light .detail-overlay-left {
+  background: linear-gradient(to right, #f1f3f6 0%, rgba(241, 243, 246, 0.96) 28%, rgba(241, 243, 246, 0.65) 55%, transparent 88%) !important;
+}
+.light .detail-overlay-radial {
+  background: radial-gradient(circle at 15% 55%, rgba(241, 243, 246, 0.85) 0%, rgba(241, 243, 246, 0.35) 45%, transparent 70%) !important;
+}
+.light .detail-overlay-bottom {
+  background: linear-gradient(to top, #f1f3f6 0%, rgba(241, 243, 246, 0.75) 40%, transparent 100%) !important;
+}
+.light .detail-overview-fade {
+  background: linear-gradient(to top, #f1f3f6 0%, transparent 100%) !important;
+}
+
+.light .detail-close-btn {
+  background-color: rgba(255, 255, 255, 0.85) !important;
+  color: #111827 !important;
+  border: 1px solid rgba(0, 0, 0, 0.08) !important;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.08) !important;
+}
+.light .detail-close-btn:hover {
+  background-color: #ffffff !important;
+  color: #000000 !important;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.12) !important;
+}
+
+.light .detail-title-text {
+  color: #111827 !important;
+  filter: none !important;
+  text-shadow: none !important;
+}
+
+.light .detail-screen-root .ring-\[\#080d16\] {
+  --tw-ring-color: #ffffff !important;
+}
+
+.light .detail-vibe-pill {
+  color: #ffffff !important;
+}
+
+.light .detail-screen-root select option {
+  background-color: #ffffff !important;
+  color: #111827 !important;
+}
+
+.light .detail-screen-root input {
+  background-color: #f3f4f6 !important;
+  color: #111827 !important;
+  border-color: #d1d5db !important;
+}
+.light .detail-screen-root input::placeholder {
+  color: #9ca3af !important;
+}
+
+.light .detail-screen-root .text-red-400 {
+  color: #dc2626 !important;
+}
+.light .detail-screen-root .hover\:text-red-300:hover {
+  color: #b91c1c !important;
+}
+.light .detail-screen-root .text-sky-100\/90 {
+  color: #0369a1 !important;
+}
+.light .detail-screen-root .text-sky-300 {
+  color: #0284c7 !important;
+}
+
+/* Glass-Light Mode Detail Screen */
+.glass-light .detail-screen-canvas {
+  background-color: #f5f5f7 !important;
+}
+.glass-light .detail-screen-bg {
+  background-color: #f5f5f7 !important;
+}
+.glass-light .detail-screen-backdrop {
+  opacity: 0.82 !important;
+}
+.glass-light .detail-overlay-top {
+  background: linear-gradient(to bottom, rgba(245, 245, 247, 0.6) 0%, transparent 100%) !important;
+}
+.glass-light .detail-overlay-left {
+  background: linear-gradient(to right, #f5f5f7 0%, rgba(245, 245, 247, 0.96) 28%, rgba(245, 245, 247, 0.65) 55%, transparent 88%) !important;
+}
+.glass-light .detail-overlay-radial {
+  background: radial-gradient(circle at 15% 55%, rgba(245, 245, 247, 0.85) 0%, rgba(245, 245, 247, 0.35) 45%, transparent 70%) !important;
+}
+.glass-light .detail-overlay-bottom {
+  background: linear-gradient(to top, #f5f5f7 0%, rgba(245, 245, 247, 0.75) 40%, transparent 100%) !important;
+}
+.glass-light .detail-overview-fade {
+  background: linear-gradient(to top, #f5f5f7 0%, transparent 100%) !important;
+}
+
+.glass-light .detail-close-btn {
+  background-color: rgba(255, 255, 255, 0.85) !important;
+  color: #111827 !important;
+  border: 1px solid rgba(0, 0, 0, 0.08) !important;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.08) !important;
+}
+.glass-light .detail-close-btn:hover {
+  background-color: #ffffff !important;
+  color: #000000 !important;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.12) !important;
+}
+
+.glass-light .detail-title-text {
+  color: #111827 !important;
+  filter: none !important;
+  text-shadow: none !important;
+}
+
+.glass-light .detail-screen-root .ring-\[\#080d16\] {
+  --tw-ring-color: #ffffff !important;
+}
+
+.glass-light .detail-vibe-pill {
+  color: #ffffff !important;
+}
+
+.glass-light .detail-screen-root select option {
+  background-color: #ffffff !important;
+  color: #111827 !important;
+}
+
+.glass-light .detail-screen-root input {
+  background-color: #f3f4f6 !important;
+  color: #111827 !important;
+  border-color: #d1d5db !important;
+}
+.glass-light .detail-screen-root input::placeholder {
+  color: #9ca3af !important;
+}
+.glass-light .detail-screen-root .text-red-400 {
+  color: #dc2626 !important;
+}
+.glass-light .detail-screen-root .hover\:text-red-300:hover {
+  color: #b91c1c !important;
+}
+.glass-light .detail-screen-root .text-sky-100\/90 {
+  color: #0369a1 !important;
+}
+.glass-light .detail-screen-root .text-sky-300 {
+  color: #0284c7 !important;
+}
+
+/* Glass (Dark) Mode Detail Screen */
+.glass .detail-screen-canvas {
+  background-color: rgba(7, 9, 14, 0.94) !important;
+}
+.glass .detail-screen-bg {
+  background-color: #07090e !important;
+}
+.glass .detail-overlay-top {
+  background: linear-gradient(to bottom, rgba(7, 9, 14, 0.3) 0%, transparent 100%) !important;
+}
+.glass .detail-overlay-left {
+  background: linear-gradient(to right, rgba(7, 9, 14, 0.95) 0%, rgba(7, 9, 14, 0.75) 55%, transparent 100%) !important;
+}
+.glass .detail-overlay-radial {
+  background: radial-gradient(circle at 15% 55%, rgba(7, 9, 14, 0.85) 0%, rgba(7, 9, 14, 0.35) 35%, transparent 60%) !important;
+}
+.glass .detail-overlay-bottom {
+  background: linear-gradient(to top, rgba(7, 9, 14, 0.95) 0%, rgba(7, 9, 14, 0.5) 40%, transparent 100%) !important;
+}
+.glass .detail-overview-fade {
+  background: linear-gradient(to top, #07090e 0%, transparent 100%) !important;
+}
+
+/* Detail Screen Source Drawer in Light Mode */
+.light .detail-source-drawer {
+  background-color: #ffffff !important;
+  border-left-color: #e5e7eb !important;
+  box-shadow: -16px 0 48px rgba(0, 0, 0, 0.1) !important;
+}
+.light .detail-source-header {
+  background-color: #ffffff !important;
+  border-bottom-color: #e5e7eb !important;
+}
+.light .detail-source-body {
+  background-color: #f9fafb !important;
+}
+.light .detail-source-drawer .bg-\[\#131A26\] {
+  background-color: #ffffff !important;
+  border: 1px solid #d1d5db !important;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04) !important;
+}
+.light .detail-source-drawer .bg-\[\#111823\] {
+  background-color: #ffffff !important;
+  border: 1px solid #e5e7eb !important;
+}
+.light .detail-source-drawer .hover\:bg-\[\#141C2A\]:hover {
+  background-color: #f3f4f6 !important;
+}
+.light .detail-source-drawer .text-amber-300 {
+  color: #b45309 !important;
+}
+.light .detail-source-drawer .text-sky-300 {
+  color: #0369a1 !important;
+}
+.light .detail-source-drawer .text-emerald-300 {
+  color: #047857 !important;
+}
+.light .detail-source-drawer .text-green-300 {
+  color: #15803d !important;
+}
+.light .detail-source-drawer .text-violet-200 {
+  color: #6d28d9 !important;
+}
+.light .detail-source-drawer .text-\[\#FFB76B\] {
+  color: #c2410c !important;
+}
+
+/* Glass-Light Detail Screen Source Drawer */
+.glass-light .detail-source-drawer {
+  background-color: #ffffff !important;
+  border-left-color: #e5e7eb !important;
+  box-shadow: -16px 0 48px rgba(0, 0, 0, 0.1) !important;
+}
+.glass-light .detail-source-header {
+  background-color: #ffffff !important;
+  border-bottom-color: #e5e7eb !important;
+}
+.glass-light .detail-source-body {
+  background-color: #f9fafb !important;
+}
+.glass-light .detail-source-drawer .bg-\[\#131A26\] {
+  background-color: #ffffff !important;
+  border: 1px solid #d1d5db !important;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04) !important;
+}
+.glass-light .detail-source-drawer .bg-\[\#111823\] {
+  background-color: #ffffff !important;
+  border: 1px solid #e5e7eb !important;
+}
+.glass-light .detail-source-drawer .hover\:bg-\[\#141C2A\]:hover {
+  background-color: #f3f4f6 !important;
+}
+.glass-light .detail-source-drawer .text-amber-300 {
+  color: #b45309 !important;
+}
+.glass-light .detail-source-drawer .text-sky-300 {
+  color: #0369a1 !important;
+}
+.glass-light .detail-source-drawer .text-emerald-300 {
+  color: #047857 !important;
+}
+.glass-light .detail-source-drawer .text-green-300 {
+  color: #15803d !important;
+}
+.glass-light .detail-source-drawer .text-violet-200 {
+  color: #6d28d9 !important;
+}
+.glass-light .detail-source-drawer .text-\[\#FFB76B\] {
+  color: #c2410c !important;
+}

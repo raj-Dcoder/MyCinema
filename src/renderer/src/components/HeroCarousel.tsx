@@ -118,29 +118,25 @@ const HeroCarousel: React.FC<HeroCarouselProps> = ({ items, onPlay, onShowDetail
 
   if (items.length === 0) {
     return (
-      <div className="relative w-full min-h-[570px] h-[73vh] max-h-[800px] overflow-hidden skeleton">
-        <div className="absolute inset-0 bg-gradient-to-t from-background via-background/40 to-transparent">
-          <div className="absolute bottom-0 left-0 right-0 p-12 md:p-16 lg:p-24 max-w-4xl space-y-6">
-            {/* Title Placeholder */}
-            <div className="h-16 w-3/4 max-w-sm rounded-lg bg-white/10 skeleton" />
-            {/* Metadata Placeholder */}
+      <div className="hero-spotlight-banner relative w-full min-h-[460px] sm:min-h-[490px] overflow-hidden rounded-[28px] border">
+        <div className="flex flex-col lg:flex-row h-full">
+          <div className="w-full lg:w-[50%] p-8 md:p-12 space-y-4">
+            <div className="h-6 w-28 rounded-md bg-slate-200 dark:bg-white/10 animate-pulse" />
+            <div className="h-12 w-3/4 rounded-lg bg-slate-200 dark:bg-white/10 animate-pulse" />
             <div className="flex gap-3">
-              <div className="h-5 w-20 rounded bg-white/10 skeleton" />
-              <div className="h-5 w-16 rounded bg-white/10 skeleton" />
-              <div className="h-5 w-24 rounded bg-white/10 skeleton" />
+              <div className="h-4 w-16 rounded bg-slate-200 dark:bg-white/10 animate-pulse" />
+              <div className="h-4 w-20 rounded bg-slate-200 dark:bg-white/10 animate-pulse" />
             </div>
-            {/* Description Placeholder */}
-            <div className="space-y-3 pt-2">
-              <div className="h-4 w-full max-w-2xl rounded bg-white/10 skeleton" />
-              <div className="h-4 w-5/6 max-w-2xl rounded bg-white/10 skeleton" />
-              <div className="h-4 w-4/6 max-w-2xl rounded bg-white/10 skeleton" />
+            <div className="space-y-2 pt-2">
+              <div className="h-4 w-full rounded bg-slate-200 dark:bg-white/10 animate-pulse" />
+              <div className="h-4 w-5/6 rounded bg-slate-200 dark:bg-white/10 animate-pulse" />
             </div>
-            {/* Buttons Placeholder */}
-            <div className="flex items-center gap-4 pt-4">
-              <div className="h-12 w-32 rounded-xl bg-white/10 skeleton" />
-              <div className="h-12 w-32 rounded-xl bg-white/10 skeleton" />
+            <div className="flex gap-3 pt-4">
+              <div className="h-11 w-32 rounded-2xl bg-slate-200 dark:bg-white/10 animate-pulse" />
+              <div className="h-11 w-28 rounded-2xl bg-slate-200 dark:bg-white/10 animate-pulse" />
             </div>
           </div>
+          <div className="hidden lg:block flex-1 bg-slate-100 dark:bg-white/5 animate-pulse" />
         </div>
       </div>
     )
@@ -183,7 +179,7 @@ const HeroCarousel: React.FC<HeroCarouselProps> = ({ items, onPlay, onShowDetail
 
   return (
     <div
-      className="relative w-full min-h-[570px] h-[73vh] max-h-[800px] overflow-hidden bg-black group cursor-pointer"
+      className="hero-spotlight-banner relative w-full min-h-[460px] sm:min-h-[480px] lg:min-h-[510px] overflow-hidden rounded-[28px] border group cursor-pointer"
       onClick={() => onShowDetail(current)}
       role="button"
       tabIndex={0}
@@ -194,109 +190,136 @@ const HeroCarousel: React.FC<HeroCarouselProps> = ({ items, onPlay, onShowDetail
         }
       }}
     >
-      {/* Background Backdrops */}
-      {items.map((item, idx) => {
-        const previousIndex = (currentIndex - 1 + items.length) % items.length
-        const nextIndex = (currentIndex + 1) % items.length
-        const shouldRenderVisuals = idx === currentIndex || idx === previousIndex || idx === nextIndex
-        const imageUrl = shouldRenderVisuals ? getHeroImageUrl(item.backdrop_path || item.poster_path) : ''
+      {/* Right Side 60%: Prominent Visual Backdrop */}
+      <div className="absolute inset-y-0 right-0 w-full lg:w-[62%] xl:w-[65%] h-full overflow-hidden pointer-events-none">
+        {items.map((item, idx) => {
+          const previousIndex = (currentIndex - 1 + items.length) % items.length
+          const nextIndex = (currentIndex + 1) % items.length
+          const shouldRenderVisuals = idx === currentIndex || idx === previousIndex || idx === nextIndex
+          const imageUrl = shouldRenderVisuals ? getHeroImageUrl(item.backdrop_path || item.poster_path) : ''
 
-        return (
-          <div
-            key={item.tmdb_id || item.id}
-            className={`absolute inset-0 transition-all duration-1000 ease-in-out ${
-              idx === currentIndex ? 'opacity-100 scale-100' : 'opacity-0 scale-110'
-            }`}
-          >
-            {shouldRenderVisuals && (
-              <>
-                <img
-                  src={imageUrl}
-                  className="absolute inset-0 h-full w-full scale-125 object-cover object-center blur-[80px] saturate-[2] opacity-85"
-                  alt=""
-                  loading={idx === currentIndex ? 'eager' : 'lazy'}
-                  decoding="async"
-                  fetchPriority={idx === currentIndex ? 'high' : 'auto'}
-                />
-                <img
-                  src={imageUrl}
-                  className="relative z-10 h-full w-full object-cover object-[center_28%]"
-                  alt=""
-                  loading={idx === currentIndex ? 'eager' : 'lazy'}
-                  decoding="async"
-                  fetchPriority={idx === currentIndex ? 'high' : 'auto'}
-                />
-                {/* Overlays */}
-                <div className="absolute inset-0 z-20 bg-gradient-to-r from-black/88 via-black/42 to-black/5" />
-                <div className="absolute inset-0 z-20 bg-gradient-to-t from-[#05080d] via-transparent to-black/20" />
-                <div className="absolute inset-y-0 right-0 z-20 w-1/4 bg-gradient-to-l from-black/55 to-transparent" />
-              </>
-            )}
-          </div>
-        )
-      })}
+          return (
+            <div
+              key={item.tmdb_id || item.id}
+              className={`absolute inset-0 transition-all duration-1000 ease-in-out ${
+                idx === currentIndex ? 'opacity-100 scale-100' : 'opacity-0 scale-105 pointer-events-none'
+              }`}
+            >
+              {shouldRenderVisuals && (
+                <>
+                  {/* Subtle Ambient Bloom */}
+                  <img
+                    src={imageUrl}
+                    className="absolute inset-0 h-full w-full object-cover object-center blur-3xl opacity-30 dark:opacity-45 scale-110"
+                    alt=""
+                    loading={idx === currentIndex ? 'eager' : 'lazy'}
+                    decoding="async"
+                  />
+                  {/* Crisp Movie Artwork */}
+                  <img
+                    src={imageUrl}
+                    className="relative z-10 h-full w-full object-cover object-[center_25%]"
+                    alt=""
+                    loading={idx === currentIndex ? 'eager' : 'lazy'}
+                    decoding="async"
+                    fetchPriority={idx === currentIndex ? 'high' : 'auto'}
+                  />
+                </>
+              )}
+            </div>
+          )
+        })}
 
-      {/* Content */}
-      <div className="hero-overlay absolute inset-0 flex flex-col justify-end px-8 pb-16 pt-24 md:px-16 md:pb-20 md:pt-20 space-y-3">
-        {visibleLogoPath ? (
-          <img
-            src={getHeroLogoUrl(visibleLogoPath)}
-            alt={displayTitle}
-            className="max-h-28 w-auto max-w-[min(620px,74vw)] object-contain object-left drop-shadow-[0_8px_28px_rgba(0,0,0,0.8)] animate-in fade-in slide-in-from-left-8 duration-700 delay-100"
-            decoding="async"
-            onError={() => {
-              setFailedLogoKeys(previous => {
-                const next = new Set(previous)
-                next.add(currentKey)
-                return next
-              })
-            }}
-          />
-        ) : shouldShowTextFallback ? (
-          <h2 className="text-4xl md:text-5xl font-black text-white tracking-tighter uppercase italic leading-[0.9] max-w-2xl animate-in fade-in slide-in-from-left-8 duration-700 delay-100">
-            {displayTitle}
-          </h2>
-        ) : (
-          <div className="h-14 md:h-20" aria-hidden="true" />
-        )}
+        {/* Soft Fading Edges: Left-to-right fade & top/bottom edge soften */}
+        <div className="hero-split-overlay absolute inset-0 z-20 pointer-events-none" />
+      </div>
 
-        {/* Status badges — loudest first: NEW > NEXT > ONLINE */}
-        {current.isOnlineResume && (
-          <div className="flex flex-wrap items-center gap-2.5 animate-in fade-in slide-in-from-left-12 duration-700 delay-150">
-            {current.onlineNewEpisode && <NewEpisodeBadge />}
-            {current.onlineNextEpisode && !current.onlineNewEpisode && <NextEpisodeBadge />}
-            <OnlineBadge />
-          </div>
-        )}
-
-        <div className="flex items-center gap-3 text-white/60 font-bold text-xs animate-in fade-in slide-in-from-left-12 duration-700 delay-200">
-          {current.release_year && (
+      {/* Left Side 40-50%: Clean Dedicated Editorial Surface */}
+      <div className="relative z-30 flex flex-col justify-center min-h-[460px] sm:min-h-[480px] lg:min-h-[510px] w-full lg:w-[52%] xl:w-[48%] p-7 sm:p-9 md:p-12 lg:p-14 space-y-4">
+        {/* Badges / Category Tag */}
+        <div className="flex flex-wrap items-center gap-2">
+          {current.isOnlineResume && (
             <>
-              <span>{current.release_year}</span>
-              <span className="w-1 h-1 bg-white/20 rounded-full" />
+              {current.onlineNewEpisode && <NewEpisodeBadge />}
+              {current.onlineNextEpisode && !current.onlineNewEpisode && <NextEpisodeBadge />}
+              <OnlineBadge />
             </>
           )}
-          <span className="uppercase tracking-widest">{mediaLabel}</span>
+          <span className="inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 text-[9px] font-black uppercase tracking-[0.2em] bg-red-600/10 text-red-600 dark:bg-red-500/20 dark:text-red-400 border border-red-600/20">
+            {current.type === 'series' ? 'Featured Series' : 'Featured Movie'}
+          </span>
+          {episodeTag && (
+            <span className="inline-flex items-center rounded-md px-2 py-0.5 text-[9px] font-black uppercase tracking-widest bg-slate-100 text-slate-700 dark:bg-white/10 dark:text-white/70 border border-slate-200 dark:border-white/10">
+              {episodeTag}
+            </span>
+          )}
+        </div>
+
+        {/* Title Logo or Title Text */}
+        <div className="min-h-[56px] sm:min-h-[68px] flex items-center">
+          {visibleLogoPath ? (
+            <img
+              src={getHeroLogoUrl(visibleLogoPath)}
+              alt={displayTitle}
+              className="hero-split-logo max-h-16 sm:max-h-20 md:max-h-24 w-auto max-w-[min(440px,90%)] object-contain object-left transition-all duration-300"
+              decoding="async"
+              onError={() => {
+                setFailedLogoKeys(previous => {
+                  const next = new Set(previous)
+                  next.add(currentKey)
+                  return next
+                })
+              }}
+            />
+          ) : shouldShowTextFallback ? (
+            <h2 className="text-3xl sm:text-4xl md:text-5xl font-black italic tracking-tighter uppercase leading-[0.95] text-slate-900 dark:text-white line-clamp-2">
+              {displayTitle}
+            </h2>
+          ) : (
+            <div className="h-12 w-48 rounded-lg bg-slate-200 dark:bg-white/10 animate-pulse" />
+          )}
+        </div>
+
+        {/* Metadata Line */}
+        <div className="flex flex-wrap items-center gap-3 text-xs font-bold text-slate-500 dark:text-white/60">
+          {current.release_year && (
+            <span className="text-slate-700 dark:text-white/80">{current.release_year}</span>
+          )}
+          <span className="h-1 w-1 rounded-full bg-slate-300 dark:bg-white/30" />
+          <span className="uppercase tracking-wider">{mediaLabel}</span>
+          {current.vote_average ? (
+            <>
+              <span className="h-1 w-1 rounded-full bg-slate-300 dark:bg-white/30" />
+              <span className="inline-flex items-center gap-1 text-amber-500 dark:text-yellow-400 font-black">
+                ★ {current.vote_average.toFixed(1)}
+              </span>
+            </>
+          ) : null}
           {progressPercent > 0 && (
             <>
-              <span className="w-1 h-1 bg-white/20 rounded-full" />
-              <span className="uppercase tracking-widest">{Math.round(progressPercent)}% watched</span>
+              <span className="h-1 w-1 rounded-full bg-slate-300 dark:bg-white/30" />
+              <span className="text-red-600 dark:text-red-400 font-black uppercase tracking-wider">
+                {Math.round(progressPercent)}% Watched
+              </span>
             </>
           )}
         </div>
 
-        <p className="text-white/45 text-xs md:text-sm font-medium max-w-lg line-clamp-2 animate-in fade-in slide-in-from-left-16 duration-700 delay-300">
+        {/* Synopsis */}
+        <p className="text-xs sm:text-sm font-medium leading-relaxed text-slate-600 dark:text-white/65 line-clamp-3 max-w-xl">
           {current.overview || "Loading description..."}
         </p>
 
-        <div className="flex items-center gap-4 pt-1 animate-in fade-in slide-in-from-left-20 duration-700 delay-500">
+        {/* Action Buttons + Carousel Controls */}
+        <div className="flex flex-wrap items-center gap-3 sm:gap-4 pt-2">
+          {/* Play/Resume Button */}
           <button
             disabled={Boolean(resumingKey) && getOnlineResumeKey(current) === resumingKey}
             onClick={(e) => {
               e.stopPropagation()
               onPlay(current)
             }}
-            className="flex items-center gap-2.5 bg-red-600 hover:bg-red-700 text-white px-7 py-3.5 rounded-2xl font-black text-xs tracking-widest transition-all shadow-lg hover:scale-105 active:scale-95 group/btn uppercase italic disabled:cursor-wait disabled:hover:scale-100"
+            className="flex items-center gap-2.5 bg-red-600 hover:bg-red-700 text-white px-7 py-3.5 rounded-2xl font-black text-xs tracking-widest uppercase italic shadow-lg shadow-red-600/25 transition-all hover:scale-105 active:scale-95 group/btn disabled:cursor-wait disabled:hover:scale-100"
           >
             {Boolean(resumingKey) && getOnlineResumeKey(current) === resumingKey ? (
               <>
@@ -305,44 +328,68 @@ const HeroCarousel: React.FC<HeroCarouselProps> = ({ items, onPlay, onShowDetail
               </>
             ) : (
               <>
-                <Play fill="white" size={18} className="group-hover/btn:scale-110 transition-transform" />
+                <Play fill="white" size={17} className="group-hover/btn:scale-110 transition-transform" />
                 {actionLabel}
               </>
             )}
           </button>
-        </div>
-      </div>
 
-      {/* Navigation Controls */}
-      <div className="hero-overlay absolute bottom-8 right-8 md:right-12 flex items-center gap-4">
-        <button
-          onClick={(e) => {
-            e.stopPropagation()
-            prev()
-          }}
-          className="p-3 rounded-full bg-white/5 hover:bg-white/10 text-white/40 hover:text-white transition-all border border-white/5 hover:scale-110"
-        >
-          <ChevronLeft size={24} />
-        </button>
-        <div className="flex gap-2">
-          {items.map((_, idx) => (
-            <div
-              key={idx}
-              className={`h-1.5 rounded-full transition-all duration-500 ${
-                idx === currentIndex ? 'w-8 bg-red-600' : 'w-1.5 bg-white/20'
-              }`}
-            />
-          ))}
+          {/* Details Button */}
+          <button
+            onClick={(e) => {
+              e.stopPropagation()
+              onShowDetail(current)
+            }}
+            className="flex items-center gap-2 bg-slate-100 hover:bg-slate-200 text-slate-800 dark:bg-white/10 dark:hover:bg-white/15 dark:text-white px-5 py-3.5 rounded-2xl font-black text-xs tracking-wider uppercase transition-all hover:scale-105 active:scale-95 border border-slate-200/80 dark:border-white/10"
+          >
+            Details
+          </button>
+
+          {/* Slide Controls */}
+          <div className="ml-auto flex items-center gap-2">
+            <button
+              aria-label="Previous slide"
+              onClick={(e) => {
+                e.stopPropagation()
+                prev()
+              }}
+              className="p-2.5 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-600 hover:text-slate-900 dark:bg-white/10 dark:hover:bg-white/20 dark:text-white/60 dark:hover:text-white transition-all hover:scale-105 active:scale-95 border border-slate-200/60 dark:border-white/5"
+            >
+              <ChevronLeft size={18} />
+            </button>
+
+            {/* Dots */}
+            <div className="flex items-center gap-1.5 px-1">
+              {items.map((_, idx) => (
+                <button
+                  key={idx}
+                  aria-label={`Go to slide ${idx + 1}`}
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    setIsAutoPlaying(false)
+                    setCurrentIndex(idx)
+                  }}
+                  className={`h-1.5 rounded-full transition-all duration-300 ${
+                    idx === currentIndex
+                      ? 'w-6 bg-red-600'
+                      : 'w-1.5 bg-slate-300 dark:bg-white/20 hover:bg-slate-400 dark:hover:bg-white/40'
+                  }`}
+                />
+              ))}
+            </div>
+
+            <button
+              aria-label="Next slide"
+              onClick={(e) => {
+                e.stopPropagation()
+                next()
+              }}
+              className="p-2.5 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-600 hover:text-slate-900 dark:bg-white/10 dark:hover:bg-white/20 dark:text-white/60 dark:hover:text-white transition-all hover:scale-105 active:scale-95 border border-slate-200/60 dark:border-white/5"
+            >
+              <ChevronRight size={18} />
+            </button>
+          </div>
         </div>
-        <button
-          onClick={(e) => {
-            e.stopPropagation()
-            next()
-          }}
-          className="p-3 rounded-full bg-white/5 hover:bg-white/10 text-white/40 hover:text-white transition-all border border-white/5 hover:scale-110"
-        >
-          <ChevronRight size={24} />
-        </button>
       </div>
     </div>
   )

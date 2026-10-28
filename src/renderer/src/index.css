@@ -1628,7 +1628,7 @@
 }
 .light .hero-backdrop-img {
   opacity: 1 !important;
-  filter: contrast(1.04) saturate(1.08) !important;
+  filter: contrast(1.06) saturate(1.12) !important;
 }
 .light .hero-backdrop-blur {
   opacity: 0 !important;
@@ -1637,11 +1637,10 @@
 .light .hero-overlay-left {
   background: linear-gradient(
     to right,
-    rgba(241, 243, 246, 0.82) 0%,
-    rgba(241, 243, 246, 0.55) 18%,
-    rgba(241, 243, 246, 0.2) 32%,
-    rgba(241, 243, 246, 0.04) 44%,
-    transparent 54%
+    rgba(241, 243, 246, 0.42) 0%,
+    rgba(241, 243, 246, 0.18) 14%,
+    rgba(241, 243, 246, 0.04) 24%,
+    transparent 32%
   ) !important;
 }
 .light .hero-overlay-radial {
@@ -1651,19 +1650,13 @@
   background: linear-gradient(
     to top,
     #f1f3f6 0%,
-    rgba(241, 243, 246, 0.75) 10%,
-    rgba(241, 243, 246, 0.2) 22%,
-    rgba(241, 243, 246, 0.04) 32%,
-    transparent 42%
+    rgba(241, 243, 246, 0.6) 6%,
+    rgba(241, 243, 246, 0.12) 12%,
+    transparent 18%
   ) !important;
 }
 .light .hero-overlay-top {
-  background: linear-gradient(
-    to bottom,
-    rgba(241, 243, 246, 0.45) 0%,
-    rgba(241, 243, 246, 0.15) 45%,
-    transparent 100%
-  ) !important;
+  display: none !important;
 }
 .light .hero-overlay-right {
   display: none !important;
@@ -1671,35 +1664,40 @@
 
 .light .hero-title-text {
   color: #111827 !important;
-  text-shadow: 0 1px 4px rgba(255, 255, 255, 0.7) !important;
+  text-shadow: 0 1px 3px rgba(255, 255, 255, 0.95), 0 0 12px rgba(255, 255, 255, 0.85) !important;
   filter: none !important;
 }
 .light .hero-greeting-eyebrow {
   filter: none !important;
-  text-shadow: none !important;
+  text-shadow: 0 1px 2px rgba(255, 255, 255, 0.9) !important;
 }
 .light .hero-greeting-title {
   color: #111827 !important;
-  text-shadow: 0 1px 4px rgba(255, 255, 255, 0.7) !important;
+  text-shadow: 0 1px 3px rgba(255, 255, 255, 0.95), 0 0 12px rgba(255, 255, 255, 0.85) !important;
   filter: none !important;
 }
 .light .hero-meta-text {
-  color: #4b5563 !important;
+  color: #1f2937 !important;
+  font-weight: 600 !important;
 }
 .light .hero-meta-item {
-  color: #1f2937 !important;
-  text-shadow: 0 1px 2px rgba(255, 255, 255, 0.8) !important;
+  color: #111827 !important;
+  font-weight: 700 !important;
+  text-shadow: 0 1px 3px rgba(255, 255, 255, 0.95) !important;
   filter: none !important;
 }
 .light .hero-meta-badge {
-  color: #374151 !important;
+  color: #111827 !important;
+  font-weight: 700 !important;
+  text-shadow: 0 1px 3px rgba(255, 255, 255, 0.95) !important;
 }
 .light .hero-meta-dot {
-  background-color: rgba(0, 0, 0, 0.25) !important;
+  background-color: rgba(0, 0, 0, 0.35) !important;
 }
 .light .hero-overview-text {
-  color: #1f2937 !important;
-  text-shadow: 0 1px 3px rgba(255, 255, 255, 0.8) !important;
+  color: #111827 !important;
+  font-weight: 600 !important;
+  text-shadow: 0 1px 3px rgba(255, 255, 255, 0.95), 0 0 12px rgba(255, 255, 255, 0.85) !important;
   filter: none !important;
 }
 .light .hero-nav-btn {
@@ -1757,7 +1755,7 @@
 }
 .glass-light .hero-backdrop-img {
   opacity: 1 !important;
-  filter: contrast(1.04) saturate(1.08) !important;
+  filter: contrast(1.06) saturate(1.12) !important;
 }
 .glass-light .hero-backdrop-blur {
   opacity: 0 !important;
@@ -1766,11 +1764,10 @@
 .glass-light .hero-overlay-left {
   background: linear-gradient(
     to right,
-    rgba(245, 245, 247, 0.82) 0%,
-    rgba(245, 245, 247, 0.55) 18%,
-    rgba(245, 245, 247, 0.2) 32%,
-    rgba(245, 245, 247, 0.04) 44%,
-    transparent 54%
+    rgba(245, 245, 247, 0.42) 0%,
+    rgba(245, 245, 247, 0.18) 14%,
+    rgba(245, 245, 247, 0.04) 24%,
+    transparent 32%
   ) !important;
 }
 .glass-light .hero-overlay-radial {
@@ -1780,19 +1777,13 @@
   background: linear-gradient(
     to top,
     #f5f5f7 0%,
-    rgba(245, 245, 247, 0.75) 10%,
-    rgba(245, 245, 247, 0.2) 22%,
-    rgba(245, 245, 247, 0.04) 32%,
-    transparent 42%
+    rgba(245, 245, 247, 0.6) 6%,
+    rgba(245, 245, 247, 0.12) 12%,
+    transparent 18%
   ) !important;
 }
 .glass-light .hero-overlay-top {
-  background: linear-gradient(
-    to bottom,
-    rgba(245, 245, 247, 0.45) 0%,
-    rgba(245, 245, 247, 0.15) 45%,
-    transparent 100%
-  ) !important;
+  display: none !important;
 }
 .glass-light .hero-overlay-right {
   display: none !important;
@@ -1800,35 +1791,40 @@
 
 .glass-light .hero-title-text {
   color: #111827 !important;
-  text-shadow: 0 1px 4px rgba(255, 255, 255, 0.7) !important;
+  text-shadow: 0 1px 3px rgba(255, 255, 255, 0.95), 0 0 12px rgba(255, 255, 255, 0.85) !important;
   filter: none !important;
 }
 .glass-light .hero-greeting-eyebrow {
   filter: none !important;
-  text-shadow: none !important;
+  text-shadow: 0 1px 2px rgba(255, 255, 255, 0.9) !important;
 }
 .glass-light .hero-greeting-title {
   color: #111827 !important;
-  text-shadow: 0 1px 4px rgba(255, 255, 255, 0.7) !important;
+  text-shadow: 0 1px 3px rgba(255, 255, 255, 0.95), 0 0 12px rgba(255, 255, 255, 0.85) !important;
   filter: none !important;
 }
 .glass-light .hero-meta-text {
-  color: #4b5563 !important;
+  color: #1f2937 !important;
+  font-weight: 600 !important;
 }
 .glass-light .hero-meta-item {
-  color: #1f2937 !important;
-  text-shadow: 0 1px 2px rgba(255, 255, 255, 0.8) !important;
+  color: #111827 !important;
+  font-weight: 700 !important;
+  text-shadow: 0 1px 3px rgba(255, 255, 255, 0.95) !important;
   filter: none !important;
 }
 .glass-light .hero-meta-badge {
-  color: #374151 !important;
+  color: #111827 !important;
+  font-weight: 700 !important;
+  text-shadow: 0 1px 3px rgba(255, 255, 255, 0.95) !important;
 }
 .glass-light .hero-meta-dot {
-  background-color: rgba(0, 0, 0, 0.25) !important;
+  background-color: rgba(0, 0, 0, 0.35) !important;
 }
 .glass-light .hero-overview-text {
-  color: #1f2937 !important;
-  text-shadow: 0 1px 3px rgba(255, 255, 255, 0.8) !important;
+  color: #111827 !important;
+  font-weight: 600 !important;
+  text-shadow: 0 1px 3px rgba(255, 255, 255, 0.95), 0 0 12px rgba(255, 255, 255, 0.85) !important;
   filter: none !important;
 }
 .glass-light .hero-nav-btn {

@@ -425,9 +425,12 @@ function queueNextEpisode(videoId: number) {
 
     const nextEpisode = episodes[currentIndex + 1]
     db.prepare(`
-      INSERT INTO progress (video_id, last_watched_time, completed)
-      VALUES (?, 0, 0)
-      ON CONFLICT(video_id) DO NOTHING
+      INSERT INTO progress (video_id, last_watched_time, completed, updated_at)
+      VALUES (?, 0, 0, CURRENT_TIMESTAMP)
+      ON CONFLICT(video_id) DO UPDATE SET
+        last_watched_time = 0,
+        completed = 0,
+        updated_at = CURRENT_TIMESTAMP
     `).run(nextEpisode.id)
   } catch (err) {
     console.error('[DB] queueNextEpisode error:', err)
@@ -463,7 +466,7 @@ export function getContinueWatching() {
     JOIN progress p ON v.id = p.video_id
     WHERE p.completed = 0
     ORDER BY p.updated_at DESC
-    LIMIT 10
+    LIMIT 50
   `).all() as any[]
 }
 

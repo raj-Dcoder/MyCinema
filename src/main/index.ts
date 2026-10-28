@@ -4658,14 +4658,22 @@ function broadcastProgress(id: string, torrent: any, status: string, errorMessag
 
   // Calculate new progress percentage
   let newProgress = existing?.progress || 0
-  if (torrent.progress !== undefined) {
-    const calculated = Math.round((torrent.progress || 0) * 100 * 100) / 100
-    // Only update if it's higher, or if it's a "done" status (to allow 100%)
-    // But never let it drop to 0 if we already have progress, unless it's an error/reset
-    if (calculated > newProgress || status === 'done') {
+  if (status === 'done') {
+    newProgress = 100
+  } else if (torrent.progress !== undefined) {
+    const rawPct = (Number(torrent.progress) || 0) * 100
+    // WebTorrent/HTTP progress is ratio (0..1) or percentage (0..100)
+    // Clamp to [0, 99.9] while downloading so it never exceeds 100% or jumps back and forth
+    const clampedPct = Math.min(99.9, Math.max(0, rawPct > 100 ? 99.9 : rawPct))
+    const calculated = Math.round(clampedPct * 100) / 100
+
+    if (status === 'queued' && calculated === 0) {
+      newProgress = 0
+    } else if (calculated > newProgress) {
       newProgress = calculated
     }
   }
+  newProgress = Math.max(0, Math.min(status === 'done' ? 100 : 99.9, newProgress))
 
   // Determine actual status - if it's "downloading" but has no size, it's resolving metadata
   let displayStatus = status
@@ -4693,10 +4701,14 @@ function broadcastProgress(id: string, torrent: any, status: string, errorMessag
       : (existing?.timeRemaining || '—'),
     status: displayStatus,
     // Only update size/downloaded if they are greater than 0, or if we don't have existing data
-    size: (torrent.length && torrent.length > 0) 
+    size: status === 'done' && (torrent.length || torrent.downloaded)
+      ? formatBytes(torrent.length || torrent.downloaded)
+      : (torrent.length && torrent.length > 0) 
       ? formatBytes(torrent.length) 
       : (existing?.size || '—'),
-    downloaded: (torrent.downloaded && torrent.downloaded > 0) 
+    downloaded: status === 'done' && (torrent.length || torrent.downloaded)
+      ? formatBytes(torrent.length || torrent.downloaded)
+      : (torrent.downloaded && torrent.downloaded > 0) 
       ? formatBytes(torrent.downloaded) 
       : (existing?.downloaded || '0 B'),
     tmdbId: existing?.tmdbId || null,
@@ -7508,18 +7520,22 @@ ipcMain.handle('get-active-downloads', async () => {
   const downloads = db.getDownloads()
   const downloadRoot = getDownloadPath()
   return downloads.map((dl: any) => {
+    // Merge live in-memory progress cache so renderer never gets stale 5-second-old progress from DB
+    const live = downloadRecordsCache.get(dl.id)
+    const record = live ? { ...dl, ...live } : dl
+
     let fileExists = true
-    if (dl.status === 'done') {
+    if (record.status === 'done') {
       const candidates: string[] = []
-      if (dl.downloadPath) {
-        candidates.push(dl.downloadPath)
+      if (record.downloadPath) {
+        candidates.push(record.downloadPath)
       }
-      if (dl.name) {
-        candidates.push(path.join(downloadRoot, dl.name))
-        candidates.push(path.join(downloadRoot, dl.id, dl.name))
+      if (record.name) {
+        candidates.push(path.join(downloadRoot, record.name))
+        candidates.push(path.join(downloadRoot, record.id, record.name))
       }
-      if (dl.id) {
-        candidates.push(path.join(downloadRoot, dl.id))
+      if (record.id) {
+        candidates.push(path.join(downloadRoot, record.id))
       }
       fileExists = candidates.some(p => {
         try {
@@ -7537,13 +7553,13 @@ ipcMain.handle('get-active-downloads', async () => {
       if (!fileExists) {
         // Auto-remove deleted download so downloads list stays 100% clean
         try {
-          db.removeDownloadRow(dl.id)
-          downloadRecordsCache.delete(dl.id)
+          db.removeDownloadRow(record.id)
+          downloadRecordsCache.delete(record.id)
         } catch {}
         return null
       }
     }
-    return { ...dl, fileExists }
+    return { ...record, fileExists }
   }).filter(Boolean)
 })
 
@@ -8142,6 +8158,7 @@ ipcMain.handle('remove-download', async (_, id: string, deleteFile: boolean = fa
   try {
     if (httpDownloader.isHttpDownload(id)) {
       httpDownloader.cancelHttpDownload(id, deleteFile)
+      downloadRecordsCache.delete(id)
       db.removeDownloadRow(id)
       BrowserWindow.getAllWindows().forEach(w => w.webContents.send('downloads-changed'))
       void pumpDownloadQueue()
@@ -8164,6 +8181,7 @@ ipcMain.handle('remove-download', async (_, id: string, deleteFile: boolean = fa
     }
     
     // 2. Delete download row from DB
+    downloadRecordsCache.delete(id)
     db.removeDownloadRow(id)
     BrowserWindow.getAllWindows().forEach(w => w.webContents.send('downloads-changed'))
     // Removing a running download frees a slot.

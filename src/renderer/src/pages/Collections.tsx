@@ -558,19 +558,19 @@ const Collections: React.FC<CollectionsProps> = ({ onPlay, onShowDetail, focusCo
                 onContextMenu={(e) => { if (pressRef.current) e.preventDefault() }}
                 className={`group relative select-none touch-pan-y ${dragId === collection.id ? 'invisible' : 'cursor-grab transition-transform duration-300 hover:-translate-y-1'}`}
               >
-                <div className="relative isolate overflow-hidden rounded-[1.75rem] bg-[#0b0e14] ring-1 ring-white/10 transition-shadow duration-300 hover:shadow-xl hover:ring-white/25">
+                <div className="relative isolate overflow-hidden rounded-[1.75rem] bg-[#0b0e14] ring-1 ring-white/10 transition-shadow duration-300 hover:shadow-xl hover:ring-white/25 collection-card-container">
                 <div className="absolute right-3 top-3 z-20 flex gap-1.5 opacity-0 transition-opacity duration-200 group-hover:opacity-100">
                   <button
                     onClick={(e) => { e.stopPropagation(); openEdit(collection) }}
                     title={`Edit "${collection.name}"`}
-                    className="flex h-8 w-8 items-center justify-center rounded-full bg-black/70 text-white/70 ring-1 ring-white/15 transition-colors hover:bg-primary hover:text-white"
+                    className="flex h-8 w-8 items-center justify-center rounded-full bg-black/70 text-white/70 ring-1 ring-white/15 transition-colors hover:bg-primary hover:text-white collection-card-action-btn"
                   >
                     <Pencil size={13} />
                   </button>
                   <button
                     onClick={(e) => { e.stopPropagation(); handleDelete(collection) }}
                     title={`Delete "${collection.name}"`}
-                    className="flex h-8 w-8 items-center justify-center rounded-full bg-black/70 text-white/70 ring-1 ring-white/15 transition-colors hover:bg-red-500/80 hover:text-white"
+                    className="flex h-8 w-8 items-center justify-center rounded-full bg-black/70 text-white/70 ring-1 ring-white/15 transition-colors hover:bg-red-500/80 hover:text-white collection-card-action-btn"
                   >
                     <Trash2 size={13} />
                   </button>
@@ -591,14 +591,14 @@ const Collections: React.FC<CollectionsProps> = ({ onPlay, onShowDetail, focusCo
                       alt=""
                       loading="lazy"
                       decoding="async"
-                      className="absolute inset-0 h-full w-full object-cover opacity-40 saturate-150"
+                      className="absolute inset-0 h-full w-full object-cover opacity-40 saturate-150 collection-card-backdrop"
                     />
                   ) : (
                     <div className={`absolute inset-0 bg-gradient-to-br ${gradient}`} />
                   )}
 
                   {posters.length > 0 ? (
-                    <div className="absolute bottom-0 right-6 top-7 flex items-end">
+                    <div className="absolute bottom-0 right-6 top-7 flex items-end collection-card-fan">
                       {posters.map((poster, i) => (
                         <img
                           key={i}
@@ -607,27 +607,27 @@ const Collections: React.FC<CollectionsProps> = ({ onPlay, onShowDetail, focusCo
                           loading="lazy"
                           decoding="async"
                           style={fanStyle(i)}
-                          className="aspect-[2/3] w-[76px] rounded-xl object-cover shadow-lg ring-1 ring-white/25"
+                          className="aspect-[2/3] w-[76px] rounded-xl object-cover shadow-lg ring-1 ring-white/25 collection-fan-card"
                         />
                       ))}
                     </div>
                   ) : (
                     <div className="absolute bottom-0 right-6 top-7 flex items-end">
-                      <div className="flex aspect-[2/3] w-[76px] items-center justify-center rounded-xl bg-white/10 ring-1 ring-white/20 backdrop-blur">
+                      <div className="flex aspect-[2/3] w-[76px] items-center justify-center rounded-xl bg-white/10 ring-1 ring-white/20 backdrop-blur collection-fan-empty">
                         <Layers size={26} className="text-white/40" />
                       </div>
                     </div>
                   )}
 
-                  <div className="absolute inset-0 bg-gradient-to-b from-[#07090d]/95 via-[#07090d]/30 to-[#07090d]/85" />
-                  <div className="absolute inset-0 bg-gradient-to-r from-[#07090d]/85 via-[#07090d]/25 to-transparent" />
+                  <div className="absolute inset-0 collection-card-overlay-v" />
+                  <div className="absolute inset-0 collection-card-overlay-h" />
 
                   <div className="absolute inset-x-0 top-0 max-w-[68%] p-5">
-                    <p className="mb-1 text-[10px] font-black uppercase tracking-[0.28em] text-white/45">
+                    <p className="mb-1 text-[10px] font-black uppercase tracking-[0.28em] text-white/45 collection-card-count">
                       {count} title{count === 1 ? '' : 's'}
                     </p>
-                    <p className="truncate text-[26px] font-black leading-tight tracking-tight text-white drop-shadow-lg">{collection.name}</p>
-                    <p className="mt-1 truncate text-xs font-semibold text-white/55">{meta}</p>
+                    <p className="truncate text-[26px] font-black leading-tight tracking-tight text-white drop-shadow-lg collection-card-title">{collection.name}</p>
+                    <p className="mt-1 truncate text-xs font-semibold text-white/55 collection-card-meta">{meta}</p>
                   </div>
                 </button>
                 </div>

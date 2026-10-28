@@ -17,6 +17,7 @@ interface HomeProps {
 }
 
 const TRENDING_RAIL_LIMIT = 10
+const HERO_CAROUSEL_LIMIT = 10
 const POSTER_RAIL_CARD_CLASS = 'basis-[calc((100%_-_1.25rem)/2)] flex-shrink-0 md:basis-[calc((100%_-_3.75rem)/4)] lg:basis-[calc((100%_-_6.25rem)/6)]'
 const HOME_SNAPSHOT_STORAGE_KEY = 'mycinema_home_snapshot_v2'
 
@@ -209,6 +210,18 @@ const isContinueWatchingTitle = (video: Video) => {
   return video.type === 'movie'
 }
 
+const parseTimestamp = (val?: string | number | null): number => {
+  if (!val) return 0
+  if (typeof val === 'number') return Number.isFinite(val) ? val : 0
+  let str = String(val).trim()
+  if (!str) return 0
+  if (/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(str)) {
+    str = str.replace(' ', 'T') + 'Z'
+  }
+  const t = new Date(str).getTime()
+  return Number.isFinite(t) ? t : 0
+}
+
 const getEpisodeLabel = (video: Video) => {
   if (video.type !== 'series') return null
   if (video.season && video.episode) return `S${video.season} E${video.episode}`
@@ -226,10 +239,17 @@ const groupContinueWatching = (videos: Video[]) => {
       continue
     }
 
-    const key = video.series_name.toLowerCase()
+    const key = video.tmdb_id ? `tmdb:${video.tmdb_id}` : video.series_name.trim().toLowerCase()
     if (seenSeries.has(key)) continue
 
-    grouped.push(video)
+    const isNext = (Number(video.last_watched_time) || 0) === 0
+    grouped.push({
+      ...video,
+      isNextEpisode: isNext,
+      tagline: isNext && !video.tagline
+        ? (video.title && video.title !== video.series_name ? `Up next · ${video.title}` : (getEpisodeLabel(video) ? `Up next · ${getEpisodeLabel(video)}` : video.tagline))
+        : video.tagline
+    })
     seenSeries.add(key)
   }
 
@@ -275,12 +295,16 @@ const ContinueWatchingCard: React.FC<{
               {episodeLabel}
             </div>
           )}
-          {video.isOnlineResume && (
+          {video.isOnlineResume ? (
             <div className="inline-flex items-center gap-1 rounded-md bg-sky-500/80 px-2 py-1 text-[9px] font-black uppercase tracking-widest text-white shadow-lg shadow-black/30 backdrop-blur-md">
               <Cloud size={10} />
-              {video.onlineNewEpisode ? 'New Episode' : video.onlineNextEpisode ? 'Up Next · Online' : 'Online'}
+              {video.onlineNewEpisode ? 'New Episode' : (video.onlineNextEpisode || video.isNextEpisode) ? 'Up Next · Online' : 'Online'}
             </div>
-          )}
+          ) : video.isNextEpisode ? (
+            <div className="inline-flex items-center gap-1 rounded-md bg-indigo-600/85 px-2 py-1 text-[9px] font-black uppercase tracking-widest text-white shadow-lg shadow-black/30 backdrop-blur-md">
+              Next Episode
+            </div>
+          ) : null}
         </div>
 
         <div className="space-y-2">
@@ -308,7 +332,7 @@ const ContinueWatchingCard: React.FC<{
             ) : (
               <>
                 <Play fill="white" size={15} />
-                {(video.last_watched_time || 0) > 0 ? 'Resume' : video.onlineNextEpisode ? `Play ${formatSeasonEpisode(video.season, video.episode)}` : 'Resume'}
+                {(video.last_watched_time || 0) > 0 ? 'Resume' : (video.onlineNextEpisode || video.isNextEpisode) ? `Play ${formatSeasonEpisode(video.season, video.episode)}` : 'Play Now'}
               </>
             )}
           </button>
@@ -328,16 +352,16 @@ const SearchResultCard: React.FC<{
   const title = getSearchTitle(video)
   const availability = video.searchAvailability || (video.isExternal ? 'online' : 'local')
   const availabilityClasses = {
-    local: 'border-emerald-400/25 bg-emerald-400/10 text-emerald-200',
-    watchlist: 'border-amber-400/25 bg-amber-400/10 text-amber-200',
-    online: 'border-cyan-400/25 bg-cyan-400/10 text-cyan-200'
+    local: 'border-emerald-500/25 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300',
+    watchlist: 'border-amber-500/25 bg-amber-500/10 text-amber-700 dark:text-amber-300',
+    online: 'border-cyan-500/25 bg-cyan-500/10 text-cyan-700 dark:text-cyan-300'
   }[availability]
   const AvailabilityIcon = availability === 'local' ? HardDrive : availability === 'watchlist' ? CheckCircle2 : Cloud
   const canAddToWatchlist = availability !== 'local' && !video.is_watchlist
 
   return (
     <div
-      className="group/result flex w-full items-center gap-3 rounded-2xl border border-white/5 bg-white/[0.035] p-2.5 text-left transition-all duration-200 hover:border-red-500/35 hover:bg-white/[0.07] active:scale-[0.99]"
+      className="group/result flex w-full items-center gap-3 rounded-2xl border border-slate-100 bg-slate-50/70 p-2.5 text-left transition-all duration-200 hover:border-red-500/35 hover:bg-white hover:shadow-md dark:border-white/5 dark:bg-white/[0.035] dark:hover:bg-white/[0.07] active:scale-[0.99]"
       onClick={() => onSelect(video)}
       onMouseEnter={() => onWarm(video)}
       onFocus={() => onWarm(video)}
@@ -350,11 +374,11 @@ const SearchResultCard: React.FC<{
         }
       }}
     >
-      <div className="h-[92px] w-[62px] shrink-0 overflow-hidden rounded-xl bg-white/5 ring-1 ring-white/8">
+      <div className="h-[92px] w-[62px] shrink-0 overflow-hidden rounded-xl bg-slate-100 ring-1 ring-black/5 dark:bg-white/5 dark:ring-white/8">
         {poster ? (
           <img src={poster} alt="" className="h-full w-full object-cover transition-transform duration-300 group-hover/result:scale-105" />
         ) : (
-          <div className="flex h-full w-full items-center justify-center text-white/20">
+          <div className="flex h-full w-full items-center justify-center text-slate-400 dark:text-white/20">
             {video.type === 'series' ? <Tv size={20} /> : <Film size={20} />}
           </div>
         )}
@@ -366,21 +390,21 @@ const SearchResultCard: React.FC<{
             <AvailabilityIcon size={10} />
             {video.searchLabel || (availability === 'local' ? 'In Library' : availability === 'watchlist' ? 'Watchlist' : 'Online')}
           </span>
-          <span className="rounded-md border border-white/10 bg-black/25 px-2 py-0.5 text-[8px] font-black uppercase tracking-widest text-white/45">
+          <span className="rounded-md border border-slate-200 bg-slate-100 px-2 py-0.5 text-[8px] font-black uppercase tracking-widest text-slate-600 dark:border-white/10 dark:bg-black/25 dark:text-white/45">
             {video.type === 'series' ? 'Series' : 'Movie'}
           </span>
           {video.release_year && (
-            <span className="text-[10px] font-black text-white/30">{video.release_year}</span>
+            <span className="text-[10px] font-black text-slate-400 dark:text-white/30">{video.release_year}</span>
           )}
           {video.vote_average ? (
-            <span className="ml-auto inline-flex items-center gap-1 text-[10px] font-black text-yellow-400">
+            <span className="ml-auto inline-flex items-center gap-1 text-[10px] font-black text-amber-500 dark:text-yellow-400">
               <Star size={10} fill="currentColor" />
               {video.vote_average.toFixed(1)}
             </span>
           ) : null}
         </div>
-        <h4 className="truncate text-sm font-black text-white transition-colors group-hover/result:text-red-100">{title}</h4>
-        <p className="mt-1 line-clamp-2 text-[11px] font-medium leading-5 text-white/45">
+        <h4 className="truncate text-sm font-black text-slate-900 dark:text-white transition-colors group-hover/result:text-primary">{title}</h4>
+        <p className="mt-1 line-clamp-2 text-[11px] font-medium leading-5 text-slate-500 dark:text-white/45">
           {video.overview || 'Open details to explore this title.'}
         </p>
       </div>
@@ -390,13 +414,13 @@ const SearchResultCard: React.FC<{
             event.stopPropagation()
             onAddToWatchlist(video)
           }}
-          className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-white/5 text-white/45 transition-all hover:bg-amber-500/15 hover:text-amber-400"
+          className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-slate-100 text-slate-500 transition-all hover:bg-amber-500/15 hover:text-amber-600 dark:bg-white/5 dark:text-white/45 dark:hover:text-amber-400"
           title="Add to Watchlist"
         >
           <Bookmark size={16} />
         </button>
       ) : (
-        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-white/5 text-white/35">
+        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-slate-100 text-slate-400 dark:bg-white/5 dark:text-white/35">
           {availability === 'local' ? <Play size={16} fill="currentColor" /> : <Bookmark size={16} fill="currentColor" />}
         </div>
       )}
@@ -485,7 +509,7 @@ const SectionHeader: React.FC<{
   )
 
   return (
-    <div className="mb-4 flex items-center justify-between gap-4">
+    <div className="relative z-10 mb-6 flex items-center justify-between gap-4">
       <div className="flex min-w-0 items-center gap-3">
         {iconTile}
         <div className="min-w-0">
@@ -593,7 +617,7 @@ const Home: React.FC<HomeProps> = ({ onPlay, onShowDetail, onNavigate, refreshKe
       // same TMDB title exists locally, the local row wins and online hides).
       const TEN_DAYS_MS = 10 * 24 * 3600 * 1000
       const isFresh = (ts?: string | null) => (
-        Date.now() - new Date(ts || 0).getTime() < TEN_DAYS_MS
+        Date.now() - parseTimestamp(ts) < TEN_DAYS_MS
       )
       const localKeys = new Set(
         (cw as Video[]).filter(v => v.tmdb_id).map(v => (
@@ -654,6 +678,7 @@ const Home: React.FC<HomeProps> = ({ onPlay, onShowDetail, onNavigate, refreshKe
       )
       const merged = [...groupContinueWatching(cw), ...onlineMovies, ...onlineSeriesCards, ...resurfacedCards]
         .sort((a, b) => {
+          // Priority 1: Brand new episode drops (unseen releases)
           const aDrop = a.onlineNewEpisode ? 1 : 0
           const bDrop = b.onlineNewEpisode ? 1 : 0
           if (aDrop !== bDrop) return bDrop - aDrop
@@ -662,9 +687,15 @@ const Home: React.FC<HomeProps> = ({ onPlay, onShowDetail, onNavigate, refreshKe
             const bAt = (b.tmdb_id && dropDetectedAt.get(Number(b.tmdb_id))) || 0
             if (aAt !== bAt) return bAt - aAt
           }
-          return new Date(b.updated_at || 0).getTime() - new Date(a.updated_at || 0).getTime()
+
+          // Priority 2: Recency of user interaction (most recently watched, resumed, or queued next episode)
+          const aTime = parseTimestamp(a.updated_at)
+          const bTime = parseTimestamp(b.updated_at)
+          if (aTime !== bTime) return bTime - aTime
+
+          return (b.id || 0) - (a.id || 0)
         })
-        .slice(0, 5)
+        .slice(0, HERO_CAROUSEL_LIMIT)
       setContinueWatching(merged)
 
       const moviesOnly = allVideos.filter(v => v.type === 'movie')
@@ -1228,21 +1259,20 @@ const Home: React.FC<HomeProps> = ({ onPlay, onShowDetail, onNavigate, refreshKe
   return (
     <div onClickCapture={handleHomeClickCapture}>
       {(showHero || showLocalEmptyState || !localDataLoaded) && (
-        <section className="-mt-6 mb-9">
-          <div className="relative overflow-hidden">
-            <div className="absolute left-0 right-0 top-0 z-30">
-              <div className="mx-auto flex max-w-[1600px] items-start px-8 pt-8 md:px-16">
+        <section className="-mt-6 mb-10">
+          <div className="relative overflow-hidden w-full">
+            {/* Top Scrim Header inside Full-Bleed Hero */}
+            <div className="absolute left-0 right-0 top-0 z-30 pointer-events-none">
+              <div className="mx-auto flex max-w-[1600px] items-start justify-between px-8 pt-8 md:px-16">
                 <div>
-                  <p className="text-[10px] font-black uppercase tracking-[0.22em] text-primary drop-shadow-[0_2px_12px_rgba(0,0,0,0.9)]">
+                  <p className="hero-greeting-eyebrow text-[10px] sm:text-[11px] font-black uppercase tracking-[0.22em] text-primary drop-shadow-[0_2px_12px_rgba(0,0,0,0.9)]">
                     {getTimeGreeting()}, {userName}
                   </p>
-                  <h2 className="mt-1 text-2xl font-black italic tracking-tighter text-white drop-shadow-[0_2px_14px_rgba(0,0,0,0.9)]">
+                  <h2 className="hero-greeting-title mt-1 text-2xl md:text-3xl font-black italic tracking-tighter text-white drop-shadow-[0_2px_14px_rgba(0,0,0,0.95)]">
                     {showHero ? heroTitle : 'Ready to Watch'}
                   </h2>
                 </div>
-              </div>
 
-              <div className="pointer-events-none mx-auto mt-6 flex max-w-[1600px] justify-end px-8 md:px-16">
                 <div className="pointer-events-auto relative flex items-center gap-4" ref={searchBoxRef}>
                   <div
                     className={`relative transition-all duration-300 ease-out ${
@@ -1250,20 +1280,20 @@ const Home: React.FC<HomeProps> = ({ onPlay, onShowDetail, onNavigate, refreshKe
                     }`}
                   >
                     <div
-                      className={`flex h-12 items-center overflow-hidden rounded-2xl border backdrop-blur-xl transition-all duration-300 ${
+                      className={`hero-search-pill flex h-12 items-center overflow-hidden rounded-2xl border backdrop-blur-xl transition-all duration-300 ${
                         isSearchOpen
-                          ? 'border-white/15 bg-black/45 shadow-[0_18px_55px_rgba(0,0,0,0.45)]'
-                          : 'border-white/10 bg-black/25'
+                          ? 'border-white/20 bg-black/60 shadow-[0_18px_55px_rgba(0,0,0,0.6)]'
+                          : 'border-white/10 bg-black/35 hover:bg-black/50'
                       }`}
                     >
                       <button
                         aria-label="Search movies and series"
-                        className={`flex h-12 w-12 shrink-0 items-center justify-center text-white transition-all hover:text-primary active:scale-95 ${
+                        className={`hero-search-btn flex h-12 w-12 shrink-0 items-center justify-center text-white transition-all hover:text-primary active:scale-95 ${
                           isSearchOpen ? 'scale-95' : 'hover:scale-110'
                         }`}
                         onClick={() => setIsSearchOpen(true)}
                       >
-                        <SearchIcon size={24} strokeWidth={3} />
+                        <SearchIcon size={24} strokeWidth={2.6} />
                       </button>
 
                       <input
@@ -1271,7 +1301,7 @@ const Home: React.FC<HomeProps> = ({ onPlay, onShowDetail, onNavigate, refreshKe
                         value={searchQuery}
                         onChange={(event) => setSearchQuery(event.target.value)}
                         placeholder="Search movies or series"
-                        className={`min-w-0 flex-1 bg-transparent pr-2 text-sm font-bold text-white outline-none placeholder:text-white/28 ${
+                        className={`hero-search-input min-w-0 flex-1 bg-transparent pr-2 text-sm font-bold text-white outline-none placeholder:text-white/35 ${
                           isSearchOpen ? 'opacity-100' : 'pointer-events-none opacity-0'
                         }`}
                       />
@@ -1279,7 +1309,7 @@ const Home: React.FC<HomeProps> = ({ onPlay, onShowDetail, onNavigate, refreshKe
                       {isSearchOpen && searchQuery && (
                         <button
                           aria-label="Clear search"
-                          className="mr-2 flex h-8 w-8 shrink-0 items-center justify-center rounded-xl text-white/45 transition-all hover:bg-white/10 hover:text-white"
+                          className="hero-search-clear mr-2 flex h-8 w-8 shrink-0 items-center justify-center rounded-xl text-white/50 transition-all hover:bg-white/15 hover:text-white"
                           onClick={() => {
                             setSearchQuery('')
                             setSearchResults([])
@@ -1292,10 +1322,10 @@ const Home: React.FC<HomeProps> = ({ onPlay, onShowDetail, onNavigate, refreshKe
                     </div>
 
                     {isSearchOpen && searchQuery.trim().length > 0 && (
-                      <div className="absolute right-0 top-14 z-40 w-[min(420px,calc(100vw-4rem))] overflow-hidden rounded-3xl border border-white/10 bg-[#070a0f]/95 shadow-[0_28px_90px_rgba(0,0,0,0.72)] backdrop-blur-2xl animate-in fade-in slide-in-from-top-2 duration-200">
-                        <div className="border-b border-white/6 px-4 py-3">
+                      <div className="hero-search-dropdown absolute right-0 top-14 z-50 w-[min(420px,calc(100vw-4rem))] overflow-hidden rounded-3xl border border-white/10 bg-[#070a0f]/95 shadow-[0_28px_90px_rgba(0,0,0,0.75)] backdrop-blur-2xl animate-in fade-in slide-in-from-top-2 duration-200">
+                        <div className="border-b border-white/10 px-4 py-3">
                           <div className="flex items-center justify-between gap-3">
-                            <p className="text-[10px] font-black uppercase tracking-[0.22em] text-white/35">Search</p>
+                            <p className="text-[10px] font-black uppercase tracking-[0.22em] text-white/40">Search</p>
                             {isSearching && <Loader2 size={15} className="animate-spin text-red-500" />}
                           </div>
                         </div>
@@ -1303,7 +1333,7 @@ const Home: React.FC<HomeProps> = ({ onPlay, onShowDetail, onNavigate, refreshKe
                         <div className="max-h-[520px] overflow-y-auto p-2.5 scrollbar-thin">
                           {searchQuery.trim().length < 2 ? (
                             <div className="flex min-h-[150px] items-center justify-center px-6 text-center">
-                              <p className="text-xs font-black uppercase tracking-[0.18em] text-white/20">
+                              <p className="text-xs font-black uppercase tracking-[0.18em] text-white/30">
                                 Start typing to find a movie or series
                               </p>
                             </div>
@@ -1334,7 +1364,7 @@ const Home: React.FC<HomeProps> = ({ onPlay, onShowDetail, onNavigate, refreshKe
                             </div>
                           ) : (
                             <div className="flex min-h-[150px] items-center justify-center px-6 text-center">
-                              <p className="text-xs font-black uppercase tracking-[0.18em] text-white/24">
+                              <p className="text-xs font-black uppercase tracking-[0.18em] text-white/30">
                                 {searchError || 'No matching titles found'}
                               </p>
                             </div>
@@ -1348,27 +1378,25 @@ const Home: React.FC<HomeProps> = ({ onPlay, onShowDetail, onNavigate, refreshKe
             </div>
 
             {showHero ? (
-              <>
-                <HeroCarousel
-                  items={heroItems}
-                  onPlay={handlePlayFromHome}
-                  onShowDetail={handleShowDetailFromHome}
-                  resumingKey={resumingOnlineKey}
-                  isActive={isActive}
-                />
-              </>
+              <HeroCarousel
+                items={heroItems}
+                onPlay={handlePlayFromHome}
+                onShowDetail={handleShowDetailFromHome}
+                resumingKey={resumingOnlineKey}
+                isActive={isActive}
+              />
             ) : showLocalEmptyState ? (
-              <div className="relative flex min-h-[570px] h-[73vh] max-h-[800px] flex-col items-start justify-end overflow-hidden bg-[#05080d] px-8 pb-20 pt-32 md:px-16">
-                <div className="absolute inset-0 bg-[linear-gradient(120deg,rgba(220,38,38,0.16),transparent_38%),linear-gradient(180deg,rgba(255,255,255,0.06),transparent_32%),#05080d]" />
-                <div className="absolute inset-0 bg-gradient-to-r from-black/85 via-black/45 to-transparent" />
+              <div className="hero-carousel-canvas relative flex min-h-[570px] h-[73vh] max-h-[800px] flex-col items-start justify-end overflow-hidden px-8 pb-20 pt-32 md:px-16">
+                <div className="absolute inset-0 bg-[linear-gradient(120deg,rgba(220,38,38,0.16),transparent_38%),linear-gradient(180deg,rgba(255,255,255,0.06),transparent_32%)]" />
+                <div className="hero-overlay-left absolute inset-0" />
                 <div className="relative max-w-xl space-y-4">
                   <div className="inline-flex rounded-md border border-white/10 bg-black/35 px-3 py-1.5 text-[9px] font-black uppercase tracking-[0.18em] text-white/70 backdrop-blur-md">
                     Library setup
                   </div>
-                  <h2 className="text-4xl font-black uppercase italic leading-[0.92] tracking-tighter text-white md:text-5xl">
+                  <h2 className="hero-title-text text-4xl font-black uppercase italic leading-[0.92] tracking-tighter text-white md:text-5xl">
                     Add your movie folder
                   </h2>
-                  <p className="max-w-lg text-sm font-semibold leading-7 text-white/50">
+                  <p className="hero-overview-text max-w-lg text-sm font-semibold leading-7 text-white/50">
                     Point MyCinema to the folder where your downloaded movies and shows live. Recently added titles will appear here automatically.
                   </p>
                   <button
@@ -1411,7 +1439,7 @@ const Home: React.FC<HomeProps> = ({ onPlay, onShowDetail, onNavigate, refreshKe
           )}
         />
         {hasRecentMovies ? (
-          <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-5">
+          <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-5 pt-2">
             {recentMovies.slice(0, 6).map(video => (
               <VideoCard key={video.id} video={video} onPlay={handlePlayFromHome} onShowDetail={handleShowDetailFromHome} />
             ))}
@@ -1446,7 +1474,7 @@ const Home: React.FC<HomeProps> = ({ onPlay, onShowDetail, onNavigate, refreshKe
           )}
         />
         {hasRecentSeries ? (
-          <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-5">
+          <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-5 pt-2">
             {recentSeries.slice(0, 6).map(video => (
               <VideoCard key={video.id} video={video} onPlay={handlePlayFromHome} onShowDetail={handleShowDetailFromHome} />
             ))}

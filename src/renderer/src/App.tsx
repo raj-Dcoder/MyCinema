@@ -19,6 +19,7 @@ import Download from './pages/Download'
 import FocusTube from './pages/FocusTube'
 import Updates from './pages/Updates'
 import appLogo from './assets/mycinema-logo.png'
+import { useTheme } from './theme/ThemeContext'
 import { normalizeProfileImage, resolveProfileImageUrl } from './utils/profileImage'
 
 const getWhatsNewStorageKey = (version: string) => `mycinema_whats_new_seen_${version}`
@@ -58,6 +59,7 @@ const sortDownloadsForTray = (items: ActiveDownload[]) => (
 )
 
 const App: React.FC = () => {
+  const { theme } = useTheme()
   const [activeTab, setActiveTab] = useState<AppTab>('home')
   // Focus Tube is opt-out. While off the tab is not rendered at all, which also
   // means its page never mounts and therefore issues no feed requests. The
@@ -368,7 +370,20 @@ const App: React.FC = () => {
     const refreshDownloads = () => {
       window.api.getActiveDownloads()
         .then((downloads: ActiveDownload[]) => {
-          if (!cancelled) setActiveDownloads(downloads || [])
+          if (!cancelled && Array.isArray(downloads)) {
+            setActiveDownloads(prev => {
+              const prevMap = new Map(prev.map(p => [p.id, p]))
+              return downloads.map(d => {
+                const existing = prevMap.get(d.id)
+                const rawProgress = typeof d.progress === 'number' ? d.progress : Number(d.progress || 0)
+                const clamped = Math.max(0, Math.min(d.status === 'done' ? 100 : 99.9, rawProgress))
+                const smoothProgress = (d.status === 'downloading' || d.status === 'connecting') && existing
+                  ? Math.max(existing.progress || 0, clamped)
+                  : clamped
+                return { ...d, progress: smoothProgress }
+              })
+            })
+          }
         })
         .catch(err => console.error('[DownloadsTray] Failed to load downloads:', err))
     }
@@ -378,11 +393,17 @@ const App: React.FC = () => {
     const cleanup = window.api.onTorrentProgress((data: ActiveDownload) => {
       if (!data?.id) return
       setActiveDownloads(prev => {
+        const rawProgress = typeof data.progress === 'number' ? data.progress : Number(data.progress || 0)
+        const clamped = Math.max(0, Math.min(data.status === 'done' ? 100 : 99.9, rawProgress))
         const index = prev.findIndex(download => download.id === data.id)
-        if (index === -1) return [data, ...prev]
+        if (index === -1) return [{ ...data, progress: clamped }, ...prev]
         const current = prev[index]
+        const smoothProgress = (data.status === 'downloading' || data.status === 'connecting')
+          ? Math.max(current.progress || 0, clamped)
+          : clamped
+
         const currentPct = Math.round(current.progress || 0)
-        const nextPct = Math.round(data.progress || 0)
+        const nextPct = Math.round(smoothProgress)
         if (
           currentPct === nextPct &&
           current.status === data.status &&
@@ -392,7 +413,7 @@ const App: React.FC = () => {
           return prev
         }
         const next = [...prev]
-        next[index] = { ...next[index], ...data }
+        next[index] = { ...next[index], ...data, progress: smoothProgress }
         return next
       })
     })
@@ -666,10 +687,11 @@ const App: React.FC = () => {
     if (!launchFullscreen) return null
 
     const controlsVisible = showWindowControls || (!!playingVideo && videoControlsVisible)
-    const capsuleClass = `pointer-events-auto flex items-center gap-px rounded-full bg-black/50 py-0.5 pl-1 pr-0.5 shadow-[0_12px_40px_rgba(0,0,0,0.55)] ring-1 ring-white/10 backdrop-blur-2xl transition-all duration-300 ease-[cubic-bezier(0.16,1,0.3,1)] ${
+    const isOnVideo = !!playingVideo
+    const capsuleClass = `window-controls-capsule ${isOnVideo ? 'on-video' : ''} pointer-events-auto flex items-center gap-px rounded-full py-0.5 pl-1 pr-0.5 transition-all duration-300 ease-[cubic-bezier(0.16,1,0.3,1)] ${
       controlsVisible ? 'translate-y-0 scale-100 opacity-100' : 'pointer-events-none -translate-y-2 scale-95 opacity-0'
     }`
-    const controlButtonClass = 'flex h-6 w-7 items-center justify-center rounded-full text-white/65 transition-all duration-150 hover:bg-white/10 hover:text-white active:scale-90 focus:outline-none focus-visible:ring-1 focus-visible:ring-white/40'
+    const controlButtonClass = 'window-control-btn flex h-6 w-7 items-center justify-center rounded-full transition-all duration-150 active:scale-90 focus:outline-none'
 
     if (isFullscreen) {
       return (
@@ -707,7 +729,7 @@ const App: React.FC = () => {
               aria-label="Close"
               tabIndex={controlsVisible ? 0 : -1}
               onClick={() => window.api.closeWindow()}
-              className={`${controlButtonClass} hover:bg-red-500 hover:text-white focus-visible:ring-red-300/60`}
+              className={`${controlButtonClass} window-control-close hover:bg-red-500 hover:text-white`}
             >
               <X size={12} strokeWidth={2.4} />
             </button>
@@ -754,7 +776,7 @@ const App: React.FC = () => {
 
   return (
     <div
-      className="flex h-screen bg-[#05080d] text-text font-sans overflow-hidden"
+      className={`flex h-screen bg-background text-text font-sans overflow-hidden ${theme === 'light' ? 'light' : 'dark'}`}
       onClick={handleAppSurfaceClick}
     >
       <WindowControls />

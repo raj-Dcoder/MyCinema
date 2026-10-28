@@ -13,9 +13,12 @@ import '@fontsource/poppins/800-italic.css'
 import '@fontsource/poppins/900.css'
 import '@fontsource/poppins/900-italic.css'
 import './index.css'
+import { ThemeProvider } from './theme/ThemeContext'
 
 ReactDOM.createRoot(document.getElementById('root') as HTMLElement).render(
   <React.StrictMode>
-    <App />
+    <ThemeProvider>
+      <App />
+    </ThemeProvider>
   </React.StrictMode>
 )

@@ -2273,7 +2273,7 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
   // Either the flag already said so, or the embed told us mid-flight.
   if (!video.embeddable || refused) {
     return createPortal(
-      <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black p-8">
+      <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black p-8 keep-dark dark">
         <div className="w-full max-w-lg border border-white/10 bg-[#0b0b0b] p-8 text-center space-y-5">
           <h3 className="text-lg font-black uppercase italic text-white">Embedding disabled</h3>
           <p className="text-sm text-white/50 font-semibold">
@@ -2324,7 +2324,7 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
         isMinimized && !isTransitioning
           ? 'pointer-events-none'
           : fsActive
-            ? 'bg-black overflow-hidden'
+            ? 'bg-black overflow-hidden keep-dark dark'
             : 'overflow-hidden'
       }`}
     >
@@ -2486,18 +2486,18 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
               ref={shellRef}
               className={
                 isMinimized
-                  ? `pointer-events-auto fixed bottom-4 right-4 z-[80] aspect-video w-[min(380px,calc(100vw-2rem))] overflow-hidden rounded-xl border border-white/15 bg-black shadow-[0_20px_60px_rgba(0,0,0,0.7)] ${
+                  ? `pointer-events-auto fixed bottom-4 right-4 z-[80] aspect-video w-[min(380px,calc(100vw-2rem))] overflow-hidden rounded-xl border border-white/15 bg-black shadow-[0_20px_60px_rgba(0,0,0,0.7)] keep-dark dark ${
                       isTransitioning ? 'will-change-transform' : ''
                     }`
                   : fsActive
-                    ? `pointer-events-auto fixed inset-0 z-[100] w-full h-full m-0 overflow-hidden rounded-none border-0 bg-black shadow-none ${
+                    ? `pointer-events-auto fixed inset-0 z-[100] w-full h-full m-0 overflow-hidden rounded-none border-0 bg-black shadow-none keep-dark dark ${
                         isTransitioning ? 'will-change-transform' : ''
                       } ${isPlaying && !chromeVisible ? 'cursor-none' : ''}`
                     : isTransitioning && (prevMinimizedRef.current || prevFullscreenRef.current)
-                      ? `pointer-events-auto fixed z-[90] overflow-hidden rounded-2xl border border-white/10 bg-black shadow-2xl will-change-transform ${
+                      ? `pointer-events-auto fixed z-[90] overflow-hidden rounded-2xl border border-white/10 bg-black shadow-2xl will-change-transform keep-dark dark ${
                           isPlaying && !chromeVisible ? 'cursor-none' : ''
                         }`
-                      : `absolute inset-0 h-full w-full overflow-hidden rounded-2xl border border-white/10 bg-black shadow-2xl ${
+                      : `absolute inset-0 h-full w-full overflow-hidden rounded-2xl border border-white/10 bg-black shadow-2xl keep-dark dark ${
                           isPlaying && !chromeVisible ? 'cursor-none' : ''
                         }`
               }

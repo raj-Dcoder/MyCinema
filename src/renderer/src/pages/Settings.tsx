@@ -1,8 +1,9 @@
 import React, { useEffect, useState } from 'react'
-import { FolderOpen, Trash2, Plus, HardDrive, AlertTriangle, Check, X as CloseIcon, Maximize2, Download, Upload, Image as ImageIcon, Subtitles, Wifi, Bell, Compass, RotateCcw, Layers } from 'lucide-react'
+import { FolderOpen, Trash2, Plus, HardDrive, AlertTriangle, Check, X as CloseIcon, Maximize2, Download, Upload, Image as ImageIcon, Subtitles, Wifi, Bell, Compass, RotateCcw, Layers, Sun, Moon } from 'lucide-react'
 import ProfilePictureModal from '../components/ProfilePictureModal'
 import { normalizeProfileImage, resolveProfileImageUrl } from '../utils/profileImage'
 import { SUBTITLE_STYLE_KEY, SUBTITLE_FONT_SIZE_KEY, SUBTITLE_POSITION_KEY, type SubtitleStyle } from '../components/player/SubtitleOverlay'
+import { useTheme } from '../theme/ThemeContext'
 import { ONLINE_PROGRESS_STORAGE_KEY, setOnlineProgressEnabledLocal, NOTIFY_NEW_EPISODES_KEY, setNewEpisodeNotifyLocal } from '../utils/streamResume'
 import { cleanIpcError } from '../utils/ipcError'
 
@@ -22,6 +23,7 @@ interface DownloadStorageInfo {
 }
 
 const Settings: React.FC = () => {
+  const { theme, setTheme } = useTheme()
   const [folders, setFolders] = useState<any[]>([])
   const [scanning, setScanning] = useState<string | null>(null)
   const [userName, setUserName] = useState(() => localStorage.getItem('mycinema_user_name') || 'User')
@@ -479,13 +481,13 @@ const Settings: React.FC = () => {
   }
 
   const sectionTitleClass = "text-[10px] font-black text-primary/80 uppercase tracking-[0.2em] ml-1 mb-3 block"
-  const panelClass = "bg-white/[0.02] border border-white/10 rounded-3xl shadow-xl backdrop-blur-md transition-all duration-300 hover:bg-white/[0.04] hover:border-white/20 hover:shadow-2xl"
-  const iconBoxClass = "flex h-12 w-12 flex-shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-white/10 to-white/5 text-white/70 shadow-[inset_0_1px_1px_rgba(255,255,255,0.1)] ring-1 ring-white/5"
+  const panelClass = "settings-panel bg-white/[0.02] border border-white/10 rounded-3xl shadow-xl backdrop-blur-md transition-all duration-300 hover:bg-white/[0.04] hover:border-white/20 hover:shadow-2xl"
+  const iconBoxClass = "settings-icon-box flex h-12 w-12 flex-shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-white/10 to-white/5 text-white/70 shadow-[inset_0_1px_1px_rgba(255,255,255,0.1)] ring-1 ring-white/5"
   const compactButtonClass = "inline-flex items-center justify-center gap-2 rounded-xl px-5 py-2.5 text-[11px] font-black uppercase tracking-widest transition-all duration-300 active:scale-95 disabled:cursor-not-allowed disabled:opacity-50 hover:-translate-y-0.5"
 
   return (
-    <div className="max-w-5xl space-y-8 pb-12">
-      <div className="relative mb-10 overflow-hidden rounded-[2rem] bg-gradient-to-r from-red-600/10 via-[#0a0f18]/50 to-transparent p-8 border border-white/5 shadow-2xl">
+    <div className="settings-page max-w-5xl space-y-8 pb-12">
+      <div className="settings-banner relative mb-10 overflow-hidden rounded-[2rem] bg-gradient-to-r from-red-600/10 via-[#0a0f18]/50 to-transparent p-8 border border-white/5 shadow-2xl">
         <div className="absolute top-0 right-0 -mr-20 -mt-20 h-64 w-64 rounded-full bg-red-600/10 blur-3xl pointer-events-none" />
         <div className="absolute bottom-0 left-0 -ml-20 -mb-20 h-64 w-64 rounded-full bg-blue-600/5 blur-3xl pointer-events-none" />
         
@@ -577,7 +579,7 @@ const Settings: React.FC = () => {
               role="switch"
               aria-checked={launchFullscreen}
               onClick={() => handleLaunchFullscreenChange(!launchFullscreen)}
-              className={`relative h-6 w-11 flex-shrink-0 rounded-full border transition-all ${
+              className={`settings-switch relative h-6 w-11 flex-shrink-0 rounded-full border transition-all ${
                 launchFullscreen
                   ? 'border-red-500/50 bg-red-600 shadow-lg shadow-red-950/30'
                   : 'border-white/10 bg-white/5'
@@ -589,6 +591,52 @@ const Settings: React.FC = () => {
                 }`}
               />
             </button>
+          </div>
+        </section>
+
+        <section>
+          <h3 className={sectionTitleClass}>Appearance</h3>
+          <div className={`${panelClass} flex items-center justify-between gap-6 p-6`}>
+            <div className="flex items-center gap-4 min-w-0">
+              <div className={iconBoxClass}>
+                {theme === 'light' ? (
+                  <Sun size={17} />
+                ) : (
+                  <Moon size={17} />
+                )}
+              </div>
+              <div className="min-w-0">
+                <h4 className="text-xs font-black text-white uppercase tracking-tight">Theme</h4>
+                <p className="mt-0.5 text-[11px] font-medium leading-4 text-white/35">
+                  {theme === 'light'
+                    ? 'Warm paper light theme — soft, calm and easy on the eyes.'
+                    : 'Deep cinematic dark theme — the classic MyCinema look.'}
+                </p>
+              </div>
+            </div>
+            <div className="theme-seg" data-theme={theme} role="group" aria-label="Theme">
+              <span className="theme-seg-thumb" data-side={theme} aria-hidden="true" />
+              <button
+                type="button"
+                data-kind="dark"
+                data-active={theme === 'dark'}
+                onClick={() => setTheme('dark')}
+                aria-pressed={theme === 'dark'}
+              >
+                <Moon size={13} />
+                Dark
+              </button>
+              <button
+                type="button"
+                data-kind="light"
+                data-active={theme === 'light'}
+                onClick={() => setTheme('light')}
+                aria-pressed={theme === 'light'}
+              >
+                <Sun size={13} />
+                Light
+              </button>
+            </div>
           </div>
         </section>
 
@@ -611,7 +659,7 @@ const Settings: React.FC = () => {
               role="switch"
               aria-checked={rememberOnlineProgress}
               onClick={() => handleRememberOnlineProgressChange(!rememberOnlineProgress)}
-              className={`relative h-6 w-11 flex-shrink-0 rounded-full border transition-all ${
+              className={`settings-switch relative h-6 w-11 flex-shrink-0 rounded-full border transition-all ${
                 rememberOnlineProgress
                   ? 'border-red-500/50 bg-red-600 shadow-lg shadow-red-950/30'
                   : 'border-white/10 bg-white/5'
@@ -641,7 +689,7 @@ const Settings: React.FC = () => {
               role="switch"
               aria-checked={notifyNewEpisodes}
               onClick={() => handleNotifyNewEpisodesChange(!notifyNewEpisodes)}
-              className={`relative h-6 w-11 flex-shrink-0 rounded-full border transition-all ${
+              className={`settings-switch relative h-6 w-11 flex-shrink-0 rounded-full border transition-all ${
                 notifyNewEpisodes
                   ? 'border-red-500/50 bg-red-600 shadow-lg shadow-red-950/30'
                   : 'border-white/10 bg-white/5'
@@ -685,7 +733,7 @@ const Settings: React.FC = () => {
               aria-checked={focusTubeEnabled}
               aria-label="Enable Focus Tube"
               onClick={() => handleFocusTubeChange(!focusTubeEnabled)}
-              className={`relative h-6 w-11 flex-shrink-0 rounded-full border transition-all ${
+              className={`settings-switch relative h-6 w-11 flex-shrink-0 rounded-full border transition-all ${
                 focusTubeEnabled
                   ? 'border-red-500/50 bg-red-600 shadow-lg shadow-red-950/30'
                   : 'border-white/10 bg-white/5'
@@ -723,7 +771,7 @@ const Settings: React.FC = () => {
                   setSubtitleStyle(val)
                   localStorage.setItem(SUBTITLE_STYLE_KEY, val)
                 }}
-                className="w-44 rounded-xl border border-white/10 bg-white/5 px-3 py-2.5 text-[11px] font-black uppercase tracking-widest text-white transition-all focus:border-primary focus:outline-none cursor-pointer"
+                className="settings-select w-44 rounded-xl border border-white/10 bg-white/5 px-3 py-2.5 text-[11px] font-black uppercase tracking-widest text-white transition-all focus:border-primary focus:outline-none cursor-pointer"
               >
                 <option value="default" className="bg-[#141414] text-white">Default (Blurred Background)</option>
                 <option value="clean" className="bg-[#141414] text-white">Clean (No Background)</option>
@@ -810,7 +858,7 @@ const Settings: React.FC = () => {
 
           <div className="grid grid-cols-1 gap-2">
             {folders.length === 0 && (
-              <div className="flex flex-col items-center justify-center space-y-3 rounded-2xl border border-dashed border-white/7 py-12 text-white/20">
+              <div className="settings-empty-card flex flex-col items-center justify-center space-y-3 rounded-2xl border border-dashed border-white/7 py-12 text-white/20">
                 <FolderOpen size={36} strokeWidth={1} />
                 <p className="text-xs font-bold uppercase tracking-[0.18em]">No folders added yet</p>
               </div>
@@ -913,7 +961,7 @@ const Settings: React.FC = () => {
             </div>
 
             {/* Folder path & drive storage display card */}
-            <div className="rounded-2xl border border-white/10 bg-black/30 p-4 space-y-3">
+            <div className="settings-drive-card rounded-2xl border border-white/10 bg-black/30 p-4 space-y-3">
               <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                 <div className="flex items-center gap-2.5 min-w-0">
                   <HardDrive size={16} className="text-white/40 flex-shrink-0" />
@@ -972,7 +1020,7 @@ const Settings: React.FC = () => {
               aria-checked={showDownloadTray}
               aria-label="Toggle floating download progress overlay"
               onClick={() => handleShowDownloadTrayChange(!showDownloadTray)}
-              className={`relative h-6 w-11 flex-shrink-0 rounded-full border transition-all ${
+              className={`settings-switch relative h-6 w-11 flex-shrink-0 rounded-full border transition-all ${
                 showDownloadTray
                   ? 'border-red-500/50 bg-red-600 shadow-lg shadow-red-950/30'
                   : 'border-white/10 bg-white/5'
@@ -999,7 +1047,7 @@ const Settings: React.FC = () => {
             )}
             <div className="grid grid-cols-1 gap-3">
               {downloadSites.map(site => (
-                <div key={site.id} className="flex flex-col gap-3 rounded-2xl border border-white/10 bg-black/20 p-4 md:flex-row md:items-center">
+                <div key={site.id} className="settings-site-card flex flex-col gap-3 rounded-2xl border border-white/10 bg-black/20 p-4 md:flex-row md:items-center">
                   <div className="flex min-w-0 flex-1 items-center gap-3">
                     <div
                       className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-xl text-[11px] font-black"
@@ -1022,13 +1070,13 @@ const Settings: React.FC = () => {
                       onKeyDown={e => { if (e.key === 'Enter') void handleSaveDownloadSiteDomain(site.id) }}
                       placeholder="https://current-mirror.example"
                       disabled={downloadSiteBusyId === site.id}
-                      className="h-9 min-w-0 flex-1 rounded-lg border border-white/10 bg-black/30 px-2.5 text-[12px] font-semibold text-white outline-none placeholder:text-white/25 focus:border-primary/50 disabled:opacity-60"
+                      className="settings-site-input h-9 min-w-0 flex-1 rounded-lg border border-white/10 bg-black/30 px-2.5 text-[12px] font-semibold text-white outline-none placeholder:text-white/25 focus:border-primary/50 disabled:opacity-60"
                     />
                     <button
                       type="button"
                       onClick={() => void handleSaveDownloadSiteDomain(site.id)}
                       disabled={!((downloadSiteDrafts[site.id] || '').trim()) || downloadSiteBusyId === site.id}
-                      className={`${compactButtonClass} border border-white/10 bg-white/5 text-white hover:bg-white/10`}
+                      className={`settings-site-btn ${compactButtonClass} border border-white/10 bg-white/5 text-white hover:bg-white/10`}
                     >
                       <span>{downloadSiteBusyId === site.id ? 'Saving…' : 'Save'}</span>
                     </button>
@@ -1036,7 +1084,7 @@ const Settings: React.FC = () => {
                       type="button"
                       onClick={() => void handleRefreshDownloadSiteDomain(site.id)}
                       disabled={downloadSiteBusyId === site.id}
-                      className={`${compactButtonClass} border border-white/10 bg-transparent text-white/50 hover:text-white hover:bg-white/5`}
+                      className={`settings-site-btn ${compactButtonClass} border border-white/10 bg-transparent text-white/50 hover:text-white hover:bg-white/5`}
                       title="Re-check the live link right now"
                     >
                       <span>{downloadSiteBusyId === site.id ? 'Checking…' : 'Refresh'}</span>
@@ -1046,7 +1094,7 @@ const Settings: React.FC = () => {
                         type="button"
                         onClick={() => void handleResetDownloadSiteDomain(site.id)}
                         disabled={downloadSiteBusyId === site.id}
-                        className={`${compactButtonClass} border border-white/10 bg-transparent text-white/50 hover:text-white hover:bg-white/5`}
+                        className={`settings-site-btn ${compactButtonClass} border border-white/10 bg-transparent text-white/50 hover:text-white hover:bg-white/5`}
                       >
                         <span>Auto</span>
                       </button>
@@ -1107,7 +1155,7 @@ const Settings: React.FC = () => {
             <h3 className="text-[12px] font-black text-red-500 uppercase tracking-[0.25em]">Danger Zone</h3>
           </div>
           
-          <div className="flex flex-col justify-between gap-6 rounded-3xl border border-red-500/20 bg-gradient-to-r from-red-500/10 to-transparent p-6 md:flex-row md:items-center">
+          <div className="settings-danger-card flex flex-col justify-between gap-6 rounded-3xl border border-red-500/20 bg-gradient-to-r from-red-500/10 to-transparent p-6 md:flex-row md:items-center">
             <div className="space-y-1">
               <h4 className="text-sm font-black uppercase text-white">Clear All Application Data</h4>
               <p className="max-w-2xl text-xs font-medium leading-5 text-white/30">

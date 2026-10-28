@@ -258,9 +258,9 @@ export const DownloadQueue: React.FC<DownloadQueueProps> = ({
   }
 
   return (
-    <div className="bg-[#12161F]/90 backdrop-blur-xl border border-white/10 rounded-2xl overflow-hidden mb-8 shadow-2xl transition-all duration-300">
+    <div className="download-queue-container bg-[#12161F]/90 backdrop-blur-xl border border-white/10 rounded-2xl overflow-hidden mb-8 shadow-2xl transition-all duration-300">
       {/* ─── Top Telemetry & Control Bar: Guaranteed Single-Row (No Wrapping) ───── */}
-      <div className="flex items-center justify-between gap-3 px-5 py-3 border-b border-white/[0.08] bg-white/[0.015] whitespace-nowrap overflow-x-auto scrollbar-none">
+      <div className="download-queue-header flex items-center justify-between gap-3 px-5 py-3 border-b border-white/[0.08] bg-white/[0.015] whitespace-nowrap overflow-x-auto scrollbar-none">
         {/* Left: Queue Title, Sub-Navigation Tabs & Live Speed Telemetry */}
         <div className="flex items-center gap-3 shrink-0">
           <div className="flex items-center gap-2 mr-1 shrink-0">
@@ -273,12 +273,12 @@ export const DownloadQueue: React.FC<DownloadQueueProps> = ({
           </div>
 
           {/* Sub-Navigation Tabs */}
-          <div className="flex items-center bg-black/40 p-1 rounded-xl border border-white/10 text-xs font-semibold shrink-0">
+          <div className="download-queue-tabs flex items-center bg-black/40 p-1 rounded-xl border border-white/10 text-xs font-semibold shrink-0">
             <button
               onClick={() => setActiveTab('all')}
               className={`px-3 py-1 rounded-lg transition-all ${
                 activeTab === 'all'
-                  ? 'bg-white/15 text-white shadow-sm'
+                  ? 'active-all bg-white/15 text-white shadow-sm'
                   : 'text-white/50 hover:text-white/80'
               }`}
             >
@@ -288,7 +288,7 @@ export const DownloadQueue: React.FC<DownloadQueueProps> = ({
               onClick={() => setActiveTab('downloading')}
               className={`px-3 py-1 rounded-lg transition-all flex items-center gap-1.5 ${
                 activeTab === 'downloading'
-                  ? 'bg-primary/20 text-primary border border-primary/30 shadow-sm'
+                  ? 'active-downloading bg-primary/20 text-primary border border-primary/30 shadow-sm'
                   : 'text-white/50 hover:text-white/80'
               }`}
             >
@@ -303,7 +303,7 @@ export const DownloadQueue: React.FC<DownloadQueueProps> = ({
               onClick={() => setActiveTab('queued')}
               className={`px-3 py-1 rounded-lg transition-all ${
                 activeTab === 'queued'
-                  ? 'bg-sky-500/20 text-sky-300 border border-sky-500/30 shadow-sm'
+                  ? 'active-queued bg-sky-500/20 text-sky-300 border border-sky-500/30 shadow-sm'
                   : 'text-white/50 hover:text-white/80'
               }`}
             >
@@ -313,7 +313,7 @@ export const DownloadQueue: React.FC<DownloadQueueProps> = ({
               onClick={() => setActiveTab('completed')}
               className={`px-3 py-1 rounded-lg transition-all ${
                 activeTab === 'completed'
-                  ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 shadow-sm'
+                  ? 'active-completed bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 shadow-sm'
                   : 'text-white/50 hover:text-white/80'
               }`}
             >
@@ -324,7 +324,7 @@ export const DownloadQueue: React.FC<DownloadQueueProps> = ({
                 onClick={() => setActiveTab('paused')}
                 className={`px-3 py-1 rounded-lg transition-all ${
                   activeTab === 'paused'
-                    ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30 shadow-sm'
+                    ? 'active-paused bg-amber-500/20 text-amber-300 border border-amber-500/30 shadow-sm'
                     : 'text-white/50 hover:text-white/80'
                 }`}
               >
@@ -346,7 +346,7 @@ export const DownloadQueue: React.FC<DownloadQueueProps> = ({
         <div className="flex items-center gap-2 text-xs shrink-0">
           {/* Quick Search within queue (if more than 3 items) */}
           {downloads.length > 3 && (
-            <div className="relative flex items-center bg-black/30 border border-white/10 rounded-lg px-2.5 py-1 text-white/70 focus-within:border-white/25 focus-within:text-white shrink-0">
+            <div className="download-queue-search relative flex items-center bg-black/30 border border-white/10 rounded-lg px-2.5 py-1 text-white/70 focus-within:border-white/25 focus-within:text-white shrink-0">
               <Search size={12} className="mr-1.5 opacity-50" />
               <input
                 type="text"
@@ -367,7 +367,7 @@ export const DownloadQueue: React.FC<DownloadQueueProps> = ({
           {activeCount > 0 && (
             <button
               onClick={handlePauseAll}
-              className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg border border-white/10 bg-white/5 text-white/80 hover:bg-white/10 hover:text-white transition-colors shrink-0"
+              className="download-queue-btn flex items-center gap-1.5 px-2.5 py-1 rounded-lg border border-white/10 bg-white/5 text-white/80 hover:bg-white/10 hover:text-white transition-colors shrink-0"
               title="Pause all active downloads"
             >
               <Pause size={12} />
@@ -378,7 +378,7 @@ export const DownloadQueue: React.FC<DownloadQueueProps> = ({
           {activeCount === 0 && pausedCount > 0 && (
             <button
               onClick={handleResumeAll}
-              className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg border border-primary/30 bg-primary/10 text-primary hover:bg-primary/20 transition-colors shrink-0"
+              className="download-queue-btn flex items-center gap-1.5 px-2.5 py-1 rounded-lg border border-primary/30 bg-primary/10 text-primary hover:bg-primary/20 transition-colors shrink-0"
               title="Resume all paused downloads"
             >
               <Play size={12} fill="currentColor" />
@@ -389,7 +389,7 @@ export const DownloadQueue: React.FC<DownloadQueueProps> = ({
           {completedCount > 0 && (
             <button
               onClick={handleClearCompleted}
-              className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg border border-white/10 bg-white/5 text-white/70 hover:bg-white/10 hover:text-white transition-colors shrink-0"
+              className="download-queue-btn flex items-center gap-1.5 px-2.5 py-1 rounded-lg border border-white/10 bg-white/5 text-white/70 hover:bg-white/10 hover:text-white transition-colors shrink-0"
               title="Remove finished downloads from this list"
             >
               <Check size={12} />
@@ -403,7 +403,7 @@ export const DownloadQueue: React.FC<DownloadQueueProps> = ({
             <select
               value={maxConcurrent}
               onChange={(e) => void onMaxConcurrentChange(Number(e.target.value))}
-              className="rounded-lg border border-white/10 bg-black/50 px-2 py-1 text-[11px] font-bold text-white outline-none hover:border-white/25 focus:border-primary cursor-pointer"
+              className="download-queue-select rounded-lg border border-white/10 bg-black/50 px-2 py-1 text-[11px] font-bold text-white outline-none hover:border-white/25 focus:border-primary cursor-pointer"
               aria-label="Maximum simultaneous downloads"
             >
               {CONCURRENT_OPTIONS.map(n => (
@@ -432,7 +432,7 @@ export const DownloadQueue: React.FC<DownloadQueueProps> = ({
           )}
         </div>
       ) : (
-        <div className="divide-y divide-white/[0.05]">
+        <div className="download-queue-list divide-y divide-white/[0.05]">
           {displayedDownloads.map((dl, idx) => {
             const parsed = parseTorrentTitle(dl.name || dl.title || '', dl.title)
             const matchingVideo = (() => {
@@ -476,9 +476,9 @@ export const DownloadQueue: React.FC<DownloadQueueProps> = ({
             return (
               <div
                 key={dl.id}
-                className={`group px-5 py-3.5 transition-colors ${
+                className={`download-queue-row group px-5 py-3.5 transition-colors ${
                   isDownloading
-                    ? 'bg-primary/[0.015] hover:bg-primary/[0.03]'
+                    ? 'is-downloading bg-primary/[0.015] hover:bg-primary/[0.03]'
                     : isDone
                       ? 'hover:bg-white/[0.02]'
                       : 'hover:bg-white/[0.015]'
@@ -511,7 +511,7 @@ export const DownloadQueue: React.FC<DownloadQueueProps> = ({
                       <button
                         onClick={() => onPauseResume(dl.id)}
                         disabled={pauseResumePendingRef.current.has(dl.id)}
-                        className="flex-shrink-0 flex items-center justify-center h-8 w-8 rounded-xl bg-white/5 text-amber-400 hover:bg-amber-400/20 transition-all"
+                        className="download-queue-resume-btn flex-shrink-0 flex items-center justify-center h-8 w-8 rounded-xl bg-white/5 text-amber-400 hover:bg-amber-400/20 transition-all"
                         title="Resume download"
                       >
                         <Play size={13} fill="currentColor" className="ml-0.5" />
@@ -519,7 +519,7 @@ export const DownloadQueue: React.FC<DownloadQueueProps> = ({
                     ) : isError ? (
                       <button
                         onClick={() => handleRetryDownload(dl.id)}
-                        className="flex-shrink-0 flex items-center justify-center h-8 w-8 rounded-xl bg-red-500/10 text-red-400 hover:bg-red-500/20 transition-all"
+                        className="download-queue-retry-btn flex-shrink-0 flex items-center justify-center h-8 w-8 rounded-xl bg-red-500/10 text-red-400 hover:bg-red-500/20 transition-all"
                         title="Retry download"
                       >
                         <RotateCcw size={13} />
@@ -534,7 +534,7 @@ export const DownloadQueue: React.FC<DownloadQueueProps> = ({
                     <div className="min-w-0 flex-1">
                       <div className="flex flex-wrap items-center gap-2">
                         <span
-                          className="text-sm font-semibold truncate max-w-md transition-colors cursor-pointer hover:text-primary text-white"
+                          className="download-queue-title text-sm font-semibold truncate max-w-md transition-colors cursor-pointer hover:text-primary text-white"
                           title={dl.name || dl.title}
                           onClick={() => onShowDetail?.(targetVideo)}
                         >
@@ -547,22 +547,22 @@ export const DownloadQueue: React.FC<DownloadQueueProps> = ({
                         {/* Format & Quality Badges */}
                         <div className="flex items-center gap-1.5 flex-wrap">
                           {parsed.quality && (
-                            <span className="px-1.5 py-0.2 rounded bg-sky-500/15 border border-sky-500/25 text-[10px] font-bold text-sky-300">
+                            <span className="download-badge download-badge-quality px-1.5 py-0.2 rounded bg-sky-500/15 border border-sky-500/25 text-[10px] font-bold text-sky-300">
                               {parsed.quality}
                             </span>
                           )}
                           {parsed.source && (
-                            <span className="px-1.5 py-0.2 rounded bg-white/5 border border-white/10 text-[10px] font-medium text-white/70">
+                            <span className="download-badge download-badge-source px-1.5 py-0.2 rounded bg-white/5 border border-white/10 text-[10px] font-medium text-white/70">
                               {parsed.source}
                             </span>
                           )}
                           {parsed.codec && (
-                            <span className="px-1.5 py-0.2 rounded bg-violet-500/10 border border-violet-500/20 text-[10px] font-medium text-violet-300">
+                            <span className="download-badge download-badge-codec px-1.5 py-0.2 rounded bg-violet-500/10 border border-violet-500/20 text-[10px] font-medium text-violet-300">
                               {parsed.codec}
                             </span>
                           )}
                           {parsed.audio && parsed.audio.map((aud, i) => (
-                            <span key={i} className="px-1.5 py-0.2 rounded bg-emerald-500/10 border border-emerald-500/20 text-[10px] font-medium text-emerald-300">
+                            <span key={i} className="download-badge download-badge-audio px-1.5 py-0.2 rounded bg-emerald-500/10 border border-emerald-500/20 text-[10px] font-medium text-emerald-300">
                               {aud}
                             </span>
                           ))}
@@ -655,7 +655,7 @@ export const DownloadQueue: React.FC<DownloadQueueProps> = ({
                           {/* Info button to open detail screen - ALWAYS visible for all completed titles */}
                           <button
                             onClick={() => onShowDetail?.(targetVideo)}
-                            className="p-1.5 rounded-lg bg-white/5 hover:bg-white/10 text-white/60 hover:text-white transition-colors"
+                            className="download-queue-icon-btn p-1.5 rounded-lg bg-white/5 hover:bg-white/10 text-white/60 hover:text-white transition-colors"
                             title="View Details"
                           >
                             <Info size={14} />
@@ -664,7 +664,7 @@ export const DownloadQueue: React.FC<DownloadQueueProps> = ({
                           {/* Open Folder shortcut (sole folder button - non-redundant!) */}
                           <button
                             onClick={() => onOpenFolder(dl.downloadPath)}
-                            className="p-1.5 rounded-lg bg-white/5 hover:bg-white/10 text-white/60 hover:text-white transition-colors"
+                            className="download-queue-icon-btn p-1.5 rounded-lg bg-white/5 hover:bg-white/10 text-white/60 hover:text-white transition-colors"
                             title="Show file in folder"
                           >
                             <FolderOpen size={14} />
@@ -677,7 +677,7 @@ export const DownloadQueue: React.FC<DownloadQueueProps> = ({
                         <button
                           onClick={() => onPauseResume(dl.id)}
                           disabled={pauseResumePendingRef.current.has(dl.id)}
-                          className="p-1.5 rounded-lg bg-white/5 hover:bg-white/10 text-white/70 hover:text-white transition-colors disabled:opacity-40"
+                          className="download-queue-icon-btn p-1.5 rounded-lg bg-white/5 hover:bg-white/10 text-white/70 hover:text-white transition-colors disabled:opacity-40"
                           title={isPaused ? 'Resume' : isQueued ? 'Remove from queue (pause)' : 'Pause'}
                         >
                           {isPaused ? <Play size={13} fill="currentColor" /> : <Pause size={13} />}
@@ -700,7 +700,7 @@ export const DownloadQueue: React.FC<DownloadQueueProps> = ({
                       <button
                         id={`dl-btn-${dl.id}`}
                         onClick={() => onRequestRemove(dl.id)}
-                        className="p-1.5 rounded-lg text-white/40 hover:text-white hover:bg-white/10 transition-colors relative"
+                        className="download-queue-icon-btn p-1.5 rounded-lg text-white/40 hover:text-white hover:bg-white/10 transition-colors relative"
                         title="More Options"
                       >
                         <MoreVertical size={14} />
@@ -713,9 +713,9 @@ export const DownloadQueue: React.FC<DownloadQueueProps> = ({
                 {/* Bottom line: Progress Bar (Only for active or non-completed downloads) */}
                 {(!isDone || isDownloading || isConnecting) && (
                   <div className="mt-2.5 flex items-center gap-3">
-                    <div className="flex-1 h-1.5 bg-white/10 rounded-full overflow-hidden">
+                    <div className="download-queue-progress-track flex-1 h-2 bg-white/10 rounded-full overflow-hidden">
                       <div
-                        className={`h-full rounded-full transition-all duration-300 ${
+                        className={`h-full rounded-full transition-[width] duration-300 ease-out ${
                           isDone ? 'bg-emerald-400' :
                           isError ? 'bg-red-400' :
                           isConnecting ? 'bg-amber-400' :
@@ -726,8 +726,8 @@ export const DownloadQueue: React.FC<DownloadQueueProps> = ({
                         style={{ width: `${Math.max(0, Math.min(100, dl.progress || 0))}%` }}
                       />
                     </div>
-                    <span className="text-[11px] font-semibold text-white/50 w-9 text-right tabular-nums">
-                      {Math.round(dl.progress || 0)}%
+                    <span className="download-queue-percent text-[11px] font-semibold text-white/50 w-9 text-right tabular-nums">
+                      {Math.max(0, Math.min(100, Math.round(dl.progress || 0)))}%
                     </span>
                   </div>
                 )}

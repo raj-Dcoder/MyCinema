@@ -1,5 +1,6 @@
 /** @type {import('tailwindcss').Config} */
 module.exports = {
+  darkMode: 'class',
   content: [
     "./src/renderer/index.html",
     "./src/renderer/src/**/*.{js,ts,jsx,tsx}",
@@ -13,12 +14,18 @@ module.exports = {
         sans: ['Poppins', 'Segoe UI Variable', 'Segoe UI', 'system-ui', 'sans-serif'],
       },
       colors: {
-        background: '#141414',
-        surface: '#181818',
+        background: 'rgb(var(--c-bg) / <alpha-value>)',
+        surface: 'rgb(var(--c-surface) / <alpha-value>)',
         primary: '#e50914',
-        secondary: '#2f2f2f',
-        text: '#ffffff',
-        muted: '#b3b3b3',
+        secondary: 'rgb(var(--c-secondary) / <alpha-value>)',
+        text: 'rgb(var(--c-text) / <alpha-value>)',
+        muted: 'rgb(var(--c-muted) / <alpha-value>)',
+        card: 'rgb(var(--c-card) / <alpha-value>)',
+        line: 'rgb(var(--c-line) / <alpha-value>)',
+      },
+      boxShadow: {
+        card: '0 1px 2px rgba(16, 18, 30, 0.05), 0 8px 24px -12px rgba(16, 18, 30, 0.18)',
+        pop: '0 12px 40px -12px rgba(16, 18, 30, 0.25)',
       },
     },
   },

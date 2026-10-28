@@ -5847,10 +5847,10 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
         <div className="flex items-center space-x-4">
           <button 
             onClick={onClose}
-            className="p-2 -ml-2 text-white/90 hover:text-white transition-colors"
+            className="p-2.5 -ml-2 rounded-xl text-white hover:text-white hover:bg-white/10 active:scale-95 transition-all"
             title="Close Player"
           >
-            <ArrowLeft size={28} />
+            <ArrowLeft size={28} className="text-white drop-shadow-md" />
           </button>
           <div>
             <h2 className="text-xl font-bold text-white drop-shadow-md">

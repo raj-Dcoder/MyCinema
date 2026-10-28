@@ -1,6 +1,7 @@
 import React from 'react'
 import ReactDOM from 'react-dom/client'
 import App from './App'
+import FocusTubePipPlayer from './components/focus/FocusTubePipPlayer'
 import '@fontsource/poppins/400.css'
 import '@fontsource/poppins/400-italic.css'
 import '@fontsource/poppins/500.css'
@@ -15,10 +16,15 @@ import '@fontsource/poppins/900-italic.css'
 import './index.css'
 import { ThemeProvider } from './theme/ThemeContext'
 
+const isFtPip = typeof window !== 'undefined' && (
+  window.location.hash === '#ft-pip' ||
+  window.location.search.includes('pip=focustube')
+)
+
 ReactDOM.createRoot(document.getElementById('root') as HTMLElement).render(
   <React.StrictMode>
     <ThemeProvider>
-      <App />
+      {isFtPip ? <FocusTubePipPlayer /> : <App />}
     </ThemeProvider>
   </React.StrictMode>
 )

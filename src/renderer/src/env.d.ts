@@ -293,6 +293,15 @@ interface Api {
   ftGetAmbientFrame?: () => Promise<{ dataUrl: string | null }>
   ftRequestImportAccess: (input: { name: string; email: string }) => Promise<{ ok?: boolean; message?: string; error?: string }>
   onFeedUpdated: (callback: (payload: { added: number; channelIds: string[] }) => void) => () => void
+  ftOpenPip: (payload: any) => Promise<boolean>
+  ftClosePip: () => Promise<void>
+  ftRestorePip: () => Promise<void>
+  ftGetPipState: () => Promise<any>
+  ftSyncPipState: (state: any) => Promise<void>
+  onFtPipInit: (callback: (payload: any) => void) => () => void
+  onFtPipSync: (callback: (state: any) => void) => () => void
+  onFtPipClosed: (callback: (state: any) => void) => () => void
+
 }
 
 declare global {

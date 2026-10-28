@@ -1,4 +1,4 @@
-import { app, shell, BrowserWindow, ipcMain, dialog, protocol, net, session } from 'electron'
+import { app, shell, BrowserWindow, ipcMain, dialog, protocol, net, session, screen } from 'electron'
 import { join } from 'path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import * as db from './db'
@@ -2061,6 +2061,7 @@ app.whenReady().then(() => {
 })
 
 app.on('before-quit', () => {
+  try { closeFtPip() } catch {}
   folderWatchers.forEach(w => w.close())
   folderWatchers.clear()
   stopFocusTubePolling()
@@ -2169,6 +2170,178 @@ ipcMain.handle('pip-thumbar-clear', (event) => {
     BrowserWindow.fromWebContents(event.sender)?.setThumbarButtons([])
   } catch (err) { /* ignore */ }
 })
+
+// ─── Focus Tube Picture-in-Picture Window ──────────────────────────────────────
+let ftPipWindow: BrowserWindow | null = null
+let currentFtPipPayload: any = null
+let lastFtPipState: { videoId?: string; currentTime?: number; isPlaying?: boolean } = {}
+let lastFtPipBounds: { x?: number; y?: number; width: number; height: number } | null = null
+
+function getMainWindow(): BrowserWindow | null {
+  return BrowserWindow.getAllWindows().find((w) => w !== ftPipWindow) || null
+}
+
+function openFtPip(payload: any): boolean {
+  currentFtPipPayload = payload
+  if (payload) {
+    lastFtPipState = {
+      videoId: payload.video?.videoId,
+      currentTime: payload.currentTime,
+      isPlaying: payload.isPlaying
+    }
+  }
+
+  if (ftPipWindow && !ftPipWindow.isDestroyed()) {
+    ftPipWindow.webContents.send('ft-pip-init', payload)
+    ftPipWindow.show()
+    ftPipWindow.focus()
+    return true
+  }
+
+  const primaryDisplay = screen.getPrimaryDisplay()
+  const { width: screenWidth, height: screenHeight, x: displayX, y: displayY } = primaryDisplay.workArea
+
+  const defaultWidth = 480
+  const defaultHeight = 306
+  const width = Math.min(Math.max(lastFtPipBounds?.width || defaultWidth, 320), screenWidth)
+  const height = Math.min(Math.max(lastFtPipBounds?.height || defaultHeight, 216), screenHeight)
+  const x = lastFtPipBounds?.x ?? (displayX + screenWidth - width - 24)
+  const y = lastFtPipBounds?.y ?? (displayY + screenHeight - height - 24)
+
+  ftPipWindow = new BrowserWindow({
+    width,
+    height,
+    x,
+    y,
+    minWidth: 320,
+    minHeight: 216,
+    maxWidth: 1280,
+    maxHeight: 756,
+    alwaysOnTop: true,
+    frame: false,
+    resizable: true,
+    show: false,
+    backgroundColor: '#0a0a0a',
+    title: 'Focus Tube Mini Player',
+    skipTaskbar: false,
+    webPreferences: {
+      preload: join(__dirname, '../preload/index.js'),
+      sandbox: false,
+      webSecurity: false,
+      backgroundThrottling: false
+    }
+  })
+
+  // Float over ALL windows, including fullscreen windows and other apps
+  ftPipWindow.setAlwaysOnTop(true, 'screen-saver')
+  if (typeof (ftPipWindow as any).setVisibleOnAllWorkspaces === 'function') {
+    (ftPipWindow as any).setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })
+  }
+
+  ftPipWindow.on('moved', () => {
+    if (ftPipWindow && !ftPipWindow.isDestroyed()) {
+      const b = ftPipWindow.getBounds()
+      lastFtPipBounds = { x: b.x, y: b.y, width: b.width, height: b.height }
+    }
+  })
+
+  ftPipWindow.on('resize', () => {
+    if (ftPipWindow && !ftPipWindow.isDestroyed()) {
+      const b = ftPipWindow.getBounds()
+      lastFtPipBounds = { x: b.x, y: b.y, width: b.width, height: b.height }
+    }
+  })
+
+  ftPipWindow.webContents.setWindowOpenHandler((details) => {
+    if (details.url.startsWith('https://') || details.url.startsWith('http://')) {
+      shell.openExternal(details.url)
+    }
+    return { action: 'deny' }
+  })
+
+  ftPipWindow.webContents.on('will-navigate', (event, navUrl) => {
+    if (!navUrl.includes('#ft-pip') && !navUrl.includes('pip=focustube')) {
+      event.preventDefault()
+      if (navUrl.startsWith('http://') || navUrl.startsWith('https://')) {
+        shell.openExternal(navUrl)
+      }
+    }
+  })
+
+  ftPipWindow.webContents.on('did-finish-load', () => {
+    if (ftPipWindow && !ftPipWindow.isDestroyed()) {
+      ftPipWindow.show()
+      if (currentFtPipPayload) {
+        ftPipWindow.webContents.send('ft-pip-init', currentFtPipPayload)
+      }
+    }
+  })
+
+  ftPipWindow.on('closed', () => {
+    const mainWin = getMainWindow()
+    if (mainWin && !mainWin.isDestroyed()) {
+      mainWin.webContents.send('ft-pip-closed', lastFtPipState)
+    }
+    ftPipWindow = null
+  })
+
+  if (is.dev && process.env['ELECTRON_RENDERER_URL']) {
+    ftPipWindow.loadURL(`${process.env['ELECTRON_RENDERER_URL']}#ft-pip`)
+  } else {
+    ftPipWindow.loadFile(join(__dirname, '../renderer/index.html'), { hash: 'ft-pip' })
+  }
+
+  return true
+}
+
+function closeFtPip(): void {
+  if (ftPipWindow && !ftPipWindow.isDestroyed()) {
+    ftPipWindow.close()
+  }
+}
+
+function restoreFromFtPip(): void {
+  const mainWin = getMainWindow()
+  if (mainWin && !mainWin.isDestroyed()) {
+    if (mainWin.isMinimized()) mainWin.restore()
+    mainWin.show()
+    mainWin.focus()
+    mainWin.webContents.send('ft-pip-closed', { ...lastFtPipState, restoreRequested: true })
+  }
+  closeFtPip()
+}
+
+ipcMain.handle('ft-open-pip', (_event, payload: any) => {
+  return openFtPip(payload)
+})
+
+ipcMain.handle('ft-close-pip', () => {
+  closeFtPip()
+})
+
+ipcMain.handle('ft-restore-pip', () => {
+  restoreFromFtPip()
+})
+
+ipcMain.handle('ft-get-pip-state', () => {
+  return currentFtPipPayload
+})
+
+ipcMain.handle('ft-sync-pip-state', (_event, state: any) => {
+  if (state) {
+    lastFtPipState = { ...lastFtPipState, ...state }
+    if (state.videoId && Number(state.currentTime) > 3) {
+      try {
+        focusTube.updateVideoProgress(state.videoId, Number(state.currentTime))
+      } catch {}
+    }
+    const mainWin = getMainWindow()
+    if (mainWin && !mainWin.isDestroyed()) {
+      mainWin.webContents.send('ft-pip-synced', state)
+    }
+  }
+})
+
 
 // Types the query into the page's own search box and submits it — for JS-only
 // (SPA) sites whose URL query params are ignored. Runs on first load only,

@@ -293,6 +293,26 @@ const api = {
     ipcRenderer.on('ft-feed-updated', handler)
     return () => ipcRenderer.removeListener('ft-feed-updated', handler)
   },
+    ftOpenPip: (payload: any) => ipcRenderer.invoke('ft-open-pip', payload),
+  ftClosePip: () => ipcRenderer.invoke('ft-close-pip'),
+  ftRestorePip: () => ipcRenderer.invoke('ft-restore-pip'),
+  ftGetPipState: () => ipcRenderer.invoke('ft-get-pip-state'),
+  ftSyncPipState: (state: any) => ipcRenderer.invoke('ft-sync-pip-state', state),
+  onFtPipInit: (callback: (payload: any) => void) => {
+    const handler = (_event: any, payload: any) => callback(payload)
+    ipcRenderer.on('ft-pip-init', handler)
+    return () => ipcRenderer.removeListener('ft-pip-init', handler)
+  },
+  onFtPipSync: (callback: (state: any) => void) => {
+    const handler = (_event: any, state: any) => callback(state)
+    ipcRenderer.on('ft-pip-synced', handler)
+    return () => ipcRenderer.removeListener('ft-pip-synced', handler)
+  },
+  onFtPipClosed: (callback: (state: any) => void) => {
+    const handler = (_event: any, state: any) => callback(state)
+    ipcRenderer.on('ft-pip-closed', handler)
+    return () => ipcRenderer.removeListener('ft-pip-closed', handler)
+  },
   log: (message: string) => ipcRenderer.send('log-to-main', message),
 }
 

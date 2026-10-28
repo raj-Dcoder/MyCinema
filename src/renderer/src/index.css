@@ -1248,6 +1248,18 @@
 .glass-light .keep-dark .bg-\[\#141414\] {
   background-color: #141414 !important;
 }
+.light .keep-dark .bg-\[\#121212\],
+.glass-light .keep-dark .bg-\[\#121212\] {
+  background-color: #121212 !important;
+}
+.light .keep-dark .bg-\[\#121218\],
+.glass-light .keep-dark .bg-\[\#121218\] {
+  background-color: #121218 !important;
+}
+.light .keep-dark .bg-\[\#121218\]\/95,
+.glass-light .keep-dark .bg-\[\#121218\]\/95 {
+  background-color: rgba(18, 18, 24, 0.95) !important;
+}
 .light .keep-dark .bg-\[\#05080d\],
 .glass-light .keep-dark .bg-\[\#05080d\] {
   background-color: #05080d !important;
@@ -1485,6 +1497,79 @@
 .light .keep-dark .player-menu-popup input::placeholder,
 .glass-light .keep-dark .player-menu-popup input::placeholder {
   color: rgba(255, 255, 255, 0.35) !important;
+}
+
+/* Watch Together Modal Dialog Box (All Themes) */
+.watch-together-modal,
+.light .keep-dark .watch-together-modal,
+.glass-light .keep-dark .watch-together-modal {
+  background-color: rgba(18, 18, 24, 0.96) !important;
+  border-color: rgba(255, 255, 255, 0.14) !important;
+  box-shadow: 0 25px 70px rgba(0, 0, 0, 0.85), 0 0 0 1px rgba(255, 255, 255, 0.08) !important;
+  color: #ffffff !important;
+  backdrop-filter: blur(24px) saturate(180%) !important;
+  -webkit-backdrop-filter: blur(24px) saturate(180%) !important;
+}
+
+.watch-together-modal h2,
+.watch-together-modal h3,
+.light .keep-dark .watch-together-modal h2,
+.light .keep-dark .watch-together-modal h3 {
+  color: #ffffff !important;
+}
+
+.watch-together-modal input,
+.light .keep-dark .watch-together-modal input,
+.glass-light .keep-dark .watch-together-modal input {
+  background-color: rgba(0, 0, 0, 0.45) !important;
+  border-color: rgba(255, 255, 255, 0.15) !important;
+  color: #ffffff !important;
+}
+
+.watch-together-modal input::placeholder,
+.light .keep-dark .watch-together-modal input::placeholder,
+.glass-light .keep-dark .watch-together-modal input::placeholder {
+  color: rgba(255, 255, 255, 0.25) !important;
+}
+
+.watch-together-modal .text-white,
+.light .keep-dark .watch-together-modal .text-white {
+  color: #ffffff !important;
+}
+
+.watch-together-modal .text-white\/50,
+.light .keep-dark .watch-together-modal .text-white\/50 {
+  color: rgba(255, 255, 255, 0.5) !important;
+}
+
+.watch-together-modal .text-white\/60,
+.light .keep-dark .watch-together-modal .text-white\/60 {
+  color: rgba(255, 255, 255, 0.6) !important;
+}
+
+.watch-together-modal .text-white\/70,
+.light .keep-dark .watch-together-modal .text-white\/70 {
+  color: rgba(255, 255, 255, 0.7) !important;
+}
+
+.watch-together-modal .text-white\/80,
+.light .keep-dark .watch-together-modal .text-white\/80 {
+  color: rgba(255, 255, 255, 0.8) !important;
+}
+
+.watch-together-modal .bg-white\/5,
+.light .keep-dark .watch-together-modal .bg-white\/5 {
+  background-color: rgba(255, 255, 255, 0.05) !important;
+}
+
+.watch-together-modal .bg-white\/\[0\.03\],
+.light .keep-dark .watch-together-modal .bg-white\/\[0\.03\] {
+  background-color: rgba(255, 255, 255, 0.03) !important;
+}
+
+.watch-together-modal .bg-white\/\[0\.02\],
+.light .keep-dark .watch-together-modal .bg-white\/\[0\.02\] {
+  background-color: rgba(255, 255, 255, 0.02) !important;
 }
 
 /* ------------------------------------------------------------------ */

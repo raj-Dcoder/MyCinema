@@ -16,7 +16,7 @@ module.exports = {
       colors: {
         background: 'rgb(var(--c-bg) / <alpha-value>)',
         surface: 'rgb(var(--c-surface) / <alpha-value>)',
-        primary: '#e50914',
+        primary: 'rgb(var(--c-accent, 229 9 20) / <alpha-value>)',
         secondary: 'rgb(var(--c-secondary) / <alpha-value>)',
         text: 'rgb(var(--c-text) / <alpha-value>)',
         muted: 'rgb(var(--c-muted) / <alpha-value>)',

@@ -19,6 +19,7 @@ import Download from './pages/Download'
 import FocusTube from './pages/FocusTube'
 import Updates from './pages/Updates'
 import appLogo from './assets/mycinema-logo.png'
+import AmbientAtmosphere from './components/AmbientAtmosphere'
 import { useTheme } from './theme/ThemeContext'
 import { normalizeProfileImage, resolveProfileImageUrl } from './utils/profileImage'
 
@@ -788,6 +789,7 @@ const App: React.FC = () => {
       className={`flex h-screen bg-background text-text font-sans overflow-hidden ${theme === 'light' ? 'light' : 'dark'}`}
       onClick={handleAppSurfaceClick}
     >
+      <AmbientAtmosphere isPlaybackActive={Boolean(playingVideo)} />
       <WindowControls />
 
       {/* Popup backdrop blur overlay — sits between WindowControls and main content */}

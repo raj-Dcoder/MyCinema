@@ -1,9 +1,9 @@
 import React, { useEffect, useState } from 'react'
-import { FolderOpen, Trash2, Plus, HardDrive, AlertTriangle, Check, X as CloseIcon, Maximize2, Download, Upload, Image as ImageIcon, Subtitles, Wifi, Bell, Compass, RotateCcw, Layers, Sun, Moon } from 'lucide-react'
+import { FolderOpen, Trash2, Plus, HardDrive, AlertTriangle, Check, X as CloseIcon, Maximize2, Download, Upload, Image as ImageIcon, Subtitles, Wifi, Bell, Compass, RotateCcw, Layers, Sun, Moon, Sparkles, Palette, ChevronDown, ChevronUp, Play, Star, Film } from 'lucide-react'
 import ProfilePictureModal from '../components/ProfilePictureModal'
 import { normalizeProfileImage, resolveProfileImageUrl } from '../utils/profileImage'
 import { SUBTITLE_STYLE_KEY, SUBTITLE_FONT_SIZE_KEY, SUBTITLE_POSITION_KEY, type SubtitleStyle } from '../components/player/SubtitleOverlay'
-import { useTheme } from '../theme/ThemeContext'
+import { useTheme, ACCENT_PALETTE, HALO_INTENSITY_PRESETS } from '../theme/ThemeContext'
 import { ONLINE_PROGRESS_STORAGE_KEY, setOnlineProgressEnabledLocal, NOTIFY_NEW_EPISODES_KEY, setNewEpisodeNotifyLocal } from '../utils/streamResume'
 import { cleanIpcError } from '../utils/ipcError'
 
@@ -23,7 +23,23 @@ interface DownloadStorageInfo {
 }
 
 const Settings: React.FC = () => {
-  const { theme, setTheme } = useTheme()
+  const {
+    theme,
+    setTheme,
+    accent,
+    setAccent,
+    currentAccent,
+    haloIntensity,
+    setHaloIntensity,
+    currentHaloPreset,
+    haloDiffusion,
+    setHaloDiffusion,
+    haloChroma,
+    setHaloChroma,
+    stagePreviewCollapsed,
+    setStagePreviewCollapsed,
+    resetToDefaults,
+  } = useTheme()
   const [folders, setFolders] = useState<any[]>([])
   const [scanning, setScanning] = useState<string | null>(null)
   const [userName, setUserName] = useState(() => localStorage.getItem('mycinema_user_name') || 'User')
@@ -636,6 +652,352 @@ const Settings: React.FC = () => {
                 <Sun size={13} />
                 Light
               </button>
+            </div>
+          </div>
+        </section>
+
+        <section>
+          <h3 className={sectionTitleClass}>Atmospheric Lighting & Accent Studio</h3>
+          <div className={`${panelClass} p-6 sm:p-7 space-y-7`}>
+            {/* Top Bar: Title & Quick Controls */}
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-2 border-b border-white/5">
+              <div className="flex items-center gap-4 min-w-0">
+                <div className={iconBoxClass}>
+                  <Sparkles size={18} style={{ color: currentAccent.hex }} />
+                </div>
+                <div className="min-w-0">
+                  <h4 className="text-sm font-black text-white tracking-tight flex items-center gap-2">
+                    Cinema Luminescence & Backlighting
+                    <span
+                      className="inline-flex items-center rounded-full px-2 py-0.5 text-[9px] font-black uppercase tracking-wider"
+                      style={{
+                        backgroundColor: `rgb(${currentAccent.rgb} / 0.15)`,
+                        color: currentAccent.hex,
+                        border: `1px solid rgb(${currentAccent.rgb} / 0.35)`,
+                      }}
+                    >
+                      {currentAccent.name}
+                    </span>
+                  </h4>
+                  <p className="mt-0.5 text-[11px] font-medium leading-4 text-white/35">
+                    Personalize your signature brand tint, button highlights, and atmospheric ambient halo.
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2 self-end sm:self-center">
+                <button
+                  type="button"
+                  onClick={resetToDefaults}
+                  className="inline-flex items-center gap-1.5 rounded-xl border border-white/10 bg-white/5 px-3 py-1.5 text-[10px] font-black uppercase tracking-widest text-white/60 transition-all hover:bg-white/10 hover:text-white"
+                  title="Reset to classic MyCinema defaults"
+                >
+                  <RotateCcw size={12} />
+                  Reset Defaults
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setStagePreviewCollapsed((prev) => !prev)}
+                  className="inline-flex items-center gap-1.5 rounded-xl border border-white/10 bg-white/5 px-3 py-1.5 text-[10px] font-black uppercase tracking-widest text-white/60 transition-all hover:bg-white/10 hover:text-white"
+                  title={stagePreviewCollapsed ? 'Expand live preview simulator' : 'Collapse live preview simulator'}
+                >
+                  {stagePreviewCollapsed ? <ChevronDown size={12} /> : <ChevronUp size={12} />}
+                  {stagePreviewCollapsed ? 'Show Preview' : 'Hide Preview'}
+                </button>
+              </div>
+            </div>
+
+            {/* Live Interactive Theater Stage Simulator (Collapsible) */}
+            {!stagePreviewCollapsed && (
+              <div className="relative overflow-hidden rounded-2xl border border-white/10 bg-black/40 p-5 backdrop-blur-xl shadow-2xl transition-all duration-300">
+                {/* Reactive Live Ambient Halo Radiating Behind the Preview */}
+                <div
+                  className="pointer-events-none absolute -top-12 -left-12 h-56 w-56 rounded-full transition-all duration-500 ease-out"
+                  style={{
+                    background: `radial-gradient(circle, rgb(${currentAccent.rgb} / ${
+                      haloIntensity === 'stealth'
+                        ? 0
+                        : (currentHaloPreset.baseOpacity * (0.5 + (haloChroma / 100) * 0.5) * 0.7).toFixed(3)
+                    }) 0%, transparent 70%)`,
+                    filter: `blur(${Math.round(40 + (haloDiffusion / 100) * 35)}px)`,
+                    transform: `scale(${0.8 + (haloDiffusion / 100) * 0.3})`,
+                  }}
+                />
+                <div
+                  className="pointer-events-none absolute -bottom-12 -right-12 h-48 w-48 rounded-full transition-all duration-500 ease-out"
+                  style={{
+                    background: `radial-gradient(circle, rgb(${currentAccent.secondaryRgb} / ${
+                      haloIntensity === 'stealth'
+                        ? 0
+                        : (currentHaloPreset.baseOpacity * (0.5 + (haloChroma / 100) * 0.5) * 0.55).toFixed(3)
+                    }) 0%, transparent 70%)`,
+                    filter: `blur(${Math.round(45 + (haloDiffusion / 100) * 35)}px)`,
+                    transform: `scale(${0.8 + (haloDiffusion / 100) * 0.3})`,
+                  }}
+                />
+
+                <div className="relative z-10 flex flex-col md:flex-row items-center justify-between gap-5">
+                  <div className="flex items-center gap-4 w-full md:w-auto">
+                    {/* Simulated Mini Movie Poster */}
+                    <div
+                      className="relative h-20 w-14 flex-shrink-0 overflow-hidden rounded-xl bg-gradient-to-br from-white/10 to-white/5 border border-white/10 shadow-lg flex items-center justify-center text-white/40"
+                      style={{
+                        boxShadow: `0 4px 20px rgb(${currentAccent.rgb} / 0.25)`,
+                      }}
+                    >
+                      <Film size={22} style={{ color: currentAccent.hex }} />
+                      <div
+                        className="absolute inset-x-0 bottom-0 h-1"
+                        style={{
+                          backgroundColor: currentAccent.hex,
+                          boxShadow: `0 0 8px rgb(${currentAccent.rgb})`,
+                        }}
+                      />
+                    </div>
+
+                    <div className="min-w-0 space-y-1">
+                      <div className="flex items-center gap-2">
+                        <span
+                          className="rounded-md px-1.5 py-0.5 text-[9px] font-black uppercase tracking-wider"
+                          style={{
+                            backgroundColor: `rgb(${currentAccent.rgb} / 0.2)`,
+                            color: currentAccent.hex,
+                          }}
+                        >
+                          LIVE STAGE
+                        </span>
+                        <span className="text-[10px] font-bold text-white/40 uppercase tracking-wider">Sci-Fi • 4K HDR</span>
+                      </div>
+                      <h5 className="text-sm font-black text-white tracking-tight truncate">Interstellar (2014)</h5>
+                      <div className="flex items-center gap-3 text-[11px] text-white/50">
+                        <span className="flex items-center gap-1 font-bold text-amber-400">
+                          <Star size={11} className="fill-amber-400" /> 8.7
+                        </span>
+                        <span>•</span>
+                        <span>Christopher Nolan</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Simulated Action Controls */}
+                  <div className="flex flex-wrap items-center gap-2.5 w-full md:w-auto justify-start md:justify-end">
+                    <button
+                      type="button"
+                      className="inline-flex items-center gap-2 rounded-xl px-4 py-2 text-xs font-black uppercase tracking-widest text-white shadow-lg transition-transform hover:scale-105 active:scale-95"
+                      style={{
+                        backgroundColor: currentAccent.hex,
+                        boxShadow: `0 4px 16px rgb(${currentAccent.rgb} / 0.4)`,
+                      }}
+                    >
+                      <Play size={13} className="fill-white" />
+                      Play Movie
+                    </button>
+                    <button
+                      type="button"
+                      className="inline-flex items-center gap-1.5 rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-xs font-bold text-white/70 hover:bg-white/10 hover:text-white transition-colors"
+                    >
+                      + Watchlist
+                    </button>
+                  </div>
+                </div>
+
+                {/* Simulated Watch Progress Bar */}
+                <div className="relative z-10 mt-4 space-y-1">
+                  <div className="flex items-center justify-between text-[10px] font-semibold text-white/40">
+                    <span>
+                      Live Atmosphere: <strong className="text-white">{currentHaloPreset.label}</strong> ({haloDiffusion}% Diffusion • {haloChroma}% Chroma)
+                    </span>
+                    <span>1h 42m of 2h 49m</span>
+                  </div>
+                  <div className="h-1.5 w-full overflow-hidden rounded-full bg-white/10">
+                    <div
+                      className="h-full rounded-full transition-all duration-300"
+                      style={{
+                        width: '62%',
+                        backgroundColor: currentAccent.hex,
+                        boxShadow: `0 0 10px rgb(${currentAccent.rgb} / 0.8)`,
+                      }}
+                    />
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* 1. Signature Illumination Tint (12 Curated Colors) */}
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <span className="text-[10px] font-black uppercase tracking-[0.2em] text-white/50">
+                  1. Signature Illumination Tint
+                </span>
+                <span className="text-[11px] font-bold text-white/40">12 Curated Cinema Shades</span>
+              </div>
+              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-2.5">
+                {ACCENT_PALETTE.map((item) => {
+                  const isActive = accent === item.id
+                  return (
+                    <button
+                      key={item.id}
+                      type="button"
+                      onClick={() => setAccent(item.id)}
+                      className={`group relative flex flex-col items-start rounded-2xl p-3 border transition-all text-left ${
+                        isActive
+                          ? 'border-white/40 bg-white/[0.08] shadow-xl'
+                          : 'border-white/5 bg-white/[0.02] hover:border-white/20 hover:bg-white/[0.05]'
+                      }`}
+                      style={
+                        isActive
+                          ? {
+                              boxShadow: `0 4px 20px rgb(${item.rgb} / 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.15)`,
+                              borderColor: item.hex,
+                            }
+                          : undefined
+                      }
+                    >
+                      <div className="flex items-center justify-between w-full mb-2">
+                        <div
+                          className="h-6 w-6 rounded-full flex items-center justify-center transition-transform group-hover:scale-110 shadow-md"
+                          style={{
+                            backgroundColor: item.hex,
+                            boxShadow: `0 0 12px rgb(${item.rgb} / 0.6)`,
+                          }}
+                        >
+                          {isActive && <Check size={13} className="text-white stroke-[3]" />}
+                        </div>
+                        {isActive && (
+                          <span
+                            className="h-1.5 w-1.5 rounded-full"
+                            style={{ backgroundColor: item.hex }}
+                          />
+                        )}
+                      </div>
+                      <span className="text-[11px] font-black text-white truncate w-full">{item.name}</span>
+                      <span className="text-[9px] font-medium text-white/35 truncate w-full">{item.subtitle}</span>
+                    </button>
+                  )
+                })}
+              </div>
+            </div>
+
+            {/* 2. Atmospheric Halo Intensity (4 Presets) */}
+            <div className="space-y-3 pt-2">
+              <div className="flex items-center justify-between">
+                <span className="text-[10px] font-black uppercase tracking-[0.2em] text-white/50">
+                  2. Atmospheric Halo Intensity
+                </span>
+                <span className="text-[11px] font-bold text-white/40">{currentHaloPreset.label}</span>
+              </div>
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+                {HALO_INTENSITY_PRESETS.map((preset) => {
+                  const isActive = haloIntensity === preset.id
+                  return (
+                    <button
+                      key={preset.id}
+                      type="button"
+                      onClick={() => setHaloIntensity(preset.id)}
+                      className={`relative flex flex-col items-center justify-center rounded-2xl py-3 px-4 border text-center transition-all ${
+                        isActive
+                          ? 'text-white border-white/30 bg-white/[0.08] shadow-lg'
+                          : 'text-white/50 border-white/5 bg-white/[0.02] hover:bg-white/[0.05] hover:text-white'
+                      }`}
+                      style={
+                        isActive
+                          ? {
+                              borderColor: currentAccent.hex,
+                              boxShadow: `0 4px 18px rgb(${currentAccent.rgb} / 0.25)`,
+                            }
+                          : undefined
+                      }
+                    >
+                      <span className="text-xs font-black uppercase tracking-wider">{preset.label}</span>
+                      <span className="text-[9px] font-medium text-white/35 mt-0.5">{preset.sublabel}</span>
+                    </button>
+                  )
+                })}
+              </div>
+            </div>
+
+            {/* 3. Halo Diffusion Radius (Spread Slider) */}
+            <div className="space-y-3 pt-2">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <span className="text-[10px] font-black uppercase tracking-[0.2em] text-white/50">
+                    3. Halo Diffusion Radius
+                  </span>
+                  <span className="text-[10px] font-medium text-white/30">(Spread & Coverage)</span>
+                </div>
+                <span
+                  className="rounded-lg px-2.5 py-0.5 text-xs font-black"
+                  style={{
+                    backgroundColor: `rgb(${currentAccent.rgb} / 0.15)`,
+                    color: currentAccent.hex,
+                    border: `1px solid rgb(${currentAccent.rgb} / 0.3)`,
+                  }}
+                >
+                  {haloDiffusion}%
+                </span>
+              </div>
+              <input
+                type="range"
+                min={50}
+                max={250}
+                step={5}
+                value={haloDiffusion}
+                disabled={haloIntensity === 'stealth'}
+                onChange={(e) => setHaloDiffusion(Number(e.target.value))}
+                className="atmosphere-slider"
+                style={{
+                  background: `linear-gradient(to right, rgb(${currentAccent.rgb}) 0%, rgb(${currentAccent.rgb}) ${
+                    ((haloDiffusion - 50) / 200) * 100
+                  }%, rgba(255,255,255,0.08) ${((haloDiffusion - 50) / 200) * 100}%, rgba(255,255,255,0.08) 100%)`,
+                }}
+              />
+              <div className="flex items-center justify-between text-[10px] font-bold text-white/30 px-1">
+                <span>Focused Core (50%)</span>
+                <span>Theater Blend (100%)</span>
+                <span>Infinite Bleed (250%)</span>
+              </div>
+            </div>
+
+            {/* 4. Chroma Vibrancy & Punch (Richness Slider) */}
+            <div className="space-y-3 pt-2">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <span className="text-[10px] font-black uppercase tracking-[0.2em] text-white/50">
+                    4. Chroma Vibrancy & Punch
+                  </span>
+                  <span className="text-[10px] font-medium text-white/30">(Color Saturation)</span>
+                </div>
+                <span
+                  className="rounded-lg px-2.5 py-0.5 text-xs font-black"
+                  style={{
+                    backgroundColor: `rgb(${currentAccent.rgb} / 0.15)`,
+                    color: currentAccent.hex,
+                    border: `1px solid rgb(${currentAccent.rgb} / 0.3)`,
+                  }}
+                >
+                  {haloChroma}%
+                </span>
+              </div>
+              <input
+                type="range"
+                min={50}
+                max={250}
+                step={5}
+                value={haloChroma}
+                disabled={haloIntensity === 'stealth'}
+                onChange={(e) => setHaloChroma(Number(e.target.value))}
+                className="atmosphere-slider"
+                style={{
+                  background: `linear-gradient(to right, rgb(${currentAccent.rgb}) 0%, rgb(${currentAccent.rgb}) ${
+                    ((haloChroma - 50) / 200) * 100
+                  }%, rgba(255,255,255,0.08) ${((haloChroma - 50) / 200) * 100}%, rgba(255,255,255,0.08) 100%)`,
+                }}
+              />
+              <div className="flex items-center justify-between text-[10px] font-bold text-white/30 px-1">
+                <span>Muted Pastel (50%)</span>
+                <span>True Cinema (100%)</span>
+                <span>Hyper-Radiance (250%)</span>
+              </div>
             </div>
           </div>
         </section>

@@ -480,7 +480,9 @@ function setupYoutubeEmbedHeaders(): void {
 
     if (requestHeaders['sec-ch-ua']) {
       requestHeaders['sec-ch-ua'] = requestHeaders['sec-ch-ua']
-        .replace(/"Electron";v="[^"]*",?\s*/gi, '')
+        .replace(/"Electron";v="[^"]*"/gi, '')
+        .replace(/,\s*,/g, ', ')
+        .replace(/^[\s,]+|[\s,]+$/g, '')
     }
 
     if (details.url.includes('/embed/')) {
@@ -782,6 +784,10 @@ function createWindow(): void {
       if (thirdPartyCookieNoticeShown) return
       thirdPartyCookieNoticeShown = true
       console.log('[Renderer] Third-party cookie notices suppressed (Electron blocks 3p cookies; playback is unaffected)')
+      return
+    }
+    // Suppress DoubleClick / YouTube ad tracking beacons blocked by CORS (harmless analytics, not video stream)
+    if (/viewthroughconversion|doubleclick\.net/i.test(String(message))) {
       return
     }
     const tag = sourceId ? String(sourceId).split('/').pop() : 'renderer'
@@ -1553,19 +1559,23 @@ function registerAudioProtocol(): void {
 app.commandLine.appendSwitch('enable-blink-features', 'AudioVideoTracks')
 
 // Hardware video decoding & GPU acceleration optimizations
-// Enable D3D11 & Media Foundation video decoding for buttery smooth 1080p/4K YouTube & streaming playback on Windows
+// Enable D3D11 & hardware-accelerated video decoding for buttery smooth 1080p/4K YouTube & streaming playback on Windows
 app.commandLine.appendSwitch('ignore-gpu-blocklist')
 app.commandLine.appendSwitch('enable-gpu-rasterization')
 app.commandLine.appendSwitch('enable-zero-copy')
+app.commandLine.appendSwitch('enable-accelerated-video-decode')
+app.commandLine.appendSwitch('enable-gpu-memory-buffer-video-frames')
 app.commandLine.appendSwitch('enable-hardware-overlays', 'single-fullscreen,single-on-top,underlay')
-app.commandLine.appendSwitch('enable-features', 'MediaFoundationVideoDecoder,PlatformHEVCDecoderSupport,CanvasOopRasterization')
+app.commandLine.appendSwitch('enable-features', 'D3D11VideoDecoder,PlatformHEVCDecoderSupport,CanvasOopRasterization')
 app.commandLine.appendSwitch('disable-features', 'CalculateNativeWinOcclusion')
+// Prevent UDP/QUIC packet loss and ISP throttling from stalling YouTube (googlevideo.com) DASH streams
+app.commandLine.appendSwitch('disable-quic')
 // Prevent Windows from throttling backgrounded or overlay-covered renderer video streams
 app.commandLine.appendSwitch('disable-backgrounding-occluded-windows')
 app.commandLine.appendSwitch('disable-renderer-backgrounding')
-// Generous media & disk cache capacity for stutter-free video buffering
-app.commandLine.appendSwitch('disk-cache-size', '268435456') // 256MB
-app.commandLine.appendSwitch('media-cache-size', '268435456') // 256MB
+// Generous media & disk cache capacity (1GB) for stutter-free video buffering at high resolutions & speeds
+app.commandLine.appendSwitch('disk-cache-size', '1073741824') // 1GB
+app.commandLine.appendSwitch('media-cache-size', '1073741824') // 1GB
 
 const APP_PROTOCOL = 'mycinema'
 

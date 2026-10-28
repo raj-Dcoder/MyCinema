@@ -648,6 +648,9 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
   const pointerHoldActiveRef = useRef(false)
   const speedToastTimerRef = useRef<number>(0)
   const settingsTabRef = useRef<'speed' | 'quality'>('speed')
+  const stallTimestampsRef = useRef<number[]>([])
+  const bufferCushionTimerRef = useRef<number>(0)
+  const isBufferCushioningRef = useRef(false)
   // Mirrors `captionsOn` so the bridge handler (registered once per video)
   // always sees the current toggle without a stale closure.
   // Default is OFF and it resets per video — see the reset effect below.
@@ -1304,12 +1307,39 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
         const state = Number(data.info)
         stateRef.current = state
         setPlayerState(state)
+        if (state === STATE_BUFFERING) {
+          const now = Date.now()
+          stallTimestampsRef.current = stallTimestampsRef.current.filter((t) => now - t < 15000)
+          stallTimestampsRef.current.push(now)
+
+          // Intelligent high-speed buffer cushion:
+          // At > 1x playback speed (e.g. 1.25x, 1.5x, 2x), YouTube's default resume threshold
+          // (~2s buffer) empties in ~1.3s, causing an endless micro-buffering loop.
+          // When 2+ stalls occur in 15 seconds at high speed, pause briefly (1.6s) so
+          // YouTube's DASH loader builds a healthy forward cushion before resuming.
+          if (speedRef.current > 1 && stallTimestampsRef.current.length >= 2 && !isBufferCushioningRef.current) {
+            isBufferCushioningRef.current = true
+            window.clearTimeout(bufferCushionTimerRef.current)
+            flashSpeedToast(`Building buffer cushion for smooth ${speedRef.current}x playback...`)
+            send('pauseVideo', [])
+            bufferCushionTimerRef.current = window.setTimeout(() => {
+              isBufferCushioningRef.current = false
+              send('playVideo', [])
+              if (speedRef.current !== 1) {
+                send('setPlaybackRate', [speedRef.current])
+              }
+            }, 1600)
+          } else if (stallTimestampsRef.current.length >= 4 && qualityPrefRef.current !== 'auto') {
+            // Warn if network cannot sustain high-speed playback at forced resolution
+            flashSpeedToast(`Network bandwidth low for ${speedRef.current}x: try Auto Quality`)
+          }
+        }
         if (state === STATE_PLAYING) {
           seekLockRef.current = null
           endedRef.current = false
           setErrorText(null)
-          // Re-assert preferred playback rate on active playback start
-          if (speedRef.current !== 1) {
+          // Re-assert preferred playback rate on active playback start (unless cushion pause is active)
+          if (!isBufferCushioningRef.current && speedRef.current !== 1) {
             send('setPlaybackRate', [speedRef.current])
           }
           send('getAvailableQualityLevels', [])
@@ -1461,7 +1491,11 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
     // document exists is delivered to the void.
     sendHandshake()
 
-    return () => window.removeEventListener('message', onMessage)
+    return () => {
+      window.clearTimeout(bufferCushionTimerRef.current)
+      isBufferCushioningRef.current = false
+      window.removeEventListener('message', onMessage)
+    }
   }, [video.videoId, iframeKey, startSeconds, saveProgress, sendHandshake])
 
   // ── Time polling while playing + periodic progress saves + sponsor skip ───
@@ -2061,6 +2095,8 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
 
   const togglePlay = useCallback(() => {
     pokeBottom()
+    window.clearTimeout(bufferCushionTimerRef.current)
+    isBufferCushioningRef.current = false
     if (stateRef.current === STATE_ENDED) {
       handleBarSeek(0)
       return

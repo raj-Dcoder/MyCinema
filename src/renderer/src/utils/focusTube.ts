@@ -161,6 +161,7 @@ export const FOCUS_TUBE_EMBED_ORIGIN = 'https://mycinema.app'
  */
 export function embedUrl(videoId: string, startSeconds = 0, qualityPreference?: string | null): string {
   const params = new URLSearchParams({
+    autoplay: '1',
     rel: '0',
     modestbranding: '1',
     playsinline: '1',
@@ -170,6 +171,7 @@ export function embedUrl(videoId: string, startSeconds = 0, qualityPreference?: 
     // No annotation overlays; they fight with our own overlays.
     iv_load_policy: '3',
     cc_load_policy: '0',
+    disablekb: '1',
     widget_referrer: `${FOCUS_TUBE_EMBED_ORIGIN}/`,
   })
   if (startSeconds > 0) params.set('start', String(Math.floor(startSeconds)))

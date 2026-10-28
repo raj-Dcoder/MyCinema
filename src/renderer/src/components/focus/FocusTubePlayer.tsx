@@ -18,6 +18,7 @@ import {
   Maximize2,
   MessageSquare,
   Minimize,
+  PictureInPicture2,
   Minus,
   MonitorPlay,
 
@@ -555,6 +556,9 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
   // In-app mini player: docks the SAME iframe to the bottom-right corner so
   // playback continues while the user browses MyCinema. Unlike OS PiP this
   // never leaves the app and never remounts the iframe (no restart).
+    const [isPiPActive, setIsPiPActive] = useState(false)
+  const isPiPActiveRef = useRef(false)
+  isPiPActiveRef.current = isPiPActive
   const [isMinimized, setIsMinimized] = useState(false)
   const isMinimizedRef = useRef(false)
   isMinimizedRef.current = isMinimized
@@ -809,8 +813,9 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
         cmd('setPlaybackQualityRange', ['auto', 'auto'])
         cmd('setPlaybackQuality', ['auto'])
       } else {
-        cmd('setPlaybackQualityRange', [prefId, prefId])
+        const minQuality = (prefId === 'hd1080' || prefId === 'hd1440' || prefId === 'hd2160') ? 'hd720' : 'large'
         cmd('setPlaybackQuality', [prefId])
+        cmd('setPlaybackQualityRange', [minQuality, prefId])
       }
     })
     window.api?.ftSetFrameQuality?.(prefId)
@@ -928,15 +933,15 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
     }
   }, [video.videoId, video.thumbnail, ambientMode])
 
-  // ── Ambient Mode: Live video frame sampling with calm, micro-smoothed transitions ──
+  // ── Ambient Mode: Live video frame sampling with calm, smooth transitions ──
   useEffect(() => {
-    if (!ambientMode || isMinimized || playerState !== STATE_PLAYING) return
+    // Never poll if ambient mode is off, player is minimized, user is in fullscreen, or video is not actively playing
+    if (!ambientMode || isMinimized || fsActive || playerState !== STATE_PLAYING) return
 
     let active = true
-    let rAFId = 0
     const interval = setInterval(async () => {
-      // Don't poll if paused or during dock/theater/sidepanel animations
-      if (!active || stateRef.current !== STATE_PLAYING || isTransitioningRef.current || isSidepanelTransitioningRef.current) return
+      // Don't poll if paused, hidden, during dock/theater/sidepanel animations, or in fullscreen
+      if (!active || stateRef.current !== STATE_PLAYING || isTransitioningRef.current || isSidepanelTransitioningRef.current || document.fullscreenElement) return
       try {
         const res = await window.api?.ftGetAmbientFrame?.()
         if (!active || !res?.dataUrl) return
@@ -946,41 +951,26 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
         const img = new Image()
         img.onload = () => {
           if (!active) return
-          // Micro-smooth transition: gently blend over 8 rAF frames (~130ms) then remain 100% calm and static
-          let frame = 0
-          const totalFrames = 8
-          const step = () => {
-            if (!active || frame >= totalFrames) return
-            const canvas = ambientCanvasRef.current
-            if (canvas) {
-              const ctx = canvas.getContext('2d')
-              if (ctx) {
-                ctx.imageSmoothingEnabled = true
-                ctx.imageSmoothingQuality = 'high'
-                ctx.globalAlpha = 0.25
-                ctx.drawImage(img, 0, 0, canvas.width, canvas.height)
-                ctx.globalAlpha = 1.0
-              }
-            }
-            frame++
-            if (frame < totalFrames && active) {
-              rAFId = requestAnimationFrame(step)
+          const canvas = ambientCanvasRef.current
+          if (canvas) {
+            const ctx = canvas.getContext('2d')
+            if (ctx) {
+              ctx.imageSmoothingEnabled = true
+              ctx.drawImage(img, 0, 0, canvas.width, canvas.height)
             }
           }
-          step()
         }
         img.src = res.dataUrl
       } catch {
         // ignore
       }
-    }, 750)
+    }, 3500)
 
     return () => {
       active = false
       clearInterval(interval)
-      cancelAnimationFrame(rAFId)
     }
-  }, [ambientMode, isMinimized, playerState])
+  }, [ambientMode, isMinimized, fsActive, playerState])
 
   // ── Comments (keyless via Invidious mirrors, one fetch per video+sort) ────
   useEffect(() => {
@@ -1264,8 +1254,9 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
         // Assert preferred quality if configured
         const targetPref = qualityPrefRef.current
         if (targetPref && targetPref !== 'auto') {
-          send('setPlaybackQualityRange', [targetPref, targetPref])
+          const minQuality = (targetPref === 'hd1080' || targetPref === 'hd1440' || targetPref === 'hd2160') ? 'hd720' : 'large'
           send('setPlaybackQuality', [targetPref])
+          send('setPlaybackQualityRange', [minQuality, targetPref])
           window.api?.ftSetFrameQuality?.(targetPref).catch(() => {})
         }
         send('getPlaybackQuality', [])
@@ -1309,12 +1300,13 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
           // Re-assert target quality preference on active playback start
           const targetPref = qualityPrefRef.current
           if (targetPref && targetPref !== 'auto') {
-            send('setPlaybackQualityRange', [targetPref, targetPref])
+            const minQuality = (targetPref === 'hd1080' || targetPref === 'hd1440' || targetPref === 'hd2160') ? 'hd720' : 'large'
             send('setPlaybackQuality', [targetPref])
+            send('setPlaybackQualityRange', [minQuality, targetPref])
             window.api?.ftSetFrameQuality?.(targetPref).catch(() => {})
             window.setTimeout(() => {
-              send('setPlaybackQualityRange', [targetPref, targetPref])
               send('setPlaybackQuality', [targetPref])
+              send('setPlaybackQualityRange', [minQuality, targetPref])
               window.api?.ftSetFrameQuality?.(targetPref).catch(() => {})
               send('getPlaybackQuality', [])
               send('getAvailableQualityLevels', [])
@@ -1771,6 +1763,81 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
       }
     }
   }, [isMinimized, isFullscreen])
+
+  
+  const handleTogglePiP = useCallback(async () => {
+    if (isPiPActiveRef.current) {
+      try {
+        await window.api?.ftRestorePip?.()
+      } catch {}
+      return
+    }
+
+    try {
+      cmd('pauseVideo')
+      setIsPiPActive(true)
+
+      const payload = {
+        video,
+        currentTime: currentTimeRef.current || currentTime || startSeconds,
+        isPlaying: stateRef.current === STATE_PLAYING,
+        playbackRate: speedRef.current,
+        volume,
+        muted,
+        queue: queueItems,
+        hasNext,
+        nextTitle,
+      }
+
+      await window.api?.ftOpenPip?.(payload)
+    } catch (err) {
+      console.error('[FocusTube] Failed to open PiP:', err)
+      setIsPiPActive(false)
+    }
+  }, [video, currentTime, startSeconds, volume, muted, queueItems, hasNext, nextTitle, cmd])
+
+  const handleRestoreFromPiP = useCallback(() => {
+    window.api?.ftRestorePip?.().catch(() => {})
+  }, [])
+
+  const handleClosePiPAndPlayer = useCallback(() => {
+    window.api?.ftClosePip?.().catch(() => {})
+    setIsPiPActive(false)
+    handleClose()
+  }, [handleClose])
+
+  useEffect(() => {
+    const unsubSync = window.api?.onFtPipSync?.((state: { videoId?: string; currentTime?: number; isPlaying?: boolean }) => {
+      if (state && state.videoId === video.videoId) {
+        if (typeof state.currentTime === 'number') {
+          setCurrentTime(state.currentTime)
+          currentTimeRef.current = state.currentTime
+        }
+        if (typeof state.isPlaying === 'boolean') {
+          const nextState = state.isPlaying ? STATE_PLAYING : STATE_PAUSED
+          setPlayerState(nextState)
+          stateRef.current = nextState
+        }
+      }
+    })
+
+    const unsubClosed = window.api?.onFtPipClosed?.((state: { videoId?: string; currentTime?: number; isPlaying?: boolean; restoreRequested?: boolean }) => {
+      setIsPiPActive(false)
+      if (state && typeof state.currentTime === 'number' && state.currentTime > 0) {
+        setCurrentTime(state.currentTime)
+        currentTimeRef.current = state.currentTime
+        cmd('seekTo', [state.currentTime, true])
+      }
+      if (state?.restoreRequested || state?.isPlaying) {
+        cmd('playVideo')
+      }
+    })
+
+    return () => {
+      unsubSync?.()
+      unsubClosed?.()
+    }
+  }, [video.videoId, cmd])
 
   const toggleMinimize = useCallback(() => {
     transitionToMinimized(!isMinimizedRef.current)
@@ -2466,12 +2533,12 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
                     className={`absolute inset-0 ${AMBIENT_CONFIG.scaleX} ${AMBIENT_CONFIG.scaleY} rounded-3xl bg-cover bg-center filter ${AMBIENT_CONFIG.blur} opacity-40 transform-gpu transition-opacity duration-700`}
                     style={{ backgroundImage: `url(${video.thumbnail || thumbnailUrl(video.videoId)})` }}
                   />
-                  {/* Dynamic live frame ambient canvas — Calm, steady, micro-smoothed */}
+                  {/* Dynamic live frame ambient canvas — Calm, steady, smooth compositor fade */}
                   <canvas
                     ref={ambientCanvasRef}
-                    width={32}
-                    height={18}
-                    className={`absolute inset-0 h-full w-full ${AMBIENT_CONFIG.scaleX} ${AMBIENT_CONFIG.scaleY} transform-gpu rounded-3xl filter ${AMBIENT_CONFIG.blur}`}
+                    width={16}
+                    height={9}
+                    className={`absolute inset-0 h-full w-full ${AMBIENT_CONFIG.scaleX} ${AMBIENT_CONFIG.scaleY} transform-gpu rounded-3xl filter ${AMBIENT_CONFIG.blur} transition-opacity duration-1000 ease-out`}
                   />
                   {/* Glossy specular reflection sheen layer for premium finish */}
                   <div className={`absolute inset-0 ${AMBIENT_CONFIG.scaleX} ${AMBIENT_CONFIG.scaleY} rounded-3xl bg-gradient-to-b from-white/[0.08] via-transparent to-black/30 filter blur-[45px] pointer-events-none`} />
@@ -2510,9 +2577,10 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
               key={`${video.videoId}:${iframeKey}`}
               src={embedSrc}
               title={video.title}
-              className="absolute inset-0 z-0 h-full w-full border-0 bg-black"
+              className="absolute inset-0 z-0 h-full w-full border-0 bg-black transform-gpu will-change-transform"
               allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
               allowFullScreen
+              loading="eager"
               referrerPolicy="strict-origin-when-cross-origin"
               onLoad={sendHandshake}
             />
@@ -2528,6 +2596,47 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
                 onPointerCancel={handleGesturePointerCancel}
                 onPointerLeave={handleGesturePointerCancel}
               />
+            )}
+
+            {/* ── PiP Active Overlay ── */}
+            {isPiPActive && (
+              <div className="absolute inset-0 z-30 flex flex-col items-center justify-center bg-black/90 p-6 text-center backdrop-blur-md">
+                <div className="relative mb-3 flex h-14 w-14 items-center justify-center rounded-2xl bg-primary/20 text-primary shadow-[0_0_30px_rgba(229,9,20,0.3)]">
+                  <PictureInPicture2 size={28} className="animate-pulse" />
+                </div>
+                <h3 className="text-base font-bold text-white sm:text-lg">
+                  Playing in Picture-in-Picture
+                </h3>
+                <p className="mt-1 max-w-sm text-xs text-white/60">
+                  Video is floating over your other apps so you can multitask freely.
+                </p>
+                <div className="mt-4 flex flex-wrap items-center justify-center gap-2">
+                  <button
+                    type="button"
+                    onClick={handleRestoreFromPiP}
+                    className="inline-flex items-center gap-1.5 rounded-lg bg-primary px-3.5 py-1.5 text-xs font-bold text-white shadow-md transition-transform hover:scale-105 active:scale-95"
+                  >
+                    <Maximize2 size={13} />
+                    Restore to Player
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => window.api?.minimizeWindow?.().catch(() => {})}
+                    className="inline-flex items-center gap-1.5 rounded-lg bg-white/10 px-3 py-1.5 text-xs font-semibold text-white/80 backdrop-blur-sm transition-colors hover:bg-white/20 hover:text-white"
+                  >
+                    <Minus size={13} />
+                    Minimize MyCinema
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleClosePiPAndPlayer}
+                    className="inline-flex items-center gap-1 rounded-lg border border-white/10 px-2.5 py-1.5 text-xs font-semibold text-white/60 transition-colors hover:bg-white/10 hover:text-white"
+                  >
+                    <X size={13} />
+                    Close
+                  </button>
+                </div>
+              </div>
             )}
 
             {/* Hold-for-2x indicator (YouTube-style, top-center). */}

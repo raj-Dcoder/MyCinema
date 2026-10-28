@@ -1528,8 +1528,17 @@ function registerAudioProtocol(): void {
 }
 
 app.commandLine.appendSwitch('enable-blink-features', 'AudioVideoTracks')
-// Prevent Chromium's hardware decoder from artifacting (producing grey glitchy soup) on specific high-bitrate MKV frames
-app.commandLine.appendSwitch('disable-features', 'D3D11VideoDecoder') 
+
+// Hardware video decoding & GPU acceleration optimizations
+// Enable D3D11 video decoding for buttery smooth 1080p/4K YouTube & streaming playback on Windows
+app.commandLine.appendSwitch('ignore-gpu-blocklist')
+app.commandLine.appendSwitch('enable-gpu-rasterization')
+app.commandLine.appendSwitch('enable-zero-copy')
+app.commandLine.appendSwitch('enable-hardware-overlays', 'single-fullscreen,single-on-top,underlay')
+app.commandLine.appendSwitch('enable-features', 'VaapiVideoDecoder,PlatformHEVCDecoderSupport,CanvasOopRasterization')
+app.commandLine.appendSwitch('disable-features', 'CalculateNativeWinOcclusion')
+// Generous media & disk cache capacity for stutter-free video buffering
+app.commandLine.appendSwitch('disk-cache-size', '268435456') // 256MB
 
 const APP_PROTOCOL = 'mycinema'
 
@@ -8836,11 +8845,13 @@ ipcMain.handle('ft-set-frame-quality', async (_e, quality: string) => {
               chosen = available[0];
             }
           }
-          if (typeof p.setPlaybackQualityRange === 'function') {
-            p.setPlaybackQualityRange(chosen, chosen);
-          }
           if (typeof p.setPlaybackQuality === 'function') {
             p.setPlaybackQuality(chosen);
+          }
+          if (typeof p.setPlaybackQualityRange === 'function') {
+            // Relax the lower bound so initial chunks and transient bandwidth dips do not cause hard buffering stalls
+            const minQuality = (chosen === 'hd1080' || chosen === 'hd1440' || chosen === 'hd2160') ? 'hd720' : 'large';
+            p.setPlaybackQualityRange(minQuality, chosen);
           }
           return true;
         } catch (e) {
@@ -8903,18 +8914,18 @@ ipcMain.handle('ft-get-ambient-frame', async () => {
           (() => {
             try {
               const v = document.querySelector('video') || document.querySelector('.html5-main-video');
-              if (!v || v.readyState < 2 || !v.videoWidth) return null;
+              if (!v || v.paused || v.ended || v.readyState < 2 || !v.videoWidth) return null;
               let canvas = window._ftAmbientCanvas;
               if (!canvas) {
                 canvas = document.createElement('canvas');
-                canvas.width = 32;
-                canvas.height = 18;
+                canvas.width = 16;
+                canvas.height = 9;
                 window._ftAmbientCanvas = canvas;
                 window._ftAmbientCtx = canvas.getContext('2d', { willReadFrequently: true });
               }
               const ctx = window._ftAmbientCtx;
-              ctx.drawImage(v, 0, 0, 32, 18);
-              return canvas.toDataURL('image/jpeg', 0.5);
+              ctx.drawImage(v, 0, 0, 16, 9);
+              return canvas.toDataURL('image/jpeg', 0.3);
             } catch {
               return null;
             }

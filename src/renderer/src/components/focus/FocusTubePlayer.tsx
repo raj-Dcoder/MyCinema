@@ -552,6 +552,7 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
   const [isFullscreen, setIsFullscreen] = useState(false)
   const isFullscreenRef = useRef(false)
   isFullscreenRef.current = isFullscreen
+  const fsActive = isFullscreen
   const [scrubTime, setScrubTime] = useState<number | null>(null)
   // In-app mini player: docks the SAME iframe to the bottom-right corner so
   // playback continues while the user browses MyCinema. Unlike OS PiP this
@@ -1628,6 +1629,13 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
     return false
   }, [transitionToFullscreen])
 
+  const handleClose = useCallback(() => {
+    saveProgress(timeRef.current)
+    ftFullscreenIntent = false
+    exitVideoFullscreen()
+    cbRef.current.onClose()
+  }, [saveProgress, exitVideoFullscreen])
+
   useEffect(() => {
     const onFsChange = () => {
       if (document.fullscreenElement && !isFullscreenRef.current) {
@@ -1779,7 +1787,7 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
 
       const payload = {
         video,
-        currentTime: currentTimeRef.current || currentTime || startSeconds,
+        currentTime: timeRef.current || currentTime || startSeconds,
         isPlaying: stateRef.current === STATE_PLAYING,
         playbackRate: speedRef.current,
         volume,
@@ -1811,7 +1819,7 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
       if (state && state.videoId === video.videoId) {
         if (typeof state.currentTime === 'number') {
           setCurrentTime(state.currentTime)
-          currentTimeRef.current = state.currentTime
+          timeRef.current = state.currentTime
         }
         if (typeof state.isPlaying === 'boolean') {
           const nextState = state.isPlaying ? STATE_PLAYING : STATE_PAUSED
@@ -1825,7 +1833,7 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
       setIsPiPActive(false)
       if (state && typeof state.currentTime === 'number' && state.currentTime > 0) {
         setCurrentTime(state.currentTime)
-        currentTimeRef.current = state.currentTime
+        timeRef.current = state.currentTime
         cmd('seekTo', [state.currentTime, true])
       }
       if (state?.restoreRequested || state?.isPlaying) {
@@ -2159,13 +2167,6 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
     }
   }, [exitHold2x])
 
-  const handleClose = useCallback(() => {
-    saveProgress(timeRef.current)
-    ftFullscreenIntent = false
-    exitVideoFullscreen()
-    cbRef.current.onClose()
-  }, [saveProgress, exitVideoFullscreen])
-
   const handleMarkWatched = useCallback(() => {
     saveProgress(timeRef.current)
     pokeBottom()
@@ -2286,6 +2287,11 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
         case 'F':
           toggleFullscreen()
           break
+        case 'p':
+        case 'P':
+          event.preventDefault()
+          handleTogglePiP()
+          break
         case 'n':
         case 'N':
           event.preventDefault()
@@ -2373,7 +2379,6 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
   // Video element fullscreen only - the app window mode must not affect the
   // icon or the auto-hide chrome. Otherwise the button shows "exit" while the
   // video is still windowed just because the app launched fullscreen.
-  const fsActive = isFullscreen
   const isFullscreenLayer = fsActive || (isTransitioning && (isFullscreen || prevFullscreenRef.current))
   const chromeVisible = bottomVisible
   // Theater UI stays mounted during the 300ms transition to fade out smoothly with zero cuts
@@ -2745,6 +2750,15 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
                     >
                       {video.title}
                     </p>
+                    <button
+                      type="button"
+                      onClick={handleTogglePiP}
+                      title="Pop out to Picture-in-Picture (float over other apps)"
+                      aria-label="Float over other apps"
+                      className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-white/10 text-white/80 backdrop-blur-md transition-colors hover:bg-primary hover:text-white"
+                    >
+                      <PictureInPicture2 size={12} />
+                    </button>
                     <button
                       type="button"
                       onClick={handleExpandFromMini}
@@ -3265,9 +3279,19 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
                 </button>
                 <button
                   type="button"
+                  onClick={handleTogglePiP}
+                  aria-label={isPiPActive ? "Exit Picture-in-Picture (p)" : "Picture-in-Picture — float over other apps (p)"}
+                  title="Picture-in-Picture (p) — float over other apps while you multitask"
+                  tabIndex={bottomVisible ? 0 : -1}
+                  className={`p-2 transition-colors ${isPiPActive ? 'text-primary' : 'text-white/80 hover:text-white'}`}
+                >
+                  <PictureInPicture2 size={18} />
+                </button>
+                <button
+                  type="button"
                   onClick={toggleMinimize}
-                  aria-label="Mini player — dock to corner"
-                  title="Mini player — dock video to the corner and keep browsing"
+                  aria-label="Mini player — dock to corner (i)"
+                  title="Mini player (i) — dock video to the corner and keep browsing MyCinema"
                   tabIndex={bottomVisible ? 0 : -1}
                   className="p-2 text-white/80 transition-colors hover:text-white"
                 >

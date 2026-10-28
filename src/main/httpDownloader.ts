@@ -202,11 +202,26 @@ async function runDownloadStream(item: HttpDownloadItem, redirectCount = 0): Pro
         return
       }
 
-      // Check Content-Length
+      // Parse Content-Range / Content-Length to determine the true authoritative total size of the file
+      const contentRange = res.headers['content-range']
       const contentLength = res.headers['content-length']
-      if (contentLength && !item.totalBytes) {
-        const total = parseInt(contentLength, 10)
-        item.totalBytes = item.downloadedBytes > 0 ? existingOrSum(item.downloadedBytes, total, res.statusCode) : total
+      if (contentRange) {
+        const match = contentRange.match(/\/(\d+)$/)
+        if (match) {
+          const totalFromRange = parseInt(match[1], 10)
+          if (Number.isFinite(totalFromRange) && totalFromRange > 0) {
+            item.totalBytes = totalFromRange
+          }
+        }
+      } else if (contentLength) {
+        const parsedLen = parseInt(contentLength, 10)
+        if (Number.isFinite(parsedLen) && parsedLen > 0) {
+          if (res.statusCode === 206 && item.downloadedBytes > 0) {
+            item.totalBytes = item.downloadedBytes + parsedLen
+          } else {
+            item.totalBytes = parsedLen
+          }
+        }
       }
 
       // If server does not support range and returned 200 instead of 206, reset offset
@@ -222,6 +237,9 @@ async function runDownloadStream(item: HttpDownloadItem, redirectCount = 0): Pro
 
       res.on('data', (chunk: Buffer) => {
         item.downloadedBytes += chunk.length
+        if (item.totalBytes > 0 && item.downloadedBytes > item.totalBytes) {
+          item.totalBytes = item.downloadedBytes
+        }
       })
 
       res.pipe(fileStream)
@@ -255,6 +273,9 @@ async function runDownloadStream(item: HttpDownloadItem, redirectCount = 0): Pro
               console.warn('[HttpDownloader] Rename error, keeping .part:', err)
             }
 
+            if (item.downloadedBytes > 0) {
+              item.totalBytes = Math.max(item.totalBytes, item.downloadedBytes)
+            }
             item.status = 'done'
             item.speed = 0
             item.timeRemaining = 0
@@ -325,7 +346,16 @@ function calculateSpeedAndEta(item: HttpDownloadItem): void {
 
 function notifyProgress(item: HttpDownloadItem, status: string, errorMessage?: string): void {
   if (!progressBroadcaster) return
-  const progressRatio = item.totalBytes > 0 ? item.downloadedBytes / item.totalBytes : 0
+  if (item.downloadedBytes > item.totalBytes && item.totalBytes > 0) {
+    item.totalBytes = item.downloadedBytes
+  }
+  const total = Math.max(item.totalBytes, item.downloadedBytes)
+  let progressRatio = 0
+  if (status === 'done') {
+    progressRatio = 1
+  } else if (total > 0) {
+    progressRatio = Math.min(0.999, Math.max(0, item.downloadedBytes / total))
+  }
 
   progressBroadcaster(
     item.id,
@@ -333,7 +363,7 @@ function notifyProgress(item: HttpDownloadItem, status: string, errorMessage?: s
       progress: progressRatio,
       downloadSpeed: item.status === 'paused' || item.status === 'done' ? 0 : item.speed,
       timeRemaining: item.timeRemaining,
-      length: item.totalBytes,
+      length: total,
       downloaded: item.downloadedBytes,
       name: item.fileName,
       path: item.savePath,

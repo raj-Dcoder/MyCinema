@@ -370,7 +370,20 @@ const App: React.FC = () => {
     const refreshDownloads = () => {
       window.api.getActiveDownloads()
         .then((downloads: ActiveDownload[]) => {
-          if (!cancelled) setActiveDownloads(downloads || [])
+          if (!cancelled && Array.isArray(downloads)) {
+            setActiveDownloads(prev => {
+              const prevMap = new Map(prev.map(p => [p.id, p]))
+              return downloads.map(d => {
+                const existing = prevMap.get(d.id)
+                const rawProgress = typeof d.progress === 'number' ? d.progress : Number(d.progress || 0)
+                const clamped = Math.max(0, Math.min(d.status === 'done' ? 100 : 99.9, rawProgress))
+                const smoothProgress = (d.status === 'downloading' || d.status === 'connecting') && existing
+                  ? Math.max(existing.progress || 0, clamped)
+                  : clamped
+                return { ...d, progress: smoothProgress }
+              })
+            })
+          }
         })
         .catch(err => console.error('[DownloadsTray] Failed to load downloads:', err))
     }
@@ -380,11 +393,17 @@ const App: React.FC = () => {
     const cleanup = window.api.onTorrentProgress((data: ActiveDownload) => {
       if (!data?.id) return
       setActiveDownloads(prev => {
+        const rawProgress = typeof data.progress === 'number' ? data.progress : Number(data.progress || 0)
+        const clamped = Math.max(0, Math.min(data.status === 'done' ? 100 : 99.9, rawProgress))
         const index = prev.findIndex(download => download.id === data.id)
-        if (index === -1) return [data, ...prev]
+        if (index === -1) return [{ ...data, progress: clamped }, ...prev]
         const current = prev[index]
+        const smoothProgress = (data.status === 'downloading' || data.status === 'connecting')
+          ? Math.max(current.progress || 0, clamped)
+          : clamped
+
         const currentPct = Math.round(current.progress || 0)
-        const nextPct = Math.round(data.progress || 0)
+        const nextPct = Math.round(smoothProgress)
         if (
           currentPct === nextPct &&
           current.status === data.status &&
@@ -394,7 +413,7 @@ const App: React.FC = () => {
           return prev
         }
         const next = [...prev]
-        next[index] = { ...next[index], ...data }
+        next[index] = { ...next[index], ...data, progress: smoothProgress }
         return next
       })
     })
@@ -757,7 +776,7 @@ const App: React.FC = () => {
 
   return (
     <div
-      className={`flex h-screen bg-background text-text font-sans overflow-hidden ${theme === 'light' ? 'light' : theme === 'glass-light' ? 'light glass-light' : theme === 'glass' ? 'dark glass' : 'dark'}`}
+      className={`flex h-screen bg-background text-text font-sans overflow-hidden ${theme === 'light' ? 'light' : 'dark'}`}
       onClick={handleAppSurfaceClick}
     >
       <WindowControls />

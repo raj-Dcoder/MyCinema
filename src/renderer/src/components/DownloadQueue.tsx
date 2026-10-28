@@ -715,7 +715,7 @@ export const DownloadQueue: React.FC<DownloadQueueProps> = ({
                   <div className="mt-2.5 flex items-center gap-3">
                     <div className="download-queue-progress-track flex-1 h-2 bg-white/10 rounded-full overflow-hidden">
                       <div
-                        className={`h-full rounded-full transition-all duration-300 ${
+                        className={`h-full rounded-full transition-[width] duration-300 ease-out ${
                           isDone ? 'bg-emerald-400' :
                           isError ? 'bg-red-400' :
                           isConnecting ? 'bg-amber-400' :
@@ -727,7 +727,7 @@ export const DownloadQueue: React.FC<DownloadQueueProps> = ({
                       />
                     </div>
                     <span className="download-queue-percent text-[11px] font-semibold text-white/50 w-9 text-right tabular-nums">
-                      {Math.round(dl.progress || 0)}%
+                      {Math.max(0, Math.min(100, Math.round(dl.progress || 0)))}%
                     </span>
                   </div>
                 )}

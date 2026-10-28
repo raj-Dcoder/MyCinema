@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react'
-import { FolderOpen, Trash2, Plus, HardDrive, AlertTriangle, Check, X as CloseIcon, Maximize2, Download, Upload, Image as ImageIcon, Subtitles, Wifi, Bell, Compass, RotateCcw, Layers, Sun, Moon, Sparkles } from 'lucide-react'
+import { FolderOpen, Trash2, Plus, HardDrive, AlertTriangle, Check, X as CloseIcon, Maximize2, Download, Upload, Image as ImageIcon, Subtitles, Wifi, Bell, Compass, RotateCcw, Layers, Sun, Moon } from 'lucide-react'
 import ProfilePictureModal from '../components/ProfilePictureModal'
 import { normalizeProfileImage, resolveProfileImageUrl } from '../utils/profileImage'
 import { SUBTITLE_STYLE_KEY, SUBTITLE_FONT_SIZE_KEY, SUBTITLE_POSITION_KEY, type SubtitleStyle } from '../components/player/SubtitleOverlay'
@@ -601,10 +601,6 @@ const Settings: React.FC = () => {
               <div className={iconBoxClass}>
                 {theme === 'light' ? (
                   <Sun size={17} />
-                ) : theme === 'glass-light' ? (
-                  <Sparkles size={17} />
-                ) : theme === 'glass' ? (
-                  <Layers size={17} />
                 ) : (
                   <Moon size={17} />
                 )}
@@ -614,11 +610,7 @@ const Settings: React.FC = () => {
                 <p className="mt-0.5 text-[11px] font-medium leading-4 text-white/35">
                   {theme === 'light'
                     ? 'Warm paper light theme — soft, calm and easy on the eyes.'
-                    : theme === 'glass'
-                      ? 'Dark liquid glass — deep obsidian canvas with frosted specular blur.'
-                      : theme === 'glass-light'
-                        ? 'Light crystal glass — luminous translucent acrylic with vibrant refraction.'
-                        : 'Deep cinematic dark theme — the classic MyCinema look.'}
+                    : 'Deep cinematic dark theme — the classic MyCinema look.'}
                 </p>
               </div>
             </div>
@@ -643,28 +635,6 @@ const Settings: React.FC = () => {
               >
                 <Sun size={13} />
                 Light
-              </button>
-              <button
-                type="button"
-                data-kind="glass"
-                data-active={theme === 'glass'}
-                onClick={() => setTheme('glass')}
-                aria-pressed={theme === 'glass'}
-                title="Apple-style Dark Frosted Glass"
-              >
-                <Layers size={13} />
-                Dark Glass
-              </button>
-              <button
-                type="button"
-                data-kind="glass-light"
-                data-active={theme === 'glass-light'}
-                onClick={() => setTheme('glass-light')}
-                aria-pressed={theme === 'glass-light'}
-                title="Apple-style Light Frosted Crystal"
-              >
-                <Sparkles size={13} />
-                Light Glass
               </button>
             </div>
           </div>

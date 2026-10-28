@@ -17,6 +17,7 @@ interface HomeProps {
 }
 
 const TRENDING_RAIL_LIMIT = 10
+const HERO_CAROUSEL_LIMIT = 10
 const POSTER_RAIL_CARD_CLASS = 'basis-[calc((100%_-_1.25rem)/2)] flex-shrink-0 md:basis-[calc((100%_-_3.75rem)/4)] lg:basis-[calc((100%_-_6.25rem)/6)]'
 const HOME_SNAPSHOT_STORAGE_KEY = 'mycinema_home_snapshot_v2'
 
@@ -209,6 +210,18 @@ const isContinueWatchingTitle = (video: Video) => {
   return video.type === 'movie'
 }
 
+const parseTimestamp = (val?: string | number | null): number => {
+  if (!val) return 0
+  if (typeof val === 'number') return Number.isFinite(val) ? val : 0
+  let str = String(val).trim()
+  if (!str) return 0
+  if (/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(str)) {
+    str = str.replace(' ', 'T') + 'Z'
+  }
+  const t = new Date(str).getTime()
+  return Number.isFinite(t) ? t : 0
+}
+
 const getEpisodeLabel = (video: Video) => {
   if (video.type !== 'series') return null
   if (video.season && video.episode) return `S${video.season} E${video.episode}`
@@ -226,10 +239,17 @@ const groupContinueWatching = (videos: Video[]) => {
       continue
     }
 
-    const key = video.series_name.toLowerCase()
+    const key = video.tmdb_id ? `tmdb:${video.tmdb_id}` : video.series_name.trim().toLowerCase()
     if (seenSeries.has(key)) continue
 
-    grouped.push(video)
+    const isNext = (Number(video.last_watched_time) || 0) === 0
+    grouped.push({
+      ...video,
+      isNextEpisode: isNext,
+      tagline: isNext && !video.tagline
+        ? (video.title && video.title !== video.series_name ? `Up next · ${video.title}` : (getEpisodeLabel(video) ? `Up next · ${getEpisodeLabel(video)}` : video.tagline))
+        : video.tagline
+    })
     seenSeries.add(key)
   }
 
@@ -275,12 +295,16 @@ const ContinueWatchingCard: React.FC<{
               {episodeLabel}
             </div>
           )}
-          {video.isOnlineResume && (
+          {video.isOnlineResume ? (
             <div className="inline-flex items-center gap-1 rounded-md bg-sky-500/80 px-2 py-1 text-[9px] font-black uppercase tracking-widest text-white shadow-lg shadow-black/30 backdrop-blur-md">
               <Cloud size={10} />
-              {video.onlineNewEpisode ? 'New Episode' : video.onlineNextEpisode ? 'Up Next · Online' : 'Online'}
+              {video.onlineNewEpisode ? 'New Episode' : (video.onlineNextEpisode || video.isNextEpisode) ? 'Up Next · Online' : 'Online'}
             </div>
-          )}
+          ) : video.isNextEpisode ? (
+            <div className="inline-flex items-center gap-1 rounded-md bg-indigo-600/85 px-2 py-1 text-[9px] font-black uppercase tracking-widest text-white shadow-lg shadow-black/30 backdrop-blur-md">
+              Next Episode
+            </div>
+          ) : null}
         </div>
 
         <div className="space-y-2">
@@ -308,7 +332,7 @@ const ContinueWatchingCard: React.FC<{
             ) : (
               <>
                 <Play fill="white" size={15} />
-                {(video.last_watched_time || 0) > 0 ? 'Resume' : video.onlineNextEpisode ? `Play ${formatSeasonEpisode(video.season, video.episode)}` : 'Resume'}
+                {(video.last_watched_time || 0) > 0 ? 'Resume' : (video.onlineNextEpisode || video.isNextEpisode) ? `Play ${formatSeasonEpisode(video.season, video.episode)}` : 'Play Now'}
               </>
             )}
           </button>
@@ -593,7 +617,7 @@ const Home: React.FC<HomeProps> = ({ onPlay, onShowDetail, onNavigate, refreshKe
       // same TMDB title exists locally, the local row wins and online hides).
       const TEN_DAYS_MS = 10 * 24 * 3600 * 1000
       const isFresh = (ts?: string | null) => (
-        Date.now() - new Date(ts || 0).getTime() < TEN_DAYS_MS
+        Date.now() - parseTimestamp(ts) < TEN_DAYS_MS
       )
       const localKeys = new Set(
         (cw as Video[]).filter(v => v.tmdb_id).map(v => (
@@ -654,6 +678,7 @@ const Home: React.FC<HomeProps> = ({ onPlay, onShowDetail, onNavigate, refreshKe
       )
       const merged = [...groupContinueWatching(cw), ...onlineMovies, ...onlineSeriesCards, ...resurfacedCards]
         .sort((a, b) => {
+          // Priority 1: Brand new episode drops (unseen releases)
           const aDrop = a.onlineNewEpisode ? 1 : 0
           const bDrop = b.onlineNewEpisode ? 1 : 0
           if (aDrop !== bDrop) return bDrop - aDrop
@@ -662,9 +687,15 @@ const Home: React.FC<HomeProps> = ({ onPlay, onShowDetail, onNavigate, refreshKe
             const bAt = (b.tmdb_id && dropDetectedAt.get(Number(b.tmdb_id))) || 0
             if (aAt !== bAt) return bAt - aAt
           }
-          return new Date(b.updated_at || 0).getTime() - new Date(a.updated_at || 0).getTime()
+
+          // Priority 2: Recency of user interaction (most recently watched, resumed, or queued next episode)
+          const aTime = parseTimestamp(a.updated_at)
+          const bTime = parseTimestamp(b.updated_at)
+          if (aTime !== bTime) return bTime - aTime
+
+          return (b.id || 0) - (a.id || 0)
         })
-        .slice(0, 5)
+        .slice(0, HERO_CAROUSEL_LIMIT)
       setContinueWatching(merged)
 
       const moviesOnly = allVideos.filter(v => v.type === 'movie')

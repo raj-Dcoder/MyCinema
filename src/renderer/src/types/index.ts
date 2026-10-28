@@ -49,6 +49,7 @@ export interface Video {
   isOnlineResume?: boolean
   // #2: card points at the computed next episode (unwatched) rather than a
   // partially-watched one.
+  isNextEpisode?: boolean
   onlineNextEpisode?: boolean
   // #3: that next episode dropped since the user last caught up.
   onlineNewEpisode?: boolean

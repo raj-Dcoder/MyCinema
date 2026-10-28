@@ -857,11 +857,19 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
             (data.title && normalizedDisplayTitle && normalizeMatchText(data.title).includes(normalizedDisplayTitle))
           )
           if (!isRelevant) return prev
-          return [data, ...prev]
+          const rawProgress = typeof data.progress === 'number' ? data.progress : Number(data.progress || 0)
+          const clamped = Math.max(0, Math.min(data.status === 'done' ? 100 : 99.9, rawProgress))
+          return [{ ...data, progress: clamped }, ...prev]
         }
         const current = prev[index]
+        const rawProgress = typeof data.progress === 'number' ? data.progress : Number(data.progress || 0)
+        const clamped = Math.max(0, Math.min(data.status === 'done' ? 100 : 99.9, rawProgress))
+        const smoothProgress = (data.status === 'downloading' || data.status === 'connecting')
+          ? Math.max(current.progress || 0, clamped)
+          : clamped
+
         const currentPct = Math.round(current.progress || 0)
-        const nextPct = Math.round(data.progress || 0)
+        const nextPct = Math.round(smoothProgress)
         if (
           currentPct === nextPct &&
           current.status === data.status &&
@@ -871,7 +879,7 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
           return prev
         }
         const next = [...prev]
-        next[index] = { ...next[index], ...data }
+        next[index] = { ...next[index], ...data, progress: smoothProgress }
         return next
       })
     })

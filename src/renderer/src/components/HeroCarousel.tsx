@@ -156,9 +156,10 @@ const HeroCarousel: React.FC<HeroCarouselProps> = ({ items, onPlay, onShowDetail
   const episodeTag = current.season && current.episode
     ? `S${current.season} E${current.episode}`
     : null
+  const isNext = Boolean(current.onlineNextEpisode || current.isNextEpisode)
   const actionLabel = current.onlineNewEpisode && episodeTag
     ? `Watch ${episodeTag}`
-    : current.onlineNextEpisode && episodeTag
+    : isNext && episodeTag
       ? `Play ${episodeTag}`
       : progressPercent > 0 ? 'Resume' : 'Play Now'
   const mediaLabel = current.type === 'series'
@@ -259,11 +260,11 @@ const HeroCarousel: React.FC<HeroCarouselProps> = ({ items, onPlay, onShowDetail
         )}
 
         {/* Status badges */}
-        {current.isOnlineResume && (
+        {(current.isOnlineResume || current.isNextEpisode || current.onlineNextEpisode || current.onlineNewEpisode) && (
           <div className="flex flex-wrap items-center gap-2.5 animate-in fade-in slide-in-from-left-12 duration-700 delay-150">
             {current.onlineNewEpisode && <NewEpisodeBadge />}
-            {current.onlineNextEpisode && !current.onlineNewEpisode && <NextEpisodeBadge />}
-            <OnlineBadge />
+            {(current.isNextEpisode || current.onlineNextEpisode) && !current.onlineNewEpisode && <NextEpisodeBadge />}
+            {current.isOnlineResume && <OnlineBadge />}
           </div>
         )}
 
@@ -278,7 +279,7 @@ const HeroCarousel: React.FC<HeroCarouselProps> = ({ items, onPlay, onShowDetail
           {current.vote_average ? (
             <>
               <span className="hero-meta-dot w-1 h-1 bg-white/30 rounded-full" />
-              <span className="inline-flex items-center gap-1 text-amber-400 font-black">
+              <span className="hero-meta-rating inline-flex items-center gap-1 text-amber-400 font-black">
                 ★ {current.vote_average.toFixed(1)}
               </span>
             </>
@@ -286,7 +287,7 @@ const HeroCarousel: React.FC<HeroCarouselProps> = ({ items, onPlay, onShowDetail
           {progressPercent > 0 && (
             <>
               <span className="hero-meta-dot w-1 h-1 bg-white/30 rounded-full" />
-              <span className="uppercase tracking-widest text-red-400 font-black">{Math.round(progressPercent)}% watched</span>
+              <span className="hero-meta-progress uppercase tracking-widest text-red-400 font-black">{Math.round(progressPercent)}% watched</span>
             </>
           )}
         </div>
@@ -332,10 +333,17 @@ const HeroCarousel: React.FC<HeroCarouselProps> = ({ items, onPlay, onShowDetail
         </button>
         <div className="flex gap-2 items-center">
           {items.map((_, idx) => (
-            <div
+            <button
               key={idx}
-              className={`h-1.5 rounded-full transition-all duration-500 ${
-                idx === currentIndex ? 'w-8 bg-red-600' : 'hero-nav-dot w-1.5 bg-white/30'
+              type="button"
+              aria-label={`Go to slide ${idx + 1}`}
+              onClick={(e) => {
+                e.stopPropagation()
+                setIsAutoPlaying(false)
+                setCurrentIndex(idx)
+              }}
+              className={`h-1.5 rounded-full transition-all duration-500 cursor-pointer ${
+                idx === currentIndex ? 'w-8 bg-red-600' : 'hero-nav-dot w-1.5 bg-white/30 hover:bg-white/60 hover:scale-125'
               }`}
             />
           ))}

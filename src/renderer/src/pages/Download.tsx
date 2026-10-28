@@ -398,11 +398,16 @@ const Download: React.FC<DownloadProps> = ({ onPlay, onShowDetail }) => {
       }
       
       setDownloads(prev => {
+        const rawProgress = typeof data.progress === 'number' ? data.progress : Number(data.progress || 0)
+        const clamped = Math.max(0, Math.min(data.status === 'done' ? 100 : 99.9, rawProgress))
         const existing = prev.find(d => d.id === data.id)
         if (existing) {
-          return prev.map(d => d.id === data.id ? { ...d, ...data } : d)
+          const smoothProgress = (data.status === 'downloading' || data.status === 'connecting')
+            ? Math.max(existing.progress || 0, clamped)
+            : clamped
+          return prev.map(d => d.id === data.id ? { ...d, ...data, progress: smoothProgress } : d)
         }
-        return [...prev, data]
+        return [...prev, { ...data, progress: clamped }]
       })
     })
 
@@ -420,13 +425,23 @@ const Download: React.FC<DownloadProps> = ({ onPlay, onShowDetail }) => {
           const next = [...filtered]
           active.forEach(a => {
             if (removedIdsRef.current.has(a.id)) return
+            const rawProgress = typeof a.progress === 'number' ? a.progress : Number(a.progress || 0)
+            const clamped = Math.max(0, Math.min(a.status === 'done' ? 100 : 99.9, rawProgress))
+
             const index = next.findIndex(d => d.id === a.id)
             if (index === -1) {
-              next.push(a)
+              next.push({ ...a, progress: clamped })
               changed = true
-            } else if (next[index].status !== a.status || next[index].progress !== a.progress) {
-              next[index] = { ...next[index], ...a }
-              changed = true
+            } else {
+              const cur = next[index]
+              const smoothProgress = (a.status === 'downloading' || a.status === 'connecting')
+                ? Math.max(cur.progress || 0, clamped)
+                : clamped
+
+              if (cur.status !== a.status || cur.progress !== smoothProgress || cur.downloadSpeed !== a.downloadSpeed) {
+                next[index] = { ...cur, ...a, progress: smoothProgress }
+                changed = true
+              }
             }
           })
           return changed ? next : prev

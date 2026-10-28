@@ -5,7 +5,7 @@ import { AudioBoostProfile, AudioBoostIntensity, AUDIO_BOOST_PROFILES, AUDIO_BOO
 import {
   SkipForward as SkipNext, Loader2, Rewind, Pause, Play, FastForward, Volume2, ListVideo, FolderOpen,
   Users, Info, Crop, RectangleHorizontal, Monitor, Sparkles, Zap, Wand2, PictureInPicture2,
-  Minimize, Maximize, SquareArrowDownRight, Clock, Activity, Magnet
+  Minimize, Maximize, Clock, Activity, Magnet
 } from 'lucide-react'
 
 export interface PlayerControlsProps {
@@ -79,8 +79,6 @@ export interface PlayerControlsProps {
   changeSpeed: (rate: number) => void
   togglePictureInPicture: () => void
   toggleFullscreen: () => void
-  toggleMinimize?: () => void
-  isMinimized?: boolean
 
   setSleepTimerEnd: (time: number | null) => void
   setShowStats: (show: boolean) => void
@@ -165,8 +163,6 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
   changeSpeed,
   togglePictureInPicture,
   toggleFullscreen,
-  toggleMinimize,
-  isMinimized,
   setSleepTimerEnd,
   setShowStats
 }) => {
@@ -427,7 +423,7 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
 
             {showSleepMenu && (
               <div 
-                className="absolute bottom-full right-0 mb-6 bg-[#111111]/90 backdrop-blur-2xl rounded-2xl shadow-[0_20px_50px_rgba(0,0,0,0.6)] border border-white/10 overflow-hidden z-50 animate-in fade-in slide-in-from-bottom-2 duration-300 w-[240px]"
+                className="absolute bottom-full right-0 mb-6 bg-[#111111]/90 backdrop-blur-2xl rounded-2xl shadow-[0_20px_50px_rgba(0,0,0,0.6)] border border-white/10 player-menu-popup overflow-hidden z-50 animate-in fade-in slide-in-from-bottom-2 duration-300 w-[240px]"
                 onClick={(e) => e.stopPropagation()}
               >
                 <div className="px-4 py-3 border-b border-white/5 bg-white/[0.02]">
@@ -507,7 +503,7 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
           <div className="relative flex items-center">
             {showAdvancedMenu && (
               <div 
-                className="absolute bottom-full right-0 mb-6 bg-[#111111]/90 backdrop-blur-2xl rounded-2xl shadow-[0_20px_50px_rgba(0,0,0,0.6)] border border-white/10 overflow-hidden z-50 animate-in fade-in slide-in-from-bottom-2 duration-300 w-[280px]"
+                className="absolute bottom-full right-0 mb-6 bg-[#111111]/90 backdrop-blur-2xl rounded-2xl shadow-[0_20px_50px_rgba(0,0,0,0.6)] border border-white/10 player-menu-popup overflow-hidden z-50 animate-in fade-in slide-in-from-bottom-2 duration-300 w-[280px]"
                 onClick={(e) => e.stopPropagation()}
               >
                 <div className="px-4 py-3 border-b border-white/5 bg-white/[0.02]">
@@ -720,14 +716,19 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
           </div>
           <div className="relative flex items-center">
             {showSpeedMenu && (
-              <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-6 bg-gray-900 rounded-lg shadow-xl border border-gray-700 overflow-hidden min-w-[120px] z-50">
-                <div className="px-3 py-2 bg-gray-800 text-[10px] font-bold text-gray-400 uppercase tracking-wider border-b border-gray-700">Speed</div>
-                <div className="max-h-56 overflow-y-auto custom-scrollbar flex flex-col">
+              <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-6 bg-[#111111]/90 backdrop-blur-2xl rounded-2xl shadow-[0_20px_50px_rgba(0,0,0,0.6)] border border-white/10 player-menu-popup overflow-hidden min-w-[140px] z-50 animate-in fade-in slide-in-from-bottom-2 duration-300">
+                <div className="px-4 py-3 border-b border-white/5 bg-white/[0.02]">
+                  <div className="flex items-center space-x-2">
+                    <FastForward size={14} className="text-primary" />
+                    <h3 className="text-[10px] font-black text-white uppercase tracking-[0.2em]">Speed</h3>
+                  </div>
+                </div>
+                <div className="p-1.5 max-h-56 overflow-y-auto custom-scrollbar flex flex-col space-y-0.5">
                   {[0.5, 0.75, 1, 1.25, 1.5, 1.75, 2, 2.25, 2.5, 3, 3.5, 4, 4.5, 5].map((rate) => (
                     <button
                       key={rate}
                       onClick={(e) => { e.stopPropagation(); changeSpeed(rate); }}
-                      className={`w-full text-left px-4 py-2.5 text-sm transition-colors hover:bg-gray-800 border-b border-gray-800/50 last:border-0 ${playbackRate === rate ? 'text-primary font-medium bg-primary/10' : 'text-gray-300'}`}
+                      className={`w-full text-left px-3 py-2 rounded-xl text-[12px] font-bold transition-all duration-200 ${playbackRate === rate ? 'bg-primary/15 text-primary' : 'text-white/60 hover:bg-white/5 hover:text-white'}`}
                     >
                       {rate === 1 ? 'Normal' : `${rate}x`}
                     </button>
@@ -757,16 +758,6 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
           >
             <PictureInPicture2 size={24} />
           </button>
-
-          {toggleMinimize && (
-            <button
-              onClick={(e) => { e.stopPropagation(); toggleMinimize(); }}
-              className={`transition-colors ${isMinimized ? 'text-primary' : 'text-white hover:text-primary'}`}
-              title={isMinimized ? 'Expand mini player' : 'Mini player — dock video to the corner and keep browsing'}
-            >
-              <SquareArrowDownRight size={22} />
-            </button>
-          )}
 
           <button onClick={(e) => { e.stopPropagation(); toggleFullscreen(); }} className="text-white hover:text-primary transition-colors" title={isAnyFullscreen ? "Exit Fullscreen" : "Fullscreen"}>
             {isAnyFullscreen ? <Minimize size={24} /> : <Maximize size={24} />}

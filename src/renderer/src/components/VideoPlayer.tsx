@@ -743,11 +743,8 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
   const seekBarWheelAccumRef = useRef(0)
   const seekBarWheelResetTimerRef = useRef<NodeJS.Timeout | null>(null)
   const [videoAspectRatio, setVideoAspectRatio] = useState(16 / 9)
-  // Video element fullscreen only — the app window mode must not drive the
-  // icon, otherwise the button shows "exit" while windowed just because the
-  // app launched fullscreen. isWindowFullscreen is still tracked below for
-  // diagnostics but no longer affects the player chrome.
-  const isAnyFullscreen = isFullscreen
+  // Tracks whether either the video element or the native window is currently fullscreen
+  const isAnyFullscreen = isFullscreen || isWindowFullscreen
   const forceRestartRef = useRef(false)
   const startupPlaybackTokenRef = useRef(0)
   const startupPlaybackPendingRef = useRef(true)
@@ -4847,29 +4844,35 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
     fullscreenToggleInFlightRef.current = true
 
     try {
-      // VIDEO-ONLY: the app window fullscreen is a separate layer and must
-      // never be toggled here. The app often runs window-fullscreen; the
-      // video element fullscreen stacks on top of it and exits back to it.
-      if (document.fullscreenElement) {
-        await document.exitFullscreen().catch(() => {})
+      const activeWindowFs = isWindowFullscreen || (await window.api.isFullscreen().catch(() => false))
+      const activeElementFs = !!document.fullscreenElement
+      const currentlyFullscreen = activeElementFs || activeWindowFs
 
+      if (currentlyFullscreen) {
+        if (activeElementFs) {
+          try { await document.exitFullscreen() } catch { /* ignore */ }
+        }
+        if (activeWindowFs) {
+          try {
+            const nextState = await window.api.toggleFullscreen()
+            setIsWindowFullscreen(nextState)
+          } catch { /* ignore */ }
+        }
         setShowControls(true)
         clearTimeout(window.controlsTimeout)
         window.controlsTimeout = setTimeout(() => setShowControls(false), 3000)
         setFullscreenPopup(previous => ({ show: true, isFullscreen: false, id: previous.id + 1 }))
-        return
-      }
-
-      try {
-        await playerShellRef.current?.requestFullscreen()
-      } catch {
-        // Last-resort fallback only when element fullscreen is unavailable.
+      } else {
         try {
           const nextState = await window.api.toggleFullscreen()
           setIsWindowFullscreen(nextState)
-        } catch { /* ignore */ }
+        } catch {
+          try {
+            await playerShellRef.current?.requestFullscreen()
+          } catch { /* ignore */ }
+        }
+        setFullscreenPopup(previous => ({ show: true, isFullscreen: true, id: previous.id + 1 }))
       }
-      setFullscreenPopup(previous => ({ show: true, isFullscreen: true, id: previous.id + 1 }))
     } catch (err) {
       console.error('Fullscreen toggle failed:', err)
     } finally {
@@ -5885,7 +5888,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
               {/* The Unified Popup Menu */}
               {showMediaMenu && (
                 <div 
-                  className="absolute top-full right-0 mt-3 bg-[#111111]/90 backdrop-blur-2xl rounded-2xl shadow-[0_20px_50px_rgba(0,0,0,0.6)] border border-white/10 overflow-hidden z-50 animate-in fade-in slide-in-from-top-2 duration-300"
+                  className="absolute top-full right-0 mt-3 bg-[#111111]/90 backdrop-blur-2xl rounded-2xl shadow-[0_20px_50px_rgba(0,0,0,0.6)] border border-white/10 player-menu-popup overflow-hidden z-50 animate-in fade-in slide-in-from-top-2 duration-300"
                   style={{ width: '400px' }}
                   onClick={(e) => e.stopPropagation()}
                 >
@@ -6287,8 +6290,6 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
         changeSpeed={changeSpeed}
         togglePictureInPicture={togglePictureInPicture}
         toggleFullscreen={toggleFullscreen}
-        toggleMinimize={toggleMinimize}
-        isMinimized={isMinimized}
         setSleepTimerEnd={setSleepTimerEnd}
         setShowStats={setShowStats}
       />

@@ -814,9 +814,8 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
         cmd('setPlaybackQualityRange', ['auto', 'auto'])
         cmd('setPlaybackQuality', ['auto'])
       } else {
-        const minQuality = (prefId === 'hd1080' || prefId === 'hd1440' || prefId === 'hd2160') ? 'hd720' : 'large'
         cmd('setPlaybackQuality', [prefId])
-        cmd('setPlaybackQualityRange', [minQuality, prefId])
+        cmd('setPlaybackQualityRange', ['auto', prefId])
       }
     })
     window.api?.ftSetFrameQuality?.(prefId)
@@ -1255,9 +1254,8 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
         // Assert preferred quality if configured
         const targetPref = qualityPrefRef.current
         if (targetPref && targetPref !== 'auto') {
-          const minQuality = (targetPref === 'hd1080' || targetPref === 'hd1440' || targetPref === 'hd2160') ? 'hd720' : 'large'
           send('setPlaybackQuality', [targetPref])
-          send('setPlaybackQualityRange', [minQuality, targetPref])
+          send('setPlaybackQualityRange', ['auto', targetPref])
           window.api?.ftSetFrameQuality?.(targetPref).catch(() => {})
         }
         send('getPlaybackQuality', [])
@@ -1297,21 +1295,6 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
           // Re-assert preferred playback rate on active playback start
           if (speedRef.current !== 1) {
             send('setPlaybackRate', [speedRef.current])
-          }
-          // Re-assert target quality preference on active playback start
-          const targetPref = qualityPrefRef.current
-          if (targetPref && targetPref !== 'auto') {
-            const minQuality = (targetPref === 'hd1080' || targetPref === 'hd1440' || targetPref === 'hd2160') ? 'hd720' : 'large'
-            send('setPlaybackQuality', [targetPref])
-            send('setPlaybackQualityRange', [minQuality, targetPref])
-            window.api?.ftSetFrameQuality?.(targetPref).catch(() => {})
-            window.setTimeout(() => {
-              send('setPlaybackQuality', [targetPref])
-              send('setPlaybackQualityRange', [minQuality, targetPref])
-              window.api?.ftSetFrameQuality?.(targetPref).catch(() => {})
-              send('getPlaybackQuality', [])
-              send('getAvailableQualityLevels', [])
-            }, 600)
           }
           send('getAvailableQualityLevels', [])
           window.api?.ftGetFrameQuality?.()?.then((res) => {

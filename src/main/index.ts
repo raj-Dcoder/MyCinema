@@ -451,18 +451,41 @@ function openYouTubeAuthWindow(parent: BrowserWindow, url: string): void {
 }
 
 function setupYoutubeEmbedHeaders(): void {
+  try {
+    const defaultUa = session.defaultSession.getUserAgent()
+    const cleanUa = defaultUa.replace(/Electron\/\S+\s*/gi, '').replace(/MyCinema\/\S+\s*/gi, '').trim()
+    session.defaultSession.setUserAgent(cleanUa)
+  } catch (err) {
+    console.warn('[YouTube] Failed to clean default session user-agent:', err)
+  }
+
   const filter = {
     urls: [
-      'https://www.youtube.com/embed/*',
-      'https://www.youtube-nocookie.com/embed/*'
+      '*://*.youtube.com/*',
+      '*://*.youtube-nocookie.com/*',
+      '*://*.googlevideo.com/*'
     ]
   }
 
   session.defaultSession.webRequest.onBeforeSendHeaders(filter, (details, callback) => {
-    const requestHeaders = {
-      ...details.requestHeaders,
-      Referer: `${YOUTUBE_EMBED_ORIGIN}/`,
-      Origin: YOUTUBE_EMBED_ORIGIN
+    const requestHeaders = { ...details.requestHeaders }
+
+    // Strip Electron & MyCinema tokens so Google's edge CDN never throttles video streaming chunks
+    if (requestHeaders['User-Agent']) {
+      requestHeaders['User-Agent'] = requestHeaders['User-Agent']
+        .replace(/Electron\/\S+\s*/gi, '')
+        .replace(/MyCinema\/\S+\s*/gi, '')
+        .trim()
+    }
+
+    if (requestHeaders['sec-ch-ua']) {
+      requestHeaders['sec-ch-ua'] = requestHeaders['sec-ch-ua']
+        .replace(/"Electron";v="[^"]*",?\s*/gi, '')
+    }
+
+    if (details.url.includes('/embed/')) {
+      requestHeaders['Referer'] = `${YOUTUBE_EMBED_ORIGIN}/`
+      requestHeaders['Origin'] = YOUTUBE_EMBED_ORIGIN
     }
 
     callback({ requestHeaders })
@@ -1530,15 +1553,21 @@ function registerAudioProtocol(): void {
 app.commandLine.appendSwitch('enable-blink-features', 'AudioVideoTracks')
 
 // Hardware video decoding & GPU acceleration optimizations
-// Enable D3D11 video decoding for buttery smooth 1080p/4K YouTube & streaming playback on Windows
+// Enable D3D11 & Media Foundation video decoding for buttery smooth 1080p/4K YouTube & streaming playback on Windows
 app.commandLine.appendSwitch('ignore-gpu-blocklist')
 app.commandLine.appendSwitch('enable-gpu-rasterization')
 app.commandLine.appendSwitch('enable-zero-copy')
 app.commandLine.appendSwitch('enable-hardware-overlays', 'single-fullscreen,single-on-top,underlay')
-app.commandLine.appendSwitch('enable-features', 'VaapiVideoDecoder,PlatformHEVCDecoderSupport,CanvasOopRasterization')
+app.commandLine.appendSwitch('enable-features', 'MediaFoundationVideoDecoder,PlatformHEVCDecoderSupport,CanvasOopRasterization')
 app.commandLine.appendSwitch('disable-features', 'CalculateNativeWinOcclusion')
+// Prevent Windows from throttling backgrounded or overlay-covered renderer video streams
+app.commandLine.appendSwitch('disable-backgrounding-occluded-windows')
+app.commandLine.appendSwitch('disable-renderer-backgrounding')
+// Enable QUIC protocol (HTTP/3) for faster, lower-latency YouTube video chunk streaming
+app.commandLine.appendSwitch('enable-quic')
 // Generous media & disk cache capacity for stutter-free video buffering
 app.commandLine.appendSwitch('disk-cache-size', '268435456') // 256MB
+app.commandLine.appendSwitch('media-cache-size', '268435456') // 256MB
 
 const APP_PROTOCOL = 'mycinema'
 
@@ -9022,9 +9051,7 @@ ipcMain.handle('ft-set-frame-quality', async (_e, quality: string) => {
             p.setPlaybackQuality(chosen);
           }
           if (typeof p.setPlaybackQualityRange === 'function') {
-            // Relax the lower bound so initial chunks and transient bandwidth dips do not cause hard buffering stalls
-            const minQuality = (chosen === 'hd1080' || chosen === 'hd1440' || chosen === 'hd2160') ? 'hd720' : 'large';
-            p.setPlaybackQualityRange(minQuality, chosen);
+            p.setPlaybackQualityRange('auto', chosen);
           }
           return true;
         } catch (e) {

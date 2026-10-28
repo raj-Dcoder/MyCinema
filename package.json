@@ -1,6 +1,6 @@
 {
   "name": "mycinema",
-  "version": "1.46.0",
+  "version": "1.47.0",
   "main": "./out/main/index.js",
   "scripts": {
     "dev": "set MYCINEMA_USER_DATA_DIR=%cd%\\.tmp-dev-profile&& electron-vite dev",

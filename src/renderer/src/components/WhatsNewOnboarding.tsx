@@ -89,37 +89,37 @@ const UPDATE_ICONS: Record<UpdateIconKey, { icon: React.ReactNode; tile: string 
 }
 
 export const LATEST_RELEASE: ReleaseNotes = {
-  version: '1.46.0',
-  title: 'In-app updates, smart downloads, and card actions.',
-  highlight: 'smart downloads',
+  version: '1.47.0',
+  title: 'A brighter look with pure cinema contrast.',
+  highlight: 'brighter look',
   description:
-    'Browse the full changelog right inside the app, manage downloads with smart name parsing, and enjoy refined video cards.',
+    'Experience a brand-new light theme, interactive hero navigation, smart next-episode resuming, and rock-solid download tracking.',
   tourId: null,
   updates: [
     {
-      icon: 'layers',
-      title: 'Dedicated updates tab',
-      description: 'Browse release history and search past changelogs right above Settings.',
-    },
-    {
-      icon: 'download',
-      title: 'Smart download queue',
-      description: 'Automatic title parsing, clean storage indicators, and cleaner state sync.',
+      icon: 'sparkles',
+      title: 'Light & dark theme toggle',
+      description: 'Switch between warm paper light and classic cinema dark in Settings.',
     },
     {
       icon: 'play',
-      title: 'Refined Focus Tube cards',
-      description: 'Creator avatars, view counts, and quick actions directly on video cards.',
+      title: 'Interactive hero navigation',
+      description: 'Tap carousel dots to jump across featured titles directly on Home.',
     },
     {
-      icon: 'sparkles',
-      title: 'Faster series library scans',
-      description: 'Cached show metadata speeds up multi-episode folder detection.',
+      icon: 'layers',
+      title: 'Smart next-episode queue',
+      description: 'Continue Watching surfaces the next unwatched episode with instant play.',
+    },
+    {
+      icon: 'download',
+      title: 'Accurate download tracking',
+      description: 'Authoritative byte-range headers deliver smooth, monotonic progress.',
     },
     {
       icon: 'shield',
-      title: 'Automatic metadata cleanup',
-      description: 'Deleting local media automatically clears associated download records.',
+      title: 'Clean cache eviction',
+      description: 'Cancelled downloads immediately purge memory records and disk handles.',
     },
   ],
 }

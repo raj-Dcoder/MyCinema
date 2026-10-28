@@ -56,6 +56,67 @@ export function normalizeUpdate(item: UpdateInput, defaultCategory = 'General'):
 
 export const APP_UPDATES: AppRelease[] = [
   {
+    "version": "v1.47.0",
+    "summary": "All-new high-contrast Light Theme alongside classic Dark Mode, clickable hero carousel navigation, smart next-episode queueing, and monotonic download progress engine.",
+    "updates": [
+      {
+        "title": "Light & Dark Theme Toggle",
+        "description": "Easily switch between a calm, warm paper Light Theme and the deep cinematic Dark Theme under Settings > Appearance.",
+        "category": "Theme & Visual Experience"
+      },
+      {
+        "title": "Universal Theme Harmony",
+        "description": "Refined colors, typography, badges, and card contrast across Home, Details, Collections, Downloads, Updates, and Settings in both themes.",
+        "category": "Theme & Visual Experience"
+      },
+      {
+        "title": "Cinema Immersion Preservation",
+        "description": "Video playback and theater surfaces remain locked to pure cinema dark for maximum contrast and zero distraction during viewing.",
+        "category": "Theme & Visual Experience"
+      },
+      {
+        "title": "Floating Controls Polish",
+        "description": "Window controls and dialogs adapt seamlessly to light and dark backgrounds with crisp contrast.",
+        "category": "Theme & Visual Experience"
+      },
+      {
+        "title": "Clickable Carousel Navigation",
+        "description": "Tap any navigation dot in the Hero Carousel to jump straight to that featured title.",
+        "category": "Home & Carousel Polish"
+      },
+      {
+        "title": "Smart Next Episode Queuing",
+        "description": "Series now automatically queue the next unwatched episode in Continue Watching with distinct \"Next Episode\" badges and direct play actions.",
+        "category": "Home & Carousel Polish"
+      },
+      {
+        "title": "Prioritized Resume Ordering",
+        "description": "Recently watched content and newly dropped episodes are sorted with higher prominence so you never lose your spot.",
+        "category": "Home & Carousel Polish"
+      },
+      {
+        "title": "Monotonic Progress Tracking",
+        "description": "Download progress calculation now uses authoritative HTTP byte-range and content-length headers, eliminating fluctuating percentages and erroneous size jumps.",
+        "category": "Download Engine Reliability"
+      },
+      {
+        "title": "Real-Time Memory Cache",
+        "description": "Active download state syncs instantly from memory cache to UI components without waiting on database write throttles.",
+        "category": "Download Engine Reliability"
+      },
+      {
+        "title": "Smooth Progress Bars",
+        "description": "Download cards and trays feature monotonic clamped progress animations that transition smoothly from 0% to 100%.",
+        "category": "Download Engine Reliability"
+      },
+      {
+        "title": "Secure Download Cache Eviction",
+        "description": "Cancelling or removing downloads immediately evicts in-memory stream records and disk handles, preventing memory leaks and orphaned file fragments.",
+        "category": "Security & Privacy"
+      }
+    ]
+  },
+  {
     "version": "v1.46.0",
     "summary": "Dedicated in-app updates and changelog tab, smart torrent title parsing with modular download queue, real-time download and library cleanup synchronization, and refined Focus Tube cards.",
     "updates": [

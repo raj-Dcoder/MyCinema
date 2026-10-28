@@ -1,3 +1,28 @@
+# MyCinema v1.47.0
+
+All-new high-contrast Light Theme alongside classic Dark Mode, clickable hero carousel navigation, smart next-episode queueing, and monotonic download progress engine.
+
+### Theme & Visual Experience
+- **Light & Dark Theme Toggle**: Easily switch between a calm, warm paper Light Theme and the deep cinematic Dark Theme under Settings > Appearance.
+- **Universal Theme Harmony**: Refined colors, typography, badges, and card contrast across Home, Details, Collections, Downloads, Updates, and Settings in both themes.
+- **Cinema Immersion Preservation**: Video playback and theater surfaces remain locked to pure cinema dark for maximum contrast and zero distraction during viewing.
+- **Floating Controls Polish**: Window controls and dialogs adapt seamlessly to light and dark backgrounds with crisp contrast.
+
+### Home & Carousel Polish
+- **Clickable Carousel Navigation**: Tap any navigation dot in the Hero Carousel to jump straight to that featured title.
+- **Smart Next Episode Queuing**: Series now automatically queue the next unwatched episode in Continue Watching with distinct "Next Episode" badges and direct play actions.
+- **Prioritized Resume Ordering**: Recently watched content and newly dropped episodes are sorted with higher prominence so you never lose your spot.
+
+### Download Engine Reliability
+- **Monotonic Progress Tracking**: Download progress calculation now uses authoritative HTTP byte-range and content-length headers, eliminating fluctuating percentages and erroneous size jumps.
+- **Real-Time Memory Cache**: Active download state syncs instantly from memory cache to UI components without waiting on database write throttles.
+- **Smooth Progress Bars**: Download cards and trays feature monotonic clamped progress animations that transition smoothly from 0% to 100%.
+
+### Security & Privacy
+- **Secure Download Cache Eviction**: Cancelling or removing downloads immediately evicts in-memory stream records and disk handles, preventing memory leaks and orphaned file fragments.
+
+***
+
 # MyCinema v1.46.0
 
 Dedicated in-app updates and changelog tab, smart torrent title parsing with modular download queue, real-time download and library cleanup synchronization, and refined Focus Tube cards.

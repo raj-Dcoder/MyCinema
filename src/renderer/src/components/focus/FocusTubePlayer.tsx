@@ -22,7 +22,6 @@ import {
   Minus,
   MonitorPlay,
 
-  SquareArrowDownRight,
   Pause,
   Play,
   Plus,
@@ -49,6 +48,7 @@ import {
 } from '../../utils/focusCinema'
 
 interface FocusTubePlayerProps {
+  activeTab?: string
   video: FtVideo
   startSeconds: number
   onClose: () => void
@@ -410,6 +410,7 @@ const QueueCard: React.FC<{
  * MyCinema's isolated cinema shell around the YouTube embed.
  */
 const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
+  activeTab: propsActiveTab,
   video,
   startSeconds,
   onClose,
@@ -557,7 +558,9 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
   // In-app mini player: docks the SAME iframe to the bottom-right corner so
   // playback continues while the user browses MyCinema. Unlike OS PiP this
   // never leaves the app and never remounts the iframe (no restart).
-    const [isPiPActive, setIsPiPActive] = useState(false)
+  const [internalTab, setInternalTab] = useState<string>(() => propsActiveTab || (window as any).__mycinemaActiveTab || 'focustube')
+  const currentTab = propsActiveTab || internalTab
+  const [isPiPActive, setIsPiPActive] = useState(false)
   const isPiPActiveRef = useRef(false)
   isPiPActiveRef.current = isPiPActive
   const [isMinimized, setIsMinimized] = useState(false)
@@ -617,15 +620,27 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
   const skipToastTimerRef = useRef<number>(0)
   const barRef = useRef<HTMLDivElement>(null)
   const scrubbingRef = useRef(false)
+  const seekLockRef = useRef<{ target: number; until: number } | null>(null)
   const shellRef = useRef<HTMLDivElement>(null)
   const stageWrapperRef = useRef<HTMLDivElement>(null)
   const fsToggleInFlightRef = useRef(false)
   const lastTapRef = useRef<{ time: number; x: number; y: number } | null>(null)
   const singleTapTimerRef = useRef<number>(0)
+  // Tracks whether the current handleSeek call came from the scrub bar (true)
+  // vs a keyboard shortcut (false). Scrubbar seeks use loadVideoById for
+  // instant stream-fetch (like card click); keyboard seeks use seekTo since
+  // ±5-10s is typically already in the buffer.
+  const barSeekRef = useRef(false)
   // Hold-for-2x refs. speedRef mirrors the `speed` state so timer callbacks
   // always restore the rate that was active when the hold began.
   const speedRef = useRef<number>(speed)
   speedRef.current = speed
+  const volumeRef = useRef<number>(volume)
+  volumeRef.current = volume
+  const mutedRef = useRef<boolean>(muted)
+  mutedRef.current = muted
+  const videoIdRef = useRef<string>(video.videoId)
+  videoIdRef.current = video.videoId
   const spaceHoldTimerRef = useRef<number>(0)
   const holdActiveRef = useRef(false)
   const holdPrevSpeedRef = useRef<number>(speed)
@@ -1290,6 +1305,7 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
         stateRef.current = state
         setPlayerState(state)
         if (state === STATE_PLAYING) {
+          seekLockRef.current = null
           endedRef.current = false
           setErrorText(null)
           // Re-assert preferred playback rate on active playback start
@@ -1337,10 +1353,18 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
 
       if (data.event === 'infoDelivery' && data.info && typeof data.info === 'object') {
         if (typeof data.info.currentTime === 'number' && data.info.currentTime >= 0) {
+          const reported = data.info.currentTime
+          // If we recently seeked, ignore stale/intermediate timestamps until YouTube catches up
+          if (seekLockRef.current) {
+            if (Date.now() < seekLockRef.current.until && Math.abs(reported - seekLockRef.current.target) > 2) {
+              return
+            }
+            seekLockRef.current = null
+          }
           // While scrubbing, the bar owns the displayed time; the polled value
           // still lands in the ref so a commit seeks from a fresh position.
-          timeRef.current = data.info.currentTime
-          if (!scrubbingRef.current) setCurrentTime(data.info.currentTime)
+          timeRef.current = reported
+          if (!scrubbingRef.current) setCurrentTime(reported)
         }
         // The feed cannot provide duration, so the player is where we learn it.
         if (typeof data.info.duration === 'number' && data.info.duration > 0
@@ -1472,6 +1496,7 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
           if (lastSkipRef.current !== key) {
             lastSkipRef.current = key
             const dest = hit.end + 0.15
+            seekLockRef.current = { target: dest, until: Date.now() + 1600 }
             timeRef.current = dest
             setCurrentTime(dest)
             try {
@@ -1479,6 +1504,7 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
                 event: 'command', func: 'seekTo', args: [dest, true], id: idRef.current, channel: 'widget',
               }), '*')
             } catch { /* next tick retries via bridge */ }
+            window.api?.ftSeekFrame?.(dest, true).catch(() => {})
             flashSkipToast(`Skipped ${sponsorLabel(hit.category)} ${formatChapterTime(hit.start)} → ${formatChapterTime(hit.end)}`)
           }
         } else {
@@ -1756,6 +1782,8 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
   }, [isMinimized, isFullscreen])
 
   
+  const autoPiPByTabRef = useRef(false)
+
   const handleTogglePiP = useCallback(async () => {
     if (isPiPActiveRef.current) {
       try {
@@ -1765,6 +1793,9 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
     }
 
     try {
+      if (document.fullscreenElement) {
+        void document.exitFullscreen().catch(() => {})
+      }
       cmd('pauseVideo')
       setIsPiPActive(true)
 
@@ -1814,14 +1845,39 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
 
     const unsubClosed = window.api?.onFtPipClosed?.((state: { videoId?: string; currentTime?: number; isPlaying?: boolean; restoreRequested?: boolean }) => {
       setIsPiPActive(false)
-      if (state && typeof state.currentTime === 'number' && state.currentTime > 0) {
-        setCurrentTime(state.currentTime)
-        timeRef.current = state.currentTime
-        cmd('seekTo', [state.currentTime, true])
+      autoPiPByTabRef.current = false
+
+      if (state?.restoreRequested) {
+        setInternalTab('focustube')
+        window.dispatchEvent(new CustomEvent('focustube-request-tab', { detail: { tab: 'focustube' } }))
       }
-      if (state?.restoreRequested || state?.isPlaying) {
-        cmd('playVideo')
+
+      if (isMinimizedRef.current) {
+        transitionToMinimized(false)
       }
+
+      const restoreTime = (state && typeof state.currentTime === 'number' && state.currentTime > 0)
+        ? state.currentTime
+        : (timeRef.current || currentTime)
+
+      if (restoreTime > 0) {
+        setCurrentTime(restoreTime)
+        timeRef.current = restoreTime
+      }
+
+      pokeBottom()
+
+      setTimeout(() => {
+        sendHandshake()
+        if (restoreTime > 0) {
+          cmd('seekTo', [restoreTime, true])
+        }
+        if (state?.restoreRequested || state?.isPlaying !== false) {
+          cmd('playVideo')
+          setPlayerState(STATE_PLAYING)
+          stateRef.current = STATE_PLAYING
+        }
+      }, 80)
     })
 
     return () => {
@@ -1831,32 +1887,37 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
   }, [video.videoId, cmd])
 
   const toggleMinimize = useCallback(() => {
-    transitionToMinimized(!isMinimizedRef.current)
+    handleTogglePiP()
     pokeBottom()
-  }, [transitionToMinimized, pokeBottom])
+  }, [handleTogglePiP, pokeBottom])
 
-  const autoMinimizedByTabRef = useRef(false)
+  // Auto-switch to floating PiP when navigating away from FocusTube tab, and auto-restore when returning
+  useEffect(() => {
+    const targetTab = propsActiveTab || internalTab
+    if (targetTab && targetTab !== 'focustube') {
+      if (!isPiPActiveRef.current && (started || stateRef.current === STATE_PLAYING) && !endedRef.current) {
+        autoPiPByTabRef.current = true
+        handleTogglePiP()
+      }
+    } else if (targetTab === 'focustube') {
+      if (autoPiPByTabRef.current && isPiPActiveRef.current) {
+        autoPiPByTabRef.current = false
+        handleRestoreFromPiP()
+      }
+    }
+  }, [propsActiveTab, internalTab, handleTogglePiP, handleRestoreFromPiP, started])
 
-  // Auto-minimize when navigating away from FocusTube, and auto-restore when returning
   useEffect(() => {
     const handleTabChange = (e: any) => {
       const activeTab = e.detail?.activeTab
-      if (activeTab && activeTab !== 'focustube') {
-        if (!isMinimizedRef.current) {
-          autoMinimizedByTabRef.current = true
-          transitionToMinimized(true)
-        }
-      } else if (activeTab === 'focustube') {
-        if (autoMinimizedByTabRef.current || isMinimizedRef.current) {
-          autoMinimizedByTabRef.current = false
-          transitionToMinimized(false)
-        }
+      if (activeTab) {
+        setInternalTab(activeTab)
       }
     }
 
     window.addEventListener('focustube-tab-changed', handleTabChange)
     return () => window.removeEventListener('focustube-tab-changed', handleTabChange)
-  }, [transitionToMinimized])
+  }, [])
 
   const handleExpandFromMini = useCallback(() => {
     window.dispatchEvent(new CustomEvent('focustube-request-tab', { detail: { tab: 'focustube' } }))
@@ -1939,24 +2000,73 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
   // ── Commands ───────────────────────────────────────────────────────────────
   const handleSeek = useCallback((seconds: number) => {
     pokeBottom()
+    const prevTime = timeRef.current
     const clamped = Math.max(0, seconds)
+    seekLockRef.current = { target: clamped, until: Date.now() + 2000 }
     timeRef.current = clamped
     setCurrentTime(clamped)
     // A manual seek clears the skip guard so the user can rewatch a skipped
     // section if they jump back into it deliberately.
     lastSkipRef.current = null
-    withBridge(() => cmd('seekTo', [clamped, true]))
+
+    // Scrubbar clicks jump to an arbitrary timestamp — the existing MSE buffer
+    // is almost certainly not covering that position, so seekTo() has to flush
+    // and re-fetch, which is slow.  Instead we use loadVideoById with
+    // startSeconds, which is exactly what happens when a card is clicked:
+    // YouTube opens a fresh adaptive stream from that position immediately.
+    // For small keyboard seeks (J/L ±5s) the content is likely already buffered,
+    // so seekTo() is fast enough and avoids the brief reload.
+    const isBarSeek = barSeekRef.current
+    barSeekRef.current = false
+
+    const isLargeSeek = isBarSeek || Math.abs(clamped - prevTime) > 15
+    if (isLargeSeek) {
+      // loadVideoById mirrors the "card click" path: instant segment fetch
+      withBridge(() => {
+        cmd('loadVideoById', [{ videoId: videoIdRef.current, startSeconds: Math.floor(clamped) }])
+      })
+      // Re-assert user prefs after reload (loadVideoById doesn't fire onReady)
+      window.setTimeout(() => {
+        withBridge(() => {
+          cmd('setVolume', [volumeRef.current])
+          if (mutedRef.current) { cmd('mute', []) } else { cmd('unMute', []) }
+          if (speedRef.current !== 1) cmd('setPlaybackRate', [speedRef.current])
+          const qp = qualityPrefRef.current
+          if (qp && qp !== 'auto') {
+            cmd('setPlaybackQuality', [qp])
+            cmd('setPlaybackQualityRange', ['auto', qp])
+          }
+          if (!captionsOnRef.current) {
+            cmd('setOption', ['captions', 'track', {}])
+            cmd('unloadModule', ['captions'])
+          }
+        })
+      }, 300)
+    } else {
+      // Small relative seek — target is likely in buffer, seekTo is fine
+      const wasPlaying = stateRef.current === STATE_PLAYING || stateRef.current === STATE_BUFFERING
+      withBridge(() => {
+        cmd('seekTo', [clamped, true])
+        if (wasPlaying) cmd('playVideo', [])
+      })
+    }
   }, [cmd, withBridge, pokeBottom])
+
+  // Convenience: explicit large-seek (chapter/segment sidebar clicks) — always
+  // uses the loadVideoById fast-path regardless of position delta.
+  const handleBarSeek = useCallback((seconds: number) => {
+    barSeekRef.current = true
+    handleSeek(seconds)
+  }, [handleSeek])
 
   const togglePlay = useCallback(() => {
     pokeBottom()
     if (stateRef.current === STATE_ENDED) {
-      handleSeek(0)
-      withBridge(() => cmd('playVideo', []))
+      handleBarSeek(0)
       return
     }
     withBridge(() => cmd(stateRef.current === STATE_PLAYING ? 'pauseVideo' : 'playVideo', []))
-  }, [cmd, withBridge, pokeBottom, handleSeek])
+  }, [cmd, withBridge, pokeBottom, handleBarSeek])
 
   const handleVolume = useCallback((next: number) => {
     const clamped = Math.min(100, Math.max(0, Math.round(next)))
@@ -2078,6 +2188,7 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
     event.preventDefault()
     try { event.currentTarget.setPointerCapture(event.pointerId) } catch { /* ignore */ }
     scrubbingRef.current = true
+    barSeekRef.current = true
     pokeBottom()
     const t = timeFromClientX(event.clientX)
     if (t !== null) setScrubTime(t)
@@ -2092,10 +2203,12 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
   const handleBarPointerUp = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
     if (!scrubbingRef.current) return
     scrubbingRef.current = false
+    barSeekRef.current = true
+    try { event.currentTarget.releasePointerCapture(event.pointerId) } catch { /* ignore */ }
     const t = timeFromClientX(event.clientX)
     setScrubTime(null)
     if (t !== null) handleSeek(t)
-    else pokeBottom()
+    else { barSeekRef.current = false; pokeBottom() }
   }, [handleSeek, pokeBottom, timeFromClientX])
 
   // ── Tap gestures on the video ────────────────────────────────────────────
@@ -2272,6 +2385,8 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
           break
         case 'p':
         case 'P':
+        case 'i':
+        case 'I':
           event.preventDefault()
           handleTogglePiP()
           break
@@ -2329,7 +2444,10 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
   // Either the flag already said so, or the embed told us mid-flight.
   if (!video.embeddable || refused) {
     return createPortal(
-      <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black p-8 keep-dark dark">
+      <div
+        style={{ display: currentTab === 'focustube' ? 'flex' : 'none' }}
+        className="fixed inset-0 z-[70] flex items-center justify-center bg-black p-8 keep-dark dark"
+      >
         <div className="w-full max-w-lg border border-white/10 bg-[#0b0b0b] p-8 text-center space-y-5">
           <h3 className="text-lg font-black uppercase italic text-white">Embedding disabled</h3>
           <p className="text-sm text-white/50 font-semibold">
@@ -2370,7 +2488,10 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
   return createPortal(
     <div
       data-fullscreen-gesture-scope="player"
-      style={{ left: fsActive ? '0' : 'var(--sidebar-width, 5rem)' }}
+      style={{
+        left: fsActive ? '0' : 'var(--sidebar-width, 5rem)',
+        display: currentTab === 'focustube' ? 'flex' : 'none'
+      }}
       className={`fixed right-0 top-0 bottom-0 ${
         fsActive ? 'left-0' : ''
       } ${
@@ -2716,115 +2837,6 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
             </div>
           )}
 
-            {/* ── MINI-PLAYER DOCK BAR (only when minimized) ──
-                Same iframe keeps playing underneath; this bar moves with it.
-                Follows the same chrome visibility as the full player: fades
-                after ~2.5s idle while playing, returns on hover/tap. The slim
-                seek strip at the very bottom stays visible so progress is
-                glanceable and seeking works even when faded. */}
-            {isMinimized && (
-              <div className={`absolute inset-x-0 bottom-0 z-40 transition-opacity duration-200 ${isTransitioning ? 'opacity-0' : 'opacity-100'}`}>
-                <div className={`bg-gradient-to-t from-black/90 via-black/50 to-transparent px-2.5 pb-1 pt-8 transition-all duration-200 ${chromeVisible ? 'translate-y-0 opacity-100' : 'pointer-events-none translate-y-1 opacity-0'}`}>
-                  <div className="mb-1.5 flex items-center gap-1.5">
-                    <p
-                      onClick={handleExpandFromMini}
-                      className="min-w-0 flex-1 truncate text-[11px] font-bold text-white/90 cursor-pointer hover:text-white transition-colors"
-                      title="Click to expand player"
-                    >
-                      {video.title}
-                    </p>
-                    <button
-                      type="button"
-                      onClick={handleTogglePiP}
-                      title="Pop out to Picture-in-Picture (float over other apps)"
-                      aria-label="Float over other apps"
-                      className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-white/10 text-white/80 backdrop-blur-md transition-colors hover:bg-primary hover:text-white"
-                    >
-                      <PictureInPicture2 size={12} />
-                    </button>
-                    <button
-                      type="button"
-                      onClick={handleExpandFromMini}
-                      title="Expand player"
-                      aria-label="Expand player"
-                      className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-white/10 text-white/80 backdrop-blur-md transition-colors hover:bg-white/20 hover:text-white"
-                    >
-                      <Maximize2 size={12} />
-                    </button>
-                    <button
-                      type="button"
-                      onClick={handleClose}
-                      title="Close player"
-                      aria-label="Close player"
-                      className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-white/10 text-white/80 backdrop-blur-md transition-colors hover:bg-primary hover:text-white"
-                    >
-                      <X size={12} />
-                    </button>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <button
-                      type="button"
-                      onClick={togglePlay}
-                      title={isPlaying ? 'Pause' : 'Play'}
-                      aria-label={isPlaying ? 'Pause' : 'Play'}
-                      className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-white text-black transition-transform hover:scale-105"
-                    >
-                      {isPlaying ? <Pause size={14} fill="currentColor" /> : <Play size={14} fill="currentColor" className="ml-0.5" />}
-                    </button>
-                    <div className="min-w-0 flex-1">
-                      <input
-                        type="range"
-                        min={0}
-                        max={duration ?? 0}
-                        step={0.1}
-                        value={displayTime}
-                        onPointerDown={() => { scrubbingRef.current = true }}
-                        onChange={(e) => setScrubTime(Number(e.target.value))}
-                        onPointerUp={(e) => {
-                          const t = Number((e.target as HTMLInputElement).value)
-                          scrubbingRef.current = false
-                          setScrubTime(null)
-                          handleSeek(t)
-                        }}
-                        onClick={(e) => e.stopPropagation()}
-                        className="h-1 w-full cursor-pointer accent-primary"
-                        aria-label="Seek video"
-                      />
-                      <div className="mt-0.5 flex items-center justify-between text-[10px] font-semibold tabular-nums text-white/60">
-                        <span>{formatChapterTime(displayTime)}</span>
-                        <span>{duration !== null && duration > 0 ? formatChapterTime(duration) : '--:--'}</span>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-                {/* Always-visible slim seek strip: full-width hit area with an
-                    invisible native slider, so seeking works even when faded. */}
-                <div className="relative flex h-3.5 items-end px-2.5 pb-1.5">
-                  <div className="h-1 w-full overflow-hidden rounded-full bg-white/25">
-                    <div className="h-full rounded-full bg-primary" style={{ width: `${progressRatio * 100}%` }} />
-                  </div>
-                  <input
-                    type="range"
-                    min={0}
-                    max={duration ?? 0}
-                    step={0.1}
-                    value={displayTime}
-                    onPointerDown={() => { scrubbingRef.current = true }}
-                    onChange={(e) => setScrubTime(Number(e.target.value))}
-                    onPointerUp={(e) => {
-                      const t = Number((e.target as HTMLInputElement).value)
-                      scrubbingRef.current = false
-                      setScrubTime(null)
-                      handleSeek(t)
-                    }}
-                    onClick={(e) => e.stopPropagation()}
-                    className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
-                    aria-label="Seek video"
-                  />
-                </div>
-              </div>
-            )}
-
             {/* ── CENTER STATE OVERLAYS (absolute, never in flow) ── */}
             {!started && !errorText && (
               <button
@@ -3091,7 +3103,11 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
                 onPointerDown={handleBarPointerDown}
                 onPointerMove={handleBarPointerMove}
                 onPointerUp={handleBarPointerUp}
-                onPointerCancel={() => { scrubbingRef.current = false; setScrubTime(null) }}
+                onPointerCancel={(e) => {
+                  scrubbingRef.current = false
+                  try { e.currentTarget.releasePointerCapture(e.pointerId) } catch { /* ignore */ }
+                  setScrubTime(null)
+                }}
                 className={`group relative flex h-5 cursor-pointer items-center touch-none ${bottomVisible ? 'pointer-events-auto' : 'pointer-events-none'}`}
               >
                 <div className="relative h-1.5 w-full overflow-visible rounded-full bg-white/20 transition-all group-hover:h-2">
@@ -3263,22 +3279,12 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
                 <button
                   type="button"
                   onClick={handleTogglePiP}
-                  aria-label={isPiPActive ? "Exit Picture-in-Picture (p)" : "Picture-in-Picture — float over other apps (p)"}
-                  title="Picture-in-Picture (p) — float over other apps while you multitask"
+                  aria-label={isPiPActive ? "Exit mini player (i / p)" : "Mini player (i / p) — float over other apps"}
+                  title="Mini player (i / p) — float over other apps while you multitask"
                   tabIndex={bottomVisible ? 0 : -1}
                   className={`p-2 transition-colors ${isPiPActive ? 'text-primary' : 'text-white/80 hover:text-white'}`}
                 >
                   <PictureInPicture2 size={18} />
-                </button>
-                <button
-                  type="button"
-                  onClick={toggleMinimize}
-                  aria-label="Mini player — dock to corner (i)"
-                  title="Mini player (i) — dock video to the corner and keep browsing MyCinema"
-                  tabIndex={bottomVisible ? 0 : -1}
-                  className="p-2 text-white/80 transition-colors hover:text-white"
-                >
-                  <SquareArrowDownRight size={18} />
                 </button>
               </div>
             </div>
@@ -3527,7 +3533,7 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
                             <button
                               key={`${chapter.start}-${index}`}
                               type="button"
-                              onClick={() => handleSeek(chapter.start)}
+                              onClick={() => handleBarSeek(chapter.start)}
                               className={`flex items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-left text-xs transition-colors ${
                                 index === activeChapterIndex
                                   ? 'bg-primary/20 text-white font-bold border border-primary/40'
@@ -3573,7 +3579,7 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
                             <button
                               key={`${seg.start}-${seg.end}-${index}`}
                               type="button"
-                              onClick={() => handleSeek(seg.start)}
+                              onClick={() => handleBarSeek(seg.start)}
                               className="flex w-full items-center justify-between rounded-lg px-2 py-1 text-left text-xs font-medium text-white/70 hover:bg-white/5 hover:text-white"
                             >
                               <span className="truncate">{sponsorLabel(seg.category)}</span>
@@ -3608,7 +3614,7 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
                                 <button
                                   key={i}
                                   type="button"
-                                  onClick={() => handleSeek(part.seconds ?? 0)}
+                                  onClick={() => handleBarSeek(part.seconds ?? 0)}
                                   className="font-bold text-sky-400 hover:underline"
                                 >
                                   {part.text}
@@ -3805,7 +3811,7 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
                         <button
                           key={`${chapter.start}-${index}`}
                           type="button"
-                          onClick={() => handleSeek(chapter.start)}
+                          onClick={() => handleBarSeek(chapter.start)}
                           className={`group/chap flex w-full items-center gap-3 rounded-xl border p-2.5 text-left transition-all ${
                             isActive
                               ? 'border-primary/50 bg-primary/15 text-white shadow-lg shadow-primary/10'

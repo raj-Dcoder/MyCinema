@@ -178,6 +178,7 @@ const App: React.FC = () => {
   }, [isSidebarExpanded])
 
   useEffect(() => {
+    try { (window as any).__mycinemaActiveTab = activeTab } catch {}
     window.dispatchEvent(new CustomEvent('focustube-tab-changed', { detail: { activeTab } }))
   }, [activeTab])
 
@@ -189,6 +190,14 @@ const App: React.FC = () => {
     }
     window.addEventListener('focustube-request-tab', handleRequestTab)
     return () => window.removeEventListener('focustube-request-tab', handleRequestTab)
+  }, [navigateToTab])
+
+  useEffect(() => {
+    return window.api?.onFtPipClosed?.((state) => {
+      if (state?.restoreRequested) {
+        navigateToTab('focustube')
+      }
+    })
   }, [navigateToTab])
 
 
@@ -1135,7 +1144,7 @@ const App: React.FC = () => {
                   player) is preserved, so coming back resumes where you left. */}
               {focusTubeEnabled && focusTubeMounted && (
                 <div className={activeTab === 'focustube' ? 'contents' : 'hidden'}>
-                  <FocusTube />
+                  <FocusTube activeTab={activeTab} />
                 </div>
               )}
               {activeTab === 'movies'  && <Movies onPlay={handlePlayVideo} onShowDetail={setSelectedVideo} />}

@@ -285,6 +285,7 @@ const api = {
     ipcRenderer.invoke('ft-get-comments', { videoId, ...options }),
   ftSetFrameQuality: (quality: string) => ipcRenderer.invoke('ft-set-frame-quality', quality),
   ftGetFrameQuality: () => ipcRenderer.invoke('ft-get-frame-quality'),
+  ftSeekFrame: (seconds: number, play?: boolean) => ipcRenderer.invoke('ft-seek-frame', { seconds, play }),
   ftGetAmbientFrame: () => ipcRenderer.invoke('ft-get-ambient-frame'),
   ftRequestImportAccess: (input: { name: string; email: string }) =>
     ipcRenderer.invoke('ft-request-import-access', input),
@@ -295,7 +296,7 @@ const api = {
   },
     ftOpenPip: (payload: any) => ipcRenderer.invoke('ft-open-pip', payload),
   ftClosePip: () => ipcRenderer.invoke('ft-close-pip'),
-  ftRestorePip: () => ipcRenderer.invoke('ft-restore-pip'),
+  ftRestorePip: (payload?: any) => ipcRenderer.invoke('ft-restore-pip', payload),
   ftGetPipState: () => ipcRenderer.invoke('ft-get-pip-state'),
   ftSyncPipState: (state: any) => ipcRenderer.invoke('ft-sync-pip-state', state),
   onFtPipInit: (callback: (payload: any) => void) => {

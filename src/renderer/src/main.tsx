@@ -23,8 +23,12 @@ const isFtPip = typeof window !== 'undefined' && (
 
 ReactDOM.createRoot(document.getElementById('root') as HTMLElement).render(
   <React.StrictMode>
-    <ThemeProvider>
-      {isFtPip ? <FocusTubePipPlayer /> : <App />}
-    </ThemeProvider>
+    {isFtPip ? (
+      <FocusTubePipPlayer />
+    ) : (
+      <ThemeProvider>
+        <App />
+      </ThemeProvider>
+    )}
   </React.StrictMode>
 )

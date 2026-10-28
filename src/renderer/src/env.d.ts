@@ -290,12 +290,13 @@ interface Api {
   ftGetComments: (videoId: string, options?: { sortBy?: 'top' | 'new'; continuation?: string | null }) => Promise<{ comments: import('./types').FtComment[]; continuation: string | null; commentCount: number | null; disabled: boolean } | { error: string }>
   ftSetFrameQuality?: (quality: string) => Promise<{ ok: boolean; error?: string }>
   ftGetFrameQuality?: () => Promise<{ quality: string | null; available?: string[] }>
+  ftSeekFrame?: (seconds: number, play?: boolean) => Promise<{ ok: boolean; error?: string }>
   ftGetAmbientFrame?: () => Promise<{ dataUrl: string | null }>
   ftRequestImportAccess: (input: { name: string; email: string }) => Promise<{ ok?: boolean; message?: string; error?: string }>
   onFeedUpdated: (callback: (payload: { added: number; channelIds: string[] }) => void) => () => void
   ftOpenPip: (payload: any) => Promise<boolean>
   ftClosePip: () => Promise<void>
-  ftRestorePip: () => Promise<void>
+  ftRestorePip: (payload?: any) => Promise<void>
   ftGetPipState: () => Promise<any>
   ftSyncPipState: (state: any) => Promise<void>
   onFtPipInit: (callback: (payload: any) => void) => () => void

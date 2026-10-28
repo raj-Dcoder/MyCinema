@@ -3757,3 +3757,42 @@
   background-color: rgba(0, 0, 0, 0.35) !important;
   border-color: rgba(255, 255, 255, 0.08) !important;
 }
+
+/* ── FocusTube PiP Player: Always Pure High-Contrast Dark Cinema Mode ── */
+.ft-pip-player,
+.light .ft-pip-player,
+.glass-light .ft-pip-player {
+  color-scheme: dark !important;
+  background-color: #000000 !important;
+  color: #ffffff !important;
+}
+
+.ft-pip-player *,
+.light .ft-pip-player *,
+.glass-light .ft-pip-player * {
+  color-scheme: dark !important;
+}
+
+.ft-pip-player svg,
+.light .ft-pip-player svg,
+.glass-light .ft-pip-player svg {
+  color: inherit;
+}
+
+.ft-pip-player .text-white,
+.light .ft-pip-player .text-white,
+.glass-light .ft-pip-player .text-white {
+  color: #ffffff !important;
+}
+
+.ft-pip-player .text-white\/60,
+.light .ft-pip-player .text-white\/60,
+.glass-light .ft-pip-player .text-white\/60 {
+  color: rgba(255, 255, 255, 0.75) !important;
+}
+
+.ft-pip-player .bg-black\/85,
+.light .ft-pip-player .bg-black\/85,
+.glass-light .ft-pip-player .bg-black\/85 {
+  background-color: rgba(0, 0, 0, 0.85) !important;
+}

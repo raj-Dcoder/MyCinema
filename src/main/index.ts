@@ -1563,8 +1563,6 @@ app.commandLine.appendSwitch('disable-features', 'CalculateNativeWinOcclusion')
 // Prevent Windows from throttling backgrounded or overlay-covered renderer video streams
 app.commandLine.appendSwitch('disable-backgrounding-occluded-windows')
 app.commandLine.appendSwitch('disable-renderer-backgrounding')
-// Enable QUIC protocol (HTTP/3) for faster, lower-latency YouTube video chunk streaming
-app.commandLine.appendSwitch('enable-quic')
 // Generous media & disk cache capacity for stutter-free video buffering
 app.commandLine.appendSwitch('disk-cache-size', '268435456') // 256MB
 app.commandLine.appendSwitch('media-cache-size', '268435456') // 256MB
@@ -2230,10 +2228,10 @@ function openFtPip(payload: any): boolean {
   const primaryDisplay = screen.getPrimaryDisplay()
   const { width: screenWidth, height: screenHeight, x: displayX, y: displayY } = primaryDisplay.workArea
 
-  const defaultWidth = 480
-  const defaultHeight = 306
+  const defaultWidth = 512
+  const defaultHeight = 288
   const width = Math.min(Math.max(lastFtPipBounds?.width || defaultWidth, 320), screenWidth)
-  const height = Math.min(Math.max(lastFtPipBounds?.height || defaultHeight, 216), screenHeight)
+  const height = lastFtPipBounds?.height ? Math.round(lastFtPipBounds.height) : Math.round(width * 9 / 16)
   const x = lastFtPipBounds?.x ?? (displayX + screenWidth - width - 24)
   const y = lastFtPipBounds?.y ?? (displayY + screenHeight - height - 24)
 
@@ -2243,9 +2241,10 @@ function openFtPip(payload: any): boolean {
     x,
     y,
     minWidth: 320,
-    minHeight: 216,
+    minHeight: 180,
     maxWidth: 1280,
-    maxHeight: 756,
+    maxHeight: 720,
+    aspectRatio: 16 / 9,
     alwaysOnTop: true,
     frame: false,
     resizable: true,
@@ -2307,9 +2306,11 @@ function openFtPip(payload: any): boolean {
   })
 
   ftPipWindow.on('closed', () => {
-    const mainWin = getMainWindow()
-    if (mainWin && !mainWin.isDestroyed()) {
-      mainWin.webContents.send('ft-pip-closed', lastFtPipState)
+    if (!isRestoringFtPip) {
+      const mainWin = getMainWindow()
+      if (mainWin && !mainWin.isDestroyed()) {
+        mainWin.webContents.send('ft-pip-closed', lastFtPipState)
+      }
     }
     ftPipWindow = null
   })
@@ -2323,21 +2324,32 @@ function openFtPip(payload: any): boolean {
   return true
 }
 
+let isRestoringFtPip = false
+
 function closeFtPip(): void {
   if (ftPipWindow && !ftPipWindow.isDestroyed()) {
     ftPipWindow.close()
   }
 }
 
-function restoreFromFtPip(): void {
+function restoreFromFtPip(pipState?: any): void {
+  isRestoringFtPip = true
   const mainWin = getMainWindow()
   if (mainWin && !mainWin.isDestroyed()) {
     if (mainWin.isMinimized()) mainWin.restore()
+    if (!mainWin.isVisible()) mainWin.show()
+    mainWin.setAlwaysOnTop(true)
     mainWin.show()
     mainWin.focus()
-    mainWin.webContents.send('ft-pip-closed', { ...lastFtPipState, restoreRequested: true })
+    mainWin.setAlwaysOnTop(false)
+
+    const mergedState = { ...lastFtPipState, ...(pipState || {}), restoreRequested: true }
+    mainWin.webContents.send('ft-pip-closed', mergedState)
   }
   closeFtPip()
+  setTimeout(() => {
+    isRestoringFtPip = false
+  }, 600)
 }
 
 ipcMain.handle('ft-open-pip', (_event, payload: any) => {
@@ -2348,8 +2360,8 @@ ipcMain.handle('ft-close-pip', () => {
   closeFtPip()
 })
 
-ipcMain.handle('ft-restore-pip', () => {
-  restoreFromFtPip()
+ipcMain.handle('ft-restore-pip', (_event, payload?: any) => {
+  restoreFromFtPip(payload)
 })
 
 ipcMain.handle('ft-get-pip-state', () => {
@@ -9102,6 +9114,49 @@ ipcMain.handle('ft-get-frame-quality', async () => {
     return { quality: null, available: [] }
   } catch {
     return { quality: null, available: [] }
+  }
+})
+
+ipcMain.handle('ft-seek-frame', async (_e, input: { seconds: number; play?: boolean } | number) => {
+  const seconds = typeof input === 'number' ? input : Number(input?.seconds || 0)
+  const shouldPlay = typeof input === 'object' && input !== null ? input.play !== false : true
+  try {
+    const frames = getYouTubeEmbedFrames()
+    let applied = false
+    const script = `
+      (() => {
+        try {
+          const p = document.getElementById('movie_player') || document.querySelector('.html5-video-player');
+          if (p && typeof p.seekTo === 'function') {
+            p.seekTo(${seconds}, true);
+            if (${shouldPlay} && typeof p.playVideo === 'function') {
+              p.playVideo();
+            }
+            return true;
+          }
+          const v = document.querySelector('video') || document.querySelector('.html5-main-video');
+          if (v) {
+            v.currentTime = ${seconds};
+            if (${shouldPlay}) v.play().catch(() => {});
+            return true;
+          }
+          return false;
+        } catch {
+          return false;
+        }
+      })()
+    `
+    for (const frame of frames) {
+      try {
+        await frame.executeJavaScript(script)
+        applied = true
+      } catch {
+        // frame execution retry/suppress
+      }
+    }
+    return { ok: applied }
+  } catch (err: any) {
+    return { ok: false, error: err?.message }
   }
 })
 

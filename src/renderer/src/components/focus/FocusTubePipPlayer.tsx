@@ -1,8 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
-  Compass,
   Maximize2,
-  Minus,
   Pause,
   Play,
   RotateCcw,
@@ -14,7 +12,7 @@ import {
   Zap,
 } from 'lucide-react'
 import type { FtVideo } from '../../types'
-import { embedUrl, formatDuration, thumbnailUrl } from '../../utils/focusTube'
+import { embedUrl } from '../../utils/focusTube'
 import { formatChapterTime, type FtSponsorSegment, sponsorLabel } from '../../utils/focusCinema'
 
 const YT_ORIGIN = 'https://www.youtube.com'
@@ -56,6 +54,7 @@ export const FocusTubePipPlayer: React.FC<FocusTubePipPlayerProps> = ({ initialP
   const [hasNext, setHasNext] = useState<boolean>(!!initialPayload?.hasNext)
   const [nextTitle, setNextTitle] = useState<string | null>(initialPayload?.nextTitle || null)
   const [queue, setQueue] = useState<FtVideo[]>(initialPayload?.queue || [])
+  const [showVolumeSlider, setShowVolumeSlider] = useState<boolean>(false)
 
   const iframeRef = useRef<HTMLIFrameElement>(null)
   const idRef = useRef<number>(1)
@@ -67,6 +66,17 @@ export const FocusTubePipPlayer: React.FC<FocusTubePipPlayerProps> = ({ initialP
   playerStateRef.current = playerState
   const videoRef = useRef<FtVideo | null>(video)
   videoRef.current = video
+  const lastTapTimeRef = useRef<number>(0)
+  const seekLockRef = useRef<{ target: number; until: number } | null>(null)
+
+  // Force pure dark mode on PiP window
+  useEffect(() => {
+    document.documentElement.classList.remove('light', 'glass-light')
+    document.documentElement.classList.add('dark')
+    document.documentElement.style.colorScheme = 'dark'
+    document.body.style.backgroundColor = '#000000'
+    document.body.style.color = '#ffffff'
+  }, [])
 
   // Fetch initial payload from main process if not provided via props
   useEffect(() => {
@@ -147,7 +157,7 @@ export const FocusTubePipPlayer: React.FC<FocusTubePipPlayerProps> = ({ initialP
     } catch {}
   }, [])
 
-  // Auto-hide controls after idle
+  // Auto-hide controls after idle during active playback
   const pokeControls = useCallback(() => {
     setShowControls(true)
     if (hideControlsTimerRef.current !== null) {
@@ -156,6 +166,7 @@ export const FocusTubePipPlayer: React.FC<FocusTubePipPlayerProps> = ({ initialP
     if (playerStateRef.current === STATE_PLAYING) {
       hideControlsTimerRef.current = window.setTimeout(() => {
         setShowControls(false)
+        setShowVolumeSlider(false)
       }, 2500)
     }
   }, [])
@@ -179,7 +190,7 @@ export const FocusTubePipPlayer: React.FC<FocusTubePipPlayerProps> = ({ initialP
           post('getDuration')
         }
 
-        // Periodic sync to main process
+        // Periodic sync to main process & SQLite DB
         if (videoRef.current && currentTimeRef.current > 0) {
           window.api?.ftSyncPipState?.({
             videoId: videoRef.current.videoId,
@@ -224,6 +235,7 @@ export const FocusTubePipPlayer: React.FC<FocusTubePipPlayerProps> = ({ initialP
         setPlayerState(state)
         playerStateRef.current = state
         if (state === STATE_PLAYING) {
+          seekLockRef.current = null
           pokeControls()
           if (speed !== 1) post('setPlaybackRate', [speed])
         } else {
@@ -242,6 +254,12 @@ export const FocusTubePipPlayer: React.FC<FocusTubePipPlayerProps> = ({ initialP
       if (data.event === 'infoDelivery' && data.info) {
         if (typeof data.info.currentTime === 'number') {
           const t = data.info.currentTime
+          if (seekLockRef.current) {
+            if (Date.now() < seekLockRef.current.until && Math.abs(t - seekLockRef.current.target) > 2) {
+              return
+            }
+            seekLockRef.current = null
+          }
           setCurrentTime(t)
           currentTimeRef.current = t
 
@@ -249,7 +267,9 @@ export const FocusTubePipPlayer: React.FC<FocusTubePipPlayerProps> = ({ initialP
           if (sponsorSegments.length > 0) {
             const hit = sponsorSegments.find((seg) => t >= seg.start && t < seg.end - 0.5)
             if (hit) {
+              seekLockRef.current = { target: hit.end, until: Date.now() + 1600 }
               post('seekTo', [hit.end, true])
+              window.api?.ftSeekFrame?.(hit.end, true).catch(() => {})
               setSkipToast({ text: `Skipped ${sponsorLabel(hit.category)}` })
               setTimeout(() => setSkipToast(null), 2500)
             }
@@ -280,11 +300,17 @@ export const FocusTubePipPlayer: React.FC<FocusTubePipPlayerProps> = ({ initialP
 
   const handleSeek = useCallback((time: number) => {
     const target = Math.max(0, Math.min(duration || Infinity, time))
+    seekLockRef.current = { target, until: Date.now() + 1600 }
     setCurrentTime(target)
     currentTimeRef.current = target
+    const shouldPlay = playerState === STATE_PLAYING || playerState === STATE_BUFFERING
     post('seekTo', [target, true])
+    if (shouldPlay) {
+      post('playVideo')
+    }
+    window.api?.ftSeekFrame?.(target, shouldPlay).catch(() => {})
     pokeControls()
-  }, [duration, post, pokeControls])
+  }, [duration, post, pokeControls, playerState])
 
   const handleRelativeSeek = useCallback((delta: number) => {
     handleSeek(currentTimeRef.current + delta)
@@ -317,14 +343,13 @@ export const FocusTubePipPlayer: React.FC<FocusTubePipPlayerProps> = ({ initialP
   }, [speed, post, pokeControls])
 
   const handleRestore = useCallback(() => {
-    if (videoRef.current) {
-      window.api?.ftSyncPipState?.({
-        videoId: videoRef.current.videoId,
-        currentTime: currentTimeRef.current,
-        isPlaying: playerStateRef.current === STATE_PLAYING,
-      }).catch(() => {})
+    const payload = {
+      videoId: videoRef.current?.videoId,
+      currentTime: currentTimeRef.current,
+      isPlaying: playerStateRef.current === STATE_PLAYING,
     }
-    window.api?.ftRestorePip?.().catch(() => {})
+    window.api?.ftSyncPipState?.(payload).catch(() => {})
+    window.api?.ftRestorePip?.(payload).catch(() => {})
   }, [])
 
   const handleClose = useCallback(() => {
@@ -350,6 +375,19 @@ export const FocusTubePipPlayer: React.FC<FocusTubePipPlayerProps> = ({ initialP
     setNextTitle(queue.length > 1 ? queue[1].title : null)
     idRef.current += 1
   }, [queue])
+
+  // Tap layer gesture: single click = play/pause, double click = restore
+  const handleTapLayerClick = useCallback(() => {
+    const now = Date.now()
+    if (now - lastTapTimeRef.current < 300) {
+      // Double tap -> Restore to theater
+      handleRestore()
+      lastTapTimeRef.current = 0
+      return
+    }
+    lastTapTimeRef.current = now
+    togglePlay()
+  }, [togglePlay, handleRestore])
 
   // Keyboard shortcuts
   useEffect(() => {
@@ -406,7 +444,7 @@ export const FocusTubePipPlayer: React.FC<FocusTubePipPlayerProps> = ({ initialP
 
   if (!video) {
     return (
-      <div className="flex h-screen w-screen items-center justify-center bg-black text-white/50 text-xs">
+      <div className="flex h-screen w-screen items-center justify-center bg-black text-white text-xs font-semibold">
         Loading mini player...
       </div>
     )
@@ -416,199 +454,259 @@ export const FocusTubePipPlayer: React.FC<FocusTubePipPlayerProps> = ({ initialP
     <div
       onMouseMove={pokeControls}
       onMouseEnter={pokeControls}
-      className="group relative flex h-screen w-screen select-none flex-col overflow-hidden bg-black font-sans text-white"
+      onMouseLeave={() => {
+        if (isPlaying) {
+          setShowControls(false)
+          setShowVolumeSlider(false)
+        }
+      }}
+      className="ft-pip-player keep-dark dark relative flex h-screen w-screen select-none overflow-hidden bg-black font-sans text-white group"
     >
-      {/* ── DRAGGABLE TITLEBAR ── */}
+      {/* ── 100% EDGE-TO-EDGE VIDEO ── */}
+      <iframe
+        ref={iframeRef}
+        key={`${video.videoId}:${idRef.current}`}
+        src={embedSrc}
+        title={video.title}
+        allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+        className="absolute inset-0 h-full w-full border-0 bg-black pointer-events-none"
+        onLoad={sendHandshake}
+      />
+
+      {/* ── TAP SHIELD (Prevents YouTube's internal chrome/seekbar/watermark from ever showing) ── */}
+      <div
+        onClick={handleTapLayerClick}
+        className="absolute inset-0 z-10 cursor-pointer bg-transparent"
+        title="Click to Play/Pause, Double-click to Restore"
+      />
+
+      {/* ── PERSISTENT TOP DRAG HANDLE (Always draggable even when controls are idle) ── */}
       <div
         style={{ WebkitAppRegion: 'drag' } as React.CSSProperties}
-        className="relative z-50 flex h-8 shrink-0 items-center justify-between border-b border-white/10 bg-gradient-to-r from-neutral-950 via-neutral-900 to-neutral-950 px-2.5 shadow-md"
-      >
-        <div className="flex min-w-0 items-center gap-2">
-          <div className="flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-primary/20 text-primary">
-            <Compass size={11} className="animate-spin-slow" />
-          </div>
-          <span className="truncate text-[11px] font-semibold text-white/90" title={video.title}>
-            {video.title}
+        className="absolute inset-x-0 top-0 h-11 z-20 cursor-grab active:cursor-grabbing"
+      />
+
+      {/* ── SPONSOR SKIP TOAST ── */}
+      {skipToast && (
+        <div className="pointer-events-none absolute inset-x-0 bottom-16 z-40 flex justify-center px-4">
+          <span className="inline-flex items-center gap-1.5 rounded-full border border-amber-300/40 bg-black/90 px-3.5 py-1 text-[11px] font-bold uppercase tracking-wider text-amber-200 shadow-2xl backdrop-blur-md">
+            <Zap size={12} className="text-amber-300" /> {skipToast.text}
           </span>
-          {video.channelTitle && (
-            <span className="hidden truncate text-[10px] text-white/40 sm:inline" title={video.channelTitle}>
-              • {video.channelTitle}
-            </span>
-          )}
         </div>
+      )}
 
+      {/* ── HIGH-CONTRAST FLOATING CONTROLS OVERLAY (Auto-fades on idle while playing) ── */}
+      <div
+        className={`absolute inset-0 z-30 flex flex-col justify-between pointer-events-none transition-opacity duration-200 ${
+          showControls || !isPlaying
+            ? 'opacity-100 bg-black/35 backdrop-blur-[1px]'
+            : 'opacity-0'
+        }`}
+      >
+        {/* TOP BAR: High-contrast draggable title & Window buttons */}
         <div
-          style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
-          className="flex items-center gap-1 shrink-0"
+          style={{ WebkitAppRegion: 'drag' } as React.CSSProperties}
+          className="pointer-events-auto flex items-center justify-between bg-gradient-to-b from-black/95 via-black/70 to-transparent px-3 pt-3 pb-8 cursor-grab active:cursor-grabbing"
         >
-          <button
-            type="button"
-            onClick={handleRestore}
-            title="Restore to Main Player (Esc)"
-            aria-label="Restore to main player"
-            className="flex h-5 w-5 items-center justify-center rounded text-white/60 transition-colors hover:bg-white/15 hover:text-white"
-          >
-            <Maximize2 size={12} />
-          </button>
-          <button
-            type="button"
-            onClick={handleClose}
-            title="Close Mini Player"
-            aria-label="Close mini player"
-            className="flex h-5 w-5 items-center justify-center rounded text-white/60 transition-colors hover:bg-red-500 hover:text-white"
-          >
-            <X size={13} />
-          </button>
-        </div>
-      </div>
-
-      {/* ── VIDEO CONTAINER ── */}
-      <div className="relative min-h-0 flex-1 overflow-hidden bg-black">
-        <iframe
-          ref={iframeRef}
-          key={`${video.videoId}:${idRef.current}`}
-          src={embedSrc}
-          title={video.title}
-          allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-          className="h-full w-full border-0 pointer-events-auto"
-          onLoad={sendHandshake}
-        />
-
-        {/* ── SPONSOR SKIP TOAST ── */}
-        {skipToast && (
-          <div className="pointer-events-none absolute inset-x-0 bottom-14 z-40 flex justify-center px-4">
-            <span className="inline-flex items-center gap-1.5 rounded-full border border-amber-300/30 bg-black/85 px-3 py-1 text-[10px] font-bold uppercase tracking-wider text-amber-200 shadow-xl backdrop-blur-md">
-              <Zap size={11} className="text-amber-300" /> {skipToast.text}
+          <div className="flex min-w-0 items-center gap-2 pr-2">
+            <span
+              style={{ color: '#ffffff' }}
+              className="truncate text-xs font-bold drop-shadow-[0_2px_4px_rgba(0,0,0,1)] select-none"
+              title={video.title}
+            >
+              {video.title}
             </span>
           </div>
-        )}
 
-        {/* ── CONTROLS OVERLAY (Auto-fades on idle while playing) ── */}
-        <div
-          className={`absolute inset-0 z-30 flex flex-col justify-between bg-gradient-to-t from-black/85 via-black/30 to-black/60 p-2 transition-opacity duration-200 ${
-            showControls ? 'opacity-100' : 'pointer-events-none opacity-0'
-          }`}
-        >
-          <div /> {/* Top spacer */}
-
-          {/* Center Play / Pause & Skip Buttons */}
-          <div className="flex items-center justify-center gap-4">
+          <div
+            style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
+            className="flex items-center gap-2 shrink-0 z-40"
+          >
             <button
               type="button"
-              onClick={() => handleRelativeSeek(-10)}
-              title="Rewind 10s (J)"
-              aria-label="Rewind 10 seconds"
-              className="flex h-8 w-8 items-center justify-center rounded-full bg-black/50 text-white/80 backdrop-blur-sm transition-transform hover:scale-110 hover:text-white active:scale-95"
+              onClick={handleRestore}
+              title="Restore to Theater View (Esc or Double-click)"
+              aria-label="Restore to theater view"
+              style={{ color: '#ffffff', backgroundColor: 'rgba(0, 0, 0, 0.75)', borderColor: 'rgba(255, 255, 255, 0.5)' }}
+              className="flex h-7 w-7 items-center justify-center rounded-full hover:!bg-white hover:!text-black text-white border shadow-xl backdrop-blur-md transition-all hover:scale-105 active:scale-95 group/btn"
             >
-              <RotateCcw size={15} />
+              <Maximize2 size={13} strokeWidth={2.5} color="currentColor" />
             </button>
             <button
               type="button"
-              onClick={togglePlay}
-              title={isPlaying ? 'Pause (Space)' : 'Play (Space)'}
-              aria-label={isPlaying ? 'Pause' : 'Play'}
-              className="flex h-11 w-11 items-center justify-center rounded-full bg-primary text-white shadow-lg transition-transform hover:scale-105 active:scale-95"
+              onClick={handleClose}
+              title="Close"
+              aria-label="Close"
+              style={{ color: '#ffffff', backgroundColor: 'rgba(0, 0, 0, 0.75)', borderColor: 'rgba(255, 255, 255, 0.5)' }}
+              className="flex h-7 w-7 items-center justify-center rounded-full hover:!bg-red-600 hover:!border-red-500 text-white border shadow-xl backdrop-blur-md transition-all hover:scale-105 active:scale-95"
             >
-              {isPlaying ? (
-                <Pause size={18} fill="currentColor" />
-              ) : (
-                <Play size={18} fill="currentColor" className="ml-0.5" />
-              )}
-            </button>
-            <button
-              type="button"
-              onClick={() => handleRelativeSeek(10)}
-              title="Forward 10s (L)"
-              aria-label="Forward 10 seconds"
-              className="flex h-8 w-8 items-center justify-center rounded-full bg-black/50 text-white/80 backdrop-blur-sm transition-transform hover:scale-110 hover:text-white active:scale-95"
-            >
-              <RotateCw size={15} />
+              <X size={14} strokeWidth={2.5} color="#ffffff" />
             </button>
           </div>
+        </div>
 
-          {/* Bottom Controls Bar */}
-          <div className="flex flex-col gap-1.5 pt-1">
-            {/* Scrubber Range Bar */}
-            <div className="group/scrub relative flex h-3 cursor-pointer items-center">
-              <div className="relative h-1 w-full overflow-hidden rounded-full bg-white/20">
-                <div
-                  className="h-full rounded-full bg-primary transition-all"
-                  style={{ width: `${progressPercent}%` }}
-                />
-              </div>
-              <input
-                type="range"
-                min={0}
-                max={duration || 0}
-                step={0.1}
-                value={displayTime}
-                onPointerDown={() => setScrubTime(currentTime)}
-                onChange={(e) => setScrubTime(Number(e.target.value))}
-                onPointerUp={(e) => {
-                  const t = Number((e.target as HTMLInputElement).value)
-                  setScrubTime(null)
-                  handleSeek(t)
-                }}
-                className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
-                aria-label="Seek video"
+        {/* CENTER CONTROLS: Crisp, High-Contrast Play / Pause / Skip */}
+        <div className="pointer-events-auto flex items-center justify-center gap-6 select-none">
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation()
+              handleRelativeSeek(-10)
+            }}
+            title="Rewind 10s (J)"
+            aria-label="Rewind 10 seconds"
+            style={{ color: '#ffffff', backgroundColor: 'rgba(0, 0, 0, 0.85)', borderColor: 'rgba(255, 255, 255, 0.6)' }}
+            className="flex h-11 w-11 items-center justify-center rounded-full hover:bg-black text-white border shadow-2xl backdrop-blur-md transition-transform hover:scale-110 active:scale-95"
+          >
+            <RotateCcw size={19} strokeWidth={2.5} color="#ffffff" />
+          </button>
+
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation()
+              togglePlay()
+            }}
+            title={isPlaying ? 'Pause (Space)' : 'Play (Space)'}
+            aria-label={isPlaying ? 'Pause' : 'Play'}
+            style={{ backgroundColor: '#ffffff', color: '#000000' }}
+            className="flex h-13 w-13 p-3.5 items-center justify-center rounded-full shadow-[0_4px_30px_rgba(0,0,0,0.9)] transition-transform hover:scale-110 active:scale-95"
+          >
+            {isPlaying ? (
+              <Pause size={22} fill="#000000" color="#000000" strokeWidth={2.5} />
+            ) : (
+              <Play size={22} fill="#000000" color="#000000" strokeWidth={2.5} className="ml-0.5" />
+            )}
+          </button>
+
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation()
+              handleRelativeSeek(10)
+            }}
+            title="Forward 10s (L)"
+            aria-label="Forward 10 seconds"
+            style={{ color: '#ffffff', backgroundColor: 'rgba(0, 0, 0, 0.85)', borderColor: 'rgba(255, 255, 255, 0.6)' }}
+            className="flex h-11 w-11 items-center justify-center rounded-full hover:bg-black text-white border shadow-2xl backdrop-blur-md transition-transform hover:scale-110 active:scale-95"
+          >
+            <RotateCw size={19} strokeWidth={2.5} color="#ffffff" />
+          </button>
+        </div>
+
+        {/* BOTTOM BAR: Scrubber, Time, Volume, Speed */}
+        <div
+          onClick={(e) => e.stopPropagation()}
+          className="pointer-events-auto flex flex-col gap-1.5 bg-gradient-to-t from-black via-black/90 to-transparent px-3.5 pt-8 pb-3"
+        >
+          {/* Scrubber Bar */}
+          <div className="group/scrub relative flex h-3 cursor-pointer items-center">
+            <div className="relative h-1.5 w-full overflow-hidden rounded-full bg-white/35 transition-all group-hover/scrub:h-2">
+              <div
+                className="h-full rounded-full bg-primary shadow-[0_0_10px_rgba(229,9,20,0.8)] transition-all"
+                style={{ width: `${progressPercent}%` }}
               />
             </div>
+            <input
+              type="range"
+              min={0}
+              max={duration || 0}
+              step={0.1}
+              value={displayTime}
+              onPointerDown={() => setScrubTime(currentTime)}
+              onChange={(e) => setScrubTime(Number(e.target.value))}
+              onPointerUp={(e) => {
+                const t = Number((e.target as HTMLInputElement).value)
+                setScrubTime(null)
+                handleSeek(t)
+              }}
+              className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
+              aria-label="Seek video"
+            />
+          </div>
 
-            {/* Time & Mini Actions */}
-            <div className="flex items-center justify-between text-[10px] font-semibold text-white/70">
-              <div className="flex items-center gap-1.5 tabular-nums">
-                <span>{formatChapterTime(displayTime)}</span>
-                <span>/</span>
-                <span>{duration ? formatChapterTime(duration) : '--:--'}</span>
-              </div>
+          {/* Time & Action Controls */}
+          <div className="flex items-center justify-between text-xs font-semibold select-none text-white drop-shadow-[0_1px_3px_rgba(0,0,0,1)]">
+            <div className="flex items-center gap-1.5 tabular-nums text-white">
+              <span style={{ color: '#ffffff' }}>{formatChapterTime(displayTime)}</span>
+              <span style={{ color: 'rgba(255, 255, 255, 0.85)' }} className="font-bold">/</span>
+              <span style={{ color: '#ffffff' }}>{duration ? formatChapterTime(duration) : '--:--'}</span>
+            </div>
 
-              <div className="flex items-center gap-2">
-                {/* Volume toggle */}
+            <div className="flex items-center gap-2.5">
+              {/* Volume */}
+              <div
+                onMouseEnter={() => setShowVolumeSlider(true)}
+                onMouseLeave={() => setShowVolumeSlider(false)}
+                className="flex items-center gap-1.5"
+              >
                 <button
                   type="button"
                   onClick={toggleMute}
                   title={muted ? 'Unmute (M)' : 'Mute (M)'}
-                  className="text-white/70 hover:text-white"
+                  style={{ color: '#ffffff' }}
+                  className="p-1 transition-colors hover:!text-primary"
                 >
-                  {muted || volume === 0 ? <VolumeX size={13} /> : <Volume2 size={13} />}
+                  {muted || volume === 0 ? (
+                    <VolumeX size={17} strokeWidth={2.5} color="#ffffff" />
+                  ) : (
+                    <Volume2 size={17} strokeWidth={2.5} color="#ffffff" />
+                  )}
                 </button>
-
-                {/* Speed toggle */}
-                <button
-                  type="button"
-                  onClick={cycleSpeed}
-                  title="Playback Speed"
-                  className="rounded bg-white/10 px-1 py-0.5 text-[9px] font-bold text-white/80 hover:bg-white/20 hover:text-white"
-                >
-                  {speed}x
-                </button>
-
-                {/* Next button */}
-                {hasNext && (
-                  <button
-                    type="button"
-                    onClick={handleNext}
-                    title={nextTitle ? `Next: ${nextTitle}` : 'Next video'}
-                    className="text-white/70 hover:text-white"
-                  >
-                    <SkipForward size={13} />
-                  </button>
+                {showVolumeSlider && (
+                  <input
+                    type="range"
+                    min={0}
+                    max={100}
+                    value={muted ? 0 : volume}
+                    onChange={(e) => handleVolumeChange(Number(e.target.value))}
+                    className="h-1.5 w-16 cursor-pointer accent-primary"
+                    aria-label="Volume"
+                  />
                 )}
               </div>
+
+              {/* Speed Pill */}
+              <button
+                type="button"
+                onClick={cycleSpeed}
+                title="Playback Speed"
+                style={{
+                  color: '#ffffff',
+                  backgroundColor: 'rgba(255, 255, 255, 0.25)',
+                  borderColor: 'rgba(255, 255, 255, 0.5)'
+                }}
+                className="rounded-md font-bold text-[11px] px-2 py-0.5 border shadow-md backdrop-blur-sm transition-colors hover:!bg-white/40"
+              >
+                {speed}x
+              </button>
+
+              {/* Next Button */}
+              {hasNext && (
+                <button
+                  type="button"
+                  onClick={handleNext}
+                  title={nextTitle ? `Next: ${nextTitle}` : 'Next video'}
+                  style={{ color: '#ffffff' }}
+                  className="p-1 transition-colors hover:!text-primary"
+                >
+                  <SkipForward size={17} strokeWidth={2.5} color="#ffffff" />
+                </button>
+              )}
             </div>
           </div>
         </div>
-
-        {/* ── ALWAYS VISIBLE SLIM SEEK STRIP AT THE VERY BOTTOM ── */}
-        {!showControls && (
-          <div className="pointer-events-none absolute inset-x-0 bottom-0 h-1 bg-black/40">
-            <div
-              className="h-full bg-primary transition-all duration-300"
-              style={{ width: `${progressPercent}%` }}
-            />
-          </div>
-        )}
       </div>
+
+      {/* ── HAIRLINE PROGRESS STRIP (When controls are hidden while playing) ── */}
+      {!showControls && isPlaying && (
+        <div className="pointer-events-none absolute inset-x-0 bottom-0 h-[2.5px] bg-black/50">
+          <div
+            className="h-full bg-primary shadow-[0_0_6px_rgba(229,9,20,0.8)] transition-all duration-300"
+            style={{ width: `${progressPercent}%` }}
+          />
+        </div>
+      )}
     </div>
   )
 }

@@ -26,7 +26,11 @@ const HIDE_SHORTS_KEY = 'mycinema_ft_hide_shorts'
 const AUTOPLAY_NEXT_KEY = 'mycinema_ft_autoplay_next'
 const SORT_ORDER_KEY = 'mycinema_ft_sort_order'
 
-const FocusTube: React.FC = () => {
+interface FocusTubeProps {
+  activeTab?: string
+}
+
+const FocusTube: React.FC<FocusTubeProps> = ({ activeTab = 'focustube' }) => {
   const [categories, setCategories] = useState<FtCategory[]>([])
   const [activeCategoryId, setActiveCategoryId] = useState<number | null>(null)
   const [videos, setVideos] = useState<FtVideo[]>([])
@@ -1204,6 +1208,7 @@ const FocusTube: React.FC = () => {
 
       {playing && (
         <FocusTubePlayer
+          activeTab={activeTab}
           // No key on videoId on purpose: the player shell (the element we
           // put into fullscreen) must stay the SAME DOM node across Next /
           // auto-advance. Keying by videoId unmounted the shell, which makes

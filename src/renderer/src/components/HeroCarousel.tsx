@@ -118,8 +118,8 @@ const HeroCarousel: React.FC<HeroCarouselProps> = ({ items, onPlay, onShowDetail
 
   if (items.length === 0) {
     return (
-      <div className="keep-dark relative w-full min-h-[570px] h-[73vh] max-h-[800px] overflow-hidden skeleton">
-        <div className="absolute inset-0 bg-gradient-to-t from-black via-black/40 to-transparent">
+      <div className="hero-carousel-canvas relative w-full min-h-[570px] h-[73vh] max-h-[800px] overflow-hidden skeleton">
+        <div className="hero-overlay-left absolute inset-0">
           <div className="absolute bottom-0 left-0 right-0 p-12 md:p-16 lg:p-24 max-w-4xl space-y-6">
             <div className="h-16 w-3/4 max-w-sm rounded-lg bg-white/10 skeleton" />
             <div className="flex gap-3">
@@ -179,7 +179,7 @@ const HeroCarousel: React.FC<HeroCarouselProps> = ({ items, onPlay, onShowDetail
 
   return (
     <div
-      className="keep-dark relative w-full min-h-[570px] h-[73vh] max-h-[800px] overflow-hidden bg-[#05080d] group cursor-pointer"
+      className="hero-carousel-canvas relative w-full min-h-[570px] h-[73vh] max-h-[800px] overflow-hidden group cursor-pointer"
       onClick={() => onShowDetail(current)}
       role="button"
       tabIndex={0}
@@ -208,7 +208,7 @@ const HeroCarousel: React.FC<HeroCarouselProps> = ({ items, onPlay, onShowDetail
               <>
                 <img
                   src={imageUrl}
-                  className="absolute inset-0 h-full w-full scale-125 object-cover object-center blur-[80px] saturate-[2] opacity-80"
+                  className="hero-backdrop-blur absolute inset-0 h-full w-full scale-125 object-cover object-center blur-[80px] saturate-[2] opacity-80"
                   alt=""
                   loading={idx === currentIndex ? 'eager' : 'lazy'}
                   decoding="async"
@@ -216,17 +216,18 @@ const HeroCarousel: React.FC<HeroCarouselProps> = ({ items, onPlay, onShowDetail
                 />
                 <img
                   src={imageUrl}
-                  className="relative z-10 h-full w-full object-cover object-[center_28%]"
+                  className="hero-backdrop-img relative z-10 h-full w-full object-cover object-[center_28%]"
                   alt=""
                   loading={idx === currentIndex ? 'eager' : 'lazy'}
                   decoding="async"
                   fetchPriority={idx === currentIndex ? 'high' : 'auto'}
                 />
-                {/* Cinema Scrim Overlays — pure rich dark, protected against light-mode washout */}
-                <div className="absolute inset-0 z-20 bg-gradient-to-r from-black/90 via-black/45 to-transparent" />
-                <div className="absolute inset-0 z-20 bg-gradient-to-t from-[#05080d] via-[#05080d]/40 to-transparent" />
-                <div className="absolute inset-x-0 top-0 h-44 z-20 bg-gradient-to-b from-black/80 via-black/30 to-transparent" />
-                <div className="absolute inset-y-0 right-0 z-20 w-1/4 bg-gradient-to-l from-black/55 to-transparent" />
+                {/* Cinema Scrim Overlays */}
+                <div className="hero-overlay-left absolute inset-0 z-20 pointer-events-none" />
+                <div className="hero-overlay-radial absolute inset-0 z-20 pointer-events-none" />
+                <div className="hero-overlay-bottom absolute inset-0 z-20 pointer-events-none" />
+                <div className="hero-overlay-top absolute inset-x-0 top-0 h-44 z-20 pointer-events-none" />
+                <div className="hero-overlay-right absolute inset-y-0 right-0 z-20 w-1/4 pointer-events-none" />
               </>
             )}
           </div>
@@ -239,7 +240,7 @@ const HeroCarousel: React.FC<HeroCarouselProps> = ({ items, onPlay, onShowDetail
           <img
             src={getHeroLogoUrl(visibleLogoPath)}
             alt={displayTitle}
-            className="max-h-24 md:max-h-28 w-auto max-w-[min(620px,74vw)] object-contain object-left drop-shadow-[0_8px_28px_rgba(0,0,0,0.85)] animate-in fade-in slide-in-from-left-8 duration-700 delay-100"
+            className="max-h-24 md:max-h-28 w-auto max-w-[min(620px,74vw)] object-contain object-left hero-split-logo animate-in fade-in slide-in-from-left-8 duration-700 delay-100"
             decoding="async"
             onError={() => {
               setFailedLogoKeys(previous => {
@@ -250,7 +251,7 @@ const HeroCarousel: React.FC<HeroCarouselProps> = ({ items, onPlay, onShowDetail
             }}
           />
         ) : shouldShowTextFallback ? (
-          <h2 className="text-4xl md:text-5xl lg:text-6xl font-black text-white tracking-tighter uppercase italic leading-[0.9] max-w-3xl drop-shadow-[0_4px_16px_rgba(0,0,0,0.9)] animate-in fade-in slide-in-from-left-8 duration-700 delay-100">
+          <h2 className="hero-title-text text-4xl md:text-5xl lg:text-6xl font-black text-white tracking-tighter uppercase italic leading-[0.9] max-w-3xl drop-shadow-[0_4px_16px_rgba(0,0,0,0.9)] animate-in fade-in slide-in-from-left-8 duration-700 delay-100">
             {displayTitle}
           </h2>
         ) : (
@@ -266,17 +267,17 @@ const HeroCarousel: React.FC<HeroCarouselProps> = ({ items, onPlay, onShowDetail
           </div>
         )}
 
-        <div className="flex items-center gap-3 text-white/70 font-bold text-xs animate-in fade-in slide-in-from-left-12 duration-700 delay-200">
+        <div className="hero-meta-text flex items-center gap-3 text-white/70 font-bold text-xs animate-in fade-in slide-in-from-left-12 duration-700 delay-200">
           {current.release_year && (
             <>
-              <span className="text-white drop-shadow">{current.release_year}</span>
-              <span className="w-1 h-1 bg-white/30 rounded-full" />
+              <span className="hero-meta-item text-white drop-shadow">{current.release_year}</span>
+              <span className="hero-meta-dot w-1 h-1 bg-white/30 rounded-full" />
             </>
           )}
-          <span className="uppercase tracking-widest text-white/80">{mediaLabel}</span>
+          <span className="hero-meta-badge uppercase tracking-widest text-white/80">{mediaLabel}</span>
           {current.vote_average ? (
             <>
-              <span className="w-1 h-1 bg-white/30 rounded-full" />
+              <span className="hero-meta-dot w-1 h-1 bg-white/30 rounded-full" />
               <span className="inline-flex items-center gap-1 text-amber-400 font-black">
                 ★ {current.vote_average.toFixed(1)}
               </span>
@@ -284,13 +285,13 @@ const HeroCarousel: React.FC<HeroCarouselProps> = ({ items, onPlay, onShowDetail
           ) : null}
           {progressPercent > 0 && (
             <>
-              <span className="w-1 h-1 bg-white/30 rounded-full" />
+              <span className="hero-meta-dot w-1 h-1 bg-white/30 rounded-full" />
               <span className="uppercase tracking-widest text-red-400 font-black">{Math.round(progressPercent)}% watched</span>
             </>
           )}
         </div>
 
-        <p className="text-white/60 text-xs md:text-sm font-medium max-w-xl line-clamp-3 leading-relaxed drop-shadow-[0_2px_8px_rgba(0,0,0,0.8)] animate-in fade-in slide-in-from-left-16 duration-700 delay-300">
+        <p className="hero-overview-text text-white/60 text-xs md:text-sm font-medium max-w-xl line-clamp-3 leading-relaxed drop-shadow-[0_2px_8px_rgba(0,0,0,0.8)] animate-in fade-in slide-in-from-left-16 duration-700 delay-300">
           {current.overview || "Loading description..."}
         </p>
 
@@ -325,16 +326,16 @@ const HeroCarousel: React.FC<HeroCarouselProps> = ({ items, onPlay, onShowDetail
             e.stopPropagation()
             prev()
           }}
-          className="p-3 rounded-full bg-white/10 hover:bg-white/20 text-white/60 hover:text-white transition-all border border-white/10 hover:scale-110"
+          className="hero-nav-btn p-3 rounded-full bg-white/10 hover:bg-white/20 text-white/60 hover:text-white transition-all border border-white/10 hover:scale-110"
         >
           <ChevronLeft size={24} />
         </button>
-        <div className="flex gap-2">
+        <div className="flex gap-2 items-center">
           {items.map((_, idx) => (
             <div
               key={idx}
               className={`h-1.5 rounded-full transition-all duration-500 ${
-                idx === currentIndex ? 'w-8 bg-red-600' : 'w-1.5 bg-white/30'
+                idx === currentIndex ? 'w-8 bg-red-600' : 'hero-nav-dot w-1.5 bg-white/30'
               }`}
             />
           ))}
@@ -344,7 +345,7 @@ const HeroCarousel: React.FC<HeroCarouselProps> = ({ items, onPlay, onShowDetail
             e.stopPropagation()
             next()
           }}
-          className="p-3 rounded-full bg-white/10 hover:bg-white/20 text-white/60 hover:text-white transition-all border border-white/10 hover:scale-110"
+          className="hero-nav-btn p-3 rounded-full bg-white/10 hover:bg-white/20 text-white/60 hover:text-white transition-all border border-white/10 hover:scale-110"
         >
           <ChevronRight size={24} />
         </button>

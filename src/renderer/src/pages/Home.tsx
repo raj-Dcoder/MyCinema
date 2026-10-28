@@ -1229,15 +1229,15 @@ const Home: React.FC<HomeProps> = ({ onPlay, onShowDetail, onNavigate, refreshKe
     <div onClickCapture={handleHomeClickCapture}>
       {(showHero || showLocalEmptyState || !localDataLoaded) && (
         <section className="-mt-6 mb-10">
-          <div className="keep-dark relative overflow-hidden w-full">
+          <div className="relative overflow-hidden w-full">
             {/* Top Scrim Header inside Full-Bleed Hero */}
             <div className="absolute left-0 right-0 top-0 z-30 pointer-events-none">
               <div className="mx-auto flex max-w-[1600px] items-start justify-between px-8 pt-8 md:px-16">
                 <div>
-                  <p className="text-[10px] sm:text-[11px] font-black uppercase tracking-[0.22em] text-primary drop-shadow-[0_2px_12px_rgba(0,0,0,0.9)]">
+                  <p className="hero-greeting-eyebrow text-[10px] sm:text-[11px] font-black uppercase tracking-[0.22em] text-primary drop-shadow-[0_2px_12px_rgba(0,0,0,0.9)]">
                     {getTimeGreeting()}, {userName}
                   </p>
-                  <h2 className="mt-1 text-2xl md:text-3xl font-black italic tracking-tighter text-white drop-shadow-[0_2px_14px_rgba(0,0,0,0.95)]">
+                  <h2 className="hero-greeting-title mt-1 text-2xl md:text-3xl font-black italic tracking-tighter text-white drop-shadow-[0_2px_14px_rgba(0,0,0,0.95)]">
                     {showHero ? heroTitle : 'Ready to Watch'}
                   </h2>
                 </div>
@@ -1249,7 +1249,7 @@ const Home: React.FC<HomeProps> = ({ onPlay, onShowDetail, onNavigate, refreshKe
                     }`}
                   >
                     <div
-                      className={`flex h-12 items-center overflow-hidden rounded-2xl border backdrop-blur-xl transition-all duration-300 ${
+                      className={`hero-search-pill flex h-12 items-center overflow-hidden rounded-2xl border backdrop-blur-xl transition-all duration-300 ${
                         isSearchOpen
                           ? 'border-white/20 bg-black/60 shadow-[0_18px_55px_rgba(0,0,0,0.6)]'
                           : 'border-white/10 bg-black/35 hover:bg-black/50'
@@ -1257,7 +1257,7 @@ const Home: React.FC<HomeProps> = ({ onPlay, onShowDetail, onNavigate, refreshKe
                     >
                       <button
                         aria-label="Search movies and series"
-                        className={`flex h-12 w-12 shrink-0 items-center justify-center text-white transition-all hover:text-primary active:scale-95 ${
+                        className={`hero-search-btn flex h-12 w-12 shrink-0 items-center justify-center text-white transition-all hover:text-primary active:scale-95 ${
                           isSearchOpen ? 'scale-95' : 'hover:scale-110'
                         }`}
                         onClick={() => setIsSearchOpen(true)}
@@ -1270,7 +1270,7 @@ const Home: React.FC<HomeProps> = ({ onPlay, onShowDetail, onNavigate, refreshKe
                         value={searchQuery}
                         onChange={(event) => setSearchQuery(event.target.value)}
                         placeholder="Search movies or series"
-                        className={`min-w-0 flex-1 bg-transparent pr-2 text-sm font-bold text-white outline-none placeholder:text-white/35 ${
+                        className={`hero-search-input min-w-0 flex-1 bg-transparent pr-2 text-sm font-bold text-white outline-none placeholder:text-white/35 ${
                           isSearchOpen ? 'opacity-100' : 'pointer-events-none opacity-0'
                         }`}
                       />
@@ -1278,7 +1278,7 @@ const Home: React.FC<HomeProps> = ({ onPlay, onShowDetail, onNavigate, refreshKe
                       {isSearchOpen && searchQuery && (
                         <button
                           aria-label="Clear search"
-                          className="mr-2 flex h-8 w-8 shrink-0 items-center justify-center rounded-xl text-white/50 transition-all hover:bg-white/15 hover:text-white"
+                          className="hero-search-clear mr-2 flex h-8 w-8 shrink-0 items-center justify-center rounded-xl text-white/50 transition-all hover:bg-white/15 hover:text-white"
                           onClick={() => {
                             setSearchQuery('')
                             setSearchResults([])
@@ -1291,7 +1291,7 @@ const Home: React.FC<HomeProps> = ({ onPlay, onShowDetail, onNavigate, refreshKe
                     </div>
 
                     {isSearchOpen && searchQuery.trim().length > 0 && (
-                      <div className="absolute right-0 top-14 z-50 w-[min(420px,calc(100vw-4rem))] overflow-hidden rounded-3xl border border-white/10 bg-[#070a0f]/95 shadow-[0_28px_90px_rgba(0,0,0,0.75)] backdrop-blur-2xl animate-in fade-in slide-in-from-top-2 duration-200">
+                      <div className="hero-search-dropdown absolute right-0 top-14 z-50 w-[min(420px,calc(100vw-4rem))] overflow-hidden rounded-3xl border border-white/10 bg-[#070a0f]/95 shadow-[0_28px_90px_rgba(0,0,0,0.75)] backdrop-blur-2xl animate-in fade-in slide-in-from-top-2 duration-200">
                         <div className="border-b border-white/10 px-4 py-3">
                           <div className="flex items-center justify-between gap-3">
                             <p className="text-[10px] font-black uppercase tracking-[0.22em] text-white/40">Search</p>
@@ -1355,17 +1355,17 @@ const Home: React.FC<HomeProps> = ({ onPlay, onShowDetail, onNavigate, refreshKe
                 isActive={isActive}
               />
             ) : showLocalEmptyState ? (
-              <div className="relative flex min-h-[570px] h-[73vh] max-h-[800px] flex-col items-start justify-end overflow-hidden bg-[#05080d] px-8 pb-20 pt-32 md:px-16">
-                <div className="absolute inset-0 bg-[linear-gradient(120deg,rgba(220,38,38,0.16),transparent_38%),linear-gradient(180deg,rgba(255,255,255,0.06),transparent_32%),#05080d]" />
-                <div className="absolute inset-0 bg-gradient-to-r from-black/85 via-black/45 to-transparent" />
+              <div className="hero-carousel-canvas relative flex min-h-[570px] h-[73vh] max-h-[800px] flex-col items-start justify-end overflow-hidden px-8 pb-20 pt-32 md:px-16">
+                <div className="absolute inset-0 bg-[linear-gradient(120deg,rgba(220,38,38,0.16),transparent_38%),linear-gradient(180deg,rgba(255,255,255,0.06),transparent_32%)]" />
+                <div className="hero-overlay-left absolute inset-0" />
                 <div className="relative max-w-xl space-y-4">
                   <div className="inline-flex rounded-md border border-white/10 bg-black/35 px-3 py-1.5 text-[9px] font-black uppercase tracking-[0.18em] text-white/70 backdrop-blur-md">
                     Library setup
                   </div>
-                  <h2 className="text-4xl font-black uppercase italic leading-[0.92] tracking-tighter text-white md:text-5xl">
+                  <h2 className="hero-title-text text-4xl font-black uppercase italic leading-[0.92] tracking-tighter text-white md:text-5xl">
                     Add your movie folder
                   </h2>
-                  <p className="max-w-lg text-sm font-semibold leading-7 text-white/50">
+                  <p className="hero-overview-text max-w-lg text-sm font-semibold leading-7 text-white/50">
                     Point MyCinema to the folder where your downloaded movies and shows live. Recently added titles will appear here automatically.
                   </p>
                   <button

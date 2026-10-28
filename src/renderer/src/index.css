@@ -1577,29 +1577,320 @@
 
 
 /* ------------------------------------------------------------------ */
-/* 6. IMAGE OVERLAYS (Hero Carousel & Poster Overlays)                */
+/* 6. IMAGE OVERLAYS (Poster Overlays)                                */
 /* ------------------------------------------------------------------ */
-.light .poster-overlay .text-white,
-.light .hero-overlay .text-white { color: #ffffff !important; }
-.light .hero-overlay .text-white\/60,
+.light .poster-overlay .text-white { color: #ffffff !important; }
 .light .poster-overlay .text-white\/65 { color: rgba(255, 255, 255, 0.65) !important; }
 .light .poster-overlay .text-white\/75 { color: rgba(255, 255, 255, 0.75) !important; }
-.light .hero-overlay .text-white\/45 { color: rgba(255, 255, 255, 0.45) !important; }
-.light .hero-overlay .text-white\/40 { color: rgba(255, 255, 255, 0.4) !important; }
-.light .hero-overlay .hover\:text-white:hover,
 .light .poster-overlay .hover\:text-white:hover { color: #ffffff !important; }
-.light .poster-overlay .bg-white\/35,
-.light .hero-overlay .bg-white\/20 { background-color: rgba(255, 255, 255, 0.35) !important; }
-.light .hero-overlay .bg-white\/5 { background-color: rgba(255, 255, 255, 0.05) !important; }
-.light .hero-overlay .hover\:bg-white\/10:hover { background-color: rgba(255, 255, 255, 0.1) !important; }
-.light .hero-overlay .border-white\/5 { border-color: rgba(255, 255, 255, 0.05) !important; }
+.light .poster-overlay .bg-white\/35 { background-color: rgba(255, 255, 255, 0.35) !important; }
 .light .poster-overlay .bg-black\/55 { background-color: rgba(0, 0, 0, 0.55) !important; }
 .light .poster-overlay .border-white\/10 { border-color: rgba(255, 255, 255, 0.1) !important; }
-.light .poster-overlay .bg-red-600,
-.light .hero-overlay .bg-red-600 { background-image: none !important; }
-.light .poster-overlay button.bg-red-600,
-.light .hero-overlay button.bg-red-600 { color: #ffffff !important; }
-.light .hero-overlay .bg-red-600:hover { filter: none !important; }
+.light .poster-overlay .bg-red-600 { background-image: none !important; }
+.light .poster-overlay button.bg-red-600 { color: #ffffff !important; }
+
+
+/* ------------------------------------------------------------------ */
+/* 6.1 HERO CAROUSEL — Light, Dark & Glass Theming                   */
+/* ------------------------------------------------------------------ */
+
+/* Default / Dark Mode Hero Overlays */
+.hero-carousel-canvas {
+  background-color: #05080d;
+}
+.hero-overlay-left {
+  background: linear-gradient(to right, rgba(0, 0, 0, 0.9) 0%, rgba(0, 0, 0, 0.45) 45%, transparent 100%);
+}
+.hero-overlay-radial {
+  background: radial-gradient(circle at 15% 55%, rgba(5, 8, 13, 0.75) 0%, rgba(5, 8, 13, 0.25) 35%, transparent 60%);
+}
+.hero-overlay-bottom {
+  background: linear-gradient(to top, #05080d 0%, rgba(5, 8, 13, 0.6) 30%, transparent 100%);
+}
+.hero-overlay-top {
+  background: linear-gradient(to bottom, rgba(0, 0, 0, 0.8) 0%, rgba(0, 0, 0, 0.3) 50%, transparent 100%);
+}
+.hero-overlay-right {
+  background: linear-gradient(to left, rgba(0, 0, 0, 0.55) 0%, transparent 100%);
+}
+
+/* Glass Dark Hero Carousel */
+.glass .hero-carousel-canvas {
+  background-color: #07090e !important;
+}
+.glass .hero-overlay-bottom {
+  background: linear-gradient(to top, #07090e 0%, rgba(7, 9, 14, 0.6) 30%, transparent 100%) !important;
+}
+
+/* Light Mode Hero Carousel — Elegant White Shades Matching DetailScreen */
+.light .hero-carousel-canvas {
+  background-color: #f1f3f6 !important;
+}
+.light .hero-backdrop-img {
+  filter: contrast(1.05) saturate(1.08) !important;
+}
+.light .hero-backdrop-blur {
+  opacity: 0.35 !important;
+}
+.light .hero-overlay-left {
+  background: linear-gradient(
+    to right,
+    #f1f3f6 0%,
+    rgba(241, 243, 246, 0.94) 22%,
+    rgba(241, 243, 246, 0.8) 36%,
+    rgba(241, 243, 246, 0.35) 52%,
+    rgba(241, 243, 246, 0.08) 68%,
+    transparent 82%
+  ) !important;
+}
+.light .hero-overlay-radial {
+  background: radial-gradient(
+    circle at 12% 48%,
+    rgba(241, 243, 246, 0.85) 0%,
+    rgba(241, 243, 246, 0.5) 25%,
+    rgba(241, 243, 246, 0.12) 42%,
+    transparent 58%
+  ) !important;
+}
+.light .hero-overlay-bottom {
+  background: linear-gradient(
+    to top,
+    #f1f3f6 0%,
+    rgba(241, 243, 246, 0.92) 16%,
+    rgba(241, 243, 246, 0.45) 35%,
+    rgba(241, 243, 246, 0.1) 55%,
+    transparent 70%
+  ) !important;
+}
+.light .hero-overlay-top {
+  background: linear-gradient(
+    to bottom,
+    rgba(241, 243, 246, 0.92) 0%,
+    rgba(241, 243, 246, 0.5) 45%,
+    rgba(241, 243, 246, 0.1) 75%,
+    transparent 100%
+  ) !important;
+}
+.light .hero-overlay-right {
+  background: transparent !important;
+}
+
+.light .hero-title-text {
+  color: #111827 !important;
+  filter: none !important;
+  text-shadow: none !important;
+}
+.light .hero-greeting-eyebrow {
+  filter: none !important;
+  text-shadow: none !important;
+}
+.light .hero-greeting-title {
+  color: #111827 !important;
+  filter: none !important;
+  text-shadow: none !important;
+}
+.light .hero-meta-text {
+  color: #4b5563 !important;
+}
+.light .hero-meta-item {
+  color: #1f2937 !important;
+  text-shadow: none !important;
+  filter: none !important;
+}
+.light .hero-meta-badge {
+  color: #374151 !important;
+}
+.light .hero-meta-dot {
+  background-color: rgba(0, 0, 0, 0.25) !important;
+}
+.light .hero-overview-text {
+  color: #1f2937 !important;
+  text-shadow: none !important;
+  filter: none !important;
+}
+.light .hero-nav-btn {
+  background-color: rgba(255, 255, 255, 0.85) !important;
+  border: 1px solid rgba(0, 0, 0, 0.08) !important;
+  color: #1f2937 !important;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.08) !important;
+}
+.light .hero-nav-btn:hover {
+  background-color: #ffffff !important;
+  color: #000000 !important;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.12) !important;
+}
+.light .hero-nav-dot {
+  background-color: rgba(0, 0, 0, 0.22) !important;
+}
+.light .hero-search-pill {
+  background-color: rgba(255, 255, 255, 0.85) !important;
+  border: 1px solid rgba(0, 0, 0, 0.08) !important;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.06) !important;
+}
+.light .hero-search-pill:hover {
+  background-color: rgba(255, 255, 255, 0.98) !important;
+  border-color: rgba(0, 0, 0, 0.12) !important;
+}
+.light .hero-search-btn {
+  color: #1f2937 !important;
+}
+.light .hero-search-btn:hover {
+  color: #e50914 !important;
+}
+.light .hero-search-input {
+  color: #111827 !important;
+}
+.light .hero-search-input::placeholder {
+  color: rgba(0, 0, 0, 0.38) !important;
+}
+.light .hero-search-clear {
+  color: rgba(0, 0, 0, 0.45) !important;
+}
+.light .hero-search-clear:hover {
+  background-color: rgba(0, 0, 0, 0.08) !important;
+  color: #000000 !important;
+}
+.light .hero-search-dropdown {
+  background-color: rgba(255, 255, 255, 0.98) !important;
+  border-color: rgba(0, 0, 0, 0.08) !important;
+  box-shadow: 0 24px 70px rgba(0, 0, 0, 0.14) !important;
+  color: #111827 !important;
+}
+
+/* Glass-Light Mode Hero Carousel — Crystal White Shades Matching DetailScreen */
+.glass-light .hero-carousel-canvas {
+  background-color: #f5f5f7 !important;
+}
+.glass-light .hero-backdrop-img {
+  filter: contrast(1.05) saturate(1.08) !important;
+}
+.glass-light .hero-backdrop-blur {
+  opacity: 0.35 !important;
+}
+.glass-light .hero-overlay-left {
+  background: linear-gradient(
+    to right,
+    #f5f5f7 0%,
+    rgba(245, 245, 247, 0.94) 22%,
+    rgba(245, 245, 247, 0.8) 36%,
+    rgba(245, 245, 247, 0.35) 52%,
+    rgba(245, 245, 247, 0.08) 68%,
+    transparent 82%
+  ) !important;
+}
+.glass-light .hero-overlay-radial {
+  background: radial-gradient(
+    circle at 12% 48%,
+    rgba(245, 245, 247, 0.85) 0%,
+    rgba(245, 245, 247, 0.5) 25%,
+    rgba(245, 245, 247, 0.12) 42%,
+    transparent 58%
+  ) !important;
+}
+.glass-light .hero-overlay-bottom {
+  background: linear-gradient(
+    to top,
+    #f5f5f7 0%,
+    rgba(245, 245, 247, 0.92) 16%,
+    rgba(245, 245, 247, 0.45) 35%,
+    rgba(245, 245, 247, 0.1) 55%,
+    transparent 70%
+  ) !important;
+}
+.glass-light .hero-overlay-top {
+  background: linear-gradient(
+    to bottom,
+    rgba(245, 245, 247, 0.92) 0%,
+    rgba(245, 245, 247, 0.5) 45%,
+    rgba(245, 245, 247, 0.1) 75%,
+    transparent 100%
+  ) !important;
+}
+.glass-light .hero-overlay-right {
+  background: transparent !important;
+}
+
+.glass-light .hero-title-text {
+  color: #111827 !important;
+  filter: none !important;
+  text-shadow: none !important;
+}
+.glass-light .hero-greeting-eyebrow {
+  filter: none !important;
+  text-shadow: none !important;
+}
+.glass-light .hero-greeting-title {
+  color: #111827 !important;
+  filter: none !important;
+  text-shadow: none !important;
+}
+.glass-light .hero-meta-text {
+  color: #4b5563 !important;
+}
+.glass-light .hero-meta-item {
+  color: #1f2937 !important;
+  text-shadow: none !important;
+  filter: none !important;
+}
+.glass-light .hero-meta-badge {
+  color: #374151 !important;
+}
+.glass-light .hero-meta-dot {
+  background-color: rgba(0, 0, 0, 0.25) !important;
+}
+.glass-light .hero-overview-text {
+  color: #1f2937 !important;
+  text-shadow: none !important;
+  filter: none !important;
+}
+.glass-light .hero-nav-btn {
+  background-color: rgba(255, 255, 255, 0.85) !important;
+  border: 1px solid rgba(0, 0, 0, 0.08) !important;
+  color: #1f2937 !important;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.08) !important;
+}
+.glass-light .hero-nav-btn:hover {
+  background-color: #ffffff !important;
+  color: #000000 !important;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.12) !important;
+}
+.glass-light .hero-nav-dot {
+  background-color: rgba(0, 0, 0, 0.22) !important;
+}
+.glass-light .hero-search-pill {
+  background-color: rgba(255, 255, 255, 0.85) !important;
+  border: 1px solid rgba(0, 0, 0, 0.08) !important;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.06) !important;
+}
+.glass-light .hero-search-pill:hover {
+  background-color: rgba(255, 255, 255, 0.98) !important;
+  border-color: rgba(0, 0, 0, 0.12) !important;
+}
+.glass-light .hero-search-btn {
+  color: #1f2937 !important;
+}
+.glass-light .hero-search-btn:hover {
+  color: #e50914 !important;
+}
+.glass-light .hero-search-input {
+  color: #111827 !important;
+}
+.glass-light .hero-search-input::placeholder {
+  color: rgba(0, 0, 0, 0.38) !important;
+}
+.glass-light .hero-search-clear {
+  color: rgba(0, 0, 0, 0.45) !important;
+}
+.glass-light .hero-search-clear:hover {
+  background-color: rgba(0, 0, 0, 0.08) !important;
+  color: #000000 !important;
+}
+.glass-light .hero-search-dropdown {
+  background-color: rgba(255, 255, 255, 0.98) !important;
+  border-color: rgba(0, 0, 0, 0.08) !important;
+  box-shadow: 0 24px 70px rgba(0, 0, 0, 0.14) !important;
+  color: #111827 !important;
+}
 
 
 /* ------------------------------------------------------------------ */

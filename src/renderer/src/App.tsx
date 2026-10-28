@@ -668,10 +668,11 @@ const App: React.FC = () => {
     if (!launchFullscreen) return null
 
     const controlsVisible = showWindowControls || (!!playingVideo && videoControlsVisible)
-    const capsuleClass = `pointer-events-auto flex items-center gap-px rounded-full bg-black/50 py-0.5 pl-1 pr-0.5 shadow-[0_12px_40px_rgba(0,0,0,0.55)] ring-1 ring-white/10 backdrop-blur-2xl transition-all duration-300 ease-[cubic-bezier(0.16,1,0.3,1)] ${
+    const isOnVideo = !!playingVideo
+    const capsuleClass = `window-controls-capsule ${isOnVideo ? 'on-video' : ''} pointer-events-auto flex items-center gap-px rounded-full py-0.5 pl-1 pr-0.5 transition-all duration-300 ease-[cubic-bezier(0.16,1,0.3,1)] ${
       controlsVisible ? 'translate-y-0 scale-100 opacity-100' : 'pointer-events-none -translate-y-2 scale-95 opacity-0'
     }`
-    const controlButtonClass = 'flex h-6 w-7 items-center justify-center rounded-full text-white/65 transition-all duration-150 hover:bg-white/10 hover:text-white active:scale-90 focus:outline-none focus-visible:ring-1 focus-visible:ring-white/40'
+    const controlButtonClass = 'window-control-btn flex h-6 w-7 items-center justify-center rounded-full transition-all duration-150 active:scale-90 focus:outline-none'
 
     if (isFullscreen) {
       return (
@@ -709,7 +710,7 @@ const App: React.FC = () => {
               aria-label="Close"
               tabIndex={controlsVisible ? 0 : -1}
               onClick={() => window.api.closeWindow()}
-              className={`${controlButtonClass} hover:bg-red-500 hover:text-white focus-visible:ring-red-300/60`}
+              className={`${controlButtonClass} window-control-close hover:bg-red-500 hover:text-white`}
             >
               <X size={12} strokeWidth={2.4} />
             </button>

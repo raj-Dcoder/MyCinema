@@ -1487,6 +1487,79 @@
   color: rgba(255, 255, 255, 0.35) !important;
 }
 
+/* ------------------------------------------------------------------ */
+/* 4a. WINDOW CONTROLS FLOATING CAPSULE (ALL THEMES)                  */
+/* ------------------------------------------------------------------ */
+.window-controls-capsule {
+  background-color: rgba(0, 0, 0, 0.55);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.55);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  backdrop-filter: blur(20px) saturate(180%);
+  -webkit-backdrop-filter: blur(20px) saturate(180%);
+}
+
+.window-control-btn {
+  color: rgba(255, 255, 255, 0.75);
+}
+.window-control-btn:hover {
+  color: #ffffff;
+  background-color: rgba(255, 255, 255, 0.12);
+}
+.window-control-btn.window-control-close:hover {
+  color: #ffffff !important;
+  background-color: #ef4444 !important;
+}
+
+/* Light & Glass-Light Theme: Clean, high-contrast frosted glass pill */
+.light .window-controls-capsule:not(.on-video),
+.glass-light .window-controls-capsule:not(.on-video) {
+  background-color: rgba(255, 255, 255, 0.88) !important;
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.1), 0 1px 3px rgba(0, 0, 0, 0.05) !important;
+  border: 1px solid rgba(0, 0, 0, 0.1) !important;
+}
+
+.light .window-controls-capsule:not(.on-video) .window-control-btn,
+.glass-light .window-controls-capsule:not(.on-video) .window-control-btn {
+  color: #4b5563 !important;
+}
+
+.light .window-controls-capsule:not(.on-video) .window-control-btn:hover,
+.glass-light .window-controls-capsule:not(.on-video) .window-control-btn:hover {
+  color: #111827 !important;
+  background-color: rgba(0, 0, 0, 0.06) !important;
+}
+
+.light .window-controls-capsule:not(.on-video) .window-control-close:hover,
+.glass-light .window-controls-capsule:not(.on-video) .window-control-close:hover {
+  color: #ffffff !important;
+  background-color: #ef4444 !important;
+}
+
+/* When watching a video in Light/Glass-Light, keep dark cinema glass */
+.light .window-controls-capsule.on-video,
+.glass-light .window-controls-capsule.on-video {
+  background-color: rgba(18, 18, 22, 0.85) !important;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.7) !important;
+  border: 1px solid rgba(255, 255, 255, 0.14) !important;
+}
+
+.light .window-controls-capsule.on-video .window-control-btn,
+.glass-light .window-controls-capsule.on-video .window-control-btn {
+  color: rgba(255, 255, 255, 0.75) !important;
+}
+
+.light .window-controls-capsule.on-video .window-control-btn:hover,
+.glass-light .window-controls-capsule.on-video .window-control-btn:hover {
+  color: #ffffff !important;
+  background-color: rgba(255, 255, 255, 0.14) !important;
+}
+
+.light .window-controls-capsule.on-video .window-control-close:hover,
+.glass-light .window-controls-capsule.on-video .window-control-close:hover {
+  color: #ffffff !important;
+  background-color: #ef4444 !important;
+}
+
 
 /* ------------------------------------------------------------------ */
 /* 4b. MODERN SPLIT / SPOTLIGHT BANNER                                */

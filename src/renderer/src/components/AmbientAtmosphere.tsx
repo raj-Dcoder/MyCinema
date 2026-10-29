@@ -14,32 +14,43 @@ export const AmbientAtmosphere: React.FC<AmbientAtmosphereProps> = ({
 
   const isStealth = haloIntensity === 'stealth' || isPlaybackActive
 
-  // Calculate dynamic opacity based on preset, chroma, and light/dark theme
+  // Calculate dynamic intense opacity and blur parameters
   const computedStyle = useMemo(() => {
     if (isStealth) {
       return {
+        topWashOpacity: 0,
         leftOrbOpacity: 0,
         rightOrbOpacity: 0,
-        blurPx: 120,
+        sideGlowOpacity: 0,
+        blurPx: 60,
         scale: 1,
       }
     }
 
-    const baseOpacity = currentHaloPreset.baseOpacity
-    const chromaFactor = 0.5 + (haloChroma / 100) * 0.5
-    // In light mode, soften ambient glow slightly to preserve contrast on light surfaces
-    const themeFactor = theme === 'light' ? 0.45 : 0.85
-    const netOpacity = Math.min(1.0, baseOpacity * chromaFactor * themeFactor)
+    const baseOpacity = currentHaloPreset.baseOpacity // 0.35, 0.75, 1.0
+    const chromaFactor = haloChroma / 100 // 0.5 to 2.5
+    const diffusionFactor = haloDiffusion / 100 // 0.5 to 2.5
 
-    const diffusionFactor = haloDiffusion / 100
-    // Blur scales from 70px to 170px based on diffusion radius
-    const blurPx = Math.round(70 + diffusionFactor * 50)
-    // Scale scales from 0.85 to 1.35
-    const scale = Math.max(0.85, Math.min(1.4, 0.85 + diffusionFactor * 0.25))
+    // In light theme, soften slightly so light paper cards stay crisp; in dark theme, full radiance!
+    const themeFactor = theme === 'light' ? 0.6 : 1.0
+    // Net intensity scales vigorously with base preset and chroma vibrancy
+    const netIntensity = baseOpacity * (0.55 + chromaFactor * 0.45) * themeFactor
+
+    // Rich, luminous individual opacities
+    const topWashOpacity = Math.min(0.88, netIntensity * 0.75)
+    const leftOrbOpacity = Math.min(0.95, netIntensity * 0.88)
+    const rightOrbOpacity = Math.min(0.88, netIntensity * 0.78)
+    const sideGlowOpacity = Math.min(0.65, netIntensity * 0.55)
+
+    // Tighter, punchier blur radius so color stays intensely saturated
+    const blurPx = Math.round(35 + diffusionFactor * 28)
+    const scale = Math.max(0.9, Math.min(1.45, 0.9 + diffusionFactor * 0.22))
 
     return {
-      leftOrbOpacity: netOpacity * 0.42,
-      rightOrbOpacity: netOpacity * 0.32,
+      topWashOpacity,
+      leftOrbOpacity,
+      rightOrbOpacity,
+      sideGlowOpacity,
       blurPx,
       scale,
     }
@@ -54,43 +65,44 @@ export const AmbientAtmosphere: React.FC<AmbientAtmosphereProps> = ({
       className={`pointer-events-none fixed inset-0 z-0 overflow-hidden select-none transition-opacity duration-700 ${className}`}
       aria-hidden="true"
     >
-      {/* Primary Top-Left Atmospheric Halo Orb */}
+      {/* 1. Broad Horizon Ambient Wash (Floods the entire upper viewport with ambient light) */}
       <div
-        className="pointer-events-none absolute -top-40 -left-40 h-[36rem] w-[36rem] rounded-full transition-all duration-700 ease-out will-change-transform"
+        className="pointer-events-none absolute -top-16 inset-x-0 h-[30rem] w-full transition-all duration-700 ease-out will-change-transform"
         style={{
-          background: `radial-gradient(circle at 45% 45%, rgb(${currentAccent.rgb} / ${computedStyle.leftOrbOpacity.toFixed(3)}) 0%, rgb(${currentAccent.rgb} / ${(computedStyle.leftOrbOpacity * 0.35).toFixed(3)}) 42%, transparent 72%)`,
+          background: `radial-gradient(ellipse 110% 80% at 50% -12%, rgb(${currentAccent.rgb} / ${computedStyle.topWashOpacity.toFixed(3)}) 0%, rgb(${currentAccent.rgb} / ${(computedStyle.topWashOpacity * 0.58).toFixed(3)}) 38%, rgb(${currentAccent.secondaryRgb} / ${(computedStyle.topWashOpacity * 0.25).toFixed(3)}) 65%, transparent 84%)`,
+          filter: `blur(${Math.round(computedStyle.blurPx * 1.15)}px)`,
+          transform: `scaleY(${computedStyle.scale}) translate3d(0,0,0)`,
+        }}
+      />
+
+      {/* 2. Primary Top-Left Atmospheric Halo Orb (Illuminates sidebar & top-left workspace) */}
+      <div
+        className="pointer-events-none absolute -top-28 -left-24 h-[44rem] w-[44rem] rounded-full transition-all duration-700 ease-out will-change-transform"
+        style={{
+          background: `radial-gradient(circle at 45% 45%, rgb(${currentAccent.rgb} / ${computedStyle.leftOrbOpacity.toFixed(3)}) 0%, rgb(${currentAccent.rgb} / ${(computedStyle.leftOrbOpacity * 0.74).toFixed(3)}) 32%, rgb(${currentAccent.rgb} / ${(computedStyle.leftOrbOpacity * 0.35).toFixed(3)}) 60%, transparent 82%)`,
           filter: `blur(${computedStyle.blurPx}px)`,
           transform: `scale(${computedStyle.scale}) translate3d(0,0,0)`,
         }}
       />
 
-      {/* Secondary Top-Right Atmospheric Halo Orb (Harmonic Tone) */}
+      {/* 3. Secondary Top-Right Atmospheric Halo Orb (Harmonic Tone) */}
       <div
-        className="pointer-events-none absolute -top-32 -right-32 h-[34rem] w-[34rem] rounded-full transition-all duration-700 ease-out will-change-transform"
+        className="pointer-events-none absolute -top-24 -right-24 h-[40rem] w-[40rem] rounded-full transition-all duration-700 ease-out will-change-transform"
         style={{
-          background: `radial-gradient(circle at 55% 45%, rgb(${currentAccent.secondaryRgb} / ${computedStyle.rightOrbOpacity.toFixed(3)}) 0%, rgb(${currentAccent.secondaryRgb} / ${(computedStyle.rightOrbOpacity * 0.3).toFixed(3)}) 45%, transparent 70%)`,
-          filter: `blur(${Math.round(computedStyle.blurPx * 1.15)}px)`,
-          transform: `scale(${computedStyle.scale * 0.95}) translate3d(0,0,0)`,
+          background: `radial-gradient(circle at 55% 45%, rgb(${currentAccent.secondaryRgb} / ${computedStyle.rightOrbOpacity.toFixed(3)}) 0%, rgb(${currentAccent.secondaryRgb} / ${(computedStyle.rightOrbOpacity * 0.68).toFixed(3)}) 34%, rgb(${currentAccent.secondaryRgb} / ${(computedStyle.rightOrbOpacity * 0.30).toFixed(3)}) 62%, transparent 80%)`,
+          filter: `blur(${Math.round(computedStyle.blurPx * 1.1)}px)`,
+          transform: `scale(${computedStyle.scale * 0.96}) translate3d(0,0,0)`,
         }}
       />
 
-      {/* Ambient Floor Feather (Subtle bottom-left reflection) */}
+      {/* 4. Lateral Edge Rim Glow (Feathers gracefully down the left border) */}
       <div
-        className="pointer-events-none absolute -bottom-48 left-1/4 h-[28rem] w-[32rem] rounded-full opacity-60 transition-all duration-700 ease-out will-change-transform"
+        className="pointer-events-none absolute top-48 -left-20 h-[36rem] w-[26rem] rounded-full transition-all duration-700 ease-out will-change-transform"
         style={{
-          background: `radial-gradient(circle, rgb(${currentAccent.rgb} / ${(computedStyle.leftOrbOpacity * 0.22).toFixed(3)}) 0%, transparent 68%)`,
-          filter: `blur(${Math.round(computedStyle.blurPx * 1.25)}px)`,
-          transform: `scale(${computedStyle.scale * 0.9}) translate3d(0,0,0)`,
+          background: `radial-gradient(ellipse 60% 80% at 20% 50%, rgb(${currentAccent.rgb} / ${computedStyle.sideGlowOpacity.toFixed(3)}) 0%, rgb(${currentAccent.rgb} / ${(computedStyle.sideGlowOpacity * 0.4).toFixed(3)}) 48%, transparent 75%)`,
+          filter: `blur(${Math.round(computedStyle.blurPx * 1.2)}px)`,
+          transform: `scale(${computedStyle.scale * 0.92}) translate3d(0,0,0)`,
         }}
-      />
-
-      {/* Center Contrast Shield Vignette (Guarantees 100% crisp text readability) */}
-      <div
-        className={`pointer-events-none absolute inset-0 ${
-          theme === 'light'
-            ? 'bg-radial-gradient from-transparent via-[#f1f3f6]/40 to-[#f1f3f6]/80'
-            : 'bg-radial-gradient from-transparent via-[#05080d]/30 to-[#05080d]/65'
-        }`}
       />
     </div>
   )

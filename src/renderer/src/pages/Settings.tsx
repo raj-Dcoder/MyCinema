@@ -503,12 +503,29 @@ const Settings: React.FC = () => {
 
   return (
     <div className="settings-page max-w-5xl space-y-8 pb-12">
-      <div className="settings-banner relative mb-10 overflow-hidden rounded-[2rem] bg-gradient-to-r from-red-600/10 via-[#0a0f18]/50 to-transparent p-8 border border-white/5 shadow-2xl">
-        <div className="absolute top-0 right-0 -mr-20 -mt-20 h-64 w-64 rounded-full bg-red-600/10 blur-3xl pointer-events-none" />
-        <div className="absolute bottom-0 left-0 -ml-20 -mb-20 h-64 w-64 rounded-full bg-blue-600/5 blur-3xl pointer-events-none" />
+      <div
+        className="settings-banner relative mb-10 overflow-hidden rounded-[2rem] p-8 border border-white/5 shadow-2xl transition-all duration-500"
+        style={{
+          background: `linear-gradient(to right, rgb(${currentAccent.rgb} / 0.2), rgba(10, 15, 24, 0.55), transparent)`,
+        }}
+      >
+        <div
+          className="absolute top-0 right-0 -mr-20 -mt-20 h-64 w-64 rounded-full blur-3xl pointer-events-none transition-all duration-500"
+          style={{ backgroundColor: `rgb(${currentAccent.rgb} / 0.3)` }}
+        />
+        <div
+          className="absolute bottom-0 left-0 -ml-20 -mb-20 h-64 w-64 rounded-full blur-3xl pointer-events-none transition-all duration-500"
+          style={{ backgroundColor: `rgb(${currentAccent.secondaryRgb} / 0.2)` }}
+        />
         
         <div className="relative z-10 flex items-center gap-6">
-          <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-gradient-to-br from-red-500 to-red-700 text-white shadow-xl shadow-red-900/50 ring-1 ring-white/20">
+          <div
+            className="flex h-16 w-16 items-center justify-center rounded-2xl text-white shadow-xl ring-1 ring-white/20 transition-all duration-500"
+            style={{
+              backgroundColor: currentAccent.hex,
+              boxShadow: `0 8px 30px rgb(${currentAccent.rgb} / 0.45)`,
+            }}
+          >
             <HardDrive size={28} />
           </div>
           <div>
@@ -712,27 +729,46 @@ const Settings: React.FC = () => {
               <div className="relative overflow-hidden rounded-2xl border border-white/10 bg-black/40 p-5 backdrop-blur-xl shadow-2xl transition-all duration-300">
                 {/* Reactive Live Ambient Halo Radiating Behind the Preview */}
                 <div
-                  className="pointer-events-none absolute -top-12 -left-12 h-56 w-56 rounded-full transition-all duration-500 ease-out"
+                  className="pointer-events-none absolute -top-8 inset-x-0 h-36 transition-all duration-500 ease-out"
                   style={{
-                    background: `radial-gradient(circle, rgb(${currentAccent.rgb} / ${
+                    background: `radial-gradient(ellipse 95% 75% at 50% -10%, rgb(${currentAccent.rgb} / ${
                       haloIntensity === 'stealth'
                         ? 0
-                        : (currentHaloPreset.baseOpacity * (0.5 + (haloChroma / 100) * 0.5) * 0.7).toFixed(3)
-                    }) 0%, transparent 70%)`,
-                    filter: `blur(${Math.round(40 + (haloDiffusion / 100) * 35)}px)`,
-                    transform: `scale(${0.8 + (haloDiffusion / 100) * 0.3})`,
+                        : Math.min(0.85, currentHaloPreset.baseOpacity * (0.5 + (haloChroma / 100) * 0.5) * 0.85).toFixed(3)
+                    }) 0%, transparent 82%)`,
+                    filter: `blur(${Math.round(25 + (haloDiffusion / 100) * 22)}px)`,
                   }}
                 />
                 <div
-                  className="pointer-events-none absolute -bottom-12 -right-12 h-48 w-48 rounded-full transition-all duration-500 ease-out"
+                  className="pointer-events-none absolute -top-16 -left-16 h-72 w-72 rounded-full transition-all duration-500 ease-out"
                   style={{
-                    background: `radial-gradient(circle, rgb(${currentAccent.secondaryRgb} / ${
+                    background: `radial-gradient(circle at 45% 45%, rgb(${currentAccent.rgb} / ${
                       haloIntensity === 'stealth'
                         ? 0
-                        : (currentHaloPreset.baseOpacity * (0.5 + (haloChroma / 100) * 0.5) * 0.55).toFixed(3)
-                    }) 0%, transparent 70%)`,
-                    filter: `blur(${Math.round(45 + (haloDiffusion / 100) * 35)}px)`,
-                    transform: `scale(${0.8 + (haloDiffusion / 100) * 0.3})`,
+                        : Math.min(0.95, currentHaloPreset.baseOpacity * (0.5 + (haloChroma / 100) * 0.5) * 1.15).toFixed(3)
+                    }) 0%, rgb(${currentAccent.rgb} / ${
+                      haloIntensity === 'stealth'
+                        ? 0
+                        : Math.min(0.72, currentHaloPreset.baseOpacity * (0.5 + (haloChroma / 100) * 0.5) * 0.82).toFixed(3)
+                    }) 36%, transparent 76%)`,
+                    filter: `blur(${Math.round(25 + (haloDiffusion / 100) * 25)}px)`,
+                    transform: `scale(${0.85 + (haloDiffusion / 100) * 0.3})`,
+                  }}
+                />
+                <div
+                  className="pointer-events-none absolute -bottom-16 -right-16 h-64 w-64 rounded-full transition-all duration-500 ease-out"
+                  style={{
+                    background: `radial-gradient(circle at 55% 55%, rgb(${currentAccent.secondaryRgb} / ${
+                      haloIntensity === 'stealth'
+                        ? 0
+                        : Math.min(0.88, currentHaloPreset.baseOpacity * (0.5 + (haloChroma / 100) * 0.5) * 0.95).toFixed(3)
+                    }) 0%, rgb(${currentAccent.secondaryRgb} / ${
+                      haloIntensity === 'stealth'
+                        ? 0
+                        : Math.min(0.62, currentHaloPreset.baseOpacity * (0.5 + (haloChroma / 100) * 0.5) * 0.68).toFixed(3)
+                    }) 38%, transparent 75%)`,
+                    filter: `blur(${Math.round(28 + (haloDiffusion / 100) * 25)}px)`,
+                    transform: `scale(${0.85 + (haloDiffusion / 100) * 0.3})`,
                   }}
                 />
 

@@ -143,14 +143,14 @@ export const HALO_INTENSITY_PRESETS: HaloIntensityPreset[] = [
   {
     id: 'whisper',
     label: 'Whisper',
-    sublabel: 'Gentle (25%)',
-    baseOpacity: 0.25,
+    sublabel: 'Gentle (35%)',
+    baseOpacity: 0.35,
   },
   {
     id: 'theater',
     label: 'Theater Aura',
-    sublabel: 'Balanced (60%)',
-    baseOpacity: 0.60,
+    sublabel: 'Balanced (75%)',
+    baseOpacity: 0.75,
   },
   {
     id: 'supercharged',
@@ -299,8 +299,8 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     const root = document.documentElement
     const baseOpacity = currentHaloPreset.baseOpacity
     // Final opacity scales with Chroma Vibrancy (e.g. 100% -> 1.0, 250% -> 1.5 multiplier)
-    const chromaMultiplier = 0.5 + (haloChroma / 100) * 0.5
-    const computedOpacity = Math.min(1.0, baseOpacity * chromaMultiplier)
+    const chromaMultiplier = 0.4 + (haloChroma / 100) * 0.6
+    const computedOpacity = Math.min(1.2, baseOpacity * chromaMultiplier)
 
     root.style.setProperty('--c-accent', currentAccent.rgb)
     root.style.setProperty('--c-accent-hex', currentAccent.hex)

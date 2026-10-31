@@ -21,6 +21,7 @@ import FocusTubeCard from '../components/focus/FocusTubeCard'
 import FocusTubePlayer from '../components/focus/FocusTubePlayer'
 import ChannelManager from '../components/focus/ChannelManager'
 import { categoryDot, formatAgo, formatPublishedExact } from '../utils/focusTube'
+import { useTheme } from '../theme/ThemeContext'
 
 const HIDE_SHORTS_KEY = 'mycinema_ft_hide_shorts'
 const AUTOPLAY_NEXT_KEY = 'mycinema_ft_autoplay_next'
@@ -536,13 +537,15 @@ const FocusTube: React.FC<FocusTubeProps> = ({ activeTab = 'focustube' }) => {
     }
   }, [activeCategoryId, loadFeed, search])
 
+  const { ftBrandLock } = useTheme()
+
   return (
-    <div className="space-y-5">
+    <div className={`space-y-5 ${ftBrandLock ? 'ft-brand-locked' : ''}`}>
       {/* ── TOP HEADER (Clean, single-tier 54px header) ── */}
       <header className="sticky top-0 z-30 flex h-14 items-center justify-between gap-4 rounded-2xl border border-white/[0.08] bg-[#0c0d14]/90 px-4 shadow-[0_10px_30px_-10px_rgba(0,0,0,0.8)] backdrop-blur-md sm:px-5">
         {/* Left: Brand */}
         <div className="flex items-center gap-3">
-          <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-primary via-primary to-primary/80 text-white shadow-[0_0_20px_rgba(229,9,20,0.5)]">
+          <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-primary via-primary to-primary/80 text-white shadow-[0_0_20px_rgba(var(--c-accent),0.5)]">
             <Play size={15} fill="currentColor" className="ml-0.5" />
           </div>
           <div className="flex items-center gap-2">
@@ -559,8 +562,8 @@ const FocusTube: React.FC<FocusTubeProps> = ({ activeTab = 'focustube' }) => {
         </div>
 
         {/* Center: Search with ⌘K / Ctrl+K and Hybrid Suggestions */}
-        <div className="relative max-w-md flex-1">
-          <Search size={14} className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-white/30" />
+        <div className="cinema-search-box relative max-w-md flex-1">
+          <Search size={14} className="cinema-search-icon pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-white/35" />
           <input
             ref={searchInputRef}
             value={search}
@@ -589,7 +592,7 @@ const FocusTube: React.FC<FocusTubeProps> = ({ activeTab = 'focustube' }) => {
             }}
             placeholder="Search subscriptions or YouTube..."
             aria-label="Search subscriptions or YouTube"
-            className="h-9 w-full rounded-xl border border-white/10 bg-white/5 pl-9 pr-14 text-xs font-medium text-white placeholder:text-white/30 transition-colors hover:border-white/20 focus:border-primary/60 focus:bg-white/[0.08] focus:outline-none focus:ring-2 focus:ring-primary/20"
+            className="cinema-search-input h-9 w-full rounded-xl border border-white/20 bg-black/40 pl-9 pr-14 text-xs font-medium text-white placeholder:text-white/40 backdrop-blur-xl transition-all focus:border-primary focus:bg-black/60 focus:outline-none focus:ring-2 focus:ring-primary/25"
           />
           {search ? (
             <button
@@ -624,15 +627,15 @@ const FocusTube: React.FC<FocusTubeProps> = ({ activeTab = 'focustube' }) => {
                   e.preventDefault()
                   void handleExecuteYouTubeSearch(search.trim())
                 }}
-                className="w-full flex items-center justify-between rounded-xl p-2.5 text-left transition-colors bg-red-600/15 hover:bg-red-600/25 border border-red-500/30 text-white group"
+                className="w-full flex items-center justify-between rounded-xl p-2.5 text-left transition-colors bg-primary/15 hover:bg-primary/25 border border-primary/30 text-white group"
               >
                 <div className="flex items-center gap-2.5 min-w-0">
-                  <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-red-600 text-white shadow-sm">
+                  <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-primary text-white shadow-sm">
                     <Search size={13} strokeWidth={2.5} />
                   </div>
                   <div className="min-w-0">
                     <p className="text-xs font-bold truncate">
-                      Search YouTube for <span className="text-red-400">&ldquo;{search.trim()}&rdquo;</span>
+                      Search YouTube for <span className="text-primary font-black">&ldquo;{search.trim()}&rdquo;</span>
                     </p>
                     <p className="text-[10px] text-white/40">Watch with side-panel queue & playlist</p>
                   </div>
@@ -680,9 +683,9 @@ const FocusTube: React.FC<FocusTubeProps> = ({ activeTab = 'focustube' }) => {
 
       {/* ── YOUTUBE SEARCH ACTIVE BAR OR CATEGORY CAROUSEL ── */}
       {youtubeSearchQuery ? (
-        <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-red-500/25 bg-gradient-to-r from-red-950/40 via-[#0e1018] to-[#0e1018] px-4 py-3 shadow-lg">
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-primary/25 bg-gradient-to-r from-primary/15 via-[#0e1018] to-[#0e1018] px-4 py-3 shadow-lg">
           <div className="flex items-center gap-3 min-w-0">
-            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-red-600 text-white shadow-[0_0_18px_rgba(229,9,20,0.55)]">
+            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-primary text-white shadow-[0_0_18px_rgba(var(--c-accent),0.55)]">
               <Search size={16} strokeWidth={2.5} />
             </div>
             <div className="min-w-0">
@@ -690,7 +693,7 @@ const FocusTube: React.FC<FocusTubeProps> = ({ activeTab = 'focustube' }) => {
                 <h2 className="text-sm font-black text-white truncate">
                   YouTube Results for &ldquo;{youtubeSearchQuery}&rdquo;
                 </h2>
-                <span className="rounded-full bg-red-500/20 px-2 py-0.5 text-[10px] font-bold text-red-300">
+                <span className="rounded-full bg-primary/20 px-2 py-0.5 text-[10px] font-bold text-primary">
                   {isSearchingYouTube ? 'Searching…' : `${youtubeSearchResults.length} videos`}
                 </span>
               </div>
@@ -716,7 +719,7 @@ const FocusTube: React.FC<FocusTubeProps> = ({ activeTab = 'focustube' }) => {
           {/* Scroll Left Button & Gradient Fade */}
           {canScrollLeft && (
             <>
-              <div className="pointer-events-none absolute left-0 top-0 bottom-0 z-10 w-12 bg-gradient-to-r from-[#0c0d14] via-[#0c0d14]/80 to-transparent" />
+              <div className="ft-carousel-fade ft-carousel-fade--left pointer-events-none absolute left-0 top-0 bottom-0 z-10 w-12 bg-gradient-to-r from-[#0c0d14] via-[#0c0d14]/80 to-transparent" />
               <button
                 type="button"
                 onClick={() => scrollCarousel('left')}
@@ -745,7 +748,7 @@ const FocusTube: React.FC<FocusTubeProps> = ({ activeTab = 'focustube' }) => {
                 onClick={() => void selectCategory(null)}
                 className={`inline-flex shrink-0 items-center rounded-xl px-4 py-1.5 text-xs font-bold transition-all ${
                   activeCategoryId === null
-                    ? 'bg-primary text-white shadow-[0_0_15px_rgba(229,9,20,0.45)]'
+                    ? 'bg-primary text-white shadow-[0_0_15px_rgba(var(--c-accent),0.45)]'
                     : 'border border-white/10 bg-white/5 text-white/70 hover:border-white/20 hover:bg-white/10 hover:text-white'
                 }`}
               >
@@ -841,7 +844,7 @@ const FocusTube: React.FC<FocusTubeProps> = ({ activeTab = 'focustube' }) => {
                     title={`${category.name}${hasUnseen ? ` (${category.unseenCount} new)` : ''} · Double-click to rename · Right-click to delete`}
                     className={`inline-flex items-center rounded-xl px-4 py-1.5 text-xs font-bold transition-all ${
                       isActive
-                        ? 'bg-primary text-white shadow-[0_0_15px_rgba(229,9,20,0.45)]'
+                        ? 'bg-primary text-white shadow-[0_0_15px_rgba(var(--c-accent),0.45)]'
                         : 'border border-white/10 bg-white/5 text-white/70 hover:border-white/20 hover:bg-white/10 hover:text-white'
                     }`}
                   >
@@ -900,7 +903,7 @@ const FocusTube: React.FC<FocusTubeProps> = ({ activeTab = 'focustube' }) => {
           {/* Scroll Right Button & Gradient Fade */}
           {canScrollRight && (
             <>
-              <div className="pointer-events-none absolute right-0 top-0 bottom-0 z-10 w-12 bg-gradient-to-l from-[#0c0d14] via-[#0c0d14]/80 to-transparent" />
+              <div className="ft-carousel-fade ft-carousel-fade--right pointer-events-none absolute right-0 top-0 bottom-0 z-10 w-12 bg-gradient-to-l from-[#0c0d14] via-[#0c0d14]/80 to-transparent" />
               <button
                 type="button"
                 onClick={() => scrollCarousel('right')}
@@ -923,7 +926,7 @@ const FocusTube: React.FC<FocusTubeProps> = ({ activeTab = 'focustube' }) => {
               title="Newest uploads first (latest)"
               className={`flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-[11px] font-bold transition-all ${
                 sortOrder === 'newest'
-                  ? 'bg-primary text-white shadow-sm'
+                  ? 'bg-primary text-white shadow-sm shadow-primary/40'
                   : 'text-white/50 hover:bg-white/5 hover:text-white'
               }`}
             >
@@ -936,7 +939,7 @@ const FocusTube: React.FC<FocusTubeProps> = ({ activeTab = 'focustube' }) => {
               title="Oldest uploads first (chronological order)"
               className={`flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-[11px] font-bold transition-all ${
                 sortOrder === 'oldest'
-                  ? 'bg-primary text-white shadow-sm'
+                  ? 'bg-primary text-white shadow-sm shadow-primary/40'
                   : 'text-white/50 hover:bg-white/5 hover:text-white'
               }`}
             >
@@ -957,7 +960,7 @@ const FocusTube: React.FC<FocusTubeProps> = ({ activeTab = 'focustube' }) => {
               onClick={toggleShorts}
               title={hideShorts ? 'Shorts are hidden (click to show)' : 'Shorts are visible (click to hide)'}
               className={`relative h-5 w-9 shrink-0 rounded-full transition-colors ${
-                hideShorts ? 'bg-primary shadow-[0_0_10px_rgba(229,9,20,0.4)]' : 'bg-white/20'
+                hideShorts ? 'bg-primary shadow-[0_0_10px_rgba(var(--c-accent),0.4)]' : 'bg-white/20'
               }`}
             >
               <span
@@ -984,7 +987,7 @@ const FocusTube: React.FC<FocusTubeProps> = ({ activeTab = 'focustube' }) => {
               }}
               title={!includeSeen ? 'Watched videos are hidden (click to show)' : 'Watched videos are included (click to hide)'}
               className={`relative h-5 w-9 shrink-0 rounded-full transition-colors ${
-                !includeSeen ? 'bg-primary shadow-[0_0_10px_rgba(229,9,20,0.4)]' : 'bg-white/20'
+                !includeSeen ? 'bg-primary shadow-[0_0_10px_rgba(var(--c-accent),0.4)]' : 'bg-white/20'
               }`}
             >
               <span
@@ -1140,7 +1143,7 @@ const FocusTube: React.FC<FocusTubeProps> = ({ activeTab = 'focustube' }) => {
             <button
               type="button"
               onClick={() => setManaging(true)}
-              className="mt-2 inline-flex items-center gap-1.5 rounded-xl bg-primary px-5 py-2.5 text-xs font-black uppercase tracking-widest text-white shadow-[0_10px_30px_-12px_rgba(229,9,20,0.9)] transition-colors hover:bg-primary/85"
+              className="mt-2 inline-flex items-center gap-1.5 rounded-xl bg-primary px-5 py-2.5 text-xs font-black uppercase tracking-widest text-white shadow-[0_10px_30px_-12px_rgba(var(--c-accent),0.9)] transition-colors hover:bg-primary/85"
             >
               <Plus size={14} /> Add channels to {activeCategory.name}
             </button>

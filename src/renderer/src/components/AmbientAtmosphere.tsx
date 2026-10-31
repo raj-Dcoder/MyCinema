@@ -10,9 +10,9 @@ export const AmbientAtmosphere: React.FC<AmbientAtmosphereProps> = ({
   isPlaybackActive = false,
   className = '',
 }) => {
-  const { currentAccent, haloIntensity, currentHaloPreset, haloDiffusion, haloChroma, theme } = useTheme()
+  const { atmosphericStudioEnabled, currentAccent, haloIntensity, currentHaloPreset, haloDiffusion, haloChroma, theme, haloBreathing } = useTheme()
 
-  const isStealth = haloIntensity === 'stealth' || isPlaybackActive
+  const isStealth = !atmosphericStudioEnabled || haloIntensity === 'stealth' || isPlaybackActive
 
   // Calculate dynamic intense opacity and blur parameters
   const computedStyle = useMemo(() => {
@@ -62,7 +62,9 @@ export const AmbientAtmosphere: React.FC<AmbientAtmosphereProps> = ({
 
   return (
     <div
-      className={`pointer-events-none fixed inset-0 z-0 overflow-hidden select-none transition-opacity duration-700 ${className}`}
+      className={`pointer-events-none fixed inset-0 z-0 overflow-hidden select-none transition-opacity duration-700 ${
+        haloBreathing ? 'animate-halo-breath' : ''
+      } ${className}`}
       aria-hidden="true"
     >
       {/* 1. Broad Horizon Ambient Wash (Floods the entire upper viewport with ambient light) */}

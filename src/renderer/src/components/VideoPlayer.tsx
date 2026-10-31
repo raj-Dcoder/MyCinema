@@ -25,6 +25,7 @@ import {
   resolveSubtitleCue,
   type SubCue
 } from '../utils/subtitleSync'
+import { useTheme } from '../theme/ThemeContext'
 
 const isTorrentStreamPath = (filePath?: string | null) => Boolean(filePath?.startsWith('torrent://'))
 const getVideoSourceUrl = (filePath: string) => (
@@ -165,6 +166,7 @@ interface VideoPlayerProps {
 
 const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVisibilityChange, onStreamChange }) => {
   const videoRef = useRef<HTMLVideoElement>(null)
+  const { atmosphericStudioEnabled, currentAccent, haloIntensity, haloDiffusion, playerAmbilightMode } = useTheme()
   
   const [isPlaying, setIsPlaying] = useState(false)
   const [currentTime, setCurrentTime] = useState(0)
@@ -360,6 +362,18 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
   // Unlike OS PiP (a separate window + app minimize), this never leaves the
   // app and never remounts the video element.
   const [isMinimized, setIsMinimized] = useState(false)
+  const isAmbilightActive = useMemo(() => {
+    if (!atmosphericStudioEnabled || haloIntensity === 'stealth' || isMinimized || playerAmbilightMode === 'blackout') {
+      return false
+    }
+    if (playerAmbilightMode === 'soft_halo') {
+      return true
+    }
+    if (playerAmbilightMode === 'pause_aura') {
+      return !isPlaying
+    }
+    return false
+  }, [atmosphericStudioEnabled, haloIntensity, isMinimized, playerAmbilightMode, isPlaying])
   // Tracks the "PiP + minimized app" flow: set when we minimize the app for
   // PiP, cleared when PiP closes (back-to-tab / close / toggle-off) so the
   // app is restored exactly once per PiP session.
@@ -5049,10 +5063,29 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
       onPointerCancel={handlePointerUpOrLeave}
     >
       {nextEpisodeStillUrl && <img src={nextEpisodeStillUrl} style={{ display: 'none' }} alt="" />}
+
+      {/* In-Player Theater Ambilight Halo */}
+      {isAmbilightActive && (
+        <div
+          className="pointer-events-none absolute inset-0 z-0 overflow-hidden select-none transition-opacity duration-700 ease-out"
+          style={{ opacity: isPlaying ? 0.38 : 0.68 }}
+          aria-hidden="true"
+        >
+          <div
+            className="absolute inset-0 transition-all duration-700 ease-out"
+            style={{
+              background: `radial-gradient(ellipse 95% 85% at 50% 50%, rgb(${currentAccent.rgb} / 0.5) 0%, rgb(${currentAccent.rgb} / 0.22) 42%, rgb(${currentAccent.secondaryRgb} / 0.08) 68%, transparent 88%)`,
+              filter: `blur(${Math.round(45 + (haloDiffusion / 100) * 35)}px)`,
+              transform: `scale(${1.08 + (haloDiffusion / 100) * 0.15})`,
+            }}
+          />
+        </div>
+      )}
+
       <div
         className={isMinimized
-          ? 'pointer-events-auto fixed bottom-4 right-4 overflow-hidden rounded-xl border border-white/15 bg-black shadow-[0_20px_60px_rgba(0,0,0,0.7)]'
-          : 'relative overflow-hidden bg-black'}
+          ? 'pointer-events-auto fixed bottom-4 right-4 z-10 overflow-hidden rounded-xl border border-white/15 bg-black shadow-[0_20px_60px_rgba(0,0,0,0.7)]'
+          : 'relative z-10 overflow-hidden bg-black'}
         style={isMinimized
           ? { width: 'min(380px, calc(100vw - 2rem))', aspectRatio: '16 / 9', transition: `opacity ${crossFade ? '200ms' : '300ms'} ease-in-out`, opacity: crossFade ? 0 : 1 }
           : {

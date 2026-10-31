@@ -78,10 +78,105 @@ function getDownloadDestination(fileName: string, explicitRoot?: string): { save
   if (!fs.existsSync(root)) {
     fs.mkdirSync(root, { recursive: true })
   }
-  const cleanName = fileName.replace(/[<>:"/\\|?*]+/g, '_')
+  let cleanName = fileName.replace(/[<>:"/\\|?*]+/g, '_')
+  cleanName = cleanName.replace(/\.(part|crdownload|fdmdownload|!ut|bc!)$/i, '')
   const savePath = path.join(root, cleanName)
   const partPath = path.join(root, `${cleanName}.part`)
   return { savePath, partPath }
+}
+
+export async function safelyFinalizeDownloadFile(partPath: string, savePath: string, maxRetries = 15): Promise<boolean> {
+  if (!fs.existsSync(partPath)) {
+    return fs.existsSync(savePath)
+  }
+
+  // Allow OS file handles and antivirus filter drivers a moment to settle
+  await new Promise(r => setTimeout(r, 200))
+
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      if (fs.existsSync(savePath)) {
+        try {
+          fs.unlinkSync(savePath)
+        } catch (unlinkErr) {
+          console.warn(`[HttpDownloader] Could not unlink existing file on attempt ${attempt}:`, unlinkErr)
+        }
+      }
+      await fs.promises.rename(partPath, savePath)
+      console.log(`[HttpDownloader] Successfully finalized file: ${savePath}`)
+      return true
+    } catch (err: any) {
+      console.warn(`[HttpDownloader] Rename attempt ${attempt}/${maxRetries} failed (${err?.code || err?.message}). Retrying...`)
+      if (attempt < maxRetries) {
+        const waitTime = Math.min(1500, 200 + attempt * 150)
+        await new Promise(r => setTimeout(r, waitTime))
+      }
+    }
+  }
+
+  // Fallback: try copyFile + unlink if rename fails (e.g. Windows cross-volume or persistent handle lock)
+  try {
+    console.log(`[HttpDownloader] Attempting fallback copyFile to finalize ${savePath}...`)
+    await fs.promises.copyFile(partPath, savePath)
+    try {
+      await fs.promises.unlink(partPath)
+    } catch (unlinkPartErr) {
+      console.warn('[HttpDownloader] Could not unlink .part after copy:', unlinkPartErr)
+    }
+    return true
+  } catch (copyErr) {
+    console.error(`[HttpDownloader] Failed all attempts to finalize ${partPath} -> ${savePath}:`, copyErr)
+    return false
+  }
+}
+
+export async function repairPendingPartDownloads(): Promise<void> {
+  try {
+    const root = getDownloadRoot()
+    if (!fs.existsSync(root)) return
+
+    const entries = await fs.promises.readdir(root)
+    for (const entry of entries) {
+      if (entry.toLowerCase().endsWith('.part')) {
+        const partPath = path.join(root, entry)
+        const cleanName = entry.slice(0, -5)
+        const savePath = path.join(root, cleanName)
+
+        // Make sure it's not currently being downloaded
+        const isActive = Array.from(activeHttpDownloads.values()).some(
+          d => path.normalize(d.partPath).toLowerCase() === path.normalize(partPath).toLowerCase()
+        )
+        if (isActive) continue
+
+        if (!fs.existsSync(savePath) && fs.existsSync(partPath)) {
+          console.log(`[HttpDownloader] Found unfinalized .part file on startup: ${entry}`)
+          const finalized = await safelyFinalizeDownloadFile(partPath, savePath, 5)
+          if (finalized) {
+            console.log(`[HttpDownloader] Auto-finalized orphan .part file: ${savePath}`)
+            if (httpCompleteCallback) {
+              httpCompleteCallback({
+                id: '',
+                url: '',
+                fileName: cleanName,
+                title: cleanName,
+                savePath,
+                partPath,
+                totalBytes: 0,
+                downloadedBytes: 0,
+                status: 'done',
+                speed: 0,
+                timeRemaining: 0,
+                lastBytes: 0,
+                lastTime: Date.now()
+              })
+            }
+          }
+        }
+      }
+    }
+  } catch (err) {
+    console.warn('[HttpDownloader] Startup part-repair error:', err)
+  }
 }
 
 /**
@@ -261,31 +356,48 @@ async function runDownloadStream(item: HttpDownloadItem, redirectCount = 0): Pro
 
       fileStream.on('finish', () => {
         cleanupTimer()
-        fileStream.close(() => {
+        fileStream.close(async () => {
           if (item.status === 'downloading') {
-            // Rename from .part to final file
-            try {
-              if (fs.existsSync(item.savePath)) {
-                fs.unlinkSync(item.savePath)
+            // Check for premature completion / dropped connection
+            if (item.totalBytes > 0 && item.downloadedBytes < (item.totalBytes - 1024)) {
+              console.warn(`[HttpDownloader] Stream ended prematurely: got ${item.downloadedBytes} / ${item.totalBytes} bytes.`)
+              if (redirectCount < 5) {
+                console.log(`[HttpDownloader] Auto-resuming download for ${item.fileName}...`)
+                setTimeout(() => {
+                  runDownloadStream(item, redirectCount + 1).then(resolve).catch(reject)
+                }, 1500)
+                return
               }
-              fs.renameSync(item.partPath, item.savePath)
-            } catch (err) {
-              console.warn('[HttpDownloader] Rename error, keeping .part:', err)
+              item.status = 'error'
+              item.errorMessage = 'Download interrupted prematurely'
+              notifyProgress(item, 'error', item.errorMessage)
+              resolve()
+              return
             }
 
-            if (item.downloadedBytes > 0) {
-              item.totalBytes = Math.max(item.totalBytes, item.downloadedBytes)
-            }
-            item.status = 'done'
-            item.speed = 0
-            item.timeRemaining = 0
-            notifyProgress(item, 'done')
-            console.log(`[HttpDownloader] Download completed successfully: ${item.savePath}`)
-            if (httpCompleteCallback) {
-              try {
-                httpCompleteCallback(item)
-              } catch (cbErr) {
-                console.error('[HttpDownloader] Complete callback error:', cbErr)
+            const finalized = await safelyFinalizeDownloadFile(item.partPath, item.savePath)
+            if (finalized) {
+              if (item.downloadedBytes > 0) {
+                item.totalBytes = Math.max(item.totalBytes, item.downloadedBytes)
+              }
+              item.status = 'done'
+              item.speed = 0
+              item.timeRemaining = 0
+              notifyProgress(item, 'done')
+              console.log(`[HttpDownloader] Download completed successfully: ${item.savePath}`)
+              if (httpCompleteCallback) {
+                try {
+                  httpCompleteCallback(item)
+                } catch (cbErr) {
+                  console.error('[HttpDownloader] Complete callback error:', cbErr)
+                }
+              }
+            } else {
+              console.error(`[HttpDownloader] Download finished but file could not be renamed from .part: ${item.partPath}`)
+              item.status = 'done'
+              notifyProgress(item, 'done')
+              if (httpCompleteCallback) {
+                try { httpCompleteCallback(item) } catch {}
               }
             }
             activeHttpDownloads.delete(item.id)

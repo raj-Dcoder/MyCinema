@@ -255,19 +255,20 @@ const Videos: React.FC<VideosProps> = ({ onPlay }) => {
               Play All
             </button>
 
-            <div className="group relative w-full sm:w-[270px]">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-white/30 transition-colors group-focus-within:text-primary" size={17} />
+            <div className="cinema-search-box group relative w-full sm:w-[280px]">
+              <Search className="cinema-search-icon absolute left-3 top-1/2 -translate-y-1/2 text-white/35 transition-colors group-focus-within:text-primary" size={17} />
               <input
                 type="text"
                 placeholder="Search videos"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                className="h-11 w-full rounded-xl border border-white/10 bg-white/[0.035] py-2 pl-10 pr-10 text-sm font-bold text-white outline-none transition-all placeholder:text-white/28 focus:border-primary/45 focus:bg-black/25 focus:ring-1 focus:ring-primary/35"
+                className="cinema-search-input h-11 w-full rounded-xl border border-white/20 bg-black/40 py-2 pl-10 pr-10 text-sm font-bold text-white outline-none backdrop-blur-xl transition-all placeholder:text-white/40 focus:border-primary focus:bg-black/60 focus:ring-2 focus:ring-primary/25"
               />
               {searchQuery && (
                 <button
+                  type="button"
                   onClick={() => setSearchQuery('')}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-white/35 transition-colors hover:text-white"
+                  className="cinema-search-clear absolute right-3 top-1/2 -translate-y-1/2 rounded-md p-0.5 text-white/40 transition-colors hover:bg-white/10 hover:text-white"
                   aria-label="Clear search"
                 >
                   <X size={16} />

@@ -253,7 +253,7 @@ async function nodeHttpRequest(
 }
 
 // ─── File-system Watcher Registry ────────────────────────────────────────────
-const VIDEO_EXTS = new Set(['.mp4', '.mkv', '.avi', '.mov', '.webm', '.flv', '.wmv', '.mpg', '.mpeg', '.mpe', '.mpv', '.m2v', '.m4v', '.ts', '.m2ts', '.mts', '.vob', '.rm', '.rmvb', '.asf', '.ogv', '.3gp', '.3g2', '.amv', '.nsv', '.roq', '.svi', '.divx', '.xvid', '.dat', '.f4v', '.f4p', '.fdmdownload', '.crdownload', '.part', '.!ut', '.bc!'])
+const VIDEO_EXTS = new Set(['.mp4', '.mkv', '.avi', '.mov', '.webm', '.flv', '.wmv', '.mpg', '.mpeg', '.mpe', '.mpv', '.m2v', '.m4v', '.ts', '.m2ts', '.mts', '.vob', '.rm', '.rmvb', '.asf', '.ogv', '.3gp', '.3g2', '.amv', '.nsv', '.roq', '.svi', '.divx', '.xvid', '.dat', '.f4v', '.f4p'])
 const folderWatchers = new Map<string, fs.FSWatcher>()
 
 /**
@@ -361,6 +361,18 @@ function isPathInsideRoot(candidatePath: string, rootPath: string): boolean {
  * Runs after the window is visible so it doesn't slow down first-paint.
  */
 async function runStartupScan(): Promise<void> {
+  // Auto-repair any existing .part video entries in DB
+  try {
+    const fixedVideos = db.fixPartVideoPaths()
+    const fixedDownloads = db.fixPartDownloadPaths()
+    if (fixedVideos > 0 || fixedDownloads > 0) {
+      console.log(`[Startup] Repaired ${fixedVideos} video(s) and ${fixedDownloads} download(s) with legacy .part paths.`)
+    }
+  } catch (err) {
+    console.warn('[Startup] Path repair error:', err)
+  }
+  void httpDownloader.repairPendingPartDownloads()
+
   const folders = db.getFolders() as any[]
   if (folders.length === 0) return
   console.log(`[Startup] Auto-scanning ${folders.length} saved folder(s)…`)
@@ -1064,6 +1076,17 @@ function registerMediaProtocol(): void {
       if (!isSafeFilePath(normalizedPath)) {
         console.error(`[Protocol] 403 Forbidden path: ${normalizedPath}`)
         return new Response('Forbidden', { status: 403 })
+      }
+
+      if (!fs.existsSync(normalizedPath)) {
+        if (normalizedPath.toLowerCase().endsWith('.part')) {
+          const stripped = normalizedPath.slice(0, -5)
+          if (fs.existsSync(stripped)) {
+            normalizedPath = stripped
+          }
+        } else if (fs.existsSync(normalizedPath + '.part')) {
+          normalizedPath = normalizedPath + '.part'
+        }
       }
 
       if (!fs.existsSync(normalizedPath)) {
@@ -1835,6 +1858,8 @@ type BackupImportSummary = {
   favoritesRestored: number
   streamProgressRestored: number
   followedSeriesRestored: number
+  focusTubeCategoriesRestored?: number
+  focusTubeChannelsRestored?: number
 }
 
 const BACKUP_FORMAT = 'mycinema.backup'
@@ -2254,7 +2279,6 @@ function openFtPip(payload: any): boolean {
     minHeight: 180,
     maxWidth: 1280,
     maxHeight: 720,
-    aspectRatio: 16 / 9,
     alwaysOnTop: true,
     frame: false,
     resizable: true,
@@ -2271,6 +2295,7 @@ function openFtPip(payload: any): boolean {
   })
 
   // Float over ALL windows, including fullscreen windows and other apps
+  ftPipWindow.setAspectRatio(16 / 9)
   ftPipWindow.setAlwaysOnTop(true, 'screen-saver')
   if (typeof (ftPipWindow as any).setVisibleOnAllWorkspaces === 'function') {
     (ftPipWindow as any).setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })
@@ -2319,7 +2344,11 @@ function openFtPip(payload: any): boolean {
     if (!isRestoringFtPip) {
       const mainWin = getMainWindow()
       if (mainWin && !mainWin.isDestroyed()) {
-        mainWin.webContents.send('ft-pip-closed', lastFtPipState)
+        mainWin.webContents.send('ft-pip-closed', {
+          ...lastFtPipState,
+          isPlaying: false,
+          restoreRequested: false
+        })
       }
     }
     ftPipWindow = null
@@ -2367,6 +2396,9 @@ ipcMain.handle('ft-open-pip', (_event, payload: any) => {
 })
 
 ipcMain.handle('ft-close-pip', () => {
+  if (lastFtPipState) {
+    lastFtPipState.isPlaying = false
+  }
   closeFtPip()
 })
 
@@ -3798,6 +3830,7 @@ ipcMain.handle('export-user-backup', async () => {
     // subscriptions and watch progress are theirs and must survive a backup.
     // db.ts cannot import focusTube (focusTube already imports db), so the
     // snapshot is attached here where both are in scope.
+    const ftData = focusTube.getBackupData()
     const backup = {
       app: 'MyCinema',
       format: BACKUP_FORMAT,
@@ -3805,7 +3838,7 @@ ipcMain.handle('export-user-backup', async () => {
       exportedAt: new Date().toISOString(),
       data: {
         ...db.getBackupData(),
-        focusTube: focusTube.getBackupData()
+        focusTube: ftData
       }
     }
 
@@ -3819,7 +3852,9 @@ ipcMain.handle('export-user-backup', async () => {
       localWatchlist: backup.data.watchlist.local.length,
       favorites: backup.data.favorites.length,
       streamProgress: (backup.data.streamProgress || []).length,
-      followedSeries: (backup.data.followedSeries || []).length
+      followedSeries: (backup.data.followedSeries || []).length,
+      focusTubeCategories: (ftData?.categories || []).length,
+      focusTubeChannels: (ftData?.channels || []).length
     }
   } catch (err) {
     console.error('[Backup] Export failed:', err)
@@ -3918,15 +3953,22 @@ ipcMain.handle('import-user-backup', async (): Promise<BackupImportSummary | { i
 
     // Focus Tube, when the backup contains it. Restored regardless of whether
     // the feature is currently switched on, so a restore never quietly drops it.
+    let ftCategoriesRestored = 0
+    let ftChannelsRestored = 0
     try {
       const focusTubeData = (backup as any)?.data?.focusTube
       if (focusTubeData && Array.isArray(focusTubeData.categories)) {
-        focusTube.restoreBackupData(focusTubeData)
-        console.log(`[Backup] Restored Focus Tube: ${focusTubeData.categories.length} categories, ${focusTubeData.channels?.length || 0} channels`)
+        const ftRes = focusTube.restoreBackupData(focusTubeData)
+        ftCategoriesRestored = ftRes.categoriesRestored
+        ftChannelsRestored = ftRes.channelsRestored
+        console.log(`[Backup] Restored Focus Tube: ${ftCategoriesRestored} categories, ${ftChannelsRestored} channels`)
       }
     } catch (err) {
       console.error('[Backup] Focus Tube restore failed:', err)
     }
+
+    summary.focusTubeCategoriesRestored = ftCategoriesRestored
+    summary.focusTubeChannelsRestored = ftChannelsRestored
 
     // Legacy backups may carry watchlist categories — absorb them into
     // collections the same way the startup migration does.
@@ -3937,7 +3979,10 @@ ipcMain.handle('import-user-backup', async (): Promise<BackupImportSummary | { i
       console.error('[Collections] Post-restore migration failed:', err)
     }
 
-    BrowserWindow.getAllWindows().forEach(w => w.webContents.send('library-updated'))
+    BrowserWindow.getAllWindows().forEach(w => {
+      w.webContents.send('library-updated')
+      w.webContents.send('ft-feed-updated', { type: 'restore' })
+    })
     return summary
   } catch (err) {
     console.error('[Backup] Import failed:', err)
@@ -4343,15 +4388,22 @@ ipcMain.handle('pre-convert-subtitle', async (_, filePath: string, trackIndex: n
 
 // ─── Open Folder in Explorer ─────────────────────────────────────────────────
 ipcMain.handle('open-folder', (_event, filePath: string) => {
-  if (!isSafeFilePath(filePath)) {
-    console.error(`[IPC] 403 Forbidden path in open-folder: ${filePath}`)
+  let targetPath = filePath
+  if (!fs.existsSync(targetPath) && typeof targetPath === 'string' && targetPath.toLowerCase().endsWith('.part')) {
+    const stripped = targetPath.slice(0, -5)
+    if (fs.existsSync(stripped)) {
+      targetPath = stripped
+    }
+  }
+  if (!isSafeFilePath(targetPath)) {
+    console.error(`[IPC] 403 Forbidden path in open-folder: ${targetPath}`)
     return false
   }
-  if (!fs.existsSync(filePath)) {
-    console.warn(`[IPC] open-folder missing file: ${filePath}`)
+  if (!fs.existsSync(targetPath)) {
+    console.warn(`[IPC] open-folder missing file: ${targetPath}`)
     return false
   }
-  shell.showItemInFolder(filePath)
+  shell.showItemInFolder(targetPath)
   return true
 })
 
@@ -9170,42 +9222,42 @@ ipcMain.handle('ft-seek-frame', async (_e, input: { seconds: number; play?: bool
   }
 })
 
-ipcMain.handle('ft-get-ambient-frame', async () => {
+let ambientSamplingInFlight = false
+
+ipcMain.handle('ft-get-ambient-frame', async (_e, bounds?: { x: number; y: number; width: number; height: number }) => {
+  if (ambientSamplingInFlight) return { dataUrl: null }
+  ambientSamplingInFlight = true
   try {
-    const frames = getYouTubeEmbedFrames()
-    for (const frame of frames) {
-      try {
-        const res = await frame.executeJavaScript(`
-          (() => {
-            try {
-              const v = document.querySelector('video') || document.querySelector('.html5-main-video');
-              if (!v || v.paused || v.ended || v.readyState < 2 || !v.videoWidth) return null;
-              let canvas = window._ftAmbientCanvas;
-              if (!canvas) {
-                canvas = document.createElement('canvas');
-                canvas.width = 16;
-                canvas.height = 9;
-                window._ftAmbientCanvas = canvas;
-                window._ftAmbientCtx = canvas.getContext('2d', { willReadFrequently: true });
-              }
-              const ctx = window._ftAmbientCtx;
-              ctx.drawImage(v, 0, 0, 16, 9);
-              return canvas.toDataURL('image/jpeg', 0.3);
-            } catch {
-              return null;
-            }
-          })()
-        `)
-        if (typeof res === 'string' && res.startsWith('data:image/')) {
-          return { dataUrl: res }
-        }
-      } catch {
-        // ignore
+    const win = BrowserWindow.getFocusedWindow() || BrowserWindow.getAllWindows().find((w) => !w.isDestroyed() && w.isVisible())
+    if (!win || win.isDestroyed()) return { dataUrl: null }
+
+    let image: Electron.NativeImage
+    if (bounds && bounds.width > 20 && bounds.height > 20) {
+      const [winW, winH] = win.getContentSize()
+      const rect = {
+        x: Math.max(0, Math.min(winW - 10, Math.round(bounds.x))),
+        y: Math.max(0, Math.min(winH - 10, Math.round(bounds.y))),
+        width: Math.max(10, Math.min(winW - Math.round(bounds.x), Math.round(bounds.width))),
+        height: Math.max(10, Math.min(winH - Math.round(bounds.y), Math.round(bounds.height)))
       }
+      image = await Promise.race([
+        win.webContents.capturePage(rect),
+        new Promise<Electron.NativeImage>((_, reject) => setTimeout(() => reject(new Error('capture timeout')), 800))
+      ])
+    } else {
+      image = await Promise.race([
+        win.webContents.capturePage(),
+        new Promise<Electron.NativeImage>((_, reject) => setTimeout(() => reject(new Error('capture timeout')), 800))
+      ])
     }
-    return { dataUrl: null }
+    if (!image || image.isEmpty()) return { dataUrl: null }
+    const resized = image.resize({ width: 16, height: 9, quality: 'good' })
+    const jpegBuffer = resized.toJPEG(35)
+    return { dataUrl: `data:image/jpeg;base64,${jpegBuffer.toString('base64')}` }
   } catch {
     return { dataUrl: null }
+  } finally {
+    ambientSamplingInFlight = false
   }
 })
 

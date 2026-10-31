@@ -320,7 +320,7 @@ export const RequestTestUserModal: React.FC<RequestTestUserModalProps> = ({
                 <button
                   type="submit"
                   disabled={submitting}
-                  className="flex-1 inline-flex items-center justify-center gap-2 rounded-xl bg-primary px-4 py-2.5 text-xs font-black uppercase tracking-widest text-white shadow-[0_10px_25px_-10px_rgba(229,9,20,0.8)] transition-all hover:bg-primary/85 disabled:cursor-not-allowed disabled:opacity-50 disabled:shadow-none"
+                  className="flex-1 inline-flex items-center justify-center gap-2 rounded-xl bg-primary px-4 py-2.5 text-xs font-black uppercase tracking-widest text-white shadow-[0_10px_25px_-10px_rgba(var(--c-accent),0.8)] transition-all hover:bg-primary/85 disabled:cursor-not-allowed disabled:opacity-50 disabled:shadow-none"
                 >
                   {submitting ? (
                     <>

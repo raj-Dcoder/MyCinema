@@ -57,7 +57,7 @@ export function WatchTogetherModal({
       onPointerUp={stopPlayerInteraction}
       onPointerCancel={stopPlayerInteraction}
     >
-      <div className="watch-together-modal bg-[#121218]/95 border border-white/15 rounded-2xl shadow-[0_24px_70px_rgba(0,0,0,0.8)] backdrop-blur-2xl w-full max-w-md overflow-hidden flex flex-col text-white animate-in zoom-in-95 duration-200">
+      <div className="watch-together-modal keep-dark dark bg-[#121218]/95 border border-white/15 rounded-2xl shadow-[0_24px_70px_rgba(0,0,0,0.8)] backdrop-blur-2xl w-full max-w-md overflow-hidden flex flex-col text-white animate-in zoom-in-95 duration-200">
         <div className="flex items-center justify-between px-6 py-5 border-b border-white/10 bg-white/[0.02]">
           <div className="flex items-center gap-3">
             <div className="w-9 h-9 rounded-xl bg-indigo-500/20 border border-indigo-500/30 flex items-center justify-center text-indigo-400">

@@ -603,7 +603,7 @@ export const FocusTubePipPlayer: React.FC<FocusTubePipPlayerProps> = ({ initialP
           <div className="group/scrub relative flex h-3 cursor-pointer items-center">
             <div className="relative h-1.5 w-full overflow-hidden rounded-full bg-white/35 transition-all group-hover/scrub:h-2">
               <div
-                className="h-full rounded-full bg-primary shadow-[0_0_10px_rgba(229,9,20,0.8)] transition-all"
+                className="h-full rounded-full bg-primary shadow-[0_0_10px_rgba(var(--c-accent),0.8)] transition-all"
                 style={{ width: `${progressPercent}%` }}
               />
             </div>
@@ -702,7 +702,7 @@ export const FocusTubePipPlayer: React.FC<FocusTubePipPlayerProps> = ({ initialP
       {!showControls && isPlaying && (
         <div className="pointer-events-none absolute inset-x-0 bottom-0 h-[2.5px] bg-black/50">
           <div
-            className="h-full bg-primary shadow-[0_0_6px_rgba(229,9,20,0.8)] transition-all duration-300"
+            className="h-full bg-primary shadow-[0_0_6px_rgba(var(--c-accent),0.8)] transition-all duration-300"
             style={{ width: `${progressPercent}%` }}
           />
         </div>

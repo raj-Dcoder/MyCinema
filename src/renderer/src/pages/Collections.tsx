@@ -41,7 +41,7 @@ const resolvePoster = (path?: string | null) => {
 }
 
 const inputCls =
-  'h-11 w-full rounded-xl border border-white/10 bg-white/[0.035] px-3 text-sm font-bold text-white outline-none transition-all placeholder:text-white/28 focus:border-primary/45 focus:ring-1 focus:ring-primary/35'
+  'cinema-search-input h-11 w-full rounded-xl border border-white/20 bg-black/40 px-3 text-sm font-bold text-white outline-none backdrop-blur-xl transition-all placeholder:text-white/40 focus:border-primary focus:bg-black/60 focus:ring-2 focus:ring-primary/25'
 
 const Collections: React.FC<CollectionsProps> = ({ onPlay, onShowDetail, focusCollectionId = null, focusNonce = 0 }) => {
   const [collections, setCollections] = useState<Collection[]>([])
@@ -1164,8 +1164,8 @@ const TitlePicker: React.FC<{
         </div>
         {tab === 'library' ? (
           <>
-            <div className="group relative mb-4 shrink-0">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-white/30" size={17} />
+            <div className="cinema-search-box group relative mb-4 shrink-0">
+              <Search className="cinema-search-icon absolute left-3 top-1/2 -translate-y-1/2 text-white/35 transition-colors group-focus-within:text-primary" size={17} />
               <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search your library" className={`${inputCls} pl-10`} />
             </div>
             <div className="flex-1 min-h-[240px] space-y-2 overflow-y-auto pr-1">
@@ -1202,8 +1202,8 @@ const TitlePicker: React.FC<{
           </>
         ) : (
           <>
-            <div className="group relative mb-4 shrink-0">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-white/30" size={17} />
+            <div className="cinema-search-box group relative mb-4 shrink-0">
+              <Search className="cinema-search-icon absolute left-3 top-1/2 -translate-y-1/2 text-white/35 transition-colors group-focus-within:text-primary" size={17} />
               <input ref={tmdbInputRef} value={tmdbQuery} onChange={(e) => setTmdbQuery(e.target.value)} placeholder="Type a movie or show name…" className={`${inputCls} pl-10`} />
             </div>
             <div className="flex-1 min-h-[240px] space-y-2 overflow-y-auto pr-1">

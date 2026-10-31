@@ -118,9 +118,9 @@ const HeroCarousel: React.FC<HeroCarouselProps> = ({ items, onPlay, onShowDetail
 
   if (items.length === 0) {
     return (
-      <div className="hero-carousel-canvas relative w-full min-h-[570px] h-[73vh] max-h-[800px] overflow-hidden skeleton">
+      <div className="hero-carousel-canvas keep-dark dark relative w-full min-h-[500px] h-[64vh] max-h-[720px] overflow-hidden skeleton">
         <div className="hero-overlay-left absolute inset-0">
-          <div className="absolute bottom-0 left-0 right-0 p-12 md:p-16 lg:p-24 max-w-4xl space-y-6">
+          <div className="absolute bottom-0 left-0 right-0 p-8 md:p-14 max-w-4xl space-y-6">
             <div className="h-16 w-3/4 max-w-sm rounded-lg bg-white/10 skeleton" />
             <div className="flex gap-3">
               <div className="h-5 w-20 rounded bg-white/10 skeleton" />
@@ -180,7 +180,7 @@ const HeroCarousel: React.FC<HeroCarouselProps> = ({ items, onPlay, onShowDetail
 
   return (
     <div
-      className="hero-carousel-canvas relative w-full min-h-[570px] h-[73vh] max-h-[800px] overflow-hidden group cursor-pointer"
+      className="hero-carousel-canvas keep-dark dark relative w-full min-h-[500px] h-[64vh] max-h-[720px] overflow-hidden group cursor-pointer"
       onClick={() => onShowDetail(current)}
       role="button"
       tabIndex={0}
@@ -223,12 +223,9 @@ const HeroCarousel: React.FC<HeroCarouselProps> = ({ items, onPlay, onShowDetail
                   decoding="async"
                   fetchPriority={idx === currentIndex ? 'high' : 'auto'}
                 />
-                {/* Cinema Scrim Overlays */}
-                <div className="hero-overlay-left absolute inset-0 z-20 pointer-events-none" />
-                <div className="hero-overlay-radial absolute inset-0 z-20 pointer-events-none" />
-                <div className="hero-overlay-bottom absolute inset-0 z-20 pointer-events-none" />
-                <div className="hero-overlay-top absolute inset-x-0 top-0 h-44 z-20 pointer-events-none" />
-                <div className="hero-overlay-right absolute inset-y-0 right-0 z-20 w-1/4 pointer-events-none" />
+                {/* Focused Content Scrim (No unnecessary top, right, or radial vignettes) */}
+                <div className="hero-overlay-left absolute inset-y-0 left-0 w-3/5 z-20 pointer-events-none" />
+                <div className="hero-overlay-bottom absolute inset-x-0 bottom-0 h-44 z-20 pointer-events-none" />
               </>
             )}
           </div>
@@ -236,7 +233,7 @@ const HeroCarousel: React.FC<HeroCarouselProps> = ({ items, onPlay, onShowDetail
       })}
 
       {/* Content */}
-      <div className="hero-overlay absolute inset-0 flex flex-col justify-end px-8 pb-16 pt-24 md:px-16 md:pb-20 md:pt-20 space-y-3 z-20">
+      <div className="hero-overlay absolute inset-0 flex flex-col justify-end px-8 pb-12 pt-16 md:px-14 md:pb-16 md:pt-16 space-y-3 z-20">
         {visibleLogoPath ? (
           <img
             src={getHeroLogoUrl(visibleLogoPath)}
@@ -321,7 +318,7 @@ const HeroCarousel: React.FC<HeroCarouselProps> = ({ items, onPlay, onShowDetail
       </div>
 
       {/* Navigation Controls */}
-      <div className="hero-overlay absolute bottom-8 right-8 md:right-16 flex items-center gap-4 z-20">
+      <div className="hero-overlay absolute bottom-8 right-8 md:right-14 flex items-center gap-4 z-20">
         <button
           onClick={(e) => {
             e.stopPropagation()

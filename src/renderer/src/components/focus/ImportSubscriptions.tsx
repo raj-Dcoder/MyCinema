@@ -498,7 +498,7 @@ const ImportSubscriptions: React.FC<ImportSubscriptionsProps> = ({ categories, i
                 type="button"
                 onClick={() => void startLoad()}
                 disabled={statusLoading || !canConnect}
-                className="mt-4 inline-flex h-11 items-center gap-2 rounded-xl bg-primary px-5 text-xs font-black uppercase tracking-widest text-white shadow-[0_10px_30px_-12px_rgba(229,9,20,0.9)] transition-colors hover:bg-primary/85 disabled:cursor-not-allowed disabled:opacity-40 disabled:shadow-none"
+                className="mt-4 inline-flex h-11 items-center gap-2 rounded-xl bg-primary px-5 text-xs font-black uppercase tracking-widest text-white shadow-[0_10px_30px_-12px_rgba(var(--c-accent),0.9)] transition-colors hover:bg-primary/85 disabled:cursor-not-allowed disabled:opacity-40 disabled:shadow-none"
               >
                 {statusLoading ? <Loader2 size={15} className="animate-spin" /> : <Download size={15} />}
                 {statusLoading ? 'Checking connection…' : startButtonLabel}
@@ -877,7 +877,7 @@ const ImportSubscriptions: React.FC<ImportSubscriptionsProps> = ({ categories, i
                 type="button"
                 onClick={() => void importSelected()}
                 disabled={!selectedCount || saving || refreshing}
-                className="inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2.5 text-[10px] font-black uppercase tracking-widest text-white shadow-[0_10px_30px_-12px_rgba(229,9,20,0.9)] transition-colors hover:bg-primary/85 disabled:opacity-35 disabled:shadow-none"
+                className="inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2.5 text-[10px] font-black uppercase tracking-widest text-white shadow-[0_10px_30px_-12px_rgba(var(--c-accent),0.9)] transition-colors hover:bg-primary/85 disabled:opacity-35 disabled:shadow-none"
               >
                 {saving ? <Loader2 size={13} className="animate-spin" /> : <CheckCheck size={13} />}
                 {saving ? 'Saving channels…' : `Import ${selectedCount} selected`}

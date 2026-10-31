@@ -897,14 +897,16 @@ export function getBackupData() {
     channelCategories: db.prepare('SELECT * FROM ft_channel_categories').all() as any[],
     videos: db.prepare('SELECT * FROM ft_videos').all() as any[],
     videoState: db.prepare('SELECT * FROM ft_video_state').all() as any[],
+    sessions: db.prepare('SELECT * FROM ft_sessions').all() as any[],
+    meta: db.prepare('SELECT * FROM ft_meta').all() as any[],
   }
 }
 
-export function restoreBackupData(data: any): void {
-  if (!data || typeof data !== 'object') return
+export function restoreBackupData(data: any): { categoriesRestored: number; channelsRestored: number } {
+  if (!data || typeof data !== 'object') return { categoriesRestored: 0, channelsRestored: 0 }
   const db = getRawDb()
   const tx = db.transaction(() => {
-    for (const table of ['ft_video_state', 'ft_videos', 'ft_channel_categories', 'ft_channels', 'ft_categories']) {
+    for (const table of ['ft_sessions', 'ft_meta', 'ft_video_state', 'ft_videos', 'ft_channel_categories', 'ft_channels', 'ft_categories']) {
       db.prepare(`DELETE FROM ${table}`).run()
     }
     const insertAll = (table: string, rows: any[]) => {
@@ -921,8 +923,14 @@ export function restoreBackupData(data: any): void {
     insertAll('ft_channel_categories', data.channelCategories)
     insertAll('ft_videos', data.videos)
     insertAll('ft_video_state', data.videoState)
+    if (Array.isArray(data.sessions)) insertAll('ft_sessions', data.sessions)
+    if (Array.isArray(data.meta)) insertAll('ft_meta', data.meta)
   })
   tx()
   // Deliberately no re-seed: a restore must be faithful to the backup, even if
   // that means coming back with no channels at all.
+  return {
+    categoriesRestored: Array.isArray(data.categories) ? data.categories.length : 0,
+    channelsRestored: Array.isArray(data.channels) ? data.channels.length : 0,
+  }
 }

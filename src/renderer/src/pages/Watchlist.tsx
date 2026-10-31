@@ -3,7 +3,7 @@ import { Video, WatchlistIntent } from '../types'
 import VideoCard from '../components/VideoCard'
 import WatchlistIntentPicker from '../components/WatchlistIntentPicker'
 import { compareWatchlistItems, getWatchlistIntent, normalizeWatchlistIntent } from '../utils/watchlistIntent'
-import { Bookmark, BookmarkCheck, CalendarDays, Film, Hourglass, LayoutGrid, Loader2, Search, Tv, Zap } from 'lucide-react'
+import { Bookmark, BookmarkCheck, CalendarDays, Film, Hourglass, LayoutGrid, Loader2, Search, Tv, Zap, X } from 'lucide-react'
 
 interface WatchlistProps {
   onPlay: (video: Video) => void
@@ -330,7 +330,7 @@ const Watchlist: React.FC<WatchlistProps> = ({ onPlay, onShowDetail, refreshKey 
 
   return (
     <div className="space-y-5">
-      <div className="flex min-w-0 flex-wrap items-center gap-3">
+      <div className="watchlist-header flex min-w-0 flex-wrap items-center gap-3">
         <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl border border-primary/20 bg-primary/10 text-primary">
           <Bookmark size={24} />
         </div>
@@ -340,15 +340,25 @@ const Watchlist: React.FC<WatchlistProps> = ({ onPlay, onShowDetail, refreshKey 
             {totalTitles} saved title{totalTitles === 1 ? '' : 's'} · {counts.asap} ASAP · {counts.weekend} Weekend · {counts.someday} Someday
           </p>
         </div>
-        <div className="group relative w-full sm:w-[270px]">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-white/30 transition-colors group-focus-within:text-primary" size={17} />
+        <div className="cinema-search-box group relative w-full sm:w-[280px]">
+          <Search className="cinema-search-icon absolute left-3 top-1/2 -translate-y-1/2 text-white/35 transition-colors group-focus-within:text-primary" size={17} />
           <input
             type="text"
             value={query}
             onChange={(event) => setQuery(event.target.value)}
             placeholder="Search movies or series to save"
-            className="h-11 w-full rounded-xl border border-white/10 bg-white/[0.035] py-2 pl-10 pr-4 text-sm font-bold text-white outline-none transition-all placeholder:text-white/28 focus:border-primary/45 focus:bg-black/25 focus:ring-1 focus:ring-primary/35"
+            className="cinema-search-input h-11 w-full rounded-xl border border-white/20 bg-black/40 py-2 pl-10 pr-10 text-sm font-bold text-white outline-none backdrop-blur-xl transition-all placeholder:text-white/40 focus:border-primary focus:bg-black/60 focus:ring-2 focus:ring-primary/25"
           />
+          {query && (
+            <button
+              type="button"
+              onClick={() => setQuery('')}
+              className="cinema-search-clear absolute right-3 top-1/2 -translate-y-1/2 rounded-md p-0.5 text-white/40 transition-colors hover:bg-white/10 hover:text-white"
+              aria-label="Clear watchlist search"
+            >
+              <X size={16} />
+            </button>
+          )}
         </div>
       </div>
 
@@ -364,7 +374,7 @@ const Watchlist: React.FC<WatchlistProps> = ({ onPlay, onShowDetail, refreshKey 
                 onClick={() => setActiveFilter(tab.id)}
                 title={tab.hint}
                 aria-pressed={isActive}
-                className={`flex h-9 items-center gap-2 rounded-full border px-3.5 text-[11px] font-black uppercase tracking-[0.1em] transition-all active:scale-95 ${
+                className={`watchlist-filter-tab flex h-9 items-center gap-2 rounded-full border px-3.5 text-[11px] font-black uppercase tracking-[0.1em] transition-all active:scale-95 ${
                   isActive
                     ? tab.id === 'all'
                       ? 'border-white bg-white text-black shadow-[0_8px_24px_rgba(255,255,255,0.2)]'
@@ -488,8 +498,8 @@ const Watchlist: React.FC<WatchlistProps> = ({ onPlay, onShowDetail, refreshKey 
         ) : visibleSingle.length > 0 ? (
           renderSection(activeFilter as WatchlistIntent, visibleSingle)
         ) : (
-          <div className="flex flex-col items-center justify-center py-24 text-center space-y-4">
-            <div className={`flex h-16 w-16 items-center justify-center rounded-2xl ${
+          <div className="cinema-empty-card flex flex-col items-center justify-center min-h-[340px] rounded-3xl border border-white/15 bg-black/40 backdrop-blur-xl p-10 text-center shadow-2xl">
+            <div className={`cinema-empty-icon mb-4 flex h-16 w-16 items-center justify-center rounded-2xl border border-white/15 shadow-lg ${
               activeFilter === 'asap' ? 'bg-red-500/10 text-red-400'
               : activeFilter === 'weekend' ? 'bg-violet-500/10 text-violet-300'
               : 'bg-teal-400/10 text-teal-200'
@@ -497,10 +507,10 @@ const Watchlist: React.FC<WatchlistProps> = ({ onPlay, onShowDetail, refreshKey 
               {activeFilter === 'asap' ? <Zap size={28} fill="currentColor" /> : activeFilter === 'weekend' ? <CalendarDays size={28} /> : <Hourglass size={28} />}
             </div>
             <div className="space-y-1.5">
-              <h3 className="text-xl font-black text-white">
+              <h3 className="cinema-empty-title text-xl font-black text-white">
                 No {activeFilter === 'asap' ? 'ASAP' : activeFilter === 'weekend' ? 'Weekend' : 'Someday'} picks yet
               </h3>
-              <p className="max-w-sm text-[12px] font-medium text-white/40">
+              <p className="cinema-empty-sub max-w-sm text-[12px] font-medium text-white/50">
                 {activeFilter === 'asap'
                   ? 'File something as ASAP and it jumps to the top of your queue.'
                   : activeFilter === 'weekend'
@@ -510,18 +520,20 @@ const Watchlist: React.FC<WatchlistProps> = ({ onPlay, onShowDetail, refreshKey 
             </div>
             <button
               onClick={() => setActiveFilter('all')}
-              className="rounded-xl border border-white/10 bg-white/[0.05] px-5 py-2.5 text-[11px] font-black uppercase tracking-widest text-white/70 transition-all hover:bg-white/10 hover:text-white active:scale-95"
+              className="mt-6 rounded-xl border border-white/15 bg-white/[0.06] px-5 py-2.5 text-[11px] font-black uppercase tracking-widest text-white/70 transition-all hover:bg-white/15 hover:text-white active:scale-95"
             >
               Show everything
             </button>
           </div>
         )
       ) : results.length === 0 ? (
-        <div className="flex flex-col items-center justify-center py-40 text-center space-y-6 opacity-20">
-          <Bookmark size={80} strokeWidth={1} />
+        <div className="cinema-empty-card flex flex-col items-center justify-center min-h-[380px] rounded-3xl border border-white/15 bg-black/40 backdrop-blur-xl p-10 text-center shadow-2xl transition-all">
+          <div className="cinema-empty-icon mb-6 flex h-16 w-16 items-center justify-center rounded-2xl border border-white/15 bg-primary/10 text-primary shadow-lg">
+            <Bookmark size={28} />
+          </div>
           <div className="space-y-2">
-            <h3 className="text-2xl font-bold">Watchlist is empty</h3>
-            <p className="text-sm font-medium text-white/60">Search movies or series, then file each one as ASAP, Weekend or Someday.</p>
+            <h3 className="cinema-empty-title text-2xl font-black italic tracking-tight text-white">Watchlist is empty</h3>
+            <p className="cinema-empty-sub text-sm font-medium text-white/50">Search movies or series, then file each one as ASAP, Weekend or Someday.</p>
           </div>
         </div>
       ) : (

@@ -371,7 +371,7 @@ const ChannelManager: React.FC<ChannelManagerProps> = ({ categories, initialCate
               onClick={() => void handleAdd()}
               disabled={adding || subscribingId !== null || searching || !query.trim()}
               title={searching ? 'Resolving your search…' : 'Subscribe to channel'}
-              className="inline-flex h-11 shrink-0 items-center gap-2 rounded-xl bg-primary px-5 text-xs font-black uppercase tracking-widest text-white shadow-[0_10px_30px_-12px_rgba(229,9,20,0.9)] transition-all hover:bg-primary/85 active:scale-95 disabled:opacity-40 disabled:shadow-none"
+              className="inline-flex h-11 shrink-0 items-center gap-2 rounded-xl bg-primary px-5 text-xs font-black uppercase tracking-widest text-white shadow-[0_10px_30px_-12px_rgba(var(--c-accent),0.9)] transition-all hover:bg-primary/85 active:scale-95 disabled:opacity-40 disabled:shadow-none"
             >
               {adding || subscribingId !== null || searching ? <Loader2 size={15} className="animate-spin" /> : <Plus size={15} />}
               <span>Subscribe</span>

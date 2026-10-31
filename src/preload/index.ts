@@ -286,7 +286,8 @@ const api = {
   ftSetFrameQuality: (quality: string) => ipcRenderer.invoke('ft-set-frame-quality', quality),
   ftGetFrameQuality: () => ipcRenderer.invoke('ft-get-frame-quality'),
   ftSeekFrame: (seconds: number, play?: boolean) => ipcRenderer.invoke('ft-seek-frame', { seconds, play }),
-  ftGetAmbientFrame: () => ipcRenderer.invoke('ft-get-ambient-frame'),
+  ftGetAmbientFrame: (bounds?: { x: number; y: number; width: number; height: number }) =>
+    ipcRenderer.invoke('ft-get-ambient-frame', bounds),
   ftRequestImportAccess: (input: { name: string; email: string }) =>
     ipcRenderer.invoke('ft-request-import-access', input),
   onFeedUpdated: (callback: (payload: { added: number; channelIds: string[] }) => void) => {

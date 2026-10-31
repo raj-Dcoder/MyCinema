@@ -1,3 +1,32 @@
+# MyCinema v1.48.0
+
+Atmospheric Lighting & Signature Accent Studio with live interactive preview, in-player theater ambilight modes, auto-repaired download file paths, and bundled onboarding feature demo video.
+
+### Atmospheric Lighting & Accent Studio
+- **Atmospheric Studio with Live Preview**: Fine-tune dynamic ambient halo glow, diffusion spread, and saturation chroma with real-time reactive feedback in Settings > Appearance.
+- **Signature Color Accents**: Personalize your cinema interface with bespoke color tones including Voltage Amber, Crimson, Cyber Teal, Neon Emerald, and Midnight Violet.
+- **Decoupled Interactive Controls**: Style buttons adaptively or assign independent signature colors so controls stay sharp and legible across all themes.
+- **In-Player Theater Ambilight**: Choose your preferred immersion level during video playback between Blackout, Soft Halo, or dramatic Pause Aura.
+- **Organic Breathing & Ambient Details**: Optional gentle organic breathing pulse for ambient backdrops, plus matching ambient color wash on detail pages.
+
+### Onboarding Feature Demo Video
+- **Embedded Feature Demo Video**: What's New modal now features a high-definition 16:9 demo video with instant playback, custom scrubber controls, audio toggle, and fullscreen support.
+- **Optimized Video Footprint**: Demo media is compressed with fast-start streaming headers, loading instantly with zero buffering or memory drag.
+
+### Player & Streaming Polish
+- **FocusTube Native Ambilight Sampling**: Ambient glow for web video player now captures native page frames with low-overhead throttles and timeout guards.
+- **High-Resolution 1.5x Streaming**: Optimized buffer cushions and TCP socket management prevent hitching and audio-video drift at higher playback speeds.
+- **FocusTube Backup Integrity**: User backup and restore routines now fully safeguard session history and channel metadata across devices.
+
+### Download Engine & Library Reliability
+- **Incomplete Path Auto-Repair**: Database and file system automatically detect and heal `.part` file extensions for completed downloads.
+- **Scanner Pre-Filter**: Scanner ignores unfinished download fragments (`.part`, `.crdownload`, `.!ut`) until downloads are completely finalized on disk.
+
+### Security & Privacy
+- **Strict Media Protocol Boundaries**: Content Security Policy now explicitly secures media scheme endpoints (`media:`, `blob:`, `data:`) to prevent untrusted resource injection.
+
+***
+
 # MyCinema v1.47.0
 
 All-new high-contrast Light Theme alongside classic Dark Mode, clickable hero carousel navigation, smart next-episode queueing, and monotonic download progress engine.

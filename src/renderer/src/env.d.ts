@@ -41,6 +41,8 @@ interface Api {
     favorites?: number
     streamProgress?: number
     followedSeries?: number
+    focusTubeCategories?: number
+    focusTubeChannels?: number
     error?: string
   }>
   importUserBackup: () => Promise<{
@@ -55,6 +57,8 @@ interface Api {
     favoritesRestored?: number
     streamProgressRestored?: number
     followedSeriesRestored?: number
+    focusTubeCategoriesRestored?: number
+    focusTubeChannelsRestored?: number
     error?: string
   }>
   clearAllData: () => Promise<boolean>
@@ -291,7 +295,7 @@ interface Api {
   ftSetFrameQuality?: (quality: string) => Promise<{ ok: boolean; error?: string }>
   ftGetFrameQuality?: () => Promise<{ quality: string | null; available?: string[] }>
   ftSeekFrame?: (seconds: number, play?: boolean) => Promise<{ ok: boolean; error?: string }>
-  ftGetAmbientFrame?: () => Promise<{ dataUrl: string | null }>
+  ftGetAmbientFrame?: (bounds?: { x: number; y: number; width: number; height: number }) => Promise<{ dataUrl: string | null }>
   ftRequestImportAccess: (input: { name: string; email: string }) => Promise<{ ok?: boolean; message?: string; error?: string }>
   onFeedUpdated: (callback: (payload: { added: number; channelIds: string[] }) => void) => () => void
   ftOpenPip: (payload: any) => Promise<boolean>

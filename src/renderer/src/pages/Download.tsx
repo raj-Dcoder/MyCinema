@@ -1043,9 +1043,9 @@ const Download: React.FC<DownloadProps> = ({ onPlay, onShowDetail }) => {
               <h1 className="text-2xl font-bold tracking-tight">Downloads</h1>
             </div>
             
-            <div className="download-search-box relative flex-1 max-w-md flex items-center bg-white/[0.035] border border-white/10 rounded-2xl overflow-hidden focus-within:border-white/20 focus-within:bg-white/[0.055] transition-all shadow-sm">
-              <div className="pl-4 text-muted">
-                {searching ? <Loader2 size={16} className="animate-spin text-white" /> : <Search size={16} />}
+            <div className="download-search-box cinema-search-box group relative flex-1 max-w-md flex items-center rounded-2xl">
+              <div className="cinema-search-icon pl-4 text-white/40 transition-colors group-focus-within:text-primary">
+                {searching ? <Loader2 size={16} className="animate-spin text-primary" /> : <Search size={16} />}
               </div>
               <input
                 ref={searchInputRef}
@@ -1053,10 +1053,10 @@ const Download: React.FC<DownloadProps> = ({ onPlay, onShowDetail }) => {
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
                 placeholder="Search movies & TV shows..."
-                className="w-full bg-transparent border-none px-3 py-2.5 text-sm text-white placeholder:text-muted/50 focus:outline-none focus:ring-0"
+                className="w-full bg-transparent border-none px-3 py-2.5 text-sm font-bold text-white placeholder:text-white/40 focus:outline-none focus:ring-0"
               />
               {query && (
-                <button onClick={() => setQuery('')} className="pr-4 text-muted hover:text-white transition-colors shrink-0">
+                <button onClick={() => setQuery('')} className="cinema-search-clear pr-4 text-white/40 hover:text-white transition-colors shrink-0">
                   <X size={14} />
                 </button>
               )}
@@ -1066,15 +1066,15 @@ const Download: React.FC<DownloadProps> = ({ onPlay, onShowDetail }) => {
           <div className="flex items-center gap-3">
             <button
               onClick={refreshDownloadsStorage}
-              className="download-storage-btn flex items-center gap-3 rounded-xl border border-white/10 bg-white/5 px-4 py-2.5 hover:bg-white/10 transition-colors"
+              className="download-storage-btn flex items-center gap-3 rounded-xl px-4 py-2.5 transition-all"
               title={downloadsStorage?.path || 'Refresh storage'}
             >
-              <HardDrive size={15} className="text-primary" />
+              <HardDrive size={15} className="text-primary shrink-0" />
               <div className="flex flex-col min-w-[100px]">
                 <div className="flex items-center justify-between gap-3 text-[10px] font-bold uppercase tracking-widest mb-1">
-                  <span className="text-white">{downloadsStorage ? formatBytes(downloadsStorage.free) : '--'} free</span>
+                  <span className="download-storage-text text-white">{downloadsStorage ? formatBytes(downloadsStorage.free) : '--'} free</span>
                 </div>
-                <div className="h-1 w-full overflow-hidden rounded-full bg-white/10">
+                <div className="download-storage-track h-1 w-full overflow-hidden rounded-full bg-white/10">
                   <div
                     className={`h-full rounded-full transition-all duration-500 ${
                       storageUsedPercent >= 90 ? 'bg-red-400' :
@@ -1089,7 +1089,7 @@ const Download: React.FC<DownloadProps> = ({ onPlay, onShowDetail }) => {
 
             <button
               onClick={() => window.api.openDownloadsFolder()}
-              className="download-folder-btn p-2.5 rounded-xl bg-white/5 border border-white/10 text-muted hover:text-white hover:bg-white/10 transition-colors"
+              className="download-folder-btn p-2.5 rounded-xl transition-all"
               title="Open downloads folder"
             >
               <FolderOpen size={16} />
@@ -1181,12 +1181,12 @@ const Download: React.FC<DownloadProps> = ({ onPlay, onShowDetail }) => {
 
         {/* Empty Queue */}
         {!searching && results.length === 0 && !selectedItem && downloads.length === 0 && (
-          <div className="flex flex-col items-center justify-center min-h-[400px] rounded-3xl border border-white/5 bg-white/[0.015] p-10 text-center animate-in fade-in zoom-in-95 duration-500">
-            <div className="mb-6 flex h-16 w-16 items-center justify-center rounded-2xl border border-white/10 bg-white/5 text-muted">
+          <div className="download-empty-card cinema-empty-card flex flex-col items-center justify-center min-h-[400px] rounded-3xl border border-white/15 bg-black/40 backdrop-blur-xl p-10 text-center shadow-2xl animate-in fade-in zoom-in-95 duration-500">
+            <div className="download-empty-icon cinema-empty-icon mb-6 flex h-16 w-16 items-center justify-center rounded-2xl border border-white/15 bg-white/5 text-white/60 shadow-lg">
               <DownloadIcon size={28} />
             </div>
-            <h2 className="text-2xl font-black italic tracking-tight text-white">No downloads yet</h2>
-            <p className="mt-2 max-w-md text-sm font-medium leading-relaxed text-muted">
+            <h2 className="download-empty-title cinema-empty-title text-2xl font-black italic tracking-tight text-white">No downloads yet</h2>
+            <p className="download-empty-sub cinema-empty-sub mt-2 max-w-md text-sm font-medium leading-relaxed text-white/50">
               Search for a movie or TV show above, or browse the catalog to start building your offline library.
             </p>
           </div>

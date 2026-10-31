@@ -1,4 +1,4 @@
-import React, { createContext, useCallback, useContext, useEffect, useState } from 'react'
+import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react'
 
 export type AppTheme = 'dark' | 'light'
 
@@ -126,6 +126,9 @@ export const ACCENT_PALETTE: AccentDef[] = [
 
 export type HaloIntensityKey = 'stealth' | 'whisper' | 'theater' | 'supercharged'
 
+export type ButtonAccentMode = 'adaptive' | 'signature' | 'custom'
+export type PlayerAmbilightMode = 'blackout' | 'soft_halo' | 'pause_aura'
+
 export interface HaloIntensityPreset {
   id: HaloIntensityKey
   label: string
@@ -165,13 +168,23 @@ const ACCENT_STORAGE_KEY = 'mycinema_accent_tint'
 const HALO_INTENSITY_STORAGE_KEY = 'mycinema_halo_intensity'
 const HALO_DIFFUSION_STORAGE_KEY = 'mycinema_halo_diffusion'
 const HALO_CHROMA_STORAGE_KEY = 'mycinema_halo_chroma'
-const STAGE_PREVIEW_COLLAPSED_KEY = 'mycinema_stage_preview_collapsed'
+const BUTTON_ACCENT_MODE_KEY = 'mycinema_button_accent_mode'
+const CUSTOM_BUTTON_ACCENT_KEY = 'mycinema_custom_button_accent'
+const FT_BRAND_LOCK_KEY = 'mycinema_ft_brand_lock'
+const PLAYER_AMBILIGHT_MODE_KEY = 'mycinema_player_ambilight_mode'
+const HALO_BREATHING_KEY = 'mycinema_halo_breathing'
+const DETAIL_AMBIENT_SHADE_KEY = 'mycinema_detail_ambient_shade'
+const ATMOSPHERIC_STUDIO_STORAGE_KEY = 'mycinema_atmospheric_studio_enabled'
 
 export interface ThemeContextValue {
   // Existing Base Theme (Untouched)
   theme: AppTheme
   setTheme: (t: AppTheme) => void
   toggleTheme: () => void
+
+  // Atmospheric Cinematic Studio Master Toggle
+  atmosphericStudioEnabled: boolean
+  setAtmosphericStudioEnabled: (enabled: boolean) => void
 
   // Atmospheric Lighting & Accent Studio
   accent: AccentKey
@@ -188,8 +201,28 @@ export interface ThemeContextValue {
   haloChroma: number
   setHaloChroma: (c: number) => void
 
-  stagePreviewCollapsed: boolean
-  setStagePreviewCollapsed: React.Dispatch<React.SetStateAction<boolean>>
+  // Decoupled Interactive Controls Accent
+  buttonAccentMode: ButtonAccentMode
+  setButtonAccentMode: (m: ButtonAccentMode) => void
+  customButtonAccent: AccentKey
+  setCustomButtonAccent: (a: AccentKey) => void
+  activeButtonAccent: AccentDef
+
+  // Focus Tube YouTube Brand Lock
+  ftBrandLock: boolean
+  setFtBrandLock: (locked: boolean) => void
+
+  // In-Player Theater Ambilight
+  playerAmbilightMode: PlayerAmbilightMode
+  setPlayerAmbilightMode: (m: PlayerAmbilightMode) => void
+
+  // Organic Breathing Pulse
+  haloBreathing: boolean
+  setHaloBreathing: (b: boolean) => void
+
+  // Movie Details Ambient Shades (Theme ambient vs Classic black)
+  detailAmbientShade: boolean
+  setDetailAmbientShade: (enabled: boolean) => void
 
   resetToDefaults: () => void
 }
@@ -198,18 +231,31 @@ const ThemeContext = createContext<ThemeContextValue>({
   theme: 'dark',
   setTheme: () => {},
   toggleTheme: () => {},
-  accent: 'crimson',
+  atmosphericStudioEnabled: true,
+  setAtmosphericStudioEnabled: () => {},
+  accent: 'voltage',
   setAccent: () => {},
-  currentAccent: ACCENT_PALETTE[0],
+  currentAccent: ACCENT_PALETTE.find((a) => a.id === 'voltage') || ACCENT_PALETTE[9],
   haloIntensity: 'theater',
   setHaloIntensity: () => {},
   currentHaloPreset: HALO_INTENSITY_PRESETS[2],
-  haloDiffusion: 100,
+  haloDiffusion: 250,
   setHaloDiffusion: () => {},
-  haloChroma: 100,
+  haloChroma: 110,
   setHaloChroma: () => {},
-  stagePreviewCollapsed: false,
-  setStagePreviewCollapsed: () => {},
+  buttonAccentMode: 'adaptive',
+  setButtonAccentMode: () => {},
+  customButtonAccent: 'voltage',
+  setCustomButtonAccent: () => {},
+  activeButtonAccent: ACCENT_PALETTE.find((a) => a.id === 'voltage') || ACCENT_PALETTE[9],
+  ftBrandLock: true,
+  setFtBrandLock: () => {},
+  playerAmbilightMode: 'pause_aura',
+  setPlayerAmbilightMode: () => {},
+  haloBreathing: false,
+  setHaloBreathing: () => {},
+  detailAmbientShade: true,
+  setDetailAmbientShade: () => {},
   resetToDefaults: () => {},
 })
 
@@ -228,7 +274,7 @@ const getInitialAccent = (): AccentKey => {
     const saved = localStorage.getItem(ACCENT_STORAGE_KEY) as AccentKey
     if (ACCENT_PALETTE.some((a) => a.id === saved)) return saved
   } catch {}
-  return 'crimson'
+  return 'voltage'
 }
 
 const getInitialHaloIntensity = (): HaloIntensityKey => {
@@ -252,28 +298,95 @@ const getInitialClampedNumber = (key: string, defaultVal: number): number => {
   return defaultVal
 }
 
-const getInitialPreviewCollapsed = (): boolean => {
+const getInitialButtonAccentMode = (): ButtonAccentMode => {
   try {
-    return localStorage.getItem(STAGE_PREVIEW_COLLAPSED_KEY) === 'true'
+    const saved = localStorage.getItem(BUTTON_ACCENT_MODE_KEY) as ButtonAccentMode
+    if (['adaptive', 'signature', 'custom'].includes(saved)) return saved
+  } catch {}
+  return 'adaptive'
+}
+
+const getInitialCustomButtonAccent = (): AccentKey => {
+  try {
+    const saved = localStorage.getItem(CUSTOM_BUTTON_ACCENT_KEY) as AccentKey
+    if (ACCENT_PALETTE.some((a) => a.id === saved)) return saved
+  } catch {}
+  return 'voltage'
+}
+
+const getInitialFtBrandLock = (): boolean => {
+  try {
+    const saved = localStorage.getItem(FT_BRAND_LOCK_KEY)
+    if (saved !== null) return saved === 'true'
+  } catch {}
+  return true
+}
+
+const getInitialPlayerAmbilightMode = (): PlayerAmbilightMode => {
+  try {
+    const saved = localStorage.getItem(PLAYER_AMBILIGHT_MODE_KEY) as PlayerAmbilightMode
+    if (['blackout', 'soft_halo', 'pause_aura'].includes(saved)) return saved
+  } catch {}
+  return 'pause_aura'
+}
+
+const getInitialHaloBreathing = (): boolean => {
+  try {
+    return localStorage.getItem(HALO_BREATHING_KEY) === 'true'
   } catch {}
   return false
 }
 
+const getInitialDetailAmbientShade = (): boolean => {
+  try {
+    const saved = localStorage.getItem(DETAIL_AMBIENT_SHADE_KEY)
+    if (saved !== null) return saved === 'true'
+  } catch {}
+  return true // Default: ON (Ambient / Theme Color)
+}
+
+const getInitialAtmosphericStudioEnabled = (): boolean => {
+  try {
+    const saved = localStorage.getItem(ATMOSPHERIC_STUDIO_STORAGE_KEY)
+    if (saved !== null) return saved === 'true'
+  } catch {}
+  return true // Default: ON
+}
+
 export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [theme, setThemeState] = useState<AppTheme>(getInitialTheme)
+  const [atmosphericStudioEnabled, setAtmosphericStudioEnabledState] = useState<boolean>(getInitialAtmosphericStudioEnabled)
   const [accent, setAccentState] = useState<AccentKey>(getInitialAccent)
   const [haloIntensity, setHaloIntensityState] = useState<HaloIntensityKey>(getInitialHaloIntensity)
   const [haloDiffusion, setHaloDiffusionState] = useState<number>(() =>
-    getInitialClampedNumber(HALO_DIFFUSION_STORAGE_KEY, 100),
+    getInitialClampedNumber(HALO_DIFFUSION_STORAGE_KEY, 250),
   )
   const [haloChroma, setHaloChromaState] = useState<number>(() =>
-    getInitialClampedNumber(HALO_CHROMA_STORAGE_KEY, 100),
+    getInitialClampedNumber(HALO_CHROMA_STORAGE_KEY, 110),
   )
-  const [stagePreviewCollapsed, setStagePreviewCollapsed] = useState<boolean>(getInitialPreviewCollapsed)
+  const [buttonAccentMode, setButtonAccentModeState] = useState<ButtonAccentMode>(getInitialButtonAccentMode)
+  const [customButtonAccent, setCustomButtonAccentState] = useState<AccentKey>(getInitialCustomButtonAccent)
+  const [ftBrandLock, setFtBrandLockState] = useState<boolean>(getInitialFtBrandLock)
+  const [playerAmbilightMode, setPlayerAmbilightModeState] = useState<PlayerAmbilightMode>(getInitialPlayerAmbilightMode)
+  const [haloBreathing, setHaloBreathingState] = useState<boolean>(getInitialHaloBreathing)
+  const [detailAmbientShade, setDetailAmbientShadeState] = useState<boolean>(getInitialDetailAmbientShade)
 
   const currentAccent = ACCENT_PALETTE.find((a) => a.id === accent) || ACCENT_PALETTE[0]
   const currentHaloPreset =
     HALO_INTENSITY_PRESETS.find((p) => p.id === haloIntensity) || HALO_INTENSITY_PRESETS[2]
+
+  const activeButtonAccent = useMemo(() => {
+    if (!atmosphericStudioEnabled) {
+      return ACCENT_PALETTE.find((a) => a.id === 'crimson') || ACCENT_PALETTE[0]
+    }
+    if (buttonAccentMode === 'signature') {
+      return ACCENT_PALETTE.find((a) => a.id === 'crimson') || ACCENT_PALETTE[0]
+    }
+    if (buttonAccentMode === 'custom') {
+      return ACCENT_PALETTE.find((a) => a.id === customButtonAccent) || ACCENT_PALETTE[0]
+    }
+    return currentAccent
+  }, [atmosphericStudioEnabled, buttonAccentMode, customButtonAccent, currentAccent])
 
   // Synchronize Base Dark/Light Theme on document element
   useEffect(() => {
@@ -297,32 +410,124 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   // Synchronize Accent & Atmospheric Halo CSS variables on document element
   useEffect(() => {
     const root = document.documentElement
+
+    if (!atmosphericStudioEnabled) {
+      // Atmospheric studio is turned OFF:
+      // Revert completely to classic MyCinema signature crimson accents, zero halo/ambient glow, and blackout scrims
+      root.setAttribute('data-atmospheric-studio', 'disabled')
+      root.setAttribute('data-halo-intensity', 'stealth')
+      root.setAttribute('data-accent', 'crimson')
+      root.setAttribute('data-detail-shade', 'black')
+
+      root.style.setProperty('--c-accent', '229 9 20')
+      root.style.setProperty('--c-accent-hex', '#e50914')
+      root.style.setProperty('--c-accent-secondary', '185 28 28')
+
+      root.style.setProperty('--c-ambient', theme === 'light' ? '241 243 246' : '8 13 22')
+      root.style.setProperty('--c-ambient-hex', theme === 'light' ? '#f1f3f6' : '#080d16')
+      root.style.setProperty('--c-ambient-secondary', theme === 'light' ? '241 243 246' : '8 13 22')
+
+      root.style.setProperty('--halo-opacity', '0')
+      root.style.setProperty('--halo-diffusion', '1.00')
+      root.style.setProperty('--halo-chroma', '1.00')
+
+      try {
+        localStorage.setItem(ATMOSPHERIC_STUDIO_STORAGE_KEY, 'false')
+      } catch {}
+
+      window.dispatchEvent(
+        new CustomEvent('mycinema_accent_changed', {
+          detail: {
+            atmosphericStudioEnabled: false,
+            accent: 'crimson',
+            activeButtonAccent: ACCENT_PALETTE[0],
+            buttonAccentMode: 'signature',
+            haloIntensity: 'stealth',
+            haloDiffusion: 100,
+            haloChroma: 100,
+            ftBrandLock: true,
+            playerAmbilightMode: 'blackout',
+            haloBreathing: false,
+            detailAmbientShade: false,
+          },
+        }),
+      )
+      return
+    }
+
+    // Atmospheric studio is turned ON:
+    root.setAttribute('data-atmospheric-studio', 'enabled')
     const baseOpacity = currentHaloPreset.baseOpacity
     // Final opacity scales with Chroma Vibrancy (e.g. 100% -> 1.0, 250% -> 1.5 multiplier)
     const chromaMultiplier = 0.4 + (haloChroma / 100) * 0.6
     const computedOpacity = Math.min(1.2, baseOpacity * chromaMultiplier)
 
-    root.style.setProperty('--c-accent', currentAccent.rgb)
-    root.style.setProperty('--c-accent-hex', currentAccent.hex)
-    root.style.setProperty('--c-accent-secondary', currentAccent.secondaryRgb)
+    // Interactive UI controls accent (Buttons, Sliders, Active Chips)
+    root.style.setProperty('--c-accent', activeButtonAccent.rgb)
+    root.style.setProperty('--c-accent-hex', activeButtonAccent.hex)
+    root.style.setProperty('--c-accent-secondary', activeButtonAccent.secondaryRgb)
+
+    // Atmospheric Backlight Ambient Aura (Halo wallpaper wash & preview)
+    root.style.setProperty('--c-ambient', currentAccent.rgb)
+    root.style.setProperty('--c-ambient-hex', currentAccent.hex)
+    root.style.setProperty('--c-ambient-secondary', currentAccent.secondaryRgb)
+
     root.style.setProperty('--halo-opacity', computedOpacity.toFixed(3))
     root.style.setProperty('--halo-diffusion', (haloDiffusion / 100).toFixed(2))
     root.style.setProperty('--halo-chroma', (haloChroma / 100).toFixed(2))
 
+    root.setAttribute('data-halo-intensity', haloIntensity)
+    root.setAttribute('data-accent', accent)
+    root.setAttribute('data-detail-shade', detailAmbientShade ? 'ambient' : 'black')
+
     try {
+      localStorage.setItem(ATMOSPHERIC_STUDIO_STORAGE_KEY, 'true')
       localStorage.setItem(ACCENT_STORAGE_KEY, accent)
       localStorage.setItem(HALO_INTENSITY_STORAGE_KEY, haloIntensity)
       localStorage.setItem(HALO_DIFFUSION_STORAGE_KEY, String(haloDiffusion))
       localStorage.setItem(HALO_CHROMA_STORAGE_KEY, String(haloChroma))
-      localStorage.setItem(STAGE_PREVIEW_COLLAPSED_KEY, String(stagePreviewCollapsed))
+      localStorage.setItem(BUTTON_ACCENT_MODE_KEY, buttonAccentMode)
+      localStorage.setItem(CUSTOM_BUTTON_ACCENT_KEY, customButtonAccent)
+      localStorage.setItem(FT_BRAND_LOCK_KEY, String(ftBrandLock))
+      localStorage.setItem(PLAYER_AMBILIGHT_MODE_KEY, playerAmbilightMode)
+      localStorage.setItem(HALO_BREATHING_KEY, String(haloBreathing))
+      localStorage.setItem(DETAIL_AMBIENT_SHADE_KEY, String(detailAmbientShade))
     } catch {}
 
     window.dispatchEvent(
       new CustomEvent('mycinema_accent_changed', {
-        detail: { accent: currentAccent, haloIntensity, haloDiffusion, haloChroma },
+        detail: {
+          atmosphericStudioEnabled: true,
+          accent: currentAccent,
+          activeButtonAccent,
+          buttonAccentMode,
+          haloIntensity,
+          haloDiffusion,
+          haloChroma,
+          ftBrandLock,
+          playerAmbilightMode,
+          haloBreathing,
+          detailAmbientShade,
+        },
       }),
     )
-  }, [accent, currentAccent, haloIntensity, currentHaloPreset, haloDiffusion, haloChroma, stagePreviewCollapsed])
+  }, [
+    atmosphericStudioEnabled,
+    theme,
+    accent,
+    currentAccent,
+    activeButtonAccent,
+    buttonAccentMode,
+    customButtonAccent,
+    haloIntensity,
+    currentHaloPreset,
+    haloDiffusion,
+    haloChroma,
+    ftBrandLock,
+    playerAmbilightMode,
+    haloBreathing,
+    detailAmbientShade,
+  ])
 
   const setTheme = useCallback((t: AppTheme) => setThemeState(t), [])
   const toggleTheme = useCallback(
@@ -330,6 +535,7 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     [],
   )
 
+  const setAtmosphericStudioEnabled = useCallback((enabled: boolean) => setAtmosphericStudioEnabledState(enabled), [])
   const setAccent = useCallback((a: AccentKey) => setAccentState(a), [])
   const setHaloIntensity = useCallback((h: HaloIntensityKey) => setHaloIntensityState(h), [])
   const setHaloDiffusion = useCallback((d: number) => {
@@ -339,11 +545,25 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     setHaloChromaState(Math.max(50, Math.min(250, Math.round(c))))
   }, [])
 
+  const setButtonAccentMode = useCallback((m: ButtonAccentMode) => setButtonAccentModeState(m), [])
+  const setCustomButtonAccent = useCallback((a: AccentKey) => setCustomButtonAccentState(a), [])
+  const setFtBrandLock = useCallback((locked: boolean) => setFtBrandLockState(locked), [])
+  const setPlayerAmbilightMode = useCallback((m: PlayerAmbilightMode) => setPlayerAmbilightModeState(m), [])
+  const setHaloBreathing = useCallback((b: boolean) => setHaloBreathingState(b), [])
+  const setDetailAmbientShade = useCallback((enabled: boolean) => setDetailAmbientShadeState(enabled), [])
+
   const resetToDefaults = useCallback(() => {
-    setAccentState('crimson')
+    setAtmosphericStudioEnabledState(true)
+    setAccentState('voltage')
     setHaloIntensityState('theater')
-    setHaloDiffusionState(100)
-    setHaloChromaState(100)
+    setHaloDiffusionState(250)
+    setHaloChromaState(110)
+    setButtonAccentModeState('adaptive')
+    setCustomButtonAccentState('voltage')
+    setFtBrandLockState(true)
+    setPlayerAmbilightModeState('pause_aura')
+    setHaloBreathingState(false)
+    setDetailAmbientShadeState(true)
   }, [])
 
   return (
@@ -352,6 +572,8 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         theme,
         setTheme,
         toggleTheme,
+        atmosphericStudioEnabled,
+        setAtmosphericStudioEnabled,
         accent,
         setAccent,
         currentAccent,
@@ -362,8 +584,19 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         setHaloDiffusion,
         haloChroma,
         setHaloChroma,
-        stagePreviewCollapsed,
-        setStagePreviewCollapsed,
+        buttonAccentMode,
+        setButtonAccentMode,
+        customButtonAccent,
+        setCustomButtonAccent,
+        activeButtonAccent,
+        ftBrandLock,
+        setFtBrandLock,
+        playerAmbilightMode,
+        setPlayerAmbilightMode,
+        haloBreathing,
+        setHaloBreathing,
+        detailAmbientShade,
+        setDetailAmbientShade,
         resetToDefaults,
       }}
     >

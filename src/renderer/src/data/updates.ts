@@ -56,6 +56,77 @@ export function normalizeUpdate(item: UpdateInput, defaultCategory = 'General'):
 
 export const APP_UPDATES: AppRelease[] = [
   {
+    "version": "v1.48.0",
+    "summary": "Atmospheric Lighting & Signature Accent Studio with live interactive preview, in-player theater ambilight modes, auto-repaired download file paths, and bundled onboarding feature demo video.",
+    "updates": [
+      {
+        "title": "Atmospheric Studio with Live Preview",
+        "description": "Fine-tune dynamic ambient halo glow, diffusion spread, and saturation chroma with real-time reactive feedback in Settings > Appearance.",
+        "category": "Atmospheric Lighting & Accent Studio"
+      },
+      {
+        "title": "Signature Color Accents",
+        "description": "Personalize your cinema interface with bespoke color tones including Voltage Amber, Crimson, Cyber Teal, Neon Emerald, and Midnight Violet.",
+        "category": "Atmospheric Lighting & Accent Studio"
+      },
+      {
+        "title": "Decoupled Interactive Controls",
+        "description": "Style buttons adaptively or assign independent signature colors so controls stay sharp and legible across all themes.",
+        "category": "Atmospheric Lighting & Accent Studio"
+      },
+      {
+        "title": "In-Player Theater Ambilight",
+        "description": "Choose your preferred immersion level during video playback between Blackout, Soft Halo, or dramatic Pause Aura.",
+        "category": "Atmospheric Lighting & Accent Studio"
+      },
+      {
+        "title": "Organic Breathing & Ambient Details",
+        "description": "Optional gentle organic breathing pulse for ambient backdrops, plus matching ambient color wash on detail pages.",
+        "category": "Atmospheric Lighting & Accent Studio"
+      },
+      {
+        "title": "Embedded Feature Demo Video",
+        "description": "What's New modal now features a high-definition 16:9 demo video with instant playback, custom scrubber controls, audio toggle, and fullscreen support.",
+        "category": "Onboarding Feature Demo Video"
+      },
+      {
+        "title": "Optimized Video Footprint",
+        "description": "Demo media is compressed with fast-start streaming headers, loading instantly with zero buffering or memory drag.",
+        "category": "Onboarding Feature Demo Video"
+      },
+      {
+        "title": "FocusTube Native Ambilight Sampling",
+        "description": "Ambient glow for web video player now captures native page frames with low-overhead throttles and timeout guards.",
+        "category": "Player & Streaming Polish"
+      },
+      {
+        "title": "High-Resolution 1.5x Streaming",
+        "description": "Optimized buffer cushions and TCP socket management prevent hitching and audio-video drift at higher playback speeds.",
+        "category": "Player & Streaming Polish"
+      },
+      {
+        "title": "FocusTube Backup Integrity",
+        "description": "User backup and restore routines now fully safeguard session history and channel metadata across devices.",
+        "category": "Player & Streaming Polish"
+      },
+      {
+        "title": "Incomplete Path Auto-Repair",
+        "description": "Database and file system automatically detect and heal `.part` file extensions for completed downloads.",
+        "category": "Download Engine & Library Reliability"
+      },
+      {
+        "title": "Scanner Pre-Filter",
+        "description": "Scanner ignores unfinished download fragments (`.part`, `.crdownload`, `.!ut`) until downloads are completely finalized on disk.",
+        "category": "Download Engine & Library Reliability"
+      },
+      {
+        "title": "Strict Media Protocol Boundaries",
+        "description": "Content Security Policy now explicitly secures media scheme endpoints (`media:`, `blob:`, `data:`) to prevent untrusted resource injection.",
+        "category": "Security & Privacy"
+      }
+    ]
+  },
+  {
     "version": "v1.47.0",
     "summary": "All-new high-contrast Light Theme alongside classic Dark Mode, clickable hero carousel navigation, smart next-episode queueing, and monotonic download progress engine.",
     "updates": [

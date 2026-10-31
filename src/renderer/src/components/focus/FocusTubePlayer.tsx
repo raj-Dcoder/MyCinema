@@ -37,6 +37,7 @@ import {
   Sparkles,
 } from 'lucide-react'
 import type { FtCategory, FtComment, FtVideo } from '../../types'
+import { useTheme } from '../../theme/ThemeContext'
 import { categoryDot, embedUrl, formatAgo, formatDuration, formatPublishedExact, formatViews, thumbnailUrl, watchUrl } from '../../utils/focusTube'
 import {
   parseChapters,
@@ -339,7 +340,7 @@ const QueueCard: React.FC<{
       onClick={() => onSelect(video)}
       className={`group relative flex items-center gap-3 rounded-xl border p-2 transition-all cursor-pointer select-none ${
         isCurrent
-          ? 'border-primary/60 bg-primary/10 shadow-[0_4px_20px_-8px_rgba(229,9,20,0.5)]'
+          ? 'border-primary/60 bg-primary/10 shadow-[0_4px_20px_-8px_rgba(var(--c-accent),0.5)]'
           : 'border-white/[0.06] bg-white/[0.02] hover:border-white/20 hover:bg-white/[0.06]'
       }`}
     >
@@ -366,7 +367,7 @@ const QueueCard: React.FC<{
           </span>
         )}
         {isCurrent && (
-          <span className="absolute top-1 left-1 flex items-center gap-1 rounded bg-primary px-1.5 py-0.5 text-[9px] font-black uppercase tracking-wider text-white shadow">
+          <span className="absolute top-1 left-1 flex items-center gap-1 rounded bg-primary px-1.5 py-0.5 text-[9px] font-black uppercase tracking-wider text-white shadow shadow-primary/40">
             <Play size={8} fill="currentColor" /> Playing
           </span>
         )}
@@ -394,9 +395,9 @@ const QueueCard: React.FC<{
         }}
         title={video.seen ? 'Mark as unwatched' : 'Mark as watched'}
         aria-label={video.seen ? 'Mark as unwatched' : 'Mark as watched'}
-        className={`shrink-0 rounded-lg p-1.5 transition-colors ${
+        className={`shrink-0 rounded-lg p-1.5 transition-all ${
           video.seen
-            ? 'bg-emerald-500/20 text-emerald-300 hover:bg-emerald-500/30'
+            ? 'bg-primary/20 text-primary border border-primary/40 shadow-sm shadow-primary/20 hover:bg-primary/30 hover:border-primary/60'
             : 'text-white/30 hover:bg-white/10 hover:text-white'
         }`}
       >
@@ -437,6 +438,7 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
   isChannelSubscribed = true,
   onSubscribeChannel,
 }) => {
+  const { ftBrandLock } = useTheme()
   const iframeRef = useRef<HTMLIFrameElement>(null)
   // Stable per-video channel id. (A previous revision read a mutated counter
   // here and addressed commands to a channel that was never registered.)
@@ -563,6 +565,7 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
   const [isPiPActive, setIsPiPActive] = useState(false)
   const isPiPActiveRef = useRef(false)
   isPiPActiveRef.current = isPiPActive
+  const pipClosedByUserRef = useRef(false)
   const [isMinimized, setIsMinimized] = useState(false)
   const isMinimizedRef = useRef(false)
   isMinimizedRef.current = isMinimized
@@ -649,8 +652,7 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
   const speedToastTimerRef = useRef<number>(0)
   const settingsTabRef = useRef<'speed' | 'quality'>('speed')
   const stallTimestampsRef = useRef<number[]>([])
-  const bufferCushionTimerRef = useRef<number>(0)
-  const isBufferCushioningRef = useRef(false)
+  const lastBufferWarningTimeRef = useRef<number>(0)
   // Mirrors `captionsOn` so the bridge handler (registered once per video)
   // always sees the current toggle without a stale closure.
   // Default is OFF and it resets per video — see the reset effect below.
@@ -676,9 +678,22 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
 
   // Resuming from a saved position is only meaningful a little way in; near the
   // end we would just land on the credits.
-  const resumeAt = startSeconds > 10 && (video.duration === null || startSeconds < video.duration - 20)
-    ? startSeconds
-    : 0
+  const [activeResumeAt, setActiveResumeAt] = useState<number>(() => {
+    return startSeconds > 10 && (video.duration === null || startSeconds < video.duration - 20)
+      ? startSeconds
+      : 0
+  })
+
+  useEffect(() => {
+    const initResume = startSeconds > 10 && (video.duration === null || startSeconds < video.duration - 20)
+      ? startSeconds
+      : 0
+    setActiveResumeAt(initResume)
+    pipClosedByUserRef.current = false
+    autoPiPByTabRef.current = false
+  }, [video.videoId, startSeconds])
+
+  const resumeAt = activeResumeAt
 
   // Keyed on video/retry/resume.
   // Reads qualityPrefRef.current on initial build so new videos carry &vq=,
@@ -952,16 +967,25 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
   }, [video.videoId, video.thumbnail, ambientMode])
 
   // ── Ambient Mode: Live video frame sampling with calm, smooth transitions ──
+  const ambientInFlightRef = useRef(false)
   useEffect(() => {
     // Never poll if ambient mode is off, player is minimized, user is in fullscreen, or video is not actively playing
     if (!ambientMode || isMinimized || fsActive || playerState !== STATE_PLAYING) return
 
     let active = true
     const interval = setInterval(async () => {
-      // Don't poll if paused, hidden, during dock/theater/sidepanel animations, or in fullscreen
-      if (!active || stateRef.current !== STATE_PLAYING || isTransitioningRef.current || isSidepanelTransitioningRef.current || document.fullscreenElement) return
+      // Don't poll if paused, hidden, during dock/theater/sidepanel animations, in fullscreen, or if already in flight
+      if (!active || stateRef.current !== STATE_PLAYING || isTransitioningRef.current || isSidepanelTransitioningRef.current || document.fullscreenElement || ambientInFlightRef.current) return
+
+      const stageEl = stageWrapperRef.current
+      if (!stageEl) return
+      const r = stageEl.getBoundingClientRect()
+      if (r.width <= 20 || r.height <= 20) return
+
+      ambientInFlightRef.current = true
       try {
-        const res = await window.api?.ftGetAmbientFrame?.()
+        const bounds = { x: r.left, y: r.top, width: r.width, height: r.height }
+        const res = await window.api?.ftGetAmbientFrame?.(bounds)
         if (!active || !res?.dataUrl) return
         if (res.dataUrl === lastAmbientUrlRef.current) return
         lastAmbientUrlRef.current = res.dataUrl
@@ -981,11 +1005,14 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
         img.src = res.dataUrl
       } catch {
         // ignore
+      } finally {
+        ambientInFlightRef.current = false
       }
-    }, 3500)
+    }, 4000)
 
     return () => {
       active = false
+      ambientInFlightRef.current = false
       clearInterval(interval)
     }
   }, [ambientMode, isMinimized, fsActive, playerState])
@@ -1268,7 +1295,9 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
         setVolume(volumePref.volume)
         setMuted(volumePref.muted)
         send('getDuration', [])
-        send('playVideo', [])
+        if (!isPiPActiveRef.current && stateRef.current !== STATE_PAUSED) {
+          send('playVideo', [])
+        }
         // Assert preferred quality if configured
         const targetPref = qualityPrefRef.current
         if (targetPref && targetPref !== 'auto') {
@@ -1309,28 +1338,18 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
         setPlayerState(state)
         if (state === STATE_BUFFERING) {
           const now = Date.now()
-          stallTimestampsRef.current = stallTimestampsRef.current.filter((t) => now - t < 15000)
+          stallTimestampsRef.current = stallTimestampsRef.current.filter((t) => now - t < 20000)
           stallTimestampsRef.current.push(now)
 
-          // Intelligent high-speed buffer cushion:
-          // At > 1x playback speed (e.g. 1.25x, 1.5x, 2x), YouTube's default resume threshold
-          // (~2s buffer) empties in ~1.3s, causing an endless micro-buffering loop.
-          // When 2+ stalls occur in 15 seconds at high speed, pause briefly (1.6s) so
-          // YouTube's DASH loader builds a healthy forward cushion before resuming.
-          if (speedRef.current > 1 && stallTimestampsRef.current.length >= 2 && !isBufferCushioningRef.current) {
-            isBufferCushioningRef.current = true
-            window.clearTimeout(bufferCushionTimerRef.current)
-            flashSpeedToast(`Building buffer cushion for smooth ${speedRef.current}x playback...`)
-            send('pauseVideo', [])
-            bufferCushionTimerRef.current = window.setTimeout(() => {
-              isBufferCushioningRef.current = false
-              send('playVideo', [])
-              if (speedRef.current !== 1) {
-                send('setPlaybackRate', [speedRef.current])
-              }
-            }, 1600)
-          } else if (stallTimestampsRef.current.length >= 4 && qualityPrefRef.current !== 'auto') {
-            // Warn if network cannot sustain high-speed playback at forced resolution
+          // If network cannot sustain high-speed playback at forced resolution,
+          // suggest Auto Quality without interrupting YouTube's native buffering.
+          if (
+            speedRef.current > 1 &&
+            stallTimestampsRef.current.length >= 4 &&
+            qualityPrefRef.current !== 'auto' &&
+            now - lastBufferWarningTimeRef.current > 30000
+          ) {
+            lastBufferWarningTimeRef.current = now
             flashSpeedToast(`Network bandwidth low for ${speedRef.current}x: try Auto Quality`)
           }
         }
@@ -1338,8 +1357,9 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
           seekLockRef.current = null
           endedRef.current = false
           setErrorText(null)
-          // Re-assert preferred playback rate on active playback start (unless cushion pause is active)
-          if (!isBufferCushioningRef.current && speedRef.current !== 1) {
+          stallTimestampsRef.current = []
+          // Re-assert preferred playback rate on active playback start
+          if (speedRef.current !== 1) {
             send('setPlaybackRate', [speedRef.current])
           }
           send('getAvailableQualityLevels', [])
@@ -1492,8 +1512,6 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
     sendHandshake()
 
     return () => {
-      window.clearTimeout(bufferCushionTimerRef.current)
-      isBufferCushioningRef.current = false
       window.removeEventListener('message', onMessage)
     }
   }, [video.videoId, iframeKey, startSeconds, saveProgress, sendHandshake])
@@ -1507,7 +1525,7 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
   useEffect(() => {
     let ticks = 0
     const interval = window.setInterval(() => {
-      if (stateRef.current !== STATE_PLAYING) return
+      if (isPiPActiveRef.current || stateRef.current !== STATE_PLAYING) return
       const target = iframeRef.current?.contentWindow
       if (target) {
         try {
@@ -1830,16 +1848,25 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
       if (document.fullscreenElement) {
         void document.exitFullscreen().catch(() => {})
       }
-      cmd('pauseVideo')
+      withBridge(() => {
+        cmd('pauseVideo', [])
+        cmd('mute', [])
+        cmd('setVolume', [0])
+      })
+      setPlayerState(STATE_PAUSED)
+      stateRef.current = STATE_PAUSED
       setIsPiPActive(true)
+      isPiPActiveRef.current = true
+      pipClosedByUserRef.current = false
 
+      const currentT = timeRef.current || currentTime || startSeconds
       const payload = {
         video,
-        currentTime: timeRef.current || currentTime || startSeconds,
-        isPlaying: stateRef.current === STATE_PLAYING,
+        currentTime: currentT,
+        isPlaying: true,
         playbackRate: speedRef.current,
-        volume,
-        muted,
+        volume: volumeRef.current,
+        muted: mutedRef.current,
         queue: queueItems,
         hasNext,
         nextTitle,
@@ -1849,16 +1876,19 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
     } catch (err) {
       console.error('[FocusTube] Failed to open PiP:', err)
       setIsPiPActive(false)
+      isPiPActiveRef.current = false
     }
-  }, [video, currentTime, startSeconds, volume, muted, queueItems, hasNext, nextTitle, cmd])
+  }, [video, startSeconds, queueItems, hasNext, nextTitle, cmd, withBridge])
 
   const handleRestoreFromPiP = useCallback(() => {
     window.api?.ftRestorePip?.().catch(() => {})
   }, [])
 
   const handleClosePiPAndPlayer = useCallback(() => {
+    pipClosedByUserRef.current = true
     window.api?.ftClosePip?.().catch(() => {})
     setIsPiPActive(false)
+    isPiPActiveRef.current = false
     handleClose()
   }, [handleClose])
 
@@ -1869,26 +1899,14 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
           setCurrentTime(state.currentTime)
           timeRef.current = state.currentTime
         }
-        if (typeof state.isPlaying === 'boolean') {
-          const nextState = state.isPlaying ? STATE_PLAYING : STATE_PAUSED
-          setPlayerState(nextState)
-          stateRef.current = nextState
-        }
+        // Do NOT set stateRef.current = STATE_PLAYING here; main player stays paused and silent while PiP plays.
       }
     })
 
     const unsubClosed = window.api?.onFtPipClosed?.((state: { videoId?: string; currentTime?: number; isPlaying?: boolean; restoreRequested?: boolean }) => {
       setIsPiPActive(false)
+      isPiPActiveRef.current = false
       autoPiPByTabRef.current = false
-
-      if (state?.restoreRequested) {
-        setInternalTab('focustube')
-        window.dispatchEvent(new CustomEvent('focustube-request-tab', { detail: { tab: 'focustube' } }))
-      }
-
-      if (isMinimizedRef.current) {
-        transitionToMinimized(false)
-      }
 
       const restoreTime = (state && typeof state.currentTime === 'number' && state.currentTime > 0)
         ? state.currentTime
@@ -1897,28 +1915,51 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
       if (restoreTime > 0) {
         setCurrentTime(restoreTime)
         timeRef.current = restoreTime
+        setActiveResumeAt(Math.floor(restoreTime))
       }
+
+      if (isMinimizedRef.current) {
+        transitionToMinimized(false)
+      }
+
+      // If user closed the PiP window (without clicking restore):
+      // Keep main player paused, do NOT resume playing, and do NOT auto-reopen PiP.
+      if (!state?.restoreRequested) {
+        pipClosedByUserRef.current = true
+        setPlayerState(STATE_PAUSED)
+        stateRef.current = STATE_PAUSED
+        cmd('pauseVideo', [])
+        return
+      }
+
+      // Explicit restore requested by user:
+      pipClosedByUserRef.current = false
+      setInternalTab('focustube')
+      window.dispatchEvent(new CustomEvent('focustube-request-tab', { detail: { tab: 'focustube' } }))
 
       pokeBottom()
 
       setTimeout(() => {
         sendHandshake()
+        const vol = volumeRef.current
+        cmd('setVolume', [vol])
+        if (!mutedRef.current && vol > 0) {
+          cmd('unMute', [])
+        }
         if (restoreTime > 0) {
           cmd('seekTo', [restoreTime, true])
         }
-        if (state?.restoreRequested || state?.isPlaying !== false) {
-          cmd('playVideo')
-          setPlayerState(STATE_PLAYING)
-          stateRef.current = STATE_PLAYING
-        }
-      }, 80)
+        cmd('playVideo', [])
+        setPlayerState(STATE_PLAYING)
+        stateRef.current = STATE_PLAYING
+      }, 120)
     })
 
     return () => {
       unsubSync?.()
       unsubClosed?.()
     }
-  }, [video.videoId, cmd])
+  }, [video.videoId, cmd, sendHandshake, pokeBottom, transitionToMinimized])
 
   const toggleMinimize = useCallback(() => {
     handleTogglePiP()
@@ -1929,17 +1970,23 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
   useEffect(() => {
     const targetTab = propsActiveTab || internalTab
     if (targetTab && targetTab !== 'focustube') {
-      if (!isPiPActiveRef.current && (started || stateRef.current === STATE_PLAYING) && !endedRef.current) {
+      if (
+        !isPiPActiveRef.current &&
+        !pipClosedByUserRef.current &&
+        stateRef.current === STATE_PLAYING &&
+        !endedRef.current
+      ) {
         autoPiPByTabRef.current = true
         handleTogglePiP()
       }
     } else if (targetTab === 'focustube') {
+      pipClosedByUserRef.current = false
       if (autoPiPByTabRef.current && isPiPActiveRef.current) {
         autoPiPByTabRef.current = false
         handleRestoreFromPiP()
       }
     }
-  }, [propsActiveTab, internalTab, handleTogglePiP, handleRestoreFromPiP, started])
+  }, [propsActiveTab, internalTab, handleTogglePiP, handleRestoreFromPiP])
 
   useEffect(() => {
     const handleTabChange = (e: any) => {
@@ -1955,7 +2002,7 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
 
   const handleExpandFromMini = useCallback(() => {
     window.dispatchEvent(new CustomEvent('focustube-request-tab', { detail: { tab: 'focustube' } }))
-    autoMinimizedByTabRef.current = false
+    autoPiPByTabRef.current = false
     transitionToMinimized(false)
     pokeBottom()
   }, [transitionToMinimized, pokeBottom])
@@ -2095,8 +2142,7 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
 
   const togglePlay = useCallback(() => {
     pokeBottom()
-    window.clearTimeout(bufferCushionTimerRef.current)
-    isBufferCushioningRef.current = false
+    pipClosedByUserRef.current = false
     if (stateRef.current === STATE_ENDED) {
       handleBarSeek(0)
       return
@@ -2532,7 +2578,7 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
         fsActive ? 'left-0' : ''
       } ${
         isFullscreenLayer ? 'z-[100]' : 'z-[70]'
-      } m-0 flex flex-col text-white select-none bg-transparent ${
+      } ${ftBrandLock ? 'ft-brand-locked' : ''} m-0 flex flex-col text-white select-none bg-transparent ${
         isMinimized && !isTransitioning
           ? 'pointer-events-none'
           : fsActive
@@ -2649,7 +2695,7 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
         <button
           type="button"
           onClick={() => handleToggleSidepanel(true)}
-          className="fixed right-0 top-20 z-40 hidden lg:flex h-8 w-6 items-center justify-center rounded-l-full bg-[#1a2230] border border-r-0 border-white/10 text-white/70 shadow-2xl opacity-75 hover:opacity-100 hover:text-white hover:bg-[#253040] hover:w-7 transition-all duration-200"
+          className="fixed right-0 top-20 z-40 hidden lg:flex h-8 w-6 items-center justify-center rounded-l-full bg-[#121620] border border-r-0 border-white/10 text-white/70 shadow-2xl opacity-75 hover:opacity-100 hover:text-primary hover:border-primary/50 hover:bg-primary/20 hover:w-7 transition-all duration-200"
           title="Expand Sidepanel (Queue, Chapters, Comments)"
         >
           <ChevronLeft size={16} strokeWidth={2.5} />
@@ -2720,14 +2766,14 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
             <iframe
               ref={iframeRef}
               key={`${video.videoId}:${iframeKey}`}
-              src={embedSrc}
+              src={isPiPActive ? 'about:blank' : embedSrc}
               title={video.title}
               className="absolute inset-0 z-0 h-full w-full border-0 bg-black transform-gpu will-change-transform"
               allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
               allowFullScreen
               loading="eager"
               referrerPolicy="strict-origin-when-cross-origin"
-              onLoad={sendHandshake}
+              onLoad={isPiPActive ? undefined : sendHandshake}
             />
 
             {/* Tap layer: single tap = play/pause, double tap/click =
@@ -2746,7 +2792,7 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
             {/* ── PiP Active Overlay ── */}
             {isPiPActive && (
               <div className="absolute inset-0 z-30 flex flex-col items-center justify-center bg-black/90 p-6 text-center backdrop-blur-md">
-                <div className="relative mb-3 flex h-14 w-14 items-center justify-center rounded-2xl bg-primary/20 text-primary shadow-[0_0_30px_rgba(229,9,20,0.3)]">
+                <div className="relative mb-3 flex h-14 w-14 items-center justify-center rounded-2xl bg-primary/20 text-primary shadow-[0_0_30px_rgba(var(--c-accent),0.3)]">
                   <PictureInPicture2 size={28} className="animate-pulse" />
                 </div>
                 <h3 className="text-base font-bold text-white sm:text-lg">
@@ -2813,7 +2859,7 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
                   title="Mark as watched and close"
                   aria-label="Mark as watched and close"
                   tabIndex={chromeVisible ? 0 : -1}
-                  className={`pointer-events-auto flex h-9 w-9 items-center justify-center rounded-full bg-black/60 text-white/70 backdrop-blur-md transition-all hover:bg-black/85 hover:text-emerald-400 active:scale-95 ${
+                  className={`pointer-events-auto flex h-9 w-9 items-center justify-center rounded-full bg-black/60 text-white/70 backdrop-blur-md transition-all hover:bg-black/85 hover:text-primary hover:border hover:border-primary/40 active:scale-95 ${
                     chromeVisible ? '' : 'pointer-events-none'
                   }`}
                 >
@@ -2892,7 +2938,7 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
                   />
                 )}
                 <span className="absolute inset-0 bg-gradient-to-t from-black/70 via-transparent to-black/40" />
-                <span className="relative flex h-20 w-20 items-center justify-center rounded-full bg-primary text-white shadow-[0_12px_48px_rgba(229,9,20,0.45)] transition-transform duration-200 group-hover:scale-105">
+                <span className="relative flex h-20 w-20 items-center justify-center rounded-full bg-primary text-white shadow-[0_12px_48px_rgba(var(--c-accent),0.45)] transition-transform duration-200 group-hover:scale-105">
                   <Play size={34} fill="currentColor" className="ml-1" />
                 </span>
                 <span className="relative flex items-center gap-2">
@@ -3168,14 +3214,14 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
                 </div>
               </div>
               {/* Buttons */}
-              <div className={`flex items-center gap-0.5 sm:gap-1 ${bottomVisible ? 'pointer-events-auto' : 'pointer-events-none'}`}>
+              <div className={`flex items-center gap-0.5 sm:gap-1 shrink-0 ${bottomVisible ? 'pointer-events-auto' : 'pointer-events-none'}`}>
                 <button
                   type="button"
                   onClick={togglePlay}
                   aria-label={isPlaying ? 'Pause' : playerState === STATE_ENDED ? 'Replay' : 'Play'}
                   title={isPlaying ? 'Pause (Space)' : playerState === STATE_ENDED ? 'Replay (Space)' : 'Play (Space)'}
                   tabIndex={bottomVisible ? 0 : -1}
-                  className="p-2 text-white transition-colors hover:text-white/70"
+                  className="shrink-0 p-1.5 text-white transition-colors hover:text-white/70 sm:p-2"
                 >
                   {isPlaying ? (
                     <Pause size={20} fill="currentColor" />
@@ -3192,20 +3238,20 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
                   aria-label={nextTitle ? `Play next: ${nextTitle}` : 'Play next unseen video'}
                   title={nextTitle ? `Next: ${nextTitle} (N)` : hasNext ? 'Play next unseen video (N)' : 'No more unseen videos in this stack'}
                   tabIndex={bottomVisible && hasNext ? 0 : -1}
-                  className={`p-2 transition-colors ${hasNext ? 'text-white/80 hover:text-white' : 'cursor-default text-white/25'}`}
+                  className={`shrink-0 p-1.5 transition-colors sm:p-2 ${hasNext ? 'text-white/80 hover:text-white' : 'cursor-default text-white/25'}`}
                 >
                   <SkipForward size={19} />
                 </button>
-                <span className="whitespace-nowrap px-1 text-[11px] font-semibold tabular-nums text-white/80">
+                <span className="shrink-0 whitespace-nowrap px-1 text-[11px] font-semibold tabular-nums text-white/80">
                   {formatChapterTime(displayTime)} <span className="text-white/40">/ {duration !== null && duration > 0 ? formatChapterTime(duration) : '--:--'}</span>
                 </span>
-                <div className="w-1 sm:w-2" />
+                <div className="w-1" />
                 <button
                   type="button"
                   onClick={toggleMute}
                   aria-label={muted ? 'Unmute' : 'Mute'}
                   tabIndex={bottomVisible ? 0 : -1}
-                  className="p-2 text-white/80 transition-colors hover:text-white"
+                  className="shrink-0 p-1.5 text-white/80 transition-colors hover:text-white sm:p-2"
                 >
                   {muted || volume === 0 ? <VolumeX size={18} /> : <Volume2 size={18} />}
                 </button>
@@ -3217,14 +3263,9 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
                   onChange={(e) => handleVolume(Number(e.target.value))}
                   aria-label="Volume"
                   tabIndex={bottomVisible ? 0 : -1}
-                  className="hidden h-1 w-16 cursor-pointer accent-white min-[420px]:block sm:w-20"
+                  className="hidden h-1 w-14 cursor-pointer accent-white min-[480px]:block sm:w-16 md:w-20"
                 />
                 <div className="min-w-0 flex-1" />
-                {sponsorSegments.length > 0 && (
-                  <span className="mr-1 hidden whitespace-nowrap text-[10px] font-bold uppercase tracking-widest text-amber-200/70 md:inline">
-                    {skipSponsors ? 'Skipping sponsors' : 'Sponsors listed'}
-                  </span>
-                )}
                 {/* Player-only autoplay: when ON, ENDED advances to the next
                     unseen video in the stack instead of closing. */}
                 <button
@@ -3237,12 +3278,12 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
                     ? (nextTitle ? `Autoplay ON — next: ${nextTitle}` : 'Autoplay ON — plays the next unseen video automatically')
                     : 'Autoplay OFF — turn on to play the next unseen video automatically'}
                   tabIndex={bottomVisible ? 0 : -1}
-                  className={`flex items-center gap-1.5 p-2 transition-colors hover:text-white ${autoplayNext ? 'text-white' : 'text-white/50'}`}
+                  className={`flex shrink-0 items-center gap-1.5 p-1.5 transition-colors hover:text-white sm:p-2 ${autoplayNext ? 'text-white' : 'text-white/50'}`}
                 >
                   <span className={`relative h-4 w-7 shrink-0 rounded-full transition-colors ${autoplayNext ? 'bg-primary' : 'bg-white/20'}`}>
                     <span className={`absolute top-0.5 h-3 w-3 rounded-full bg-white transition-all ${autoplayNext ? 'left-3.5' : 'left-0.5'}`} />
                   </span>
-                  <span className="hidden text-[11px] font-black uppercase tracking-widest min-[420px]:inline">
+                  <span className="hidden text-[11px] font-black uppercase tracking-widest min-[540px]:inline">
                     Auto
                   </span>
                 </button>
@@ -3253,7 +3294,7 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
                   aria-pressed={captionsOn}
                   title="Captions"
                   tabIndex={bottomVisible ? 0 : -1}
-                  className={`p-2 transition-colors hover:text-white ${captionsOn ? 'text-white' : 'text-white/50'}`}
+                  className={`shrink-0 p-1.5 transition-colors hover:text-white sm:p-2 ${captionsOn ? 'text-white' : 'text-white/50'}`}
                 >
                   <Subtitles size={18} />
                 </button>
@@ -3264,10 +3305,10 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
                   aria-expanded={showSettings && settingsTab === 'speed'}
                   title="Speed (+ / - steps of 0.10)"
                   tabIndex={bottomVisible ? 0 : -1}
-                  className={`flex items-center gap-1 p-2 transition-colors hover:text-white ${showSettings && settingsTab === 'speed' ? 'text-white' : 'text-white/70'}`}
+                  className={`flex shrink-0 items-center gap-1 p-1.5 transition-colors hover:text-white sm:p-2 ${showSettings && settingsTab === 'speed' ? 'text-white' : 'text-white/70'}`}
                 >
                   <Gauge size={18} />
-                  <span className="min-w-7 text-left text-[11px] font-black tabular-nums">
+                  <span className="min-w-6 text-left text-[11px] font-black tabular-nums">
                     {isHolding2x ? '2x' : `${speed}x`}
                   </span>
                 </button>
@@ -3278,10 +3319,10 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
                   aria-expanded={showSettings && settingsTab === 'quality'}
                   title={actualQuality ? `Quality: ${qualityLabel(actualQuality)} · Target: ${qualityLabel(qualityPref)}` : `Target Quality: ${qualityLabel(qualityPref)}`}
                   tabIndex={bottomVisible ? 0 : -1}
-                  className={`flex items-center gap-1 p-2 transition-colors hover:text-white ${showSettings && settingsTab === 'quality' ? 'text-white' : 'text-white/70'}`}
+                  className={`flex shrink-0 items-center gap-1 p-1.5 transition-colors hover:text-white sm:p-2 ${showSettings && settingsTab === 'quality' ? 'text-white' : 'text-white/70'}`}
                 >
                   <MonitorPlay size={18} />
-                  <span className="hidden text-[11px] font-black min-[420px]:inline">
+                  <span className="hidden text-[11px] font-black min-[520px]:inline">
                     {actualQuality ? qualityLabel(actualQuality) : (qualityPref !== 'auto' ? qualityLabel(qualityPref) : 'Auto')}
                   </span>
                 </button>
@@ -3291,26 +3332,16 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
                   aria-label={ambientMode ? 'Turn off ambient glow' : 'Turn on ambient glow'}
                   title={ambientMode ? 'Ambient Mode: ON (Click to turn off)' : 'Ambient Mode: OFF (Click to turn on)'}
                   tabIndex={bottomVisible ? 0 : -1}
-                  className={`flex items-center gap-1 p-2 transition-all rounded-lg ${
+                  className={`flex shrink-0 items-center gap-1 p-1.5 transition-all rounded-lg sm:p-2 ${
                     ambientMode
                       ? 'text-sky-400 hover:text-sky-300 drop-shadow-[0_0_6px_rgba(56,189,248,0.5)]'
                       : 'text-white/70 hover:text-white'
                   }`}
                 >
                   <Sparkles size={18} className={ambientMode ? 'animate-pulse' : ''} />
-                  <span className="hidden text-[11px] font-black min-[480px]:inline">
+                  <span className="hidden text-[11px] font-black min-[640px]:inline">
                     Ambient
                   </span>
-                </button>
-                <button
-                  type="button"
-                  onClick={toggleFullscreen}
-                  aria-label={fsActive ? 'Exit fullscreen' : 'Fullscreen'}
-                  title="Fullscreen (f)"
-                  tabIndex={bottomVisible ? 0 : -1}
-                  className="p-2 text-white/80 transition-colors hover:text-white"
-                >
-                  {fsActive ? <Minimize size={18} /> : <Maximize size={18} />}
                 </button>
                 <button
                   type="button"
@@ -3318,9 +3349,19 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
                   aria-label={isPiPActive ? "Exit mini player (i / p)" : "Mini player (i / p) — float over other apps"}
                   title="Mini player (i / p) — float over other apps while you multitask"
                   tabIndex={bottomVisible ? 0 : -1}
-                  className={`p-2 transition-colors ${isPiPActive ? 'text-primary' : 'text-white/80 hover:text-white'}`}
+                  className={`shrink-0 p-1.5 transition-colors sm:p-2 ${isPiPActive ? 'text-primary' : 'text-white/80 hover:text-white'}`}
                 >
                   <PictureInPicture2 size={18} />
+                </button>
+                <button
+                  type="button"
+                  onClick={toggleFullscreen}
+                  aria-label={fsActive ? 'Exit fullscreen' : 'Fullscreen'}
+                  title="Fullscreen (f)"
+                  tabIndex={bottomVisible ? 0 : -1}
+                  className="shrink-0 p-1.5 text-white/80 transition-colors hover:text-white sm:p-2"
+                >
+                  {fsActive ? <Minimize size={18} /> : <Maximize size={18} />}
                 </button>
               </div>
             </div>
@@ -3496,7 +3537,7 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
                       title={hasNext ? (nextTitle ? `Mark watched & play next: ${nextTitle}` : 'Mark watched & play next') : (video.seen ? 'Watched' : 'Mark watched')}
                       className={`inline-flex items-center gap-2 rounded-xl border px-4 py-2 text-xs font-bold transition-all ${
                         video.seen
-                          ? 'border-emerald-500/30 bg-emerald-500/15 text-emerald-300'
+                          ? 'border-primary/40 bg-primary/20 text-primary shadow-sm shadow-primary/20 hover:bg-primary/30 hover:border-primary/60'
                           : 'border-white/10 bg-white/5 text-white hover:border-white/20 hover:bg-white/10'
                       }`}
                     >
@@ -3696,7 +3737,7 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
             <button
               type="button"
               onClick={() => handleToggleSidepanel(false)}
-              className="absolute -left-3.5 top-9 z-50 hidden lg:flex h-7 w-7 items-center justify-center rounded-full bg-[#1a2230] border border-white/10 text-white/70 shadow-xl opacity-0 translate-x-2 pointer-events-none group-hover/sidepanel:opacity-100 group-hover/sidepanel:translate-x-0 group-hover/sidepanel:pointer-events-auto hover:text-white hover:bg-[#253040] hover:scale-110 transition-all duration-300"
+              className="absolute -left-3.5 top-9 z-50 hidden lg:flex h-7 w-7 items-center justify-center rounded-full bg-[#121620] border border-white/10 text-white/70 shadow-xl opacity-0 translate-x-2 pointer-events-none group-hover/sidepanel:opacity-100 group-hover/sidepanel:translate-x-0 group-hover/sidepanel:pointer-events-auto hover:text-primary hover:border-primary/50 hover:bg-primary/20 hover:scale-110 transition-all duration-300"
               title="Collapse Sidepanel"
             >
               <ChevronRight size={16} strokeWidth={2.5} />
@@ -3733,9 +3774,9 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
                     <button
                       type="button"
                       onClick={() => setSidebarTab('queue')}
-                      className={`rounded-lg px-2 py-1 text-[11px] font-bold transition-colors ${
+                      className={`rounded-lg px-2 py-1 text-[11px] font-bold transition-all ${
                         sidebarTab === 'queue'
-                          ? 'bg-primary text-white shadow'
+                          ? 'bg-primary text-white shadow shadow-primary/40'
                           : 'text-white/50 hover:bg-white/10 hover:text-white'
                       }`}
                     >
@@ -3744,9 +3785,9 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
                     <button
                       type="button"
                       onClick={() => setSidebarTab('chapters')}
-                      className={`rounded-lg px-2 py-1 text-[11px] font-bold transition-colors ${
+                      className={`rounded-lg px-2 py-1 text-[11px] font-bold transition-all ${
                         sidebarTab === 'chapters'
-                          ? 'bg-primary text-white shadow'
+                          ? 'bg-primary text-white shadow shadow-primary/40'
                           : 'text-white/50 hover:bg-white/10 hover:text-white'
                       }`}
                     >
@@ -3755,9 +3796,9 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
                     <button
                       type="button"
                       onClick={() => setSidebarTab('comments')}
-                      className={`rounded-lg px-2 py-1 text-[11px] font-bold transition-colors ${
+                      className={`rounded-lg px-2 py-1 text-[11px] font-bold transition-all ${
                         sidebarTab === 'comments'
-                          ? 'bg-primary text-white shadow'
+                          ? 'bg-primary text-white shadow shadow-primary/40'
                           : 'text-white/50 hover:bg-white/10 hover:text-white'
                       }`}
                     >
@@ -3791,7 +3832,7 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
                         title="Queue order: Newest uploads first"
                         className={`flex items-center gap-1 rounded-md px-2 py-0.5 text-[10px] font-bold transition-all ${
                           sortOrder === 'newest'
-                            ? 'bg-primary text-white shadow'
+                            ? 'bg-primary text-white shadow shadow-primary/40'
                             : 'text-white/40 hover:bg-white/5 hover:text-white'
                         }`}
                       >
@@ -3804,7 +3845,7 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
                         title="Queue order: Oldest uploads first (chronological order)"
                         className={`flex items-center gap-1 rounded-md px-2 py-0.5 text-[10px] font-bold transition-all ${
                           sortOrder === 'oldest'
-                            ? 'bg-primary text-white shadow'
+                            ? 'bg-primary text-white shadow shadow-primary/40'
                             : 'text-white/40 hover:bg-white/5 hover:text-white'
                         }`}
                       >

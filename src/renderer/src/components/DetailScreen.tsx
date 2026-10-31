@@ -4,6 +4,7 @@ import katMovieHdLogo from '../assets/site-logos/katmoviehd.jpg'
 import { cleanIpcError } from '../utils/ipcError'
 import { X, Play, Info, Calendar, CalendarDays, Clock, Star, FolderOpen, Film, Music, Subtitles, HardDrive, ChevronDown, ChevronUp, Bookmark, Share2, Search, Zap, Users, Download, AlertTriangle, Clapperboard, Loader2, ExternalLink, Languages, CheckCircle2, Copy, MessageCircle, Send, Trash2, Bell, BellRing, Hourglass, Layers, Plus } from 'lucide-react'
 import { Video, WatchlistIntent } from '../types'
+import { useTheme } from '../theme/ThemeContext'
 import { getWatchlistIntent, normalizeWatchlistIntent, WATCHLIST_INTENT_META } from '../utils/watchlistIntent'
 import { ShareHintGuide, DeleteHintGuide, FollowGuide } from './FeatureGuides'
 import { getTorrentSourceHealthScore, getTorrentSourceSpeedLabel, isHevcSource } from '../utils/torrentSources'
@@ -164,6 +165,8 @@ const MYCINEMA_SHARE_BASE_URL = (
 ).replace(/\/+$/, '')
 
 const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource, onClose, onPlay, onWatchlistChange }) => {
+  const { detailAmbientShade, atmosphericStudioEnabled } = useTheme()
+  const isAmbientShadeActive = atmosphericStudioEnabled && detailAmbientShade
   const [episodes, setEpisodes] = useState<Video[]>([])
   const [localVersions, setLocalVersions] = useState<Video[]>([])
   const [seriesCatalog, setSeriesCatalog] = useState<SeriesCatalogEpisode[]>([])
@@ -780,6 +783,8 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
 
   const handleOpenDownloadOptions = async () => {
     setTorrentStreamError(null)
+    setDownloadSiteError(null)
+    setDownloadSiteNotice(null)
     if (!initialSharedSource?.magnet) {
       setSourceLanguageFilter('all')
       setSourceQualityFilter('all')
@@ -1611,7 +1616,10 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
   return (
     <div
       style={{ left: 'var(--sidebar-width, 5rem)' }}
-      className="fixed right-0 top-0 bottom-0 z-50 animate-in fade-in duration-300 transition-[left] duration-300 ease-in-out detail-screen-root"
+      data-detail-shade={isAmbientShadeActive ? 'ambient' : 'black'}
+      className={`fixed right-0 top-0 bottom-0 z-50 animate-in fade-in duration-300 transition-[left] duration-300 ease-in-out detail-screen-root ${
+        isAmbientShadeActive ? 'detail-ambient-active' : 'detail-ambient-disabled'
+      }`}
     >
       <div className="relative w-full h-full bg-[#080d16] overflow-hidden flex flex-col detail-screen-canvas">
         {/* Close Button */}
@@ -1630,7 +1638,7 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
               alt={video.title} 
               loading="eager"
               decoding="async"
-              className="h-full w-full object-cover object-center opacity-70 md:opacity-[0.85] scale-[1.05] translate-x-[2%] md:translate-x-[5%] detail-screen-backdrop"
+              className="h-full w-full object-cover object-center opacity-85 md:opacity-95 scale-[1.03] translate-x-[2%] md:translate-x-[4%] detail-screen-backdrop"
             />
           ) : posterUrl ? (
             <img 
@@ -1642,18 +1650,9 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
             />
           ) : null}
           
-          {/* Cinematic Overlays */}
-          {/* 1. Subtle top vignette for edge readability (15%) */}
-          <div className="absolute inset-x-0 top-0 h-[20vh] pointer-events-none detail-overlay-top" />
-          
-          {/* 2. Strong left linear gradient for content readability */}
-          <div className="absolute inset-y-0 left-0 w-full md:w-[75%] pointer-events-none detail-overlay-left" />
-          
-          {/* 3. Spotlight radial gradient centered behind text area for readability without paneling */}
-          <div className="absolute inset-0 pointer-events-none detail-overlay-radial" />
-
-          {/* 4. Bottom vignette to gently ground the image and improve readability of lower content */}
-          <div className="absolute inset-x-0 bottom-0 h-[35vh] pointer-events-none detail-overlay-bottom" />
+          {/* Focused Content Scrim (Feather-soft left & bottom radial veil — Top & Right 100% open) */}
+          <div className="absolute inset-y-0 left-0 w-full md:w-[75%] lg:w-[68%] pointer-events-none detail-overlay-left" />
+          <div className="absolute inset-x-0 bottom-0 h-[38vh] pointer-events-none detail-overlay-bottom" />
         </div>
 
         {/* Content Section */}
@@ -1789,7 +1788,7 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
             )}
 
             {/* Overview */}
-            <div className="relative max-w-2xl">
+            <div className="relative w-full max-w-[485px] detail-overview-container">
               <p
                 ref={overviewRef}
                 className={`detail-overview-text text-white/75 text-sm md:text-[15px] leading-7 font-medium transition-all duration-300 ${
@@ -1798,10 +1797,6 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
               >
                 {video.overview || 'No overview available for this title.'}
               </p>
-
-              {!expandedOverview && isOverflowing && (
-                <div className="pointer-events-none absolute bottom-6 left-0 right-0 h-10 detail-overview-fade" />
-              )}
 
               {video.overview && video.overview.length > 250 && (
                 <button
@@ -1838,7 +1833,7 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
                 <button
                   onClick={handleOpenDownloadOptions}
                   disabled={searching && sources.length === 0}
-                  className={`flex min-h-16 items-center justify-center gap-3 rounded-xl px-7 text-xs font-black uppercase tracking-[0.12em] transition-all hover:-translate-y-0.5 active:scale-95 disabled:cursor-wait disabled:opacity-55 ${
+                  className={`detail-sources-btn flex min-h-16 items-center justify-center gap-3 rounded-xl px-7 text-xs font-black uppercase tracking-[0.12em] transition-all hover:-translate-y-0.5 active:scale-95 disabled:cursor-wait disabled:opacity-55 ${
                     isLocalMedia || isDownloadActive
                       ? 'border border-white/10 bg-white/[0.055] text-white/70 hover:bg-white/[0.09] hover:text-white'
                       : 'bg-primary text-white shadow-[0_10px_30px_rgba(229,9,20,0.34)] hover:bg-primary/80'
@@ -2242,6 +2237,41 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
                       </button>
                     )}
                   </div>
+                </div>
+                <div>
+                  <p className="text-[10px] font-black uppercase tracking-[0.18em] text-white/35 mb-2">Download Websites</p>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <button
+                      onClick={() => void handleOpenDownloadSite('hdmovies', 'HDHub4u')}
+                      disabled={resolvingSiteId !== null}
+                      className="flex h-12 items-center justify-center px-4 bg-white/5 border border-white/10 rounded-xl hover:border-rose-500/30 hover:bg-rose-600/10 transition-all hover:-translate-y-0.5 active:scale-95 glass-effect disabled:opacity-60 disabled:cursor-wait"
+                      title="Search this title on HDHub4u (latest working link)"
+                    >
+                      {resolvingSiteId === 'hdmovies'
+                        ? <Loader2 size={18} className="animate-spin text-white/45" />
+                        : <img src={hdHub4uLogo} alt="HDHub4u" className="h-7 w-auto max-w-[130px] object-contain" />}
+                    </button>
+                    <button
+                      onClick={() => void handleOpenDownloadSite('catmovies', 'KatMovieHD')}
+                      disabled={resolvingSiteId !== null}
+                      className="flex h-12 items-center justify-center px-4 bg-white/5 border border-white/10 rounded-xl hover:border-cyan-500/30 hover:bg-cyan-600/10 transition-all hover:-translate-y-0.5 active:scale-95 glass-effect disabled:opacity-60 disabled:cursor-wait"
+                      title="Search this title on KatMovieHD (latest working link)"
+                    >
+                      {resolvingSiteId === 'catmovies'
+                        ? <Loader2 size={18} className="animate-spin text-white/45" />
+                        : <img src={katMovieHdLogo} alt="KatMovieHD" className="h-7 w-auto max-w-[130px] object-contain" />}
+                    </button>
+                  </div>
+                  {(downloadSiteError || downloadSiteNotice) && (
+                    <div className="mt-2">
+                      {downloadSiteError && (
+                        <p className="text-[11px] font-semibold text-red-400">{downloadSiteError}</p>
+                      )}
+                      {downloadSiteNotice && (
+                        <p className="text-[11px] font-semibold text-amber-400">{downloadSiteNotice}</p>
+                      )}
+                    </div>
+                  )}
                 </div>
               </div>
             </div>
@@ -3194,78 +3224,6 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
                       <Search size={12} />
                       Try again
                     </button>
-                  )}
-                  {/* Web fallback — same handler as before, now at the failure moment */}
-                  <div className="mt-2 w-full max-w-[320px] rounded-xl bg-white/[0.03] px-4 py-3 ring-1 ring-white/[0.07]">
-                    <p className="text-[9px] font-black uppercase tracking-[0.18em] text-white/35">
-                      Still can&apos;t find? Try web
-                    </p>
-                    <div className="mt-2 flex items-center justify-center gap-2">
-                      <button
-                        onClick={() => void handleOpenDownloadSite('hdmovies', 'HDHub4u')}
-                        disabled={resolvingSiteId !== null}
-                        className="flex h-10 flex-1 items-center justify-center px-2 bg-white/5 border border-white/10 rounded-lg hover:border-rose-500/30 hover:bg-rose-600/10 transition-all active:scale-95 disabled:opacity-60 disabled:cursor-wait"
-                        title="Search this title on HDHub4u (latest working link)"
-                      >
-                        {resolvingSiteId === 'hdmovies'
-                          ? <Loader2 size={15} className="animate-spin text-white/45" />
-                          : <img src={hdHub4uLogo} alt="HDHub4u" className="h-6 w-auto max-w-[120px] object-contain" />}
-                      </button>
-                      <button
-                        onClick={() => void handleOpenDownloadSite('catmovies', 'KatMovieHD')}
-                        disabled={resolvingSiteId !== null}
-                        className="flex h-10 flex-1 items-center justify-center px-2 bg-white/5 border border-white/10 rounded-lg hover:border-cyan-500/30 hover:bg-cyan-600/10 transition-all active:scale-95 disabled:opacity-60 disabled:cursor-wait"
-                        title="Search this title on KatMovieHD (latest working link)"
-                      >
-                        {resolvingSiteId === 'catmovies'
-                          ? <Loader2 size={15} className="animate-spin text-white/45" />
-                          : <img src={katMovieHdLogo} alt="KatMovieHD" className="h-6 w-auto max-w-[120px] object-contain" />}
-                      </button>
-                    </div>
-                    {downloadSiteError && (
-                      <p className="mt-2 text-[11px] font-semibold text-red-400">{downloadSiteError}</p>
-                    )}
-                    {downloadSiteNotice && (
-                      <p className="mt-2 text-[11px] font-semibold text-amber-400">{downloadSiteNotice}</p>
-                    )}
-                  </div>
-                </div>
-              )}
-            </div>
-            {/* Sticky web fallback footer — always available without leaving sources */}
-            <div className="shrink-0 border-t border-white/[0.07] bg-[#0C1017] px-4 py-3">
-              <div className="flex items-center gap-2">
-                <p className="shrink-0 text-[9px] font-black uppercase tracking-[0.16em] text-white/35">
-                  Can&apos;t find?
-                </p>
-                <button
-                  onClick={() => void handleOpenDownloadSite('hdmovies', 'HDHub4u')}
-                  disabled={resolvingSiteId !== null}
-                  className="flex h-9 flex-1 items-center justify-center px-2 bg-white/[0.04] border border-white/10 rounded-lg hover:border-rose-500/30 hover:bg-rose-600/10 transition-all active:scale-95 disabled:opacity-60 disabled:cursor-wait"
-                  title="Search this title on HDHub4u (latest working link)"
-                >
-                  {resolvingSiteId === 'hdmovies'
-                    ? <Loader2 size={14} className="animate-spin text-white/45" />
-                    : <img src={hdHub4uLogo} alt="HDHub4u" className="h-5 w-auto max-w-[110px] object-contain" />}
-                </button>
-                <button
-                  onClick={() => void handleOpenDownloadSite('catmovies', 'KatMovieHD')}
-                  disabled={resolvingSiteId !== null}
-                  className="flex h-9 flex-1 items-center justify-center px-2 bg-white/[0.04] border border-white/10 rounded-lg hover:border-cyan-500/30 hover:bg-cyan-600/10 transition-all active:scale-95 disabled:opacity-60 disabled:cursor-wait"
-                  title="Search this title on KatMovieHD (latest working link)"
-                >
-                  {resolvingSiteId === 'catmovies'
-                    ? <Loader2 size={14} className="animate-spin text-white/45" />
-                    : <img src={katMovieHdLogo} alt="KatMovieHD" className="h-5 w-auto max-w-[110px] object-contain" />}
-                </button>
-              </div>
-              {(downloadSiteError || downloadSiteNotice) && (
-                <div className="mt-1.5">
-                  {downloadSiteError && (
-                    <p className="text-[11px] font-semibold text-red-400">{downloadSiteError}</p>
-                  )}
-                  {downloadSiteNotice && (
-                    <p className="text-[11px] font-semibold text-amber-400">{downloadSiteNotice}</p>
                   )}
                 </div>
               )}

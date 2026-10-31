@@ -1,6 +1,6 @@
 import fs from 'fs'
 import path from 'path'
-import { addVideo, getVideos, updateVideoMetadata, deleteVideo, getDownloadById, getDownloadByTorrentName } from './db'
+import { addVideo, getVideos, updateVideoMetadata, deleteVideo, getDownloadById, getDownloadByTorrentName, updateVideoFilePath } from './db'
 import { fetchTmdbMetadata } from './tmdb'
 import ffmpeg from 'fluent-ffmpeg'
 import ffmpegStatic from 'ffmpeg-static'
@@ -21,7 +21,7 @@ const ffprobePath = isDev
 ffmpeg.setFfprobePath(ffprobePath)
 ffmpeg.setFfmpegPath(ffmpegPath)
 
-const VIDEO_EXTENSIONS = ['.mp4', '.mkv', '.avi', '.mov', '.webm', '.flv', '.wmv', '.mpg', '.mpeg', '.mpe', '.mpv', '.m2v', '.m4v', '.ts', '.m2ts', '.mts', '.vob', '.rm', '.rmvb', '.asf', '.ogv', '.3gp', '.3g2', '.amv', '.nsv', '.roq', '.svi', '.divx', '.xvid', '.dat', '.f4v', '.f4p', '.fdmdownload', '.crdownload', '.part', '.!ut', '.bc!']
+const VIDEO_EXTENSIONS = ['.mp4', '.mkv', '.avi', '.mov', '.webm', '.flv', '.wmv', '.mpg', '.mpeg', '.mpe', '.mpv', '.m2v', '.m4v', '.ts', '.m2ts', '.mts', '.vob', '.rm', '.rmvb', '.asf', '.ogv', '.3gp', '.3g2', '.amv', '.nsv', '.roq', '.svi', '.divx', '.xvid', '.dat', '.f4v', '.f4p']
 const LIBRARY_UPDATE_DEBOUNCE_MS = 1200
 
 function normalizeVideoPath(filePath: string) {
@@ -249,6 +249,31 @@ export async function scanFolder(rootPath: string) {
           vote_average: video.vote_average,
           release_year: video.release_year
         })
+      }
+    }
+  }
+
+  // 0. Repair any legacy videos in DB that were mistakenly indexed with .part extension
+  for (const dbVideo of allInitialVideos as any[]) {
+    if (typeof dbVideo.file_path === 'string' && dbVideo.file_path.toLowerCase().endsWith('.part')) {
+      const targetPath = dbVideo.file_path.slice(0, -5)
+      if (fs.existsSync(targetPath)) {
+        console.log(`[Scanner] Auto-repairing legacy .part video in DB: "${dbVideo.file_path}" -> "${targetPath}"`)
+        updateVideoFilePath(dbVideo.id, targetPath)
+        videoByPath.delete(normalizeVideoPath(dbVideo.file_path))
+        dbVideo.file_path = targetPath
+        videoByPath.set(normalizeVideoPath(targetPath), dbVideo)
+      } else if (fs.existsSync(dbVideo.file_path)) {
+        try {
+          fs.renameSync(dbVideo.file_path, targetPath)
+          console.log(`[Scanner] Finalized .part video on disk and updated DB: "${targetPath}"`)
+          updateVideoFilePath(dbVideo.id, targetPath)
+          videoByPath.delete(normalizeVideoPath(dbVideo.file_path))
+          dbVideo.file_path = targetPath
+          videoByPath.set(normalizeVideoPath(targetPath), dbVideo)
+        } catch (e) {
+          console.warn(`[Scanner] Could not rename .part video:`, e)
+        }
       }
     }
   }

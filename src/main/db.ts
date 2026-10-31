@@ -489,6 +489,58 @@ export function updateVideoMetadata(id: number, metadata: any) {
   )
 }
 
+export function updateVideoFilePath(id: number, newFilePath: string) {
+  return db.prepare('UPDATE videos SET file_path = ? WHERE id = ?').run(newFilePath, id)
+}
+
+export function fixPartVideoPaths(): number {
+  let count = 0
+  try {
+    const rows = db.prepare("SELECT id, file_path FROM videos WHERE file_path LIKE '%.part'").all() as any[]
+    for (const row of rows) {
+      if (typeof row.file_path === 'string' && row.file_path.toLowerCase().endsWith('.part')) {
+        const targetPath = row.file_path.slice(0, -5)
+        if (fs.existsSync(targetPath)) {
+          console.log(`[DB] Auto-repaired video path: "${row.file_path}" -> "${targetPath}"`)
+          db.prepare('UPDATE videos SET file_path = ? WHERE id = ?').run(targetPath, row.id)
+          count++
+        } else if (fs.existsSync(row.file_path)) {
+          try {
+            fs.renameSync(row.file_path, targetPath)
+            console.log(`[DB] Finalized .part video on disk and repaired path: "${targetPath}"`)
+            db.prepare('UPDATE videos SET file_path = ? WHERE id = ?').run(targetPath, row.id)
+            count++
+          } catch (e) {
+            console.warn(`[DB] Could not finalize .part on disk for id ${row.id}:`, e)
+          }
+        }
+      }
+    }
+  } catch (err) {
+    console.error('[DB] Error fixing .part video paths:', err)
+  }
+  return count
+}
+
+export function fixPartDownloadPaths(): number {
+  let count = 0
+  try {
+    const rows = db.prepare("SELECT id, download_path FROM downloads WHERE download_path LIKE '%.part'").all() as any[]
+    for (const row of rows) {
+      if (typeof row.download_path === 'string' && row.download_path.toLowerCase().endsWith('.part')) {
+        const targetPath = row.download_path.slice(0, -5)
+        if (fs.existsSync(targetPath)) {
+          db.prepare('UPDATE downloads SET download_path = ? WHERE id = ?').run(targetPath, row.id)
+          count++
+        }
+      }
+    }
+  } catch (err) {
+    console.error('[DB] Error fixing .part download paths:', err)
+  }
+  return count
+}
+
 export function getSeriesInfo(seriesName: string) {
   return db.prepare(`
     SELECT * FROM videos 

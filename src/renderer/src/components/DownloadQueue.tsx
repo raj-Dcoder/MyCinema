@@ -223,7 +223,7 @@ export const DownloadQueue: React.FC<DownloadQueueProps> = ({
   const handleDirectPlay = (dl: ActiveDownload, matchingVideo?: Video, parsedTitle?: { cleanTitle: string }) => {
     if (matchingVideo) {
       // If this is a TV series, find all episodes and start Episode 1 (or earliest episode)
-      if (matchingVideo.is_series || matchingVideo.series_name) {
+      if (matchingVideo.type === 'series' || matchingVideo.series_name) {
         const seriesEpisodes = allVideos
           .filter(v => (v.tmdb_id && v.tmdb_id === matchingVideo.tmdb_id) || (v.series_name && v.series_name.toLowerCase() === matchingVideo.series_name?.toLowerCase()))
           .sort((a, b) => {
@@ -246,12 +246,12 @@ export const DownloadQueue: React.FC<DownloadQueueProps> = ({
         id: -Date.now(),
         title: parsedTitle?.cleanTitle || dl.title || 'Downloaded Video',
         file_path: dl.downloadPath,
+        type: 'movie',
         category: 'Movies',
         duration: 0,
-        progress: 0,
-        is_favorite: 0,
-        in_watchlist: 0,
-        date_added: new Date().toISOString()
+        is_favorite: false,
+        is_watchlist: false,
+        updated_at: new Date().toISOString()
       }
       onPlay?.(fallbackVideo)
     }
@@ -458,12 +458,12 @@ export const DownloadQueue: React.FC<DownloadQueueProps> = ({
               title: parsed.cleanTitle || dl.title || 'Movie',
               file_path: dl.downloadPath || '',
               tmdb_id: dl.tmdbId,
+              type: 'movie',
               category: 'Movies',
               duration: 0,
-              progress: 0,
-              is_favorite: 0,
-              in_watchlist: 0,
-              date_added: new Date().toISOString()
+              is_favorite: false,
+              is_watchlist: false,
+              updated_at: new Date().toISOString()
             }
 
             const isDownloading = dl.status === 'downloading'
@@ -646,7 +646,7 @@ export const DownloadQueue: React.FC<DownloadQueueProps> = ({
                           <button
                             onClick={() => handleDirectPlay(dl, matchingVideo, parsed)}
                             className="flex items-center gap-1.5 px-3 py-1 rounded-lg bg-primary hover:bg-primary/90 text-white text-xs font-bold transition-all shadow-sm shadow-primary/20 hover:scale-[1.02]"
-                            title={matchingVideo?.is_series ? "Play Episode 1" : "Play Movie"}
+                            title={matchingVideo?.type === 'series' || matchingVideo?.series_name ? "Play Episode 1" : "Play Movie"}
                           >
                             <Play size={11} fill="currentColor" />
                             <span>Play</span>

@@ -81,7 +81,7 @@ const FocusTubeCard: React.FC<FocusTubeCardProps> = ({ video, onPlay, onToggleSe
       tabIndex={0}
       role="button"
       aria-label={`Play ${video.title}`}
-      className="group relative isolate flex flex-col overflow-hidden rounded-2xl border border-white/[0.08] bg-[#0c0e14]/75 backdrop-blur-sm cursor-pointer transition-all duration-300 hover:-translate-y-1 hover:border-red-500/70 hover:ring-1 hover:ring-red-500/25 hover:shadow-[0_0_28px_rgba(229,9,20,0.22)] focus:outline-none focus-visible:ring-2 focus-visible:ring-red-500 select-none"
+      className="group relative isolate flex flex-col overflow-hidden rounded-2xl border border-white/[0.08] bg-[#0c0e14]/75 backdrop-blur-sm cursor-pointer transition-all duration-300 hover:-translate-y-1 hover:border-primary/70 hover:ring-1 hover:ring-primary/25 hover:shadow-[0_0_28px_rgba(var(--c-accent),0.22)] focus:outline-none focus-visible:ring-2 focus-visible:ring-primary select-none"
     >
       {/* ── 16:9 Thumbnail Area ── */}
       <div className="relative aspect-video w-full overflow-hidden rounded-t-2xl bg-[#101116]">
@@ -133,7 +133,7 @@ const FocusTubeCard: React.FC<FocusTubeCardProps> = ({ video, onPlay, onToggleSe
           aria-label={video.seen ? 'Mark as unwatched' : 'Mark as watched'}
           className={`absolute top-2.5 right-2.5 z-10 flex h-9 w-9 items-center justify-center rounded-full border shadow-xl backdrop-blur-md transition-all duration-200 hover:scale-110 active:scale-95 ${
             video.seen
-              ? 'border-white/30 bg-black/80 text-white opacity-100 hover:border-white/50 hover:bg-black/90'
+              ? 'border-primary/60 bg-primary text-white shadow-[0_0_14px_rgba(var(--c-accent),0.55)] opacity-100 hover:bg-primary/90 hover:border-primary'
               : 'border-white/20 bg-black/70 text-white opacity-0 group-hover:opacity-100 group-focus-visible:opacity-100 hover:border-white/40 hover:bg-black/90'
           }`}
         >
@@ -148,12 +148,12 @@ const FocusTubeCard: React.FC<FocusTubeCardProps> = ({ video, onPlay, onToggleSe
         {progressPct > 0 ? (
           <div className="absolute inset-x-0 bottom-0 h-1 bg-white/10">
             <div
-              className="h-full bg-red-600 shadow-[0_0_8px_rgba(229,9,20,0.8)] transition-all duration-300"
+              className="h-full bg-primary shadow-[0_0_8px_rgba(var(--c-accent),0.8)] transition-all duration-300"
               style={{ width: `${progressPct}%` }}
             />
           </div>
         ) : (
-          <div className="absolute inset-x-0 bottom-0 h-[2px] bg-white/[0.04] transition-colors duration-300 group-hover:bg-red-600/70" />
+          <div className="absolute inset-x-0 bottom-0 h-[2px] bg-white/[0.04] transition-colors duration-300 group-hover:bg-primary/70" />
         )}
 
         {/* Non-embeddable warning */}

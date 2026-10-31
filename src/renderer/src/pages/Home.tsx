@@ -1259,165 +1259,166 @@ const Home: React.FC<HomeProps> = ({ onPlay, onShowDetail, onNavigate, refreshKe
   return (
     <div onClickCapture={handleHomeClickCapture}>
       {(showHero || showLocalEmptyState || !localDataLoaded) && (
-        <section className="-mt-6 mb-10">
-          <div className="relative overflow-hidden w-full">
-            {/* Top Scrim Header inside Full-Bleed Hero */}
-            <div className="absolute left-0 right-0 top-0 z-30 pointer-events-none">
-              <div className="mx-auto flex max-w-[1600px] items-start justify-between px-8 pt-8 md:px-16">
-                <div>
-                  <p className="hero-greeting-eyebrow text-[10px] sm:text-[11px] font-black uppercase tracking-[0.22em] text-primary drop-shadow-[0_2px_12px_rgba(0,0,0,0.9)]">
-                    {getTimeGreeting()}, {userName}
-                  </p>
-                  <h2 className="hero-greeting-title mt-1 text-2xl md:text-3xl font-black italic tracking-tighter text-white drop-shadow-[0_2px_14px_rgba(0,0,0,0.95)]">
-                    {showHero ? heroTitle : 'Ready to Watch'}
-                  </h2>
+        <section className="-mt-2 mb-10">
+          {/* Desktop App Header Above Floating Cinema Card */}
+          <div className="mx-auto mb-4 flex max-w-[1600px] items-center justify-between px-6 md:px-10 lg:px-14">
+            <div>
+              <p className="hero-greeting-eyebrow text-[11px] sm:text-xs font-black uppercase tracking-[0.22em] text-primary">
+                {getTimeGreeting()}, {userName}
+              </p>
+              <h2 className="hero-greeting-title mt-0.5 text-2xl md:text-3xl font-black italic tracking-tighter text-white">
+                {showHero ? heroTitle : 'Ready to Watch'}
+              </h2>
+            </div>
+
+            <div className="relative flex items-center gap-4" ref={searchBoxRef}>
+              <div
+                className={`relative transition-all duration-300 ease-out ${
+                  isSearchOpen ? 'w-[min(420px,calc(100vw-4rem))]' : 'w-12'
+                }`}
+              >
+                <div
+                  className={`hero-search-pill flex h-12 items-center overflow-hidden rounded-2xl border backdrop-blur-xl transition-all duration-300 ${
+                    isSearchOpen
+                      ? 'border-white/20 bg-black/60 shadow-[0_18px_55px_rgba(0,0,0,0.6)]'
+                      : 'border-white/10 bg-black/35 hover:bg-black/50'
+                  }`}
+                >
+                  <button
+                    aria-label="Search movies and series"
+                    className={`hero-search-btn flex h-12 w-12 shrink-0 items-center justify-center text-white transition-all hover:text-primary active:scale-95 ${
+                      isSearchOpen ? 'scale-95' : 'hover:scale-110'
+                    }`}
+                    onClick={() => setIsSearchOpen(true)}
+                  >
+                    <SearchIcon size={22} strokeWidth={2.4} />
+                  </button>
+
+                  <input
+                    ref={searchInputRef}
+                    value={searchQuery}
+                    onChange={(event) => setSearchQuery(event.target.value)}
+                    placeholder="Search movies or series"
+                    className={`hero-search-input min-w-0 flex-1 bg-transparent pr-2 text-sm font-bold text-white outline-none placeholder:text-white/35 ${
+                      isSearchOpen ? 'opacity-100' : 'pointer-events-none opacity-0'
+                    }`}
+                  />
+
+                  {isSearchOpen && searchQuery && (
+                    <button
+                      aria-label="Clear search"
+                      className="hero-search-clear mr-2 flex h-8 w-8 shrink-0 items-center justify-center rounded-xl text-white/50 transition-all hover:bg-white/15 hover:text-white"
+                      onClick={() => {
+                        setSearchQuery('')
+                        setSearchResults([])
+                        searchInputRef.current?.focus()
+                      }}
+                    >
+                      <X size={16} />
+                    </button>
+                  )}
                 </div>
 
-                <div className="pointer-events-auto relative flex items-center gap-4" ref={searchBoxRef}>
-                  <div
-                    className={`relative transition-all duration-300 ease-out ${
-                      isSearchOpen ? 'w-[min(420px,calc(100vw-4rem))]' : 'w-12'
-                    }`}
-                  >
-                    <div
-                      className={`hero-search-pill flex h-12 items-center overflow-hidden rounded-2xl border backdrop-blur-xl transition-all duration-300 ${
-                        isSearchOpen
-                          ? 'border-white/20 bg-black/60 shadow-[0_18px_55px_rgba(0,0,0,0.6)]'
-                          : 'border-white/10 bg-black/35 hover:bg-black/50'
-                      }`}
-                    >
-                      <button
-                        aria-label="Search movies and series"
-                        className={`hero-search-btn flex h-12 w-12 shrink-0 items-center justify-center text-white transition-all hover:text-primary active:scale-95 ${
-                          isSearchOpen ? 'scale-95' : 'hover:scale-110'
-                        }`}
-                        onClick={() => setIsSearchOpen(true)}
-                      >
-                        <SearchIcon size={24} strokeWidth={2.6} />
-                      </button>
-
-                      <input
-                        ref={searchInputRef}
-                        value={searchQuery}
-                        onChange={(event) => setSearchQuery(event.target.value)}
-                        placeholder="Search movies or series"
-                        className={`hero-search-input min-w-0 flex-1 bg-transparent pr-2 text-sm font-bold text-white outline-none placeholder:text-white/35 ${
-                          isSearchOpen ? 'opacity-100' : 'pointer-events-none opacity-0'
-                        }`}
-                      />
-
-                      {isSearchOpen && searchQuery && (
-                        <button
-                          aria-label="Clear search"
-                          className="hero-search-clear mr-2 flex h-8 w-8 shrink-0 items-center justify-center rounded-xl text-white/50 transition-all hover:bg-white/15 hover:text-white"
-                          onClick={() => {
-                            setSearchQuery('')
-                            setSearchResults([])
-                            searchInputRef.current?.focus()
-                          }}
-                        >
-                          <X size={16} />
-                        </button>
-                      )}
+                {isSearchOpen && searchQuery.trim().length > 0 && (
+                  <div className="hero-search-dropdown absolute right-0 top-14 z-50 w-[min(420px,calc(100vw-4rem))] overflow-hidden rounded-3xl border border-white/10 bg-[#070a0f]/95 shadow-[0_28px_90px_rgba(0,0,0,0.75)] backdrop-blur-2xl animate-in fade-in slide-in-from-top-2 duration-200">
+                    <div className="border-b border-white/10 px-4 py-3">
+                      <div className="flex items-center justify-between gap-3">
+                        <p className="text-[10px] font-black uppercase tracking-[0.22em] text-white/40">Search</p>
+                        {isSearching && <Loader2 size={15} className="animate-spin text-red-500" />}
+                      </div>
                     </div>
 
-                    {isSearchOpen && searchQuery.trim().length > 0 && (
-                      <div className="hero-search-dropdown absolute right-0 top-14 z-50 w-[min(420px,calc(100vw-4rem))] overflow-hidden rounded-3xl border border-white/10 bg-[#070a0f]/95 shadow-[0_28px_90px_rgba(0,0,0,0.75)] backdrop-blur-2xl animate-in fade-in slide-in-from-top-2 duration-200">
-                        <div className="border-b border-white/10 px-4 py-3">
-                          <div className="flex items-center justify-between gap-3">
-                            <p className="text-[10px] font-black uppercase tracking-[0.22em] text-white/40">Search</p>
-                            {isSearching && <Loader2 size={15} className="animate-spin text-red-500" />}
-                          </div>
+                    <div className="max-h-[520px] overflow-y-auto p-2.5 scrollbar-thin">
+                      {searchQuery.trim().length < 2 ? (
+                        <div className="flex min-h-[150px] items-center justify-center px-6 text-center">
+                          <p className="text-xs font-black uppercase tracking-[0.18em] text-white/30">
+                            Start typing to find a movie or series
+                          </p>
                         </div>
+                      ) : searchResults.length > 0 ? (
+                        <div className="space-y-2">
+                          {searchResults.map(result => (
+                            <SearchResultCard
+                              key={getSearchResultKey(result)}
+                              video={result}
+                              onSelect={openSearchResult}
+                              onWarm={warmSearchResult}
+                              onAddToWatchlist={saveToWatchlist}
+                            />
+                          ))}
+                        </div>
+                      ) : isSearching ? (
+                        <div className="space-y-2">
+                          {[1, 2, 3].map(item => (
+                            <div key={item} className="flex items-center gap-3 rounded-2xl border border-white/5 bg-white/[0.03] p-2.5">
+                              <div className="h-[92px] w-[62px] rounded-xl skeleton" />
+                              <div className="flex-1 space-y-3">
+                                <div className="h-3 w-24 rounded-full skeleton" />
+                                <div className="h-4 w-44 rounded-full skeleton" />
+                                <div className="h-3 w-full rounded-full skeleton" />
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <div className="flex min-h-[150px] items-center justify-center px-6 text-center">
+                          <p className="text-xs font-black uppercase tracking-[0.18em] text-white/30">
+                            {searchError || 'No matching titles found'}
+                          </p>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
 
-                        <div className="max-h-[520px] overflow-y-auto p-2.5 scrollbar-thin">
-                          {searchQuery.trim().length < 2 ? (
-                            <div className="flex min-h-[150px] items-center justify-center px-6 text-center">
-                              <p className="text-xs font-black uppercase tracking-[0.18em] text-white/30">
-                                Start typing to find a movie or series
-                              </p>
-                            </div>
-                          ) : searchResults.length > 0 ? (
-                            <div className="space-y-2">
-                              {searchResults.map(result => (
-                                <SearchResultCard
-                                  key={getSearchResultKey(result)}
-                                  video={result}
-                                  onSelect={openSearchResult}
-                                  onWarm={warmSearchResult}
-                                  onAddToWatchlist={saveToWatchlist}
-                                />
-                              ))}
-                            </div>
-                          ) : isSearching ? (
-                            <div className="space-y-2">
-                              {[1, 2, 3].map(item => (
-                                <div key={item} className="flex items-center gap-3 rounded-2xl border border-white/5 bg-white/[0.03] p-2.5">
-                                  <div className="h-[92px] w-[62px] rounded-xl skeleton" />
-                                  <div className="flex-1 space-y-3">
-                                    <div className="h-3 w-24 rounded-full skeleton" />
-                                    <div className="h-4 w-44 rounded-full skeleton" />
-                                    <div className="h-3 w-full rounded-full skeleton" />
-                                  </div>
-                                </div>
-                              ))}
-                            </div>
-                          ) : (
-                            <div className="flex min-h-[150px] items-center justify-center px-6 text-center">
-                              <p className="text-xs font-black uppercase tracking-[0.18em] text-white/30">
-                                {searchError || 'No matching titles found'}
-                              </p>
-                            </div>
-                          )}
-                        </div>
-                      </div>
+          {/* Apple TV+ Floating Cinema Card */}
+          <div className="mx-auto max-w-[1600px] px-4 sm:px-6 md:px-10 lg:px-14">
+            <div className="hero-cinema-card relative overflow-hidden rounded-3xl">
+              {showHero ? (
+                <HeroCarousel
+                  items={heroItems}
+                  onPlay={handlePlayFromHome}
+                  onShowDetail={handleShowDetailFromHome}
+                  resumingKey={resumingOnlineKey}
+                  isActive={isActive}
+                />
+              ) : showLocalEmptyState ? (
+                <div className="hero-carousel-canvas keep-dark dark relative flex min-h-[500px] h-[64vh] max-h-[720px] flex-col items-start justify-end overflow-hidden px-8 pb-14 pt-20 md:px-14">
+                  <div className="absolute inset-0 bg-[linear-gradient(120deg,rgba(220,38,38,0.16),transparent_38%),linear-gradient(180deg,rgba(255,255,255,0.06),transparent_32%)]" />
+                  <div className="hero-overlay-left absolute inset-0" />
+                  <div className="relative max-w-xl space-y-4">
+                    <div className="inline-flex rounded-md border border-white/10 bg-black/35 px-3 py-1.5 text-[9px] font-black uppercase tracking-[0.18em] text-white/70 backdrop-blur-md">
+                      Library setup
+                    </div>
+                    <h2 className="hero-title-text text-4xl font-black uppercase italic leading-[0.92] tracking-tighter text-white md:text-5xl">
+                      Add your movie folder
+                    </h2>
+                    <p className="hero-overview-text max-w-lg text-sm font-semibold leading-7 text-white/50">
+                      Point MyCinema to the folder where your downloaded movies and shows live. Recently added titles will appear here automatically.
+                    </p>
+                    <button
+                      onClick={handleAddMediaFolderFromHome}
+                      disabled={Boolean(homeFolderScanPath)}
+                      className="rounded-2xl bg-red-600 px-7 py-3.5 text-xs font-black uppercase italic tracking-widest text-white shadow-lg shadow-red-950/35 transition-all hover:scale-105 hover:bg-red-500 active:scale-95 disabled:cursor-wait disabled:opacity-65 disabled:hover:scale-100"
+                    >
+                      {homeFolderScanPath ? 'Scanning Folder...' : 'Add Media Folder'}
+                    </button>
+                    {homeFolderScanPath && (
+                      <p className="max-w-lg truncate text-[11px] font-semibold text-white/35">
+                        {homeFolderScanPath}
+                      </p>
                     )}
                   </div>
                 </div>
-              </div>
-            </div>
-
-            {showHero ? (
-              <HeroCarousel
-                items={heroItems}
-                onPlay={handlePlayFromHome}
-                onShowDetail={handleShowDetailFromHome}
-                resumingKey={resumingOnlineKey}
-                isActive={isActive}
-              />
-            ) : showLocalEmptyState ? (
-              <div className="hero-carousel-canvas relative flex min-h-[570px] h-[73vh] max-h-[800px] flex-col items-start justify-end overflow-hidden px-8 pb-20 pt-32 md:px-16">
-                <div className="absolute inset-0 bg-[linear-gradient(120deg,rgba(220,38,38,0.16),transparent_38%),linear-gradient(180deg,rgba(255,255,255,0.06),transparent_32%)]" />
-                <div className="hero-overlay-left absolute inset-0" />
-                <div className="relative max-w-xl space-y-4">
-                  <div className="inline-flex rounded-md border border-white/10 bg-black/35 px-3 py-1.5 text-[9px] font-black uppercase tracking-[0.18em] text-white/70 backdrop-blur-md">
-                    Library setup
-                  </div>
-                  <h2 className="hero-title-text text-4xl font-black uppercase italic leading-[0.92] tracking-tighter text-white md:text-5xl">
-                    Add your movie folder
-                  </h2>
-                  <p className="hero-overview-text max-w-lg text-sm font-semibold leading-7 text-white/50">
-                    Point MyCinema to the folder where your downloaded movies and shows live. Recently added titles will appear here automatically.
-                  </p>
-                  <button
-                    onClick={handleAddMediaFolderFromHome}
-                    disabled={Boolean(homeFolderScanPath)}
-                    className="rounded-2xl bg-red-600 px-7 py-3.5 text-xs font-black uppercase italic tracking-widest text-white shadow-lg shadow-red-950/35 transition-all hover:scale-105 hover:bg-red-500 active:scale-95 disabled:cursor-wait disabled:opacity-65 disabled:hover:scale-100"
-                  >
-                    {homeFolderScanPath ? 'Scanning Folder...' : 'Add Media Folder'}
-                  </button>
-                  {homeFolderScanPath && (
-                    <p className="max-w-lg truncate text-[11px] font-semibold text-white/35">
-                      {homeFolderScanPath}
-                    </p>
-                  )}
+              ) : (
+                <div className="flex min-h-[500px] h-[64vh] max-h-[720px] items-center justify-center bg-black/40">
+                  <div className="text-3xl font-black uppercase italic text-white/10">Loading Library...</div>
                 </div>
-              </div>
-            ) : (
-              <div className="flex min-h-[570px] h-[73vh] max-h-[800px] items-center justify-center bg-white/5">
-                <div className="text-3xl font-black uppercase italic text-white/10">Loading Library...</div>
-              </div>
-            )}
+              )}
+            </div>
           </div>
         </section>
       )}

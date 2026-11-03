@@ -1,8 +1,10 @@
-import React, { useEffect, useMemo, useState, useRef } from 'react'
+import React, { useEffect, useMemo, useState, useRef, useCallback } from 'react'
 import { Video } from '../types'
 import VideoCard from '../components/VideoCard'
-import { ArrowUpDown, Check, Film, Search, X } from 'lucide-react'
+import { ArrowUpDown, Check, Film, Search, X, BellRing } from 'lucide-react'
 import { groupMovieCards } from '../utils/mediaVersions'
+import { safeGetFollowedMovies } from '../utils/streamResume'
+import FollowedMoviesModal from '../components/FollowedMoviesModal'
 
 interface MoviesProps {
   onPlay: (video: Video) => void
@@ -16,7 +18,20 @@ const Movies: React.FC<MoviesProps> = ({ onPlay, onShowDetail }) => {
   const [activeFilter, setActiveFilter] = useState('All')
   const [sortBy, setSortBy] = useState('newest')
   const [showSortMenu, setShowSortMenu] = useState(false)
+  const [followedMovies, setFollowedMovies] = useState<any[]>([])
+  const [showFollowedModal, setShowFollowedModal] = useState(false)
   const isInitialLoad = useRef(true)
+
+  const loadFollowed = useCallback(async () => {
+    try {
+      const list = await safeGetFollowedMovies()
+      setFollowedMovies(list || [])
+    } catch { /* best-effort */ }
+  }, [])
+
+  useEffect(() => {
+    void loadFollowed()
+  }, [loadFollowed])
 
   const fetchMovies = async () => {
     if (isInitialLoad.current) {
@@ -162,6 +177,39 @@ const Movies: React.FC<MoviesProps> = ({ onPlay, onShowDetail }) => {
                 </>
               )}
             </div>
+
+            <button
+              type="button"
+              onClick={() => setShowFollowedModal(true)}
+              className={`flex h-11 items-center gap-2 rounded-xl border px-3.5 text-[10px] font-black uppercase tracking-widest transition-all active:scale-95 group ${
+                followedMovies.some(f => f?.has_unseen_drop || f?.is_released_ott)
+                  ? 'border-primary/40 bg-primary/15 text-primary shadow-[0_4px_20px_rgba(229,9,20,0.25)]'
+                  : 'border-white/10 bg-white/[0.035] text-white/70 hover:bg-white/5 hover:text-white'
+              }`}
+              title="Followed Movies & OTT Alerts"
+              aria-label="View Followed Movies"
+            >
+              <BellRing
+                size={15}
+                className={
+                  followedMovies.some(f => f?.has_unseen_drop || f?.is_released_ott)
+                    ? 'text-primary animate-pulse'
+                    : 'text-sky-400 group-hover:text-sky-300 transition-colors'
+                }
+              />
+              <span>Following</span>
+              {followedMovies.length > 0 && (
+                <span
+                  className={`px-1.5 py-0.5 rounded-md text-[9px] font-black ${
+                    followedMovies.some(f => f?.has_unseen_drop || f?.is_released_ott)
+                      ? 'bg-primary text-white'
+                      : 'bg-white/10 text-white/80'
+                  }`}
+                >
+                  {followedMovies.length}
+                </span>
+              )}
+            </button>
           </div>
 
           <div className="flex max-w-full items-center gap-1 overflow-x-auto rounded-xl border border-white/5 bg-white/[0.03] p-1">
@@ -227,6 +275,15 @@ const Movies: React.FC<MoviesProps> = ({ onPlay, onShowDetail }) => {
           </div>
         </div>
       )}
+      <FollowedMoviesModal
+        isOpen={showFollowedModal}
+        onClose={() => setShowFollowedModal(false)}
+        onShowDetail={onShowDetail}
+        onFollowedChange={() => {
+          void loadFollowed()
+          void fetchMovies()
+        }}
+      />
     </div>
   )
 }

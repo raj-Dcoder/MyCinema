@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import {
   AlertCircle,
   Check,
@@ -350,8 +351,8 @@ const ImportSubscriptions: React.FC<ImportSubscriptionsProps> = ({ categories, i
   const startButtonLabel = connected ? 'Load subscriptions' : 'Connect Google account'
   const currentPage = Math.min(page + 1, pageCount)
 
-  return (
-    <div className="fixed inset-0 z-[75] flex items-start justify-center overflow-y-auto bg-black/80 p-3 pt-4 backdrop-blur-sm sm:p-6 sm:pt-8">
+  return createPortal(
+    <div className="fixed inset-0 z-[1000] flex items-start justify-center overflow-y-auto bg-black/80 p-3 pt-4 backdrop-blur-md sm:p-6 sm:pt-8">
       <section
         role="dialog"
         aria-modal="true"
@@ -891,7 +892,8 @@ const ImportSubscriptions: React.FC<ImportSubscriptionsProps> = ({ categories, i
         isOpen={showRegisterModal}
         onClose={() => setShowRegisterModal(false)}
       />
-    </div>
+    </div>,
+    document.body
   )
 }
 

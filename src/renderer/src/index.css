@@ -755,13 +755,15 @@
 }
 
 /* Category Pills & Chips in FocusTube */
-.light button:has(> span.truncate) {
+.light .ft-category-pill,
+.light .focustube-container button:has(> span.truncate) {
   background-color: #ffffff !important;
   border: 1px solid #d1d5db !important;
   color: #1f2937 !important;
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04) !important;
 }
-.light button:has(> span.truncate):hover {
+.light .ft-category-pill:hover,
+.light .focustube-container button:has(> span.truncate):hover {
   background-color: #f9fafb !important;
   border-color: #9ca3af !important;
   color: #111827 !important;
@@ -1592,12 +1594,17 @@
   color: rgba(255, 255, 255, 0.35) !important;
 }
 
-/* Watch Together Modal Dialog Box (All Themes — 100% Dark Cinema Glass) */
+/* Watch Together & Followed Series Modal Dialog Boxes (All Themes — 100% Dark Cinema Glass) */
 .watch-together-modal,
+.followed-series-modal,
 .light .watch-together-modal,
+.light .followed-series-modal,
 .glass-light .watch-together-modal,
+.glass-light .followed-series-modal,
 .light .keep-dark .watch-together-modal,
-.glass-light .keep-dark .watch-together-modal {
+.light .keep-dark .followed-series-modal,
+.glass-light .keep-dark .watch-together-modal,
+.glass-light .keep-dark .followed-series-modal {
   background-color: rgba(18, 18, 24, 0.96) !important;
   border: 1px solid rgba(255, 255, 255, 0.14) !important;
   box-shadow: 0 25px 70px rgba(0, 0, 0, 0.85), 0 0 0 1px rgba(255, 255, 255, 0.08) !important;
@@ -2360,9 +2367,7 @@
   --tw-ring-color: #ffffff !important;
 }
 
-.light .detail-vibe-pill {
-  color: #ffffff !important;
-}
+/* .light .detail-vibe-pill handled adaptively */
 
 .light .detail-screen-root select option {
   background-color: #ffffff !important;
@@ -2649,9 +2654,7 @@
   --tw-ring-color: #ffffff !important;
 }
 
-.glass-light .detail-vibe-pill {
-  color: #ffffff !important;
-}
+/* .glass-light .detail-vibe-pill handled adaptively */
 
 .glass-light .detail-screen-root select option {
   background-color: #ffffff !important;
@@ -4498,17 +4501,123 @@
 }
 
 /* Universal border & card fix for rounded containers in Light / Ambient mode */
-.light .rounded-3xl.border-white\/5,
-.light .rounded-3xl.border-white\/10,
-.light .rounded-2xl.border-white\/5,
-.light .rounded-2xl.border-white\/10,
-.glass-light .rounded-3xl.border-white\/5,
-.glass-light .rounded-3xl.border-white\/10,
-.glass-light .rounded-2xl.border-white\/5,
-.glass-light .rounded-2xl.border-white\/10 {
+.light :not(.keep-dark) .rounded-3xl.border-white\/5:not(.player-menu-popup):not(.watch-together-modal):not(.followed-series-modal),
+.light :not(.keep-dark) .rounded-3xl.border-white\/10:not(.player-menu-popup):not(.watch-together-modal):not(.followed-series-modal),
+.light :not(.keep-dark) .rounded-2xl.border-white\/5:not(.player-menu-popup):not(.watch-together-modal):not(.followed-series-modal),
+.light :not(.keep-dark) .rounded-2xl.border-white\/10:not(.player-menu-popup):not(.watch-together-modal):not(.followed-series-modal),
+.glass-light :not(.keep-dark) .rounded-3xl.border-white\/5:not(.player-menu-popup):not(.watch-together-modal):not(.followed-series-modal),
+.glass-light :not(.keep-dark) .rounded-3xl.border-white\/10:not(.player-menu-popup):not(.watch-together-modal):not(.followed-series-modal),
+.glass-light :not(.keep-dark) .rounded-2xl.border-white\/5:not(.player-menu-popup):not(.watch-together-modal):not(.followed-series-modal),
+.glass-light :not(.keep-dark) .rounded-2xl.border-white\/10:not(.player-menu-popup):not(.watch-together-modal):not(.followed-series-modal) {
   border: 1.5px solid rgba(15, 23, 42, 0.2) !important;
   background-color: rgba(255, 255, 255, 0.9) !important;
   box-shadow: 0 4px 20px rgba(0, 0, 0, 0.06), inset 0 1px 0 #ffffff !important;
+}
+
+/* Immunize all Player Popup Menus (Audio & Subtitles, Speed, Sleep, Aspect) in ALL themes */
+.player-menu-popup,
+.light .player-menu-popup,
+.glass-light .player-menu-popup,
+.light .keep-dark .player-menu-popup,
+.glass-light .keep-dark .player-menu-popup {
+  background-color: rgba(18, 18, 24, 0.96) !important;
+  border: 1px solid rgba(255, 255, 255, 0.12) !important;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.8), 0 0 0 1px rgba(255, 255, 255, 0.08) !important;
+  color: #ffffff !important;
+  backdrop-filter: blur(24px) saturate(180%) !important;
+  -webkit-backdrop-filter: blur(24px) saturate(180%) !important;
+}
+
+/* Inner containers and controls inside player-menu-popup in Light / Dark modes */
+.light .keep-dark .player-menu-popup .bg-white\/\[0\.02\],
+.light .keep-dark .player-menu-popup .bg-white\/\[0\.03\],
+.light .keep-dark .player-menu-popup .bg-white\/5,
+.light .player-menu-popup .bg-white\/\[0\.02\],
+.light .player-menu-popup .bg-white\/\[0\.03\],
+.light .player-menu-popup .bg-white\/5 {
+  background-color: rgba(255, 255, 255, 0.04) !important;
+}
+
+.light .keep-dark .player-menu-popup .bg-black\/30,
+.light .player-menu-popup .bg-black\/30 {
+  background-color: rgba(0, 0, 0, 0.45) !important;
+}
+
+.light .keep-dark .player-menu-popup input,
+.light .player-menu-popup input {
+  background-color: rgba(0, 0, 0, 0.5) !important;
+  border-color: rgba(255, 255, 255, 0.12) !important;
+  color: #ffffff !important;
+}
+
+.light .keep-dark .player-menu-popup input::placeholder,
+.light .player-menu-popup input::placeholder {
+  color: rgba(255, 255, 255, 0.35) !important;
+}
+
+/* Immunize all buttons inside player-menu-popup in all themes (Audio/Sub tracks, Sync, Appearance) */
+.player-menu-popup button,
+.light .player-menu-popup button,
+.glass-light .player-menu-popup button,
+.light .keep-dark .player-menu-popup button,
+.glass-light .keep-dark .player-menu-popup button {
+  background-color: transparent !important;
+  border-color: transparent !important;
+  box-shadow: none !important;
+  color: rgba(255, 255, 255, 0.7) !important;
+}
+
+.player-menu-popup button:hover,
+.light .player-menu-popup button:hover,
+.glass-light .player-menu-popup button:hover,
+.light .keep-dark .player-menu-popup button:hover,
+.glass-light .keep-dark .player-menu-popup button:hover {
+  background-color: rgba(255, 255, 255, 0.08) !important;
+  color: #ffffff !important;
+}
+
+.player-menu-popup button.bg-primary\/15,
+.light .player-menu-popup button.bg-primary\/15,
+.glass-light .player-menu-popup button.bg-primary\/15,
+.light .keep-dark .player-menu-popup button.bg-primary\/15,
+.glass-light .keep-dark .player-menu-popup button.bg-primary\/15 {
+  background-color: rgba(229, 9, 20, 0.18) !important;
+  color: #e50914 !important;
+}
+
+.player-menu-popup button.bg-white\/10,
+.light .player-menu-popup button.bg-white\/10,
+.light .keep-dark .player-menu-popup button.bg-white\/10 {
+  background-color: rgba(255, 255, 255, 0.12) !important;
+  color: #ffffff !important;
+}
+
+.player-menu-popup button.bg-white\/\[0\.06\],
+.light .player-menu-popup button.bg-white\/\[0\.06\],
+.light .keep-dark .player-menu-popup button.bg-white\/\[0\.06\] {
+  background-color: rgba(255, 255, 255, 0.08) !important;
+  color: rgba(255, 255, 255, 0.8) !important;
+}
+
+.player-menu-popup button.group\/footer,
+.light .player-menu-popup button.group\/footer,
+.light .keep-dark .player-menu-popup button.group\/footer {
+  background-color: rgba(255, 255, 255, 0.03) !important;
+  border-top: 1px solid rgba(255, 255, 255, 0.06) !important;
+}
+
+.player-menu-popup button.group\/footer:hover,
+.light .player-menu-popup button.group\/footer:hover,
+.light .keep-dark .player-menu-popup button.group\/footer:hover {
+  background-color: rgba(229, 9, 20, 0.1) !important;
+}
+
+.player-menu-popup button span,
+.light .player-menu-popup button span,
+.glass-light .player-menu-popup button span,
+.light .keep-dark .player-menu-popup button span,
+.glass-light .keep-dark .player-menu-popup button span {
+  color: inherit !important;
 }
 
 /* ------------------------------------------------------------------ */
@@ -4539,5 +4648,43 @@
   will-change: transform, opacity;
 }
 
+/* ------------------------------------------------------------------ */
+/* 24. INDUSTRY-GRADE ACCORDION ANIMATION (GPU Decelerated Spring)   */
+/* ------------------------------------------------------------------ */
+.cinema-series-card {
+  width: 100%;
+  transition: max-width 380ms cubic-bezier(0.16, 1, 0.3, 1),
+              box-shadow 380ms cubic-bezier(0.16, 1, 0.3, 1),
+              border-color 200ms ease,
+              background-color 200ms ease;
+  will-change: max-width;
+}
 
+.cinema-accordion-wrapper {
+  display: grid;
+  grid-template-rows: 0fr;
+  opacity: 0;
+  transition: grid-template-rows 380ms cubic-bezier(0.16, 1, 0.3, 1),
+              opacity 300ms cubic-bezier(0.16, 1, 0.3, 1);
+  will-change: grid-template-rows, opacity;
+}
+
+.cinema-accordion-wrapper.is-expanded {
+  grid-template-rows: 1fr;
+  opacity: 1;
+}
+
+.cinema-accordion-inner {
+  overflow: hidden;
+}
+
+.cinema-accordion-content {
+  transform: translateY(-8px);
+  transition: transform 380ms cubic-bezier(0.16, 1, 0.3, 1);
+  will-change: transform;
+}
+
+.cinema-accordion-wrapper.is-expanded .cinema-accordion-content {
+  transform: translateY(0);
+}
 

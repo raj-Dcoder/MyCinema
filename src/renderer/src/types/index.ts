@@ -31,6 +31,12 @@ export interface Video {
   is_favorite?: boolean
   is_watchlist?: boolean
   category?: string
+  origin_country?: string[]
+  original_language?: string
+  is_indian?: boolean
+  popularity?: number
+  streamUrl?: string
+  is_released_ott?: boolean
   // Watch-later intent lane: ASAP (up next) · Weekend (cozy binge) · Someday (backlog).
   // External rows use `priority`; local rows use `watchlist_priority`. Both are
   // normalized into `priority` by getWatchlist — the extras below are aliases
@@ -53,20 +59,50 @@ export interface Video {
   onlineNextEpisode?: boolean
   // #3: that next episode dropped since the user last caught up.
   onlineNewEpisode?: boolean
+  // #4: movie has dropped on OTT / Digital
+  onlineOttRelease?: boolean
+  ottPlatform?: string
   // Original torrent file position (?file=) — pins resume to the exact file
   // for packs whose filenames carry no parseable S/E tags.
   fileIndex?: number
 }
 
 export interface TmdbProvider {
+  provider_id?: number
   provider_name: string
   logo_path: string
+  link?: string | null
+  direct_url?: string | null
 }
 
 export interface TmdbReleaseInfo {
   releaseDate: string | null
+  digitalReleaseDate?: string | null
+  digitalNote?: string | null
   providers: TmdbProvider[]
   type: 'theatrical' | 'digital' | 'tv' | null
+  justWatchLink?: string | null
+  region?: string | null
+}
+
+export interface TmdbFranchisePart {
+  id: number
+  title: string
+  overview: string | null
+  releaseDate: string | null
+  releaseYear?: number
+  posterPath: string | null
+  backdropPath: string | null
+  voteAverage?: number
+}
+
+export interface TmdbFranchise {
+  collectionId: number
+  collectionName: string
+  overview?: string | null
+  backdropPath?: string | null
+  posterPath?: string | null
+  parts: TmdbFranchisePart[]
 }
 
 // ─── Focus Tube ───────────────────────────────────────────────────────────────

@@ -628,16 +628,15 @@ const App: React.FC = () => {
   }
 
   // Hover-intent reveal: only pop the capsule after the cursor lingers in
-  // the corner (~250ms), so brush-by mouse passes — e.g. reaching for a
-  // panel close button just below — never flash it. A deliberate move to
-  // the corner always lands it.
+  // the corner (~160ms), so brush-by mouse passes never flash it.
+  // A deliberate move to the very corner always lands it.
   const scheduleWindowControlsReveal = () => {
     clearWindowControlsHideTimer()
     if (windowControlsShowTimerRef.current) return
     windowControlsShowTimerRef.current = window.setTimeout(() => {
       windowControlsShowTimerRef.current = null
       setShowWindowControls(true)
-    }, 250)
+    }, 160)
   }
 
   const hideWindowControlsSoon = () => {
@@ -648,15 +647,6 @@ const App: React.FC = () => {
       windowControlsHideTimerRef.current = null
     }, 800)
   }
-
-  // Briefly flash the auto-hide window capsule on launch / fullscreen change
-  // so users discover it, then let it melt away until they hover top-right.
-  useEffect(() => {
-    if (!launchFullscreen) return
-    revealWindowControls()
-    const timer = window.setTimeout(() => setShowWindowControls(false), 3500)
-    return () => window.clearTimeout(timer)
-  }, [launchFullscreen, isFullscreen])
 
   const handleToggleFullscreen = async () => {
     if (appFullscreenToggleInFlightRef.current) return
@@ -698,16 +688,19 @@ const App: React.FC = () => {
 
     const controlsVisible = showWindowControls || (!!playingVideo && videoControlsVisible)
     const isOnVideo = !!playingVideo
-    const capsuleClass = `window-controls-capsule ${isOnVideo ? 'on-video' : ''} pointer-events-auto flex items-center gap-px rounded-full py-0.5 pl-1 pr-0.5 transition-all duration-300 ease-[cubic-bezier(0.16,1,0.3,1)] ${
-      controlsVisible ? 'translate-y-0 scale-100 opacity-100' : 'pointer-events-none -translate-y-2 scale-95 opacity-0'
+    const capsuleClass = `window-controls-capsule ${isOnVideo ? 'on-video' : ''} pointer-events-auto flex items-center gap-px rounded-full py-0.5 px-0.5 transition-all duration-300 ease-[cubic-bezier(0.16,1,0.3,1)] ${
+      controlsVisible ? 'translate-y-0 scale-100 opacity-100' : 'pointer-events-none -translate-y-1 scale-95 opacity-0'
     }`
     const controlButtonClass = 'window-control-btn flex h-6 w-7 items-center justify-center rounded-full transition-all duration-150 active:scale-90 focus:outline-none'
 
     if (isFullscreen) {
       return (
         <div
-          className="fixed right-0 top-0 z-[260] flex h-8 w-28 items-start justify-end pr-1.5 pt-1"
+          className={`fixed right-0 top-0 z-[260] flex items-start justify-end pr-0.5 pt-0.5 ${
+            controlsVisible ? 'h-8 w-28' : 'h-6 w-6'
+          }`}
           onMouseEnter={scheduleWindowControlsReveal}
+          onMouseMove={scheduleWindowControlsReveal}
           onMouseLeave={hideWindowControlsSoon}
           onFocus={revealWindowControls}
           onBlur={hideWindowControlsSoon}
@@ -750,8 +743,11 @@ const App: React.FC = () => {
 
     return (
       <div
-        className="fixed right-0 top-0 z-[260] flex h-8 w-16 items-start justify-end pr-1.5 pt-1"
+        className={`fixed right-0 top-0 z-[260] flex items-start justify-end pr-0.5 pt-0.5 ${
+          controlsVisible ? 'h-8 w-14' : 'h-6 w-6'
+        }`}
         onMouseEnter={scheduleWindowControlsReveal}
+        onMouseMove={scheduleWindowControlsReveal}
         onMouseLeave={hideWindowControlsSoon}
         onFocus={revealWindowControls}
         onBlur={hideWindowControlsSoon}
@@ -1266,6 +1262,7 @@ const App: React.FC = () => {
           }} 
           onPlay={handlePlayVideo}
           onWatchlistChange={() => setWatchlistRefreshKey(k => k + 1)}
+          onShowDetail={(v) => setSelectedVideo(v)}
         />
       )}
 

@@ -1,4 +1,4 @@
-import { app, shell, BrowserWindow, ipcMain, dialog, protocol, net, session, screen } from 'electron'
+import { app, shell, BrowserWindow, ipcMain, dialog, protocol, net, session, screen, Notification } from 'electron'
 import { join } from 'path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import * as db from './db'
@@ -1581,15 +1581,9 @@ function registerAudioProtocol(): void {
 
 app.commandLine.appendSwitch('enable-blink-features', 'AudioVideoTracks')
 
-// Hardware video decoding & GPU acceleration optimizations
-// Enable D3D11 & hardware-accelerated video decoding for buttery smooth 1080p/4K YouTube & streaming playback on Windows
-app.commandLine.appendSwitch('ignore-gpu-blocklist')
-app.commandLine.appendSwitch('enable-gpu-rasterization')
-app.commandLine.appendSwitch('enable-zero-copy')
-app.commandLine.appendSwitch('enable-accelerated-video-decode')
-app.commandLine.appendSwitch('enable-gpu-memory-buffer-video-frames')
-app.commandLine.appendSwitch('enable-hardware-overlays', 'single-fullscreen,single-on-top,underlay')
-app.commandLine.appendSwitch('enable-features', 'D3D11VideoDecoder,PlatformHEVCDecoderSupport,CanvasOopRasterization')
+// Prevent hardware video decoder underflow / deadlocks on Windows
+// Software VP9/AV1 decoding (VpxVideoDecoder) avoids D3D11 texture binding stalls
+app.commandLine.appendSwitch('disable-accelerated-video-decode')
 app.commandLine.appendSwitch('disable-features', 'CalculateNativeWinOcclusion')
 // Prevent UDP/QUIC packet loss and ISP throttling from stalling YouTube (googlevideo.com) DASH streams
 app.commandLine.appendSwitch('disable-quic')
@@ -1858,6 +1852,7 @@ type BackupImportSummary = {
   favoritesRestored: number
   streamProgressRestored: number
   followedSeriesRestored: number
+  followedMoviesRestored?: number
   focusTubeCategoriesRestored?: number
   focusTubeChannelsRestored?: number
 }
@@ -3229,6 +3224,18 @@ ipcMain.handle('open-web-popup', (event, url: string, title?: string, autoSearch
   return true
 })
 
+ipcMain.handle('open-external-url', async (_event, url: string) => {
+  if (!url || typeof url !== 'string') return false
+  if (!/^https?:\/\//i.test(url)) return false
+  try {
+    await shell.openExternal(url)
+    return true
+  } catch (err) {
+    console.warn('[Main] shell.openExternal failed:', err)
+    return false
+  }
+})
+
 // ─── Download sites (portal-resolved mirrors + search deep-links) ───────────
 // Domains rotate/ban often, so the renderer never hardcodes one: it asks main
 // to resolve the live domain from the site's portal page (cached 12h), with a
@@ -3522,7 +3529,7 @@ function backfillDownloadQueueOrder(): void {
 }
 
 // ─── Followed series: new-episode alerts (#3) ────────────────────────────────
-const FOLLOW_CHECK_THROTTLE_MS = 20 * 3600 * 1000 // max one TMDB check per series per 20h
+const FOLLOW_CHECK_THROTTLE_MS = 2 * 3600 * 1000 // max one TMDB check per series per 2h
 
 function isFollowCheckDue(lastChecked?: string | null) {
   if (!lastChecked) return true
@@ -3651,60 +3658,42 @@ async function checkOneFollowedSeries(f: any, opts: { explicit?: boolean } = {})
     : null
   const newerThanWatched = !watched || isEpisodeAfter(newest, watched)
   const newerThanKnown = !known || isEpisodeAfter(newest, known)
-  // Stale follows never alert: no stream activity in 14 days and the follow
-  // itself is older than that means the show was abandoned — pinging every
-  // daily drop would just be spam. Watching again re-arms automatically.
-  const STALE_FOLLOW_MS = 14 * 24 * 3600 * 1000
-  const lastActivity = db.getStreamLatestActivity(f.tmdb_id)?.latest
-  const followedAt = f.added_at
-  // Explicit refreshes (user opened the show) always count as engagement.
-  const engaged = Boolean(opts.explicit) ||
-    (lastActivity && Date.now() - new Date(lastActivity).getTime() < STALE_FOLLOW_MS) ||
-    (followedAt && Date.now() - new Date(followedAt).getTime() < STALE_FOLLOW_MS)
 
-  // Never-baselined (followed while the TMDB lookup failed): adopt silently —
-  // everything already out predates the user. Exception: the newest episode
-  // aired AFTER the follow, i.e. a genuine drop happened before the first
-  // check could baseline — treat it as a candidate below.
+  // Never-baselined: if the user followed before initial check, adopt baseline
   if (!known) {
-    const followedAtMs = followedAt ? new Date(followedAt).getTime() : 0
+    const followedAtMs = f.added_at ? new Date(f.added_at).getTime() : 0
     const airedAtMs = latest.airDate ? new Date(latest.airDate).getTime() : 0
     const droppedAfterFollow = followedAtMs > 0 && Number.isFinite(airedAtMs) && airedAtMs > followedAtMs
-    if (!droppedAfterFollow || !newerThanWatched || !engaged || !isAlertAvailable(latest.airDate)) {
+    if (!droppedAfterFollow || !newerThanWatched) {
       db.setFollowedBaseline(f.tmdb_id, newest.season, newest.episode)
       return { hasNew: false }
     }
-  } else if (!(newerThanWatched && newerThanKnown && engaged && isAlertAvailable(latest.airDate))) {
-    // Caught up (or nothing watched yet with an existing baseline): keep the
-    // baseline fresh silently.
-    db.touchFollowedChecked(f.tmdb_id, newest.season, newest.episode, false)
-    return { hasNew: false }
   }
 
-  // Candidate: verify a watchable source exists before crying "new episode".
-  // If not, hold — advance only the clock (never the baseline past the held
-  // episode) so the next check retries instead of swallowing it forever.
-  const watchable = await hasWatchableFollowedEpisode(f, newest)
-  if (!watchable) {
-    console.log(`[Followed] Holding alert for ${f.tmdb_id} S${newest.season}E${newest.episode} — no watchable source yet`)
-    db.touchFollowedChecked(f.tmdb_id, null, null, false)
-    return { hasNew: false }
+  // If a new episode dropped that is newer than baseline and newer than watched:
+  if (newerThanWatched && newerThanKnown) {
+    console.log(`[Followed] New episode drop detected for ${f.title || f.tmdb_id}: S${newest.season}E${newest.episode}`)
+    db.touchFollowedChecked(f.tmdb_id, newest.season, newest.episode, true)
+    return { hasNew: true, season: newest.season, episode: newest.episode }
   }
-  db.touchFollowedChecked(f.tmdb_id, newest.season, newest.episode, true)
-  return { hasNew: true, season: newest.season, episode: newest.episode }
+
+  // Already caught up to latest released
+  db.touchFollowedChecked(f.tmdb_id, newest.season, newest.episode, false)
+  return { hasNew: false }
 }
 
-ipcMain.handle('check-followed-updates', async () => {
+ipcMain.handle('check-followed-updates', async (_, opts?: { force?: boolean }) => {
   try {
     if (!loadAppSettings().rememberOnlineProgress || !loadAppSettings().notifyNewEpisodes) {
       return db.getFollowedSeries()
     }
   } catch { /* fall through and check */ }
   const followed = db.getFollowedSeries()
+  const force = Boolean(opts?.force)
   for (const f of followed) {
-    if (!isFollowCheckDue(f.last_checked)) continue
+    if (!force && !isFollowCheckDue(f.last_checked)) continue
     try {
-      await checkOneFollowedSeries(f)
+      await checkOneFollowedSeries(f, { explicit: force })
     } catch (err) {
       console.warn('[Followed] update check failed for', f.tmdb_id, err)
     }
@@ -3729,6 +3718,223 @@ ipcMain.handle('check-series-updates', async (_, tmdbId) => {
     return { checked: true, ...result }
   } catch (err) {
     console.warn('[Followed] explicit check failed for', id, err)
+    return { checked: false }
+  }
+})
+
+// ─── Followed movies: OTT release alerts ──────────────────────────────────
+
+function parseMovieOttStatus(info: any): { isReleased: boolean; ottPlatform: string | null; digitalDate: string | null } {
+  if (!info) return { isReleased: false, ottPlatform: null, digitalDate: null }
+
+  let isReleased = false
+  let ottPlatform: string | null = null
+  let digitalDate: string | null = info.digitalReleaseDate || null
+
+  // 1. Flatrate watch providers present (e.g. Netflix, Prime Video, JioHotstar, etc.)
+  if (Array.isArray(info.providers) && info.providers.length > 0) {
+    isReleased = true
+    ottPlatform = info.providers[0].provider_name || null
+  }
+
+  // 2. Digital release date passed (in UTC or local time)
+  if (digitalDate) {
+    const dTime = new Date(digitalDate).getTime()
+    if (Number.isFinite(dTime) && dTime <= Date.now()) {
+      isReleased = true
+      if (!ottPlatform) {
+        ottPlatform = info.digitalNote || 'Digital / VOD'
+      }
+    }
+  }
+
+  // 3. Fallback: if releaseType is 'digital' and releaseDate <= now
+  if (!isReleased && info.type === 'digital' && info.releaseDate) {
+    const rTime = new Date(info.releaseDate).getTime()
+    if (Number.isFinite(rTime) && rTime <= Date.now()) {
+      isReleased = true
+      if (!ottPlatform) ottPlatform = 'Digital / VOD'
+    }
+  }
+
+  return { isReleased, ottPlatform, digitalDate }
+}
+
+async function detectMovieDigitalDrop(
+  tmdbId: number,
+  title: string,
+  info: any
+): Promise<{ isReleased: boolean; ottPlatform?: string | null; digitalDate?: string | null }> {
+  const tmdbParsed = parseMovieOttStatus(info)
+  if (tmdbParsed.isReleased) {
+    return tmdbParsed
+  }
+
+  // Fallback: If TMDB hasn't updated watch providers or digital release dates yet,
+  // query Torrentio (with qualityfilter=cam,screener) to see if a clean digital rip
+  // (NF, AMZN, DSNP, ZEE5, JIO, ATVP, WEB-DL) has already dropped.
+  try {
+    const imdbId = info?.imdbId || await Promise.race([
+      getImdbIdForTmdb('movie', tmdbId),
+      new Promise<null>((_, reject) => setTimeout(() => reject(new Error('imdb lookup timeout')), 2500))
+    ]).catch(() => null)
+
+    if (imdbId) {
+      const yearStr = info?.releaseDate ? String(info.releaseDate).slice(0, 4) : ''
+      const searchTitle = String(title || info?.title || '').trim()
+
+      const streams = await Promise.race([
+        fetchTorrentioSources(imdbId, searchTitle, 'movie'),
+        new Promise<any[]>((_, reject) => setTimeout(() => reject(new Error('torrentio timeout')), 3000))
+      ]).catch(() => [])
+
+      if (Array.isArray(streams) && streams.length > 0) {
+        for (const s of streams) {
+          const rawText = `${s.name || ''} ${s.title || ''}`
+          // Reject any CAM / screener that might slip through
+          if (/\b(cam|hdcam|camrip|ts|telesync|screener|scr|dvdscr)\b/i.test(rawText)) continue
+
+          // If searchTitle is provided, verify title relevance
+          if (searchTitle && !isRelevanceMatch(rawText, searchTitle, 'movie', yearStr)) continue
+
+          let detectedPlatform: string | null = null
+          if (/\b(NF|Netflix)\b/i.test(rawText)) detectedPlatform = 'Netflix'
+          else if (/\b(AMZN|PrimeVideo|Prime)\b/i.test(rawText)) detectedPlatform = 'Prime Video'
+          else if (/\b(DSNP|Hotstar|Disney)\b/i.test(rawText)) detectedPlatform = 'Hotstar'
+          else if (/\b(ZEE5)\b/i.test(rawText)) detectedPlatform = 'Zee5'
+          else if (/\b(JIO|JioCinema)\b/i.test(rawText)) detectedPlatform = 'JioCinema'
+          else if (/\b(ATVP|AppleTV|Apple)\b/i.test(rawText)) detectedPlatform = 'Apple TV'
+          else if (/\b(HMAX|MAX|HBO)\b/i.test(rawText)) detectedPlatform = 'Max'
+          else if (/\b(SONY|SonyLiv)\b/i.test(rawText)) detectedPlatform = 'SonyLIV'
+          else if (/\b(WEB-?DL|WEBRip|BluRay|BRRip|BDRip)\b/i.test(rawText)) detectedPlatform = 'Digital / OTT'
+
+          if (detectedPlatform) {
+            console.log(`[Followed Movie] Real-world digital drop confirmed for ${searchTitle || tmdbId} on ${detectedPlatform}`)
+            return {
+              isReleased: true,
+              ottPlatform: detectedPlatform,
+              digitalDate: new Date().toISOString()
+            }
+          }
+        }
+      }
+    }
+  } catch (err) {
+    console.warn('[detectMovieDigitalDrop] Fallback check skipped:', err)
+  }
+
+  return { isReleased: false, ottPlatform: null, digitalDate: null }
+}
+
+async function checkOneFollowedMovie(f: any, opts: { explicit?: boolean } = {}): Promise<{ hasNew: boolean; isReleased: boolean; ottPlatform?: string | null }> {
+  const tmdbId = Number(f.tmdb_id)
+  if (!tmdbId) return { hasNew: false, isReleased: false }
+
+  const info = await tmdb.fetchTmdbReleaseInfo(tmdbId, 'movie')
+  const { isReleased, ottPlatform, digitalDate } = await detectMovieDigitalDrop(tmdbId, f.title || '', info)
+
+  const wasAlreadyReleased = Boolean(f.is_released_ott)
+
+  // If newly released on OTT (transition from 0 -> 1)
+  if (isReleased && !wasAlreadyReleased) {
+    console.log(`[Followed Movie] OTT drop detected for ${f.title || tmdbId} on ${ottPlatform || 'OTT'}`)
+    db.touchFollowedMovieChecked(tmdbId, true, ottPlatform, true, digitalDate)
+
+    // Trigger Desktop Notification if supported
+    try {
+      if (Notification.isSupported()) {
+        const notif = new Notification({
+          title: '🎬 OTT Release Alert!',
+          body: `${f.title} is now streaming on ${ottPlatform || 'OTT'}! Tap to watch.`
+        })
+        notif.on('click', () => {
+          const win = BrowserWindow.getAllWindows()[0]
+          if (win && !win.isDestroyed()) {
+            if (win.isMinimized()) win.restore()
+            win.focus()
+            win.webContents.send('open-shared-media', { type: 'movie', tmdbId })
+          }
+        })
+        notif.show()
+      }
+    } catch (notifErr) {
+      console.warn('[Followed Movie] Notification error:', notifErr)
+    }
+
+    return { hasNew: true, isReleased: true, ottPlatform }
+  }
+
+  db.touchFollowedMovieChecked(tmdbId, isReleased, ottPlatform, false, digitalDate)
+  return { hasNew: false, isReleased, ottPlatform }
+}
+
+ipcMain.handle('follow-movie', async (_, input) => {
+  const tmdbId = Number(input?.tmdb_id)
+  if (!tmdbId) return { followed: false }
+  const followResult = db.upsertFollowedMovie({
+    tmdb_id: tmdbId,
+    title: input.title,
+    poster_path: input.poster_path,
+    backdrop_path: input.backdrop_path,
+    overview: input.overview,
+    theatrical_date: input.theatrical_date || input.release_date
+  })
+
+  // Baseline check: adopt current state silently so already-released movies don't false alert
+  try {
+    const info = await tmdb.fetchTmdbReleaseInfo(tmdbId, 'movie')
+    const { isReleased, ottPlatform, digitalDate } = await detectMovieDigitalDrop(tmdbId, input.title || '', info)
+    db.setFollowedMovieBaseline(tmdbId, isReleased, digitalDate, ottPlatform)
+    return {
+      followed: true,
+      isNew: Boolean(followResult?.isNew),
+      isReleased,
+      ottPlatform
+    }
+  } catch {
+    return { followed: true, isNew: Boolean(followResult?.isNew), isReleased: false }
+  }
+})
+
+ipcMain.handle('unfollow-movie', (_, tmdbId) => {
+  db.unfollowMovie(Number(tmdbId))
+  return { unfollowed: true }
+})
+
+ipcMain.handle('get-followed-movies', () => {
+  return db.getFollowedMovies()
+})
+
+ipcMain.handle('mark-followed-movie-seen', (_, tmdbId) => {
+  db.markFollowedMovieSeen(Number(tmdbId))
+  return { seen: true }
+})
+
+ipcMain.handle('check-followed-movies-updates', async (_, opts?: { force?: boolean }) => {
+  const followed = db.getFollowedMovies()
+  const force = Boolean(opts?.force)
+  for (const f of followed) {
+    if (!force && f.is_released_ott) continue
+    if (!force && !isFollowCheckDue(f.last_checked)) continue
+    try {
+      await checkOneFollowedMovie(f, { explicit: force })
+    } catch (err) {
+      console.warn('[Followed Movie] update check failed for', f.tmdb_id, err)
+    }
+  }
+  return db.getFollowedMovies()
+})
+
+ipcMain.handle('check-movie-updates', async (_, tmdbId) => {
+  const id = Number(tmdbId)
+  if (!id) return { checked: false }
+  const f = db.getFollowedMovie(id)
+  if (!f) return { checked: false, followed: false }
+  try {
+    const result = await checkOneFollowedMovie(f, { explicit: true })
+    return { checked: true, ...result }
+  } catch (err) {
+    console.warn('[Followed Movie] explicit check failed for', id, err)
     return { checked: false }
   }
 })
@@ -3853,6 +4059,7 @@ ipcMain.handle('export-user-backup', async () => {
       favorites: backup.data.favorites.length,
       streamProgress: (backup.data.streamProgress || []).length,
       followedSeries: (backup.data.followedSeries || []).length,
+      followedMovies: (backup.data.followedMovies || []).length,
       focusTubeCategories: (ftData?.categories || []).length,
       focusTubeChannels: (ftData?.channels || []).length
     }
@@ -3887,6 +4094,7 @@ ipcMain.handle('import-user-backup', async (): Promise<BackupImportSummary | { i
     const favorites = Array.isArray(backup.data.favorites) ? backup.data.favorites : []
     const streamProgress = Array.isArray(backup.data.streamProgress) ? backup.data.streamProgress : []
     const followedSeries = Array.isArray(backup.data.followedSeries) ? backup.data.followedSeries : []
+    const followedMovies = Array.isArray(backup.data.followedMovies) ? backup.data.followedMovies : []
 
     const summary: BackupImportSummary = {
       imported: true,
@@ -3898,7 +4106,8 @@ ipcMain.handle('import-user-backup', async (): Promise<BackupImportSummary | { i
       localWatchlistRestored: 0,
       favoritesRestored: 0,
       streamProgressRestored: 0,
-      followedSeriesRestored: 0
+      followedSeriesRestored: 0,
+      followedMoviesRestored: 0
     }
 
     for (const folder of folders) {
@@ -3949,6 +4158,12 @@ ipcMain.handle('import-user-backup', async (): Promise<BackupImportSummary | { i
       if (!item || typeof item.tmdb_id !== 'number' || !item.title) continue
       const restoreResult = db.restoreFollowedSeriesRow(item)
       summary.followedSeriesRestored += restoreResult.changes > 0 ? 1 : 0
+    }
+
+    for (const item of followedMovies) {
+      if (!item || typeof item.tmdb_id !== 'number' || !item.title) continue
+      const restoreResult = db.restoreFollowedMovieRow(item)
+      summary.followedMoviesRestored = (summary.followedMoviesRestored || 0) + (restoreResult.changes > 0 ? 1 : 0)
     }
 
     // Focus Tube, when the backup contains it. Restored regardless of whether
@@ -5179,12 +5394,42 @@ ipcMain.handle('fetch-trending-apple-tv', async (_, type: 'movie' | 'series', fo
   return await tmdb.fetchTrendingAppleTv(type, forceRefresh)
 })
 
+ipcMain.handle('fetch-recently-released', async (_, type: 'movie' | 'series', forceRefresh?: boolean) => {
+  return await tmdb.fetchRecentlyReleased(type, forceRefresh)
+})
+
+ipcMain.handle('fetch-upcoming', async (_, type: 'movie' | 'series', forceRefresh?: boolean) => {
+  return await tmdb.fetchUpcoming(type, forceRefresh)
+})
+
 ipcMain.handle('get-tmdb-release-info', async (_, id: number, type: 'movie' | 'series') => {
-  return await tmdb.fetchTmdbReleaseInfo(id, type)
+  const info = await tmdb.fetchTmdbReleaseInfo(id, type)
+  if (type === 'movie' && info && (!info.providers || info.providers.length === 0) && !info.digitalReleaseDate) {
+    try {
+      const digitalDrop = await detectMovieDigitalDrop(id, info.title || '', info)
+      if (digitalDrop.isReleased && digitalDrop.ottPlatform) {
+        info.providers = [{
+          provider_name: digitalDrop.ottPlatform,
+          logo_path: '',
+          link: null,
+          direct_url: null
+        }]
+        info.digitalReleaseDate = digitalDrop.digitalDate || new Date().toISOString()
+        info.type = 'digital'
+      }
+    } catch {
+      // Non-fatal fallback
+    }
+  }
+  return info
 })
 
 ipcMain.handle('get-tmdb-keywords', async (_, id: number, type: 'movie' | 'series') => {
   return await tmdb.fetchTmdbKeywords(id, type)
+})
+
+ipcMain.handle('get-tmdb-franchise', async (_, movieId: number) => {
+  return await tmdb.fetchTmdbFranchise(movieId)
 })
 
 ipcMain.handle('save-video-keywords', (_, id: number, keywords: string[]) => {
@@ -9072,9 +9317,10 @@ ipcMain.handle('ft-get-comments', async (_e, input: { videoId: string; sortBy?: 
   }
 })
 
-function getYouTubeEmbedFrames(): Electron.WebFrameMain[] {
+function getYouTubeEmbedFrames(onlyMainWindow = false): Electron.WebFrameMain[] {
   const result: Electron.WebFrameMain[] = []
-  const wins = BrowserWindow.getAllWindows()
+  const mainWin = getMainWindow()
+  const wins = onlyMainWindow && mainWin ? [mainWin] : BrowserWindow.getAllWindows()
   for (const win of wins) {
     if (win.isDestroyed()) continue
     const collectFrames = (parent: Electron.WebFrameMain) => {
@@ -9144,6 +9390,54 @@ ipcMain.handle('ft-set-frame-quality', async (_e, quality: string) => {
     return { ok: applied }
   } catch (err: any) {
     return { ok: false, error: err?.message }
+  }
+})
+
+ipcMain.handle('ft-get-frame-time', async () => {
+  try {
+    const frames = getYouTubeEmbedFrames(true)
+    for (const frame of frames) {
+      try {
+        const res = await frame.executeJavaScript(`
+          (() => {
+            try {
+              const p = document.getElementById('movie_player') || document.querySelector('.html5-video-player');
+              if (p && typeof p.getCurrentTime === 'function') {
+                return {
+                  currentTime: p.getCurrentTime(),
+                  duration: typeof p.getDuration === 'function' ? p.getDuration() : null,
+                  playerState: typeof p.getPlayerState === 'function' ? p.getPlayerState() : null
+                };
+              }
+              const v = document.querySelector('video') || document.querySelector('.html5-main-video');
+              if (v) {
+                return {
+                  currentTime: v.currentTime,
+                  duration: v.duration,
+                  playerState: v.paused ? 2 : 1
+                };
+              }
+              return null;
+            } catch {
+              return null;
+            }
+          })()
+        `)
+        const r = res as any
+        if (r && typeof r.currentTime === 'number' && Number.isFinite(r.currentTime)) {
+          return {
+            currentTime: r.currentTime,
+            duration: typeof r.duration === 'number' && Number.isFinite(r.duration) ? r.duration : null,
+            playerState: typeof r.playerState === 'number' ? r.playerState : null
+          }
+        }
+      } catch {
+        // ignore
+      }
+    }
+    return null
+  } catch {
+    return null
   }
 })
 

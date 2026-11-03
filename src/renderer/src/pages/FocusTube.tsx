@@ -540,7 +540,7 @@ const FocusTube: React.FC<FocusTubeProps> = ({ activeTab = 'focustube' }) => {
   const { ftBrandLock } = useTheme()
 
   return (
-    <div className={`space-y-5 ${ftBrandLock ? 'ft-brand-locked' : ''}`}>
+    <div className={`space-y-5 focustube-container ${ftBrandLock ? 'ft-brand-locked' : ''}`}>
       {/* ── TOP HEADER (Clean, single-tier 54px header) ── */}
       <header className="sticky top-0 z-30 flex h-14 items-center justify-between gap-4 rounded-2xl border border-white/[0.08] bg-[#0c0d14]/90 px-4 shadow-[0_10px_30px_-10px_rgba(0,0,0,0.8)] backdrop-blur-md sm:px-5">
         {/* Left: Brand */}
@@ -746,7 +746,7 @@ const FocusTube: React.FC<FocusTubeProps> = ({ activeTab = 'focustube' }) => {
               <button
                 type="button"
                 onClick={() => void selectCategory(null)}
-                className={`inline-flex shrink-0 items-center rounded-xl px-4 py-1.5 text-xs font-bold transition-all ${
+                className={`ft-category-pill inline-flex shrink-0 items-center rounded-xl px-4 py-1.5 text-xs font-bold transition-all ${
                   activeCategoryId === null
                     ? 'bg-primary text-white shadow-[0_0_15px_rgba(var(--c-accent),0.45)]'
                     : 'border border-white/10 bg-white/5 text-white/70 hover:border-white/20 hover:bg-white/10 hover:text-white'
@@ -842,7 +842,7 @@ const FocusTube: React.FC<FocusTubeProps> = ({ activeTab = 'focustube' }) => {
                       setConfirmDeleteId(category.id)
                     }}
                     title={`${category.name}${hasUnseen ? ` (${category.unseenCount} new)` : ''} · Double-click to rename · Right-click to delete`}
-                    className={`inline-flex items-center rounded-xl px-4 py-1.5 text-xs font-bold transition-all ${
+                    className={`ft-category-pill inline-flex items-center rounded-xl px-4 py-1.5 text-xs font-bold transition-all ${
                       isActive
                         ? 'bg-primary text-white shadow-[0_0_15px_rgba(var(--c-accent),0.45)]'
                         : 'border border-white/10 bg-white/5 text-white/70 hover:border-white/20 hover:bg-white/10 hover:text-white'

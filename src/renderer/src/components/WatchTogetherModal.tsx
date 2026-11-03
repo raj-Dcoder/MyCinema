@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { createPortal } from 'react-dom';
 import { Users, X, Play, Copy, Check } from 'lucide-react';
 
 const getUserName = () => localStorage.getItem('mycinema_user_name') || 'User';
@@ -49,9 +50,9 @@ export function WatchTogetherModal({
 
   const activeSession = roomId !== null;
 
-  return (
+  return createPortal(
     <div
-      className="fixed inset-0 z-[100] flex items-center justify-center bg-black/80 backdrop-blur-md p-4 animate-in fade-in duration-200"
+      className="fixed inset-0 z-[1000] flex items-center justify-center bg-black/80 backdrop-blur-md p-4 animate-in fade-in duration-200"
       onClick={stopPlayerInteraction}
       onPointerDown={stopPlayerInteraction}
       onPointerUp={stopPlayerInteraction}
@@ -210,6 +211,7 @@ export function WatchTogetherModal({
           )}
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }

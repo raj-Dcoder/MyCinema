@@ -2,7 +2,9 @@ import React, { useEffect, useMemo, useState, useRef } from 'react'
 import { Video } from '../types'
 import VideoCard from '../components/VideoCard'
 import { groupSeriesCards } from '../utils/seriesCards'
-import { ArrowUpDown, Check, Search, Tv, X } from 'lucide-react'
+import { ArrowUpDown, Check, Search, Tv, X, BellRing } from 'lucide-react'
+import FollowedSeriesModal from '../components/FollowedSeriesModal'
+import { safeGetFollowedSeries } from '../utils/streamResume'
 
 interface SeriesProps {
   onPlay: (video: Video) => void
@@ -18,6 +20,17 @@ const Series: React.FC<SeriesProps> = ({ onPlay, onShowDetail }) => {
   const [sortBy, setSortBy] = useState('newest')
   const [showSortMenu, setShowSortMenu] = useState(false)
   const isInitialLoad = useRef(true)
+  const [showFollowedModal, setShowFollowedModal] = useState(false)
+  const [followedSeries, setFollowedSeries] = useState<any[]>([])
+
+  const loadFollowed = async () => {
+    try {
+      const list = await safeGetFollowedSeries()
+      setFollowedSeries(Array.isArray(list) ? list : [])
+    } catch {
+      setFollowedSeries([])
+    }
+  }
 
   const fetchSeries = async () => {
     // Only show skeletons on the absolute first load to prevent "flickering"
@@ -168,7 +181,29 @@ const Series: React.FC<SeriesProps> = ({ onPlay, onShowDetail }) => {
               )}
             </div>
 
-            <div className="relative">
+                        <button
+              type="button"
+              onClick={() => setShowFollowedModal(true)}
+              className={`flex h-11 items-center gap-2 rounded-xl border px-3.5 text-[10px] font-black uppercase tracking-widest transition-all active:scale-95 group ${
+                followedSeries.some(f => f?.has_unseen_new)
+                  ? 'border-primary/40 bg-primary/15 text-primary shadow-[0_4px_20px_rgba(229,9,20,0.25)]'
+                  : 'border-white/10 bg-white/[0.035] text-white/70 hover:bg-white/5 hover:text-white'
+              }`}
+              title="Followed Series & Episode Alerts"
+              aria-label="View Followed Series"
+            >
+              <BellRing size={15} className={followedSeries.some(f => f?.has_unseen_new) ? 'text-primary animate-pulse' : 'text-sky-400 group-hover:text-sky-300 transition-colors'} />
+              <span>Following</span>
+              {followedSeries.length > 0 && (
+                <span className={`px-1.5 py-0.5 rounded-md text-[9px] font-black ${
+                  followedSeries.some(f => f?.has_unseen_new) ? 'bg-primary text-white' : 'bg-white/10 text-white/80'
+                }`}>
+                  {followedSeries.length}
+                </span>
+              )}
+            </button>
+
+<div className="relative">
               <button
                 type="button"
                 onClick={() => setShowSortMenu(value => !value)}
@@ -270,6 +305,15 @@ const Series: React.FC<SeriesProps> = ({ onPlay, onShowDetail }) => {
           </div>
         </div>
       )}
+      <FollowedSeriesModal
+        isOpen={showFollowedModal}
+        onClose={() => setShowFollowedModal(false)}
+        onShowDetail={onShowDetail}
+        onFollowedChange={() => {
+          void loadFollowed()
+          void fetchSeries()
+        }}
+      />
     </div>
   )
 }

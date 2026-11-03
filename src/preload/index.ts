@@ -43,10 +43,13 @@ const api = {
   fetchTrendingPrimeVideo: (type: 'movie' | 'series', forceRefresh?: boolean) => ipcRenderer.invoke('fetch-trending-prime-video', type, forceRefresh),
   fetchTrendingJioHotstar: (type: 'movie' | 'series', forceRefresh?: boolean) => ipcRenderer.invoke('fetch-trending-jiohotstar', type, forceRefresh),
   fetchTrendingAppleTv: (type: 'movie' | 'series', forceRefresh?: boolean) => ipcRenderer.invoke('fetch-trending-apple-tv', type, forceRefresh),
+  fetchRecentlyReleased: (type: 'movie' | 'series', forceRefresh?: boolean) => ipcRenderer.invoke('fetch-recently-released', type, forceRefresh),
+  fetchUpcoming: (type: 'movie' | 'series', forceRefresh?: boolean) => ipcRenderer.invoke('fetch-upcoming', type, forceRefresh),
   getTmdbTitleLogo: (type: 'movie' | 'series', tmdbId: number) => ipcRenderer.invoke('get-tmdb-title-logo', type, tmdbId),
   getTmdbKeywords: (id: number, type: 'movie' | 'series') => ipcRenderer.invoke('get-tmdb-keywords', id, type),
   saveVideoKeywords: (id: number, keywords: string[]) => ipcRenderer.invoke('save-video-keywords', id, keywords),
   getTmdbReleaseInfo: (id: number, type: 'movie' | 'series') => ipcRenderer.invoke('get-tmdb-release-info', id, type),
+  getTmdbFranchise: (movieId: number) => ipcRenderer.invoke('get-tmdb-franchise', movieId),
   getTmdbTrailer: (params: { tmdbId?: number | null; title: string; type: 'movie' | 'series'; year?: number | null; seasonNumber?: number | null; preferLatestSeason?: boolean }) =>
     ipcRenderer.invoke('get-tmdb-trailer', params),
   getTmdbSeriesCatalog: (tmdbId: number) => ipcRenderer.invoke('get-tmdb-series-catalog', tmdbId),
@@ -172,6 +175,8 @@ const api = {
     return () => ipcRenderer.removeListener('thumbar-command', handler)
   },
   openWebPopup: (url: string, title?: string, autoSearch?: string) => ipcRenderer.invoke('open-web-popup', url, title, autoSearch),
+  openExternalUrl: (url: string) => ipcRenderer.invoke('open-external-url', url),
+  openExternal: (url: string) => ipcRenderer.invoke('open-external-url', url),
   getDownloadSites: () => ipcRenderer.invoke('get-download-sites'),
   resolveDownloadSiteUrl: (siteId: string, title: string, year?: string | number | null) =>
     ipcRenderer.invoke('resolve-download-site-url', siteId, title, year),
@@ -207,8 +212,15 @@ const api = {
   unfollowSeries: (tmdbId: number) => ipcRenderer.invoke('unfollow-series', tmdbId),
   getFollowedSeries: () => ipcRenderer.invoke('get-followed-series'),
   markFollowedSeen: (tmdbId: number) => ipcRenderer.invoke('mark-followed-seen', tmdbId),
-  checkFollowedUpdates: () => ipcRenderer.invoke('check-followed-updates'),
+  checkFollowedUpdates: (opts?: any) => ipcRenderer.invoke('check-followed-updates', opts),
   checkSeriesUpdates: (tmdbId: number) => ipcRenderer.invoke('check-series-updates', tmdbId),
+  followMovie: (input: { tmdb_id: number; title?: string; poster_path?: string | null; backdrop_path?: string | null; overview?: string | null; theatrical_date?: string | null; release_date?: string | null }) =>
+    ipcRenderer.invoke('follow-movie', input),
+  unfollowMovie: (tmdbId: number) => ipcRenderer.invoke('unfollow-movie', tmdbId),
+  getFollowedMovies: () => ipcRenderer.invoke('get-followed-movies'),
+  markFollowedMovieSeen: (tmdbId: number) => ipcRenderer.invoke('mark-followed-movie-seen', tmdbId),
+  checkFollowedMovieUpdates: (opts?: any) => ipcRenderer.invoke('check-followed-movies-updates', opts),
+  checkMovieUpdates: (tmdbId: number) => ipcRenderer.invoke('check-movie-updates', tmdbId),
   deleteStreamProgress: (tmdbId: number, mediaType: string, season?: number | null, episode?: number | null) =>
     ipcRenderer.invoke('delete-stream-progress', tmdbId, mediaType, season ?? null, episode ?? null),
   onAppSettingsChanged: (callback: (settings: any) => void) => {
@@ -285,6 +297,7 @@ const api = {
     ipcRenderer.invoke('ft-get-comments', { videoId, ...options }),
   ftSetFrameQuality: (quality: string) => ipcRenderer.invoke('ft-set-frame-quality', quality),
   ftGetFrameQuality: () => ipcRenderer.invoke('ft-get-frame-quality'),
+  ftGetFrameTime: () => ipcRenderer.invoke('ft-get-frame-time'),
   ftSeekFrame: (seconds: number, play?: boolean) => ipcRenderer.invoke('ft-seek-frame', { seconds, play }),
   ftGetAmbientFrame: (bounds?: { x: number; y: number; width: number; height: number }) =>
     ipcRenderer.invoke('ft-get-ambient-frame', bounds),

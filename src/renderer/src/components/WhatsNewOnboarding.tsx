@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import {
   X,
   ArrowRight,
@@ -110,44 +111,38 @@ const UPDATE_ICONS: Record<UpdateIconKey, { icon: React.ReactNode; tile: string 
 }
 
 export const LATEST_RELEASE: ReleaseNotes = {
-  version: '1.48.0',
-  title: 'Atmospheric Lighting & Signature Accent Studio.',
-  highlight: 'Atmospheric Lighting',
+  version: '1.49.0',
+  title: 'Movie OTT alerts & franchise timelines.',
+  highlight: 'Movie OTT alerts',
   description:
-    'Transform your theater with adaptive halo glow, signature color accents, decoupled button styling, and rock-solid playback & download reliability.',
+    'Track movies for digital drops on Netflix, Prime Video, and Hotstar, explore complete franchise timelines, and browse upcoming cinema.',
   tourId: null,
-  video: {
-    src: demoVideo,
-    poster: demoPoster,
-    caption: 'Atmospheric Studio Demo',
-    autoPlay: true,
-    loop: true,
-  },
+  video: null,
   updates: [
     {
-      icon: 'sparkles',
-      title: 'Atmospheric lighting studio',
-      description: 'Tune ambient glow, diffusion, and saturation with live preview in Settings.',
+      icon: 'bell',
+      title: 'Movie OTT release alerts',
+      description: 'Get notified immediately when followed movies drop on streaming platforms.',
     },
     {
-      icon: 'layers',
-      title: 'Signature accent palette',
-      description: 'Personalize with Voltage Amber, Crimson, Cyber Teal, and Midnight Violet.',
+      icon: 'sparkles',
+      title: 'Franchise timeline rails',
+      description: 'Explore prequels and sequels in chronological order on movie detail screens.',
     },
     {
       icon: 'play',
-      title: 'Theater ambilight modes',
-      description: 'Switch between Blackout, Soft Halo, and Pause Aura during movie playback.',
+      title: 'Recently released & upcoming',
+      description: 'Discover fresh digital drops and upcoming cinema with regional language tags.',
     },
     {
-      icon: 'shield',
-      title: 'Decoupled button accents',
-      description: 'Style buttons adaptively or customize them independently under Appearance.',
+      icon: 'layers',
+      title: 'Direct OTT deep links',
+      description: 'Open titles directly on Netflix, Prime Video, and Hotstar in your browser.',
     },
     {
       icon: 'fix',
-      title: 'Auto-repaired video paths',
-      description: 'Automatically heals incomplete file extensions and locks download integrity.',
+      title: 'Root-level dialog layering',
+      description: 'Modals now render smoothly above all screens without visual conflicts.',
     },
   ],
 }
@@ -258,9 +253,9 @@ const WhatsNewOnboarding: React.FC<WhatsNewOnboardingProps> = ({ onClose, onSkip
     )
   }
 
-  return (
+  return createPortal(
     <div
-      className="fixed inset-0 z-[200] flex items-center justify-center bg-black/75 p-4 font-sans backdrop-blur-md"
+      className="fixed inset-0 z-[1000] flex items-center justify-center bg-black/80 p-4 font-sans backdrop-blur-md"
       onClick={handleContinue}
       role="dialog"
       aria-modal="true"
@@ -491,7 +486,8 @@ const WhatsNewOnboarding: React.FC<WhatsNewOnboardingProps> = ({ onClose, onSkip
           </button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   )
 }
 

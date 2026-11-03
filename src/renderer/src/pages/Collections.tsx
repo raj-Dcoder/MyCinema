@@ -702,7 +702,7 @@ const CollectionEditor: React.FC<{
   }
 
   return createPortal(
-    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm" onClick={onClose}>
+    <div className="fixed inset-0 z-[1000] flex items-center justify-center bg-black/80 p-4 backdrop-blur-md" onClick={onClose}>
       <div
         className="w-full max-w-md rounded-3xl border border-white/10 bg-[#12161f] p-6 shadow-2xl"
         onClick={(e) => e.stopPropagation()}
@@ -880,7 +880,7 @@ const ShareModal: React.FC<{
   }
 
   return createPortal(
-    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm" onClick={onClose}>
+    <div className="fixed inset-0 z-[1000] flex items-center justify-center bg-black/80 p-4 backdrop-blur-md" onClick={onClose}>
       <div
         className="w-full max-w-md rounded-3xl border border-white/10 bg-[#12161f] p-6 shadow-2xl"
         onClick={(e) => e.stopPropagation()}
@@ -1136,7 +1136,7 @@ const TitlePicker: React.FC<{
   const tmdbYearOf = (item: any) => (item.release_date || item.first_air_date || '').slice(0, 4)
 
   return createPortal(
-    <div className="fixed inset-0 z-[100] flex overflow-y-auto bg-black/70 p-4 backdrop-blur-sm" onClick={onClose}>
+    <div className="fixed inset-0 z-[1000] flex overflow-y-auto bg-black/80 p-4 backdrop-blur-md" onClick={onClose}>
       <div
         className="m-auto flex max-h-[85vh] w-full max-w-xl flex-col overflow-hidden rounded-3xl border border-white/10 bg-[#12161f] p-6 shadow-2xl"
         onClick={(e) => e.stopPropagation()}

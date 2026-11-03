@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react'
+import { createPortal } from 'react-dom'
 import { X, Sparkles, Send, CheckCircle2, AlertCircle, Loader2, Mail, ShieldAlert, Check, Copy } from 'lucide-react'
 
 const REGISTRATION_STORAGE_KEY = 'mycinema_ft_test_user_registration'
@@ -125,12 +126,12 @@ export const RequestTestUserModal: React.FC<RequestTestUserModalProps> = ({
     }
   }
 
-  return (
+  return createPortal(
     <div
       role="dialog"
       aria-modal="true"
       aria-labelledby="request-access-title"
-      className="fixed inset-0 z-[70] flex items-center justify-center bg-black/80 p-4 backdrop-blur-md animate-in fade-in"
+      className="fixed inset-0 z-[1000] flex items-center justify-center bg-black/80 p-4 backdrop-blur-md animate-in fade-in"
       onClick={(e) => {
         if (e.target === e.currentTarget && !submitting) onClose()
       }}
@@ -339,6 +340,7 @@ export const RequestTestUserModal: React.FC<RequestTestUserModalProps> = ({
           )}
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   )
 }

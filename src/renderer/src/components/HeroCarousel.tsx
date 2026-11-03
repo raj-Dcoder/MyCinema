@@ -1,8 +1,8 @@
 import React, { useState, useEffect } from 'react'
-import { Play, ChevronLeft, ChevronRight, Loader2 } from 'lucide-react'
+import { Play, ChevronLeft, ChevronRight, Loader2, Info, ExternalLink } from 'lucide-react'
 import { Video } from '../types'
-import { getOnlineResumeKey } from '../utils/streamResume'
-import { NewEpisodeBadge, OnlineBadge, NextEpisodeBadge } from './StreamBadges'
+import { getOnlineResumeKey, safeUnfollowMovie, safeMarkFollowedMovieSeen } from '../utils/streamResume'
+import { NewEpisodeBadge, OnlineBadge, NextEpisodeBadge, OttReleaseBadge } from './StreamBadges'
 
 interface HeroCarouselProps {
   items: Video[]
@@ -41,7 +41,7 @@ const HeroCarousel: React.FC<HeroCarouselProps> = ({ items, onPlay, onShowDetail
     if (!isAutoPlaying || !isActive || items.length === 0) return
     const interval = setInterval(() => {
       setCurrentIndex((prev) => (prev + 1) % items.length)
-    }, 8000)
+    }, 4000)
     return () => clearInterval(interval)
   }, [isAutoPlaying, isActive, items.length])
 
@@ -157,11 +157,13 @@ const HeroCarousel: React.FC<HeroCarouselProps> = ({ items, onPlay, onShowDetail
     ? `S${current.season} E${current.episode}`
     : null
   const isNext = Boolean(current.onlineNextEpisode || current.isNextEpisode)
-  const actionLabel = current.onlineNewEpisode && episodeTag
-    ? `Watch ${episodeTag}`
-    : isNext && episodeTag
-      ? `Play ${episodeTag}`
-      : progressPercent > 0 ? 'Resume' : 'Play Now'
+  const actionLabel = current.onlineOttRelease
+    ? (current.ottPlatform ? `Watch on ${current.ottPlatform}` : 'Stream on OTT')
+    : current.onlineNewEpisode && episodeTag
+      ? `Watch ${episodeTag}`
+      : isNext && episodeTag
+        ? `Play ${episodeTag}`
+        : progressPercent > 0 ? 'Resume' : 'Play Now'
   const mediaLabel = current.type === 'series'
     ? episodeTag || 'Web Series'
     : current.type === 'video'
@@ -257,8 +259,9 @@ const HeroCarousel: React.FC<HeroCarouselProps> = ({ items, onPlay, onShowDetail
         )}
 
         {/* Status badges */}
-        {(current.isOnlineResume || current.isNextEpisode || current.onlineNextEpisode || current.onlineNewEpisode) && (
+        {(current.isOnlineResume || current.isNextEpisode || current.onlineNextEpisode || current.onlineNewEpisode || current.onlineOttRelease) && (
           <div className="flex flex-wrap items-center gap-2.5 animate-in fade-in slide-in-from-left-12 duration-700 delay-150">
+            {current.onlineOttRelease && <OttReleaseBadge platform={current.ottPlatform} />}
             {current.onlineNewEpisode && <NewEpisodeBadge />}
             {(current.isNextEpisode || current.onlineNextEpisode) && !current.onlineNewEpisode && <NextEpisodeBadge />}
             {current.isOnlineResume && <OnlineBadge />}
@@ -293,27 +296,72 @@ const HeroCarousel: React.FC<HeroCarouselProps> = ({ items, onPlay, onShowDetail
           {current.overview || "Loading description..."}
         </p>
 
-        <div className="flex items-center gap-4 pt-1 animate-in fade-in slide-in-from-left-20 duration-700 delay-500">
-          <button
-            disabled={Boolean(resumingKey) && getOnlineResumeKey(current) === resumingKey}
-            onClick={(e) => {
-              e.stopPropagation()
-              onPlay(current)
-            }}
-            className="flex items-center gap-2.5 bg-red-600 hover:bg-red-700 text-white px-7 py-3.5 rounded-2xl font-black text-xs tracking-widest transition-all shadow-lg shadow-red-950/50 hover:scale-105 active:scale-95 group/btn uppercase italic disabled:cursor-wait disabled:hover:scale-100"
-          >
-            {Boolean(resumingKey) && getOnlineResumeKey(current) === resumingKey ? (
-              <>
-                <Loader2 size={18} className="animate-spin" />
-                Loading…
-              </>
-            ) : (
-              <>
-                <Play fill="white" size={18} className="group-hover/btn:scale-110 transition-transform" />
-                {actionLabel}
-              </>
-            )}
-          </button>
+        <div className="flex items-center gap-3 pt-1 animate-in fade-in slide-in-from-left-20 duration-700 delay-500">
+          {current.onlineOttRelease ? (
+            <>
+              {/* Primary: Lands on DetailScreen */}
+              <button
+                onClick={(e) => {
+                  e.stopPropagation()
+                  onShowDetail(current)
+                }}
+                className="flex items-center gap-2.5 bg-red-600 hover:bg-red-700 text-white px-7 py-3.5 rounded-2xl font-black text-xs tracking-widest transition-all shadow-lg shadow-red-950/50 hover:scale-105 active:scale-95 uppercase italic"
+              >
+                <Info size={17} />
+                <span>View Details</span>
+              </button>
+
+              {/* Secondary: Safe Direct Launch on Netflix/OTT Platform */}
+              {current.ottPlatform && (
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    const cleanTitle = current.type === 'series' && current.series_name ? current.series_name : current.title
+                    const pName = (current.ottPlatform || '').toLowerCase()
+                    const url = pName.includes('netflix')
+                      ? `https://www.netflix.com/search?q=${encodeURIComponent(cleanTitle)}`
+                      : pName.includes('prime')
+                        ? `https://www.primevideo.com/search/ref=atv_nb_sr?phrase=${encodeURIComponent(cleanTitle)}`
+                        : pName.includes('hotstar')
+                          ? `https://www.hotstar.com/in/explore?search_query=${encodeURIComponent(cleanTitle)}`
+                          : `https://www.google.com/search?q=${encodeURIComponent(`${cleanTitle} watch on ${current.ottPlatform}`)}`
+
+                    window.api.openExternalUrl?.(url)
+                    if (current.tmdb_id) {
+                      void safeUnfollowMovie(current.tmdb_id)
+                      void safeMarkFollowedMovieSeen(current.tmdb_id)
+                    }
+                  }}
+                  className="flex items-center gap-2 bg-white/10 hover:bg-white/20 text-white px-5 py-3.5 rounded-2xl font-black text-xs tracking-widest transition-all border border-white/15 hover:border-white/30 hover:scale-105 active:scale-95 uppercase"
+                  title={`Open ${current.ottPlatform} directly in browser`}
+                >
+                  <span>Watch on {current.ottPlatform}</span>
+                  <ExternalLink size={13} className="opacity-70" />
+                </button>
+              )}
+            </>
+          ) : (
+            <button
+              disabled={Boolean(resumingKey) && getOnlineResumeKey(current) === resumingKey}
+              onClick={(e) => {
+                e.stopPropagation()
+                onPlay(current)
+              }}
+              className="flex items-center gap-2.5 bg-red-600 hover:bg-red-700 text-white px-7 py-3.5 rounded-2xl font-black text-xs tracking-widest transition-all shadow-lg shadow-red-950/50 hover:scale-105 active:scale-95 group/btn uppercase italic disabled:cursor-wait disabled:hover:scale-100"
+            >
+              {Boolean(resumingKey) && getOnlineResumeKey(current) === resumingKey ? (
+                <>
+                  <Loader2 size={18} className="animate-spin" />
+                  Loading…
+                </>
+              ) : (
+                <>
+                  <Play fill="white" size={18} className="group-hover/btn:scale-110 transition-transform" />
+                  {actionLabel}
+                </>
+              )}
+            </button>
+          )}
         </div>
       </div>
 

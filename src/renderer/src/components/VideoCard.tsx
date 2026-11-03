@@ -182,6 +182,13 @@ const VideoCard: React.FC<VideoCardProps> = ({ video, onPlay, onShowDetail, isCo
             ) : (
               <>
             {(() => {
+              if (video.onlineNewEpisode) {
+                return (
+                  <span className="rounded-md border border-red-500/40 bg-red-600 px-2 py-1 text-[8px] font-black uppercase tracking-widest text-white shadow-md shadow-red-950/40 animate-pulse">
+                    New Episode
+                  </span>
+                )
+              }
               if ((video.version_count || 1) > 1) {
                 return (
                   <span className="inline-flex items-center gap-1 rounded-md border border-emerald-400/25 bg-emerald-400/15 px-2 py-1 text-[8px] font-black uppercase tracking-widest text-emerald-200">
@@ -191,18 +198,20 @@ const VideoCard: React.FC<VideoCardProps> = ({ video, onPlay, onShowDetail, isCo
                 )
               }
               if (!compactTopBar && video.isExternal && !video.is_watchlist) {
-                if (!video.release_date) {
+                const todayStr = new Date().toISOString().substring(0, 10)
+                const releaseDateStr = video.release_date ? String(video.release_date).trim().substring(0, 10) : ''
+
+                if (!releaseDateStr) {
                   return (
                     <span className="rounded-md border border-red-500/30 bg-red-600/25 px-2 py-1 text-[8px] font-black uppercase tracking-widest text-white">
                       Trending
                     </span>
                   )
                 }
-                
-                const releaseDate = new Date(video.release_date)
-                const isReleased = releaseDate <= new Date()
-                
-                if (isReleased) {
+
+                const isUpcoming = releaseDateStr >= todayStr
+
+                if (!isUpcoming) {
                   return (
                     <span className="rounded-md border border-emerald-500/30 bg-emerald-600/25 px-2 py-1 text-[8px] font-black uppercase tracking-widest text-emerald-200">
                       Released
@@ -233,11 +242,49 @@ const VideoCard: React.FC<VideoCardProps> = ({ video, onPlay, onShowDetail, isCo
               <h3 className="line-clamp-2 text-sm font-black leading-tight text-white">
                 {title}
               </h3>
-              <div className="mt-1 flex items-center gap-2 text-[9px] font-black uppercase tracking-wider text-white/65">
-                {video.release_year && <span>{video.release_year}</span>}
-                {video.release_year && <span className="h-1 w-1 rounded-full bg-white/35" />}
-                <span className="truncate">{category}</span>
-              </div>
+              {(() => {
+                const todayStr = new Date().toISOString().substring(0, 10)
+                const releaseDateStr = video.release_date ? String(video.release_date).trim().substring(0, 10) : ''
+                const isUpcomingCard = Boolean(releaseDateStr && releaseDateStr >= todayStr)
+                const formattedUpcoming = (() => {
+                  if (!isUpcomingCard || !video.release_date) return null
+                  const match = String(video.release_date).trim().match(/^(\d{4})-(\d{2})-(\d{2})/)
+                  if (match) {
+                    const d = new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]))
+                    if (!isNaN(d.getTime())) {
+                      return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+                    }
+                  }
+                  return null
+                })()
+                const displayCardDate = (isUpcomingCard && formattedUpcoming) ? formattedUpcoming : video.release_year
+
+                const langMap: Record<string, string> = {
+                  hi: 'Hindi',
+                  te: 'Telugu',
+                  ta: 'Tamil',
+                  ml: 'Malayalam',
+                  kn: 'Kannada',
+                  bn: 'Bengali',
+                  pa: 'Punjabi',
+                  mr: 'Marathi'
+                }
+                const indianLangLabel = video.original_language && langMap[video.original_language] ? langMap[video.original_language] : null
+
+                return (
+                  <div className="mt-1 flex items-center gap-2 text-[9px] font-black uppercase tracking-wider text-white/65">
+                    {displayCardDate && <span>{displayCardDate}</span>}
+                    {displayCardDate && <span className="h-1 w-1 rounded-full bg-white/35" />}
+                    {indianLangLabel && (
+                      <>
+                        <span className="text-amber-300 font-black">{indianLangLabel}</span>
+                        <span className="h-1 w-1 rounded-full bg-white/35" />
+                      </>
+                    )}
+                    <span className="truncate">{category}</span>
+                  </div>
+                )
+              })()}
             </div>
 
             {tagline && (
@@ -246,16 +293,24 @@ const VideoCard: React.FC<VideoCardProps> = ({ video, onPlay, onShowDetail, isCo
               </p>
             )}
 
-            <button
-              className="flex w-full items-center justify-center gap-2 rounded-lg bg-red-600 px-3 py-2 text-[10px] font-black uppercase tracking-widest text-white shadow-lg shadow-red-950/40 transition-colors hover:bg-red-500"
-              onClick={(event) => {
-                event.stopPropagation()
-                void handleWatchNow()
-              }}
-            >
-              <Play fill="white" size={14} />
-              Watch Now
-            </button>
+            {(() => {
+              const todayStr = new Date().toISOString().substring(0, 10)
+              const releaseDateStr = video.release_date ? String(video.release_date).trim().substring(0, 10) : ''
+              const isUpcoming = Boolean(releaseDateStr && releaseDateStr >= todayStr)
+
+              return (
+                <button
+                  className="flex w-full items-center justify-center gap-2 rounded-lg bg-red-600 px-3 py-2 text-[10px] font-black uppercase tracking-widest text-white shadow-lg shadow-red-950/40 transition-colors hover:bg-red-500"
+                  onClick={(event) => {
+                    event.stopPropagation()
+                    void handleWatchNow()
+                  }}
+                >
+                  <Play fill="white" size={14} />
+                  {isUpcoming ? 'View Details' : 'Watch Now'}
+                </button>
+              )
+            })()}
           </div>
         </div>
       </div>

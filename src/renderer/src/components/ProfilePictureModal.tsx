@@ -1,4 +1,5 @@
 import React, { useRef } from 'react'
+import { createPortal } from 'react-dom'
 import { X, Upload, Check, ImageIcon } from 'lucide-react'
 import { BUILTIN_PROFILE_AVATAR_PREFIX, DEFAULT_AVATARS, getBuiltinProfileAvatarId } from '../utils/profileImage'
 
@@ -39,8 +40,8 @@ const ProfilePictureModal: React.FC<ProfilePictureModalProps> = ({ isOpen, onClo
     onClose()
   }
 
-  return (
-    <div className="fixed inset-0 z-[300] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-in fade-in duration-200">
+  return createPortal(
+    <div className="fixed inset-0 z-[1000] flex items-center justify-center bg-black/80 backdrop-blur-md p-4 animate-in fade-in duration-200">
       <div className="w-full max-w-md overflow-hidden rounded-3xl border border-white/10 bg-[#0b1018] shadow-2xl animate-in zoom-in-95 duration-200">
         
         {/* Header */}
@@ -129,7 +130,8 @@ const ProfilePictureModal: React.FC<ProfilePictureModalProps> = ({ isOpen, onClo
 
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   )
 }
 

@@ -229,6 +229,22 @@ export function initDb() {
       last_checked DATETIME,
       added_at DATETIME DEFAULT CURRENT_TIMESTAMP
     );
+
+    -- Movies the user follows for OTT release alerts.
+    CREATE TABLE IF NOT EXISTS followed_movies (
+      tmdb_id INTEGER PRIMARY KEY,
+      title TEXT NOT NULL,
+      poster_path TEXT,
+      backdrop_path TEXT,
+      overview TEXT,
+      theatrical_date TEXT,
+      digital_date TEXT,
+      ott_platform TEXT,
+      is_released_ott BOOLEAN DEFAULT 0,
+      has_unseen_drop BOOLEAN DEFAULT 0,
+      last_checked DATETIME,
+      added_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
   `)
 
   // Check and add columns for downloads if they don't exist
@@ -743,6 +759,14 @@ export function getBackupData() {
     ORDER BY added_at DESC
   `).all()
 
+  const followedMovies = db.prepare(`
+    SELECT tmdb_id, title, poster_path, backdrop_path, overview,
+           theatrical_date, digital_date, ott_platform, is_released_ott,
+           has_unseen_drop, last_checked, added_at
+    FROM followed_movies
+    ORDER BY added_at DESC
+  `).all()
+
   return {
     folders,
     watchlist: {
@@ -751,7 +775,8 @@ export function getBackupData() {
     },
     favorites,
     streamProgress,
-    followedSeries
+    followedSeries,
+    followedMovies
   }
 }
 
@@ -792,6 +817,23 @@ export function restoreFollowedSeriesRow(item: any) {
     item.poster_path || null, item.backdrop_path || null, item.overview || null,
     item.last_known_season ?? null, item.last_known_episode ?? null,
     item.has_unseen_new ? 1 : 0, item.last_checked || null, item.added_at || null
+  )
+}
+
+export function restoreFollowedMovieRow(item: any) {
+  const tmdbId = Number(item?.tmdb_id)
+  if (!tmdbId || !item.title) return { changes: 0 }
+  return db.prepare(`
+    INSERT INTO followed_movies
+      (tmdb_id, title, poster_path, backdrop_path, overview, theatrical_date,
+       digital_date, ott_platform, is_released_ott, has_unseen_drop, last_checked, added_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE(?, CURRENT_TIMESTAMP))
+    ON CONFLICT(tmdb_id) DO NOTHING
+  `).run(
+    tmdbId, item.title,
+    item.poster_path || null, item.backdrop_path || null, item.overview || null,
+    item.theatrical_date || null, item.digital_date || null, item.ott_platform || null,
+    item.is_released_ott ? 1 : 0, item.has_unseen_drop ? 1 : 0, item.last_checked || null, item.added_at || null
   )
 }
 
@@ -1240,6 +1282,76 @@ export function markFollowedSeen(tmdbId: number) {
 
 export function unfollowSeries(tmdbId: number) {
   return db.prepare('DELETE FROM followed_series WHERE tmdb_id = ?').run(Number(tmdbId))
+}
+
+// ── Followed Movies for OTT Release Alerts ─────────────────────────────
+
+export function getFollowedMovie(tmdbId: number) {
+  return db.prepare('SELECT * FROM followed_movies WHERE tmdb_id = ?').get(Number(tmdbId)) as any
+}
+
+export function getFollowedMovies() {
+  return db.prepare('SELECT * FROM followed_movies ORDER BY added_at DESC').all() as any[]
+}
+
+export function upsertFollowedMovie(meta: any) {
+  const tmdbId = Number(meta.tmdb_id)
+  if (!tmdbId) return null
+  const prev = getFollowedMovie(tmdbId)
+  db.prepare(`
+    INSERT INTO followed_movies (tmdb_id, title, poster_path, backdrop_path, overview, theatrical_date)
+    VALUES (?, ?, ?, ?, ?, ?)
+    ON CONFLICT(tmdb_id) DO UPDATE SET
+      title = excluded.title,
+      poster_path = COALESCE(excluded.poster_path, followed_movies.poster_path),
+      backdrop_path = COALESCE(excluded.backdrop_path, followed_movies.backdrop_path),
+      overview = COALESCE(excluded.overview, followed_movies.overview),
+      theatrical_date = COALESCE(excluded.theatrical_date, followed_movies.theatrical_date)
+  `).run(
+    tmdbId, meta.title || 'Unknown Title',
+    meta.poster_path || null, meta.backdrop_path || null, meta.overview || null,
+    meta.theatrical_date || meta.release_date || null
+  )
+  return { isNew: !prev }
+}
+
+export function setFollowedMovieBaseline(tmdbId: number, isReleased: boolean, digitalDate?: string | null, ottPlatform?: string | null) {
+  return db.prepare(`
+    UPDATE followed_movies
+    SET is_released_ott = ?, digital_date = ?, ott_platform = ?,
+        has_unseen_drop = 0, last_checked = CURRENT_TIMESTAMP
+    WHERE tmdb_id = ?
+  `).run(isReleased ? 1 : 0, digitalDate ?? null, ottPlatform ?? null, Number(tmdbId))
+}
+
+export function touchFollowedMovieChecked(
+  tmdbId: number,
+  isReleased: boolean,
+  ottPlatform?: string | null,
+  hasUnseen: boolean = false,
+  digitalDate?: string | null
+) {
+  return db.prepare(`
+    UPDATE followed_movies
+    SET is_released_ott = CASE WHEN ? = 1 THEN 1 ELSE is_released_ott END,
+        ott_platform = COALESCE(?, ott_platform),
+        digital_date = COALESCE(?, digital_date),
+        has_unseen_drop = CASE WHEN ? = 1 THEN 1 ELSE has_unseen_drop END,
+        last_checked = CURRENT_TIMESTAMP
+    WHERE tmdb_id = ?
+  `).run(isReleased ? 1 : 0, ottPlatform ?? null, digitalDate ?? null, hasUnseen ? 1 : 0, Number(tmdbId))
+}
+
+export function markFollowedMovieSeen(tmdbId: number) {
+  return db.prepare('UPDATE followed_movies SET has_unseen_drop = 0 WHERE tmdb_id = ?').run(Number(tmdbId))
+}
+
+export function unfollowMovie(tmdbId: number) {
+  return db.prepare('DELETE FROM followed_movies WHERE tmdb_id = ?').run(Number(tmdbId))
+}
+
+export function clearAllFollowedMovieNewFlags() {
+  return db.prepare('UPDATE followed_movies SET has_unseen_drop = 0').run()
 }
 
 // Highest S/E with any stream row (watched or in-progress) for a series.

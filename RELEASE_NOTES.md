@@ -1,3 +1,35 @@
+# MyCinema v1.49.0
+
+Movie OTT release alerts, franchise collection timeline rails, recently released and upcoming discover rows, direct OTT deep links, and root-level modal layering.
+
+### Movie OTT Release Alerts & Following
+- **Follow Movies for OTT Releases**: Track upcoming and in-theater movies to receive instant notifications when they become available for streaming on digital platforms (Netflix, Prime Video, Hotstar, and more).
+- **Followed Content Hubs**: Access dedicated Followed Movies and Followed Series modals with live status indicators, manual update checks, and one-click removal.
+- **Unseen Drop Notifications**: Persistent sparkle badges on cards and carousels highlight newly dropped movies and episodes until viewed.
+
+### Franchise & Universe Timelines
+- **Franchise Timeline Rail**: Movie detail pages now feature a dedicated franchise carousel displaying all prequels and sequels in chronological order with release years and ratings.
+- **Instant Movie Jumping**: Seamlessly explore and switch between connected franchise entries directly from the movie overview screen.
+
+### Discover & Content Rows
+- **Recently Released Rows**: Discover newly released movies and series on Home, Movies, and Series pages sorted reverse-chronologically.
+- **Upcoming Cinema Previews**: Browse anticipated upcoming theatrical and digital releases with quick filters for All, Indian, and International cinema.
+- **Regional Indian Language Badges**: Content cards display clear regional language tags (Hindi, Telugu, Tamil, Malayalam, Kannada, Bengali, Punjabi, Marathi) and formatted release dates.
+
+### Streaming & Player Experience
+- **Direct OTT Deep Linking**: Launch official streaming titles directly on Netflix, Prime Video, Hotstar, and other supported platforms via secure browser links.
+- **Ambilight & Theater Immersion**: Polished ambilight mode with upgraded default soft halo radiance and heightened playback aura intensity.
+- **FocusTube Playhead Sync**: Resilient direct frame polling recovers accurate playback time during stream buffering or PiP transitions.
+
+### Window Controls & Modal Architecture
+- **Root-Level Modal Layering**: Modals and dialogs render via React body portals with backdrop blur and elevated z-index, eliminating clipping and stacking conflicts.
+- **Smart Window Controls Hover**: Refined hover intent delay (160ms) and compact trigger boundary prevent accidental activation of window control capsules.
+
+### Security & Privacy
+- **Safe External Link Execution**: All outbound streaming and provider links are sanitized and dispatched through main-process handlers to enforce protocol validation.
+
+***
+
 # MyCinema v1.48.0
 
 Atmospheric Lighting & Signature Accent Studio with live interactive preview, in-player theater ambilight modes, auto-repaired download file paths, and bundled onboarding feature demo video.

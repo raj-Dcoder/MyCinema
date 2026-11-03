@@ -41,6 +41,7 @@ interface Api {
     favorites?: number
     streamProgress?: number
     followedSeries?: number
+    followedMovies?: number
     focusTubeCategories?: number
     focusTubeChannels?: number
     error?: string
@@ -57,6 +58,7 @@ interface Api {
     favoritesRestored?: number
     streamProgressRestored?: number
     followedSeriesRestored?: number
+    followedMoviesRestored?: number
     focusTubeCategoriesRestored?: number
     focusTubeChannelsRestored?: number
     error?: string
@@ -70,8 +72,11 @@ interface Api {
   fetchTrendingPrimeVideo: (type: 'movie' | 'series', forceRefresh?: boolean) => Promise<any[]>
   fetchTrendingJioHotstar: (type: 'movie' | 'series', forceRefresh?: boolean) => Promise<any[]>
   fetchTrendingAppleTv: (type: 'movie' | 'series', forceRefresh?: boolean) => Promise<any[]>
+  fetchRecentlyReleased: (type: 'movie' | 'series', forceRefresh?: boolean) => Promise<any[]>
+  fetchUpcoming: (type: 'movie' | 'series', forceRefresh?: boolean) => Promise<any[]>
   getTmdbTitleLogo: (type: 'movie' | 'series', tmdbId: number) => Promise<string | null>
   getTmdbReleaseInfo: (id: number, type: 'movie' | 'series') => Promise<import('./types').TmdbReleaseInfo | null>
+  getTmdbFranchise: (movieId: number) => Promise<import('./types').TmdbFranchise | null>
   getTmdbKeywords: (id: number, type: 'movie' | 'series') => Promise<string[]>
   saveVideoKeywords: (id: number, keywords: string[]) => Promise<any>
   getTmdbTrailer: (params: { tmdbId?: number | null; title: string; type: 'movie' | 'series'; year?: number | null; seasonNumber?: number | null; preferLatestSeason?: boolean }) => Promise<any | null>
@@ -184,6 +189,8 @@ interface Api {
   clearPipThumbar: () => Promise<void>
   onThumbarCommand: (callback: (command: string) => void) => () => void
   openWebPopup: (url: string, title?: string, autoSearch?: string) => Promise<boolean>
+  openExternalUrl: (url: string) => Promise<boolean>
+  openExternal: (url: string) => Promise<boolean>
   getDownloadSites: () => Promise<Array<{
     id: string
     name: string
@@ -228,8 +235,14 @@ interface Api {
   unfollowSeries: (tmdbId: number) => Promise<{ unfollowed: boolean }>
   getFollowedSeries: () => Promise<any[]>
   markFollowedSeen: (tmdbId: number) => Promise<{ seen: boolean }>
-  checkFollowedUpdates: () => Promise<any[]>
+  checkFollowedUpdates: (opts?: { force?: boolean }) => Promise<any[]>
   checkSeriesUpdates: (tmdbId: number) => Promise<{ checked: boolean; hasNew?: boolean; season?: number; episode?: number }>
+  followMovie: (input: { tmdb_id: number; title?: string; poster_path?: string | null; backdrop_path?: string | null; overview?: string | null; theatrical_date?: string | null; release_date?: string | null }) => Promise<{ followed: boolean; isNew?: boolean; isReleased?: boolean; ottPlatform?: string | null }>
+  unfollowMovie: (tmdbId: number) => Promise<{ unfollowed: boolean }>
+  getFollowedMovies: () => Promise<any[]>
+  markFollowedMovieSeen: (tmdbId: number) => Promise<{ seen: boolean }>
+  checkFollowedMovieUpdates: (opts?: { force?: boolean }) => Promise<any[]>
+  checkMovieUpdates: (tmdbId: number) => Promise<{ checked: boolean; hasNew?: boolean; isReleased?: boolean; ottPlatform?: string | null }>
   getStreamProgress: (tmdbId: number, mediaType: string, season?: number | null, episode?: number | null) => Promise<any>
   updateStreamProgress: (entry: any) => void
   getStreamContinueWatching: () => Promise<any[]>
@@ -294,6 +307,7 @@ interface Api {
   ftGetComments: (videoId: string, options?: { sortBy?: 'top' | 'new'; continuation?: string | null }) => Promise<{ comments: import('./types').FtComment[]; continuation: string | null; commentCount: number | null; disabled: boolean } | { error: string }>
   ftSetFrameQuality?: (quality: string) => Promise<{ ok: boolean; error?: string }>
   ftGetFrameQuality?: () => Promise<{ quality: string | null; available?: string[] }>
+  ftGetFrameTime?: () => Promise<{ currentTime: number; duration?: number | null; playerState?: number | null } | null>
   ftSeekFrame?: (seconds: number, play?: boolean) => Promise<{ ok: boolean; error?: string }>
   ftGetAmbientFrame?: (bounds?: { x: number; y: number; width: number; height: number }) => Promise<{ dataUrl: string | null }>
   ftRequestImportAccess: (input: { name: string; email: string }) => Promise<{ ok?: boolean; message?: string; error?: string }>

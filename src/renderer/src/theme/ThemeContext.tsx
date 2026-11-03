@@ -250,7 +250,7 @@ const ThemeContext = createContext<ThemeContextValue>({
   activeButtonAccent: ACCENT_PALETTE.find((a) => a.id === 'voltage') || ACCENT_PALETTE[9],
   ftBrandLock: true,
   setFtBrandLock: () => {},
-  playerAmbilightMode: 'pause_aura',
+  playerAmbilightMode: 'soft_halo',
   setPlayerAmbilightMode: () => {},
   haloBreathing: false,
   setHaloBreathing: () => {},
@@ -325,9 +325,15 @@ const getInitialFtBrandLock = (): boolean => {
 const getInitialPlayerAmbilightMode = (): PlayerAmbilightMode => {
   try {
     const saved = localStorage.getItem(PLAYER_AMBILIGHT_MODE_KEY) as PlayerAmbilightMode
+    const migrated = localStorage.getItem('mycinema_ambilight_migrated_v2')
+    if (!migrated) {
+      localStorage.setItem('mycinema_ambilight_migrated_v2', 'true')
+      localStorage.setItem(PLAYER_AMBILIGHT_MODE_KEY, 'soft_halo')
+      return 'soft_halo'
+    }
     if (['blackout', 'soft_halo', 'pause_aura'].includes(saved)) return saved
   } catch {}
-  return 'pause_aura'
+  return 'soft_halo'
 }
 
 const getInitialHaloBreathing = (): boolean => {
@@ -561,7 +567,7 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     setButtonAccentModeState('adaptive')
     setCustomButtonAccentState('voltage')
     setFtBrandLockState(true)
-    setPlayerAmbilightModeState('pause_aura')
+    setPlayerAmbilightModeState('soft_halo')
     setHaloBreathingState(false)
     setDetailAmbientShadeState(true)
   }, [])

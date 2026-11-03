@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react'
+import { createPortal } from 'react-dom'
 import { Search, Download as DownloadIcon, Film, Tv, X, Loader2, HardDrive, CheckCircle2, AlertCircle, Pause, Play, FolderOpen, Bookmark, BookmarkCheck, ArrowLeft, Languages, RotateCcw, Share2, Copy, MessageCircle, Send, MoreVertical, Trash, ListMinus, Star, Users, Zap } from 'lucide-react'
 
 import { Video } from '../types'
@@ -978,8 +979,8 @@ const Download: React.FC<DownloadProps> = ({ onPlay, onShowDetail }) => {
       {downloadToShare && (() => {
         const payload = getDownloadSharePayload(downloadToShare)
         if (!payload) return null
-        return (
-          <div className="fixed inset-0 z-[120] flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm" onClick={() => setDownloadToShare(null)}>
+        return createPortal(
+          <div className="fixed inset-0 z-[1000] flex items-center justify-center bg-black/80 p-4 backdrop-blur-md animate-in fade-in duration-200" onClick={() => setDownloadToShare(null)}>
             <div className="w-full max-w-md overflow-hidden rounded-2xl border border-secondary bg-surface shadow-2xl" onClick={e => e.stopPropagation()}>
               <div className="flex items-center justify-between border-b border-secondary px-5 py-4">
                 <div className="flex items-center gap-3">
@@ -1030,7 +1031,8 @@ const Download: React.FC<DownloadProps> = ({ onPlay, onShowDetail }) => {
                 </div>
               </div>
             </div>
-          </div>
+          </div>,
+          document.body
         )
       })()}
 

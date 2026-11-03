@@ -72,7 +72,7 @@ export const safeDeleteStreamProgress = async (
 /** #3: follow + new-episode alerts. Main (app-settings.json) is source of truth. */
 export const NOTIFY_NEW_EPISODES_KEY = 'mycinema_notify_new_episodes'
 export const FOLLOW_CHECK_STORAGE_KEY = 'mycinema_follow_check_at'
-export const FOLLOW_CHECK_THROTTLE_MS = 20 * 3600 * 1000
+export const FOLLOW_CHECK_THROTTLE_MS = 2 * 3600 * 1000
 export const FOLLOW_TOAST_EVENT = 'mycinema-following-toast'
 
 export const isNewEpisodeNotifyEnabled = () => {
@@ -136,11 +136,68 @@ export const safeCheckSeriesUpdates = async (
   }
 }
 
-export const safeCheckFollowedUpdates = async (): Promise<any[] | null> => {
+export const safeCheckFollowedUpdates = async (force = false): Promise<any[] | null> => {
   try {
     const fn = streamBridge()?.checkFollowedUpdates
     if (typeof fn !== 'function') return null
-    return (await fn.call(streamBridge())) || []
+    return (await fn.call(streamBridge(), { force })) || []
+  } catch {
+    return null
+  }
+}
+
+export const safeFollowMovie = async (input: {
+  tmdb_id: number; title?: string; poster_path?: string | null; backdrop_path?: string | null;
+  overview?: string | null; theatrical_date?: string | null; release_date?: string | null
+}): Promise<{ followed: boolean; isNew?: boolean; isReleased?: boolean; ottPlatform?: string | null }> => {
+  try {
+    const fn = (window as any).api?.followMovie
+    if (typeof fn !== 'function') return { followed: false }
+    return (await fn(input)) || { followed: false }
+  } catch {
+    return { followed: false }
+  }
+}
+
+export const safeUnfollowMovie = async (tmdbId: number): Promise<void> => {
+  try {
+    await (window as any).api?.unfollowMovie?.(tmdbId)
+  } catch { /* best-effort */ }
+}
+
+export const safeGetFollowedMovies = async (): Promise<any[]> => {
+  try {
+    const fn = (window as any).api?.getFollowedMovies
+    if (typeof fn !== 'function') return []
+    return (await fn()) || []
+  } catch {
+    return []
+  }
+}
+
+export const safeMarkFollowedMovieSeen = async (tmdbId: number): Promise<void> => {
+  try {
+    await (window as any).api?.markFollowedMovieSeen?.(tmdbId)
+  } catch { /* best-effort */ }
+}
+
+export const safeCheckMovieUpdates = async (
+  tmdbId: number
+): Promise<{ checked: boolean; hasNew?: boolean; isReleased?: boolean; ottPlatform?: string | null }> => {
+  try {
+    const fn = (window as any).api?.checkMovieUpdates
+    if (typeof fn !== 'function') return { checked: false }
+    return (await fn(tmdbId)) || { checked: false }
+  } catch {
+    return { checked: false }
+  }
+}
+
+export const safeCheckFollowedMovieUpdates = async (force = false): Promise<any[] | null> => {
+  try {
+    const fn = (window as any).api?.checkFollowedMovieUpdates
+    if (typeof fn !== 'function') return null
+    return (await fn({ force })) || []
   } catch {
     return null
   }

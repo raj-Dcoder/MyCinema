@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { AlertCircle, Check, Download, Loader2, Plus, RotateCcw, Search, Sparkles, Trash2, Users, X } from 'lucide-react'
 import type { FtCategory, FtChannel } from '../../types'
 import { categoryDot, formatRelativeTime } from '../../utils/focusTube'
@@ -284,8 +285,8 @@ const ChannelManager: React.FC<ChannelManagerProps> = ({ categories, initialCate
     onChanged()
   }, [channels, load, onChanged])
 
-  return (
-    <div className="fixed inset-0 z-[65] flex items-start justify-center overflow-y-auto bg-black/70 p-6 pt-16 backdrop-blur-sm">
+  return createPortal(
+    <div className="fixed inset-0 z-[1000] flex items-start justify-center overflow-y-auto bg-black/80 p-6 pt-16 backdrop-blur-md">
       <div className="flex max-h-[calc(100vh-6rem)] w-full max-w-3xl flex-col overflow-hidden rounded-3xl border border-white/10 bg-surface shadow-[0_40px_120px_-30px_rgba(0,0,0,1)]">
         <div className="relative shrink-0 overflow-hidden border-b border-white/[0.07] px-6 py-5">
           <div
@@ -804,7 +805,8 @@ const ChannelManager: React.FC<ChannelManagerProps> = ({ categories, initialCate
           onClose={() => setShowRegisterModal(false)}
         />
       )}
-    </div>
+    </div>,
+    document.body
   )
 }
 

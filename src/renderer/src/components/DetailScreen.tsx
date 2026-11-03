@@ -1,15 +1,17 @@
-import React, { useEffect, useRef, useState } from 'react'
+import React, { useEffect, useMemo, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import hdHub4uLogo from '../assets/site-logos/hdhub4u.webp'
 import katMovieHdLogo from '../assets/site-logos/katmoviehd.jpg'
 import { cleanIpcError } from '../utils/ipcError'
-import { X, Play, Info, Calendar, CalendarDays, Clock, Star, FolderOpen, Film, Music, Subtitles, HardDrive, ChevronDown, ChevronUp, Bookmark, Share2, Search, Zap, Users, Download, AlertTriangle, Clapperboard, Loader2, ExternalLink, Languages, CheckCircle2, Copy, MessageCircle, Send, Trash2, Bell, BellRing, Hourglass, Layers, Plus } from 'lucide-react'
-import { Video, WatchlistIntent } from '../types'
+import { X, Play, Info, Calendar, CalendarDays, Clock, Star, FolderOpen, Film, Music, Subtitles, HardDrive, ChevronDown, ChevronUp, Bookmark, Share2, Search, Zap, Users, Download, AlertTriangle, Clapperboard, Loader2, ExternalLink, Languages, CheckCircle2, Copy, MessageCircle, Send, Trash2, Bell, BellRing, Hourglass, Layers, Plus, Tv, AlertCircle, BookOpen, MapPin, Compass, Sparkles } from 'lucide-react'
+import { Video, WatchlistIntent, TmdbFranchise, TmdbFranchisePart, TmdbProvider } from '../types'
 import { useTheme } from '../theme/ThemeContext'
 import { getWatchlistIntent, normalizeWatchlistIntent, WATCHLIST_INTENT_META } from '../utils/watchlistIntent'
 import { ShareHintGuide, DeleteHintGuide, FollowGuide } from './FeatureGuides'
 import { getTorrentSourceHealthScore, getTorrentSourceSpeedLabel, isHevcSource } from '../utils/torrentSources'
-import { isOnlineProgressEnabled, isNewEpisodeNotifyEnabled, formatResumeTime, formatSeasonEpisode, getTorrentFileQueryIndex, safeGetStreamHistory, safeGetStreamProgress, safeDeleteStreamProgress, safeFollowSeries, safeUnfollowSeries, safeGetFollowedSeries, safeCheckSeriesUpdates, safeMarkFollowedSeen } from '../utils/streamResume'
+import { isOnlineProgressEnabled, isNewEpisodeNotifyEnabled, formatResumeTime, formatSeasonEpisode, getTorrentFileQueryIndex, safeGetStreamHistory, safeGetStreamProgress, safeDeleteStreamProgress, safeFollowSeries, safeUnfollowSeries, safeGetFollowedSeries, safeCheckSeriesUpdates, safeMarkFollowedSeen, safeFollowMovie, safeUnfollowMovie, safeGetFollowedMovies, safeMarkFollowedMovieSeen } from '../utils/streamResume'
 import { getMediaUnitIdentity, getVersionLabel, groupMediaVersions, pickPreferredVersion } from '../utils/mediaVersions'
+import { getStreamingDeepLink } from '../utils/streamingLinks'
 
 interface DetailScreenProps {
   video: Video
@@ -17,6 +19,7 @@ interface DetailScreenProps {
   onClose: () => void
   onPlay: (video: Video) => void
   onWatchlistChange?: () => void
+  onShowDetail?: (video: Video) => void
 }
 
 // ─── Media Info helpers ───────────────────────────────────────────────────────
@@ -119,6 +122,87 @@ const getVibeColor = (vibe: string) => {
   }
 }
 
+const getVibeIcon = (vibe: string) => {
+  const lower = vibe.toLowerCase()
+  if (lower.includes('novel') || lower.includes('book') || lower.includes('adaptation')) {
+    return <BookOpen size={11} className="text-white/45 shrink-0" />
+  }
+  if (lower.includes(',') || lower.includes('city') || lower.includes('island') || lower.includes('york') || lower.includes('angeles') || lower.includes('chicago') || lower.includes('london') || lower.includes('paris') || lower.includes('tokyo') || lower.includes('portland')) {
+    return <MapPin size={11} className="text-white/45 shrink-0" />
+  }
+  if (lower.includes('survival') || lower.includes('mission') || lower.includes('quest') || lower.includes('adventure') || lower.includes('journey')) {
+    return <Compass size={11} className="text-white/45 shrink-0" />
+  }
+  if (lower.includes('magic') || lower.includes('space') || lower.includes('supernatural') || lower.includes('sci-fi') || lower.includes('alien')) {
+    return <Sparkles size={11} className="text-white/45 shrink-0" />
+  }
+  return null
+}
+
+const formatVibeLabel = (vibe: string) => {
+  const lowerWords = new Set(['on', 'or', 'and', 'the', 'in', 'of', 'at', 'by', 'for', 'with', 'a', 'an'])
+  return vibe
+    .split(' ')
+    .map((word, idx) => {
+      const lower = word.toLowerCase()
+      if (idx > 0 && lowerWords.has(lower)) {
+        return lower
+      }
+      return word.charAt(0).toUpperCase() + word.slice(1).toLowerCase()
+    })
+    .join(' ')
+}
+
+const getAdaptiveVibeClass = (vibe: string, isLight: boolean) => {
+  const lower = vibe.toLowerCase()
+
+  // 1. Amber / Terracotta (Book, Novel, Drama, Adaptation, Romance, History, Comfort)
+  if (lower.includes('novel') || lower.includes('book') || lower.includes('drama') || lower.includes('adaptation') || lower.includes('romance') || lower.includes('history') || lower.includes('comfort')) {
+    return isLight
+      ? 'bg-amber-50/95 border-amber-300 text-amber-950 shadow-sm hover:bg-amber-100'
+      : 'bg-amber-950/40 border-amber-500/40 text-amber-200 backdrop-blur-md hover:bg-amber-900/50 hover:border-amber-400/60'
+  }
+
+  // 2. Sky Blue / Slate (Locations, Cities, Mystery, Crime, Detective, Law, Investigation)
+  if (lower.includes(',') || lower.includes('city') || lower.includes('york') || lower.includes('portland') || lower.includes('angeles') || lower.includes('chicago') || lower.includes('london') || lower.includes('paris') || lower.includes('mystery') || lower.includes('crime') || lower.includes('detective')) {
+    return isLight
+      ? 'bg-sky-50/95 border-sky-300 text-sky-950 shadow-sm hover:bg-sky-100'
+      : 'bg-sky-950/40 border-sky-500/40 text-sky-200 backdrop-blur-md hover:bg-sky-900/50 hover:border-sky-400/60'
+  }
+
+  // 3. Teal / Cyan / Emerald (Rescue, Mission, Survival, Action, Chase, Heist, Thrill, Rush, Quest)
+  if (lower.includes('rescue') || lower.includes('mission') || lower.includes('survival') || lower.includes('action') || lower.includes('chase') || lower.includes('heist') || lower.includes('thrill') || lower.includes('rush') || lower.includes('quest')) {
+    return isLight
+      ? 'bg-teal-50/95 border-teal-300 text-teal-950 shadow-sm hover:bg-teal-100'
+      : 'bg-teal-950/40 border-teal-500/40 text-teal-200 backdrop-blur-md hover:bg-teal-900/50 hover:border-teal-400/60'
+  }
+
+  // 4. Purple / Fuchsia / Violet (Forest, Nature, Space, Sci-Fi, Supernatural, Magic, Fantasy, Mind Trip)
+  if (lower.includes('forest') || lower.includes('nature') || lower.includes('space') || lower.includes('sci-fi') || lower.includes('supernatural') || lower.includes('magic') || lower.includes('fantasy') || lower.includes('mind') || lower.includes('trip') || lower.includes('alien') || lower.includes('chaos')) {
+    return isLight
+      ? 'bg-purple-50/95 border-purple-300 text-purple-950 shadow-sm hover:bg-purple-100'
+      : 'bg-purple-950/40 border-purple-500/40 text-purple-200 backdrop-blur-md hover:bg-purple-900/50 hover:border-purple-400/60'
+  }
+
+  // Fallback cycling through the 4 harmonic palettes based on vibe string hash:
+  const hash = vibe.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0)
+  const palettes = [
+    isLight
+      ? 'bg-amber-50/95 border-amber-300 text-amber-950 shadow-sm hover:bg-amber-100'
+      : 'bg-amber-950/40 border-amber-500/40 text-amber-200 backdrop-blur-md hover:bg-amber-900/50 hover:border-amber-400/60',
+    isLight
+      ? 'bg-sky-50/95 border-sky-300 text-sky-950 shadow-sm hover:bg-sky-100'
+      : 'bg-sky-950/40 border-sky-500/40 text-sky-200 backdrop-blur-md hover:bg-sky-900/50 hover:border-sky-400/60',
+    isLight
+      ? 'bg-teal-50/95 border-teal-300 text-teal-950 shadow-sm hover:bg-teal-100'
+      : 'bg-teal-950/40 border-teal-500/40 text-teal-200 backdrop-blur-md hover:bg-teal-900/50 hover:border-teal-400/60',
+    isLight
+      ? 'bg-purple-50/95 border-purple-300 text-purple-950 shadow-sm hover:bg-purple-100'
+      : 'bg-purple-950/40 border-purple-500/40 text-purple-200 backdrop-blur-md hover:bg-purple-900/50 hover:border-purple-400/60'
+  ]
+  return palettes[hash % palettes.length]
+}
+
 const hasSourceEpisodeMarker = (source: any) => (
   typeof source.parsedEpisode === 'number' ||
   /\bs\d{1,2}[\s._-]*e(?:p)?[\s._-]*\d{1,3}\b/i.test(source.title || '') ||
@@ -164,13 +248,17 @@ const MYCINEMA_SHARE_BASE_URL = (
   'https://mycinema-share.rajveersinghranaofficial.workers.dev'
 ).replace(/\/+$/, '')
 
-const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource, onClose, onPlay, onWatchlistChange }) => {
-  const { detailAmbientShade, atmosphericStudioEnabled } = useTheme()
+const seriesSeasonCountCache = new Map<number, number>()
+
+const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource, onClose, onPlay, onWatchlistChange, onShowDetail }) => {
+  const { theme, detailAmbientShade, atmosphericStudioEnabled } = useTheme()
+  const isLight = theme === 'light'
   const isAmbientShadeActive = atmosphericStudioEnabled && detailAmbientShade
   const [episodes, setEpisodes] = useState<Video[]>([])
   const [localVersions, setLocalVersions] = useState<Video[]>([])
   const [seriesCatalog, setSeriesCatalog] = useState<SeriesCatalogEpisode[]>([])
   const [catalogLoading, setCatalogLoading] = useState(false)
+  const [catalogLoaded, setCatalogLoaded] = useState(false)
   const [loading, setLoading] = useState(false)
   const [showInfoModal, setShowInfoModal] = useState(false)
   const [showTrailerModal, setShowTrailerModal] = useState(false)
@@ -184,6 +272,10 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
   const trailerCacheRef = useRef<Map<string, any>>(new Map())
   const [showAllAudio, setShowAllAudio] = useState(false)
   const [selectedSeason, setSelectedSeason] = useState<number | null>(null)
+  const [isEpisodesExpanded, setIsEpisodesExpanded] = useState(false)
+  const [franchise, setFranchise] = useState<TmdbFranchise | null>(null)
+  const [franchiseLoading, setFranchiseLoading] = useState(false)
+  const [localLibraryVideos, setLocalLibraryVideos] = useState<Video[]>([])
   // Local rows come from SQLite where booleans are 0/1 numbers — coerce to a
   // real boolean, otherwise `{isWatchlist && ...}` renders a stray "0".
   const [isWatchlist, setIsWatchlist] = useState(Boolean(video.is_watchlist))
@@ -210,25 +302,73 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
   const [collectionToast, setCollectionToast] = useState<string | null>(null)
   const collectionReqRef = useRef(0)
   const collectionToastTimer = useRef<number | null>(null)
+  const mainScrollRef = useRef<HTMLDivElement>(null)
 
   // Keep the bookmark + intent pill in sync when a different title opens.
   useEffect(() => {
+    mainScrollRef.current?.scrollTo({ top: 0, behavior: "smooth" })
     setIsWatchlist(Boolean(video.is_watchlist))
     setWatchlistIntent(getWatchlistIntent(video as any))
     setShowIntentPicker(false)
     setIntentBusy(null)
     setIntentRemoving(false)
+    setIsEpisodesExpanded(false)
     setShowCollectionMenu(false)
     setCollections([])
     setCreatingCollection(false)
     setNewCollectionName('')
     setCollectionToast(null)
+    setCatalogLoaded(false)
     collectionReqRef.current += 1
     if (collectionToastTimer.current) {
       window.clearTimeout(collectionToastTimer.current)
       collectionToastTimer.current = null
     }
   }, [video.id, video.tmdb_id, video.is_watchlist])
+
+  useEffect(() => {
+    let cancelled = false
+    setFranchise(null)
+
+    if (video.type === 'movie' && video.tmdb_id) {
+      setFranchiseLoading(true)
+      window.api.getTmdbFranchise(video.tmdb_id)
+        .then((data: any) => {
+          if (!cancelled) {
+            setFranchise(data)
+            setFranchiseLoading(false)
+          }
+        })
+        .catch((err: any) => {
+          console.error('[DetailScreen] Failed to fetch franchise:', err)
+          if (!cancelled) {
+            setFranchise(null)
+            setFranchiseLoading(false)
+          }
+        })
+    } else {
+      setFranchiseLoading(false)
+    }
+
+    return () => {
+      cancelled = true
+    }
+  }, [video.id, video.tmdb_id, video.type])
+
+  useEffect(() => {
+    let cancelled = false
+    window.api.getVideos()
+      .then((all: any) => {
+        if (!cancelled && Array.isArray(all)) {
+          setLocalLibraryVideos(all)
+        }
+      })
+      .catch(() => {})
+
+    return () => {
+      cancelled = true
+    }
+  }, [])
 
   // Titles opened from Hero/Trending carry no flags — verify against the DB so
   // the bookmark reflects what's actually saved (and picks up its lane).
@@ -294,11 +434,31 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
   useEffect(() => {
     let cancelled = false
     setIsFollowing(false)
-    if (video.type !== 'series' || !video.tmdb_id) return
-    safeGetFollowedSeries().then(list => {
-      if (cancelled) return
-      setIsFollowing((list || []).some(f => Number(f.tmdb_id) === video.tmdb_id))
-    }).catch(() => {})
+    if (!video.tmdb_id) return
+
+    if (video.type === 'series') {
+      safeGetFollowedSeries().then(list => {
+        if (cancelled) return
+        setIsFollowing((list || []).some(f => Number(f.tmdb_id) === video.tmdb_id))
+      }).catch(() => {})
+    } else if (video.type === 'movie') {
+      safeGetFollowedMovies().then(list => {
+        if (cancelled) return
+        const match = (list || []).find(f => Number(f.tmdb_id) === video.tmdb_id)
+        if (match) {
+          // If the movie has dropped on OTT and the user opens/views it:
+          // automatically remove from following as requested
+          if (match.is_released_ott && video.tmdb_id) {
+            void safeUnfollowMovie(video.tmdb_id)
+            void safeMarkFollowedMovieSeen(video.tmdb_id)
+            setIsFollowing(false)
+          } else {
+            setIsFollowing(true)
+          }
+        }
+      }).catch(() => {})
+    }
+
     return () => { cancelled = true }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [video.tmdb_id, video.type])
@@ -306,29 +466,48 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
     if (!video.tmdb_id || followBusy) return
     setFollowBusy(true)
     try {
-      if (isFollowing) {
-        await safeUnfollowSeries(video.tmdb_id)
-        setIsFollowing(false)
-        setNewDrop(null)
-      } else {
-        const res = await safeFollowSeries({
-          tmdb_id: video.tmdb_id,
-          title: displayTitle,
-          poster_path: video.poster_path ?? null,
-          backdrop_path: video.backdrop_path ?? null,
-          overview: video.overview ?? null,
-          season: video.season ?? null,
-          episode: video.episode ?? null
-        })
-        if (res?.followed) {
-          setIsFollowing(true)
-          // A fresh drop may already be out (followed mid-season) — surface
-          // the strip without waiting for any scheduled check.
-          safeCheckSeriesUpdates(video.tmdb_id).then(check => {
-            if (check?.hasNew && check.season != null && check.episode != null) {
-              setNewDrop({ season: check.season, episode: check.episode })
-            }
-          }).catch(() => {})
+      if (video.type === 'series') {
+        if (isFollowing) {
+          await safeUnfollowSeries(video.tmdb_id)
+          setIsFollowing(false)
+          setNewDrop(null)
+        } else {
+          const res = await safeFollowSeries({
+            tmdb_id: video.tmdb_id,
+            title: displayTitle,
+            poster_path: video.poster_path ?? null,
+            backdrop_path: video.backdrop_path ?? null,
+            overview: video.overview ?? null,
+            season: video.season ?? null,
+            episode: video.episode ?? null
+          })
+          if (res?.followed) {
+            setIsFollowing(true)
+            // A fresh drop may already be out (followed mid-season) — surface
+            // the strip without waiting for any scheduled check.
+            safeCheckSeriesUpdates(video.tmdb_id).then(check => {
+              if (check?.hasNew && check.season != null && check.episode != null) {
+                setNewDrop({ season: check.season, episode: check.episode })
+              }
+            }).catch(() => {})
+          }
+        }
+      } else if (video.type === 'movie') {
+        if (isFollowing) {
+          await safeUnfollowMovie(video.tmdb_id)
+          setIsFollowing(false)
+        } else {
+          const res = await safeFollowMovie({
+            tmdb_id: video.tmdb_id,
+            title: displayTitle,
+            poster_path: video.poster_path ?? null,
+            backdrop_path: video.backdrop_path ?? null,
+            overview: video.overview ?? null,
+            release_date: video.release_date ?? null
+          })
+          if (res?.followed) {
+            setIsFollowing(true)
+          }
         }
       }
     } finally {
@@ -343,8 +522,59 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
   const [isOverflowing, setIsOverflowing] = useState(false)
   const [releaseInfo, setReleaseInfo] = useState<import('../types').TmdbReleaseInfo | null>(null)
   const [releaseInfoLoading, setReleaseInfoLoading] = useState(false)
+  const isMovieOnOtt = video.type === 'movie' && Boolean(
+    video.is_released_ott ||
+    (releaseInfo?.providers && releaseInfo.providers.length > 0) ||
+    (releaseInfo?.digitalReleaseDate && new Date(releaseInfo.digitalReleaseDate).getTime() <= Date.now()) ||
+    (releaseInfo?.type === 'digital' && releaseInfo?.releaseDate && new Date(releaseInfo.releaseDate).getTime() <= Date.now())
+  )
+
+  useEffect(() => {
+    if (isMovieOnOtt && video.tmdb_id && isFollowing) {
+      void safeUnfollowMovie(video.tmdb_id)
+      void safeMarkFollowedMovieSeen(video.tmdb_id)
+      setIsFollowing(false)
+    }
+  }, [isMovieOnOtt, video.tmdb_id, isFollowing])
+
+  const effectiveReleaseDate = useMemo(() => {
+    const candidateDates = [
+      video.release_date,
+      (video as any).first_air_date,
+      releaseInfo?.releaseDate,
+      (releaseInfo as any)?.theatricalReleaseDate,
+      releaseInfo?.digitalReleaseDate
+    ].filter((d): d is string => Boolean(d && typeof d === 'string'))
+
+    const fullDateCandidate = candidateDates.find(d => /^\d{4}-\d{2}-\d{2}/.test(d.trim()))
+    return fullDateCandidate || candidateDates[0] || null
+  }, [video.release_date, (video as any).first_air_date, releaseInfo])
+
+  const isContentUpcoming = useMemo(() => {
+    const parsedTime = effectiveReleaseDate ? new Date(effectiveReleaseDate).getTime() : NaN
+    if (!isNaN(parsedTime) && parsedTime > Date.now()) return true
+    const currentYear = new Date().getFullYear()
+    const yearNum = typeof video.release_year === 'number'
+      ? video.release_year
+      : parseInt(String(video.release_year || effectiveReleaseDate?.slice(0, 4) || ''), 10)
+    if (yearNum && yearNum > currentYear) return true
+    return false
+  }, [effectiveReleaseDate, video.release_year])
+
+  const formattedUpcomingReleaseDate = useMemo(() => {
+    if (!isContentUpcoming || !effectiveReleaseDate) return null
+    const match = String(effectiveReleaseDate).trim().match(/^(\d{4})-(\d{2})-(\d{2})/)
+    if (match) {
+      const d = new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]))
+      if (!isNaN(d.getTime())) {
+        return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+      }
+    }
+    return null
+  }, [isContentUpcoming, effectiveReleaseDate])
   const [keywordsLoading, setKeywordsLoading] = useState(false)
   const overviewRef = useRef<HTMLParagraphElement>(null)
+  const officialSourcesRef = useRef<HTMLDivElement>(null)
   const [expandedOverview, setExpandedOverview] = useState(false)
   const [tmdbKeywords, setTmdbKeywords] = useState<string[]>([])
   const [isWebPopupOpen, setIsWebPopupOpen] = useState(false)
@@ -528,6 +758,19 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [showCollectionMenu, collectionBusyId, createBusy])
+
+  // Keyboard: Esc collapses the episodes accordion if expanded.
+  useEffect(() => {
+    if (!isEpisodesExpanded) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.stopPropagation()
+        setIsEpisodesExpanded(false)
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [isEpisodesExpanded])
 
   const handleIntentSelect = async (intent: WatchlistIntent) => {
     if (intentBusy || intentRemoving) return
@@ -1193,6 +1436,55 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
     window.api.openWebPopup(url, `${searchTitle} — Letterboxd`)
   }
 
+  const handleOpenStreamingProvider = async (provider: TmdbProvider) => {
+    const url = getStreamingDeepLink(provider, displayTitle, releaseInfo?.justWatchLink)
+    try {
+      const opened = await window.api.openExternalUrl?.(url)
+      if (!opened) {
+        window.dispatchEvent(new CustomEvent('web-popup-opened'))
+        setIsWebPopupOpen(true)
+        const clearBlurOnFocus = () => {
+          window.dispatchEvent(new CustomEvent('web-popup-closed'))
+          setIsWebPopupOpen(false)
+          window.removeEventListener('focus', clearBlurOnFocus)
+        }
+        window.addEventListener('focus', clearBlurOnFocus)
+        await window.api.openWebPopup(url, `${displayTitle} — ${provider.provider_name}`)
+      }
+    } catch {
+      window.dispatchEvent(new CustomEvent('web-popup-opened'))
+      setIsWebPopupOpen(true)
+      const clearBlurOnFocus = () => {
+        window.dispatchEvent(new CustomEvent('web-popup-closed'))
+        setIsWebPopupOpen(false)
+        window.removeEventListener('focus', clearBlurOnFocus)
+      }
+      window.addEventListener('focus', clearBlurOnFocus)
+      await window.api.openWebPopup(url, `${displayTitle} — ${provider.provider_name}`)
+    }
+  }
+
+  const handleOpenJustWatch = async () => {
+    if (!releaseInfo?.justWatchLink) return
+    const url = releaseInfo.justWatchLink
+    try {
+      const opened = await window.api.openExternalUrl?.(url)
+      if (!opened) {
+        window.dispatchEvent(new CustomEvent('web-popup-opened'))
+        setIsWebPopupOpen(true)
+        const clearBlurOnFocus = () => {
+          window.dispatchEvent(new CustomEvent('web-popup-closed'))
+          setIsWebPopupOpen(false)
+          window.removeEventListener('focus', clearBlurOnFocus)
+        }
+        window.addEventListener('focus', clearBlurOnFocus)
+        await window.api.openWebPopup(url, `${displayTitle} — JustWatch`)
+      }
+    } catch {
+      await window.api.openWebPopup(url, `${displayTitle} — JustWatch`)
+    }
+  }
+
   const getSharePayload = () => {
     if (!video.tmdb_id || (video.type !== 'movie' && video.type !== 'series')) return null
 
@@ -1362,17 +1654,30 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
 
     if (video.type === 'series' && video.tmdb_id) {
       setCatalogLoading(true)
+      setCatalogLoaded(false)
       window.api.getTmdbSeriesCatalog(video.tmdb_id).then(catalog => {
-        if (!cancelled) setSeriesCatalog(catalog || [])
+        if (!cancelled) {
+          setSeriesCatalog(catalog || [])
+          if (catalog && catalog.length > 0) {
+            const seasonNums = new Set(catalog.map((e: any) => e.seasonNumber || 1))
+            if (seasonNums.size > 0) {
+              seriesSeasonCountCache.set(video.tmdb_id!, seasonNums.size)
+            }
+          }
+        }
       }).catch(err => {
         console.error('[DetailScreen] Failed to load episode catalog:', err)
         if (!cancelled) setSeriesCatalog([])
       }).finally(() => {
-        if (!cancelled) setCatalogLoading(false)
+        if (!cancelled) {
+          setCatalogLoading(false)
+          setCatalogLoaded(true)
+        }
       })
     } else {
       setSeriesCatalog([])
       setCatalogLoading(false)
+      setCatalogLoaded(true)
     }
 
     return () => {
@@ -1479,6 +1784,61 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
     .map(Number)
     .sort((a, b) => a - b)
   const seasonKey = seasons.join(',')
+
+  useEffect(() => {
+    if (video.type === 'series' && video.tmdb_id) {
+      if (seasons.length > 0) {
+        seriesSeasonCountCache.set(video.tmdb_id, seasons.length)
+      } else if (trailerSeasons.length > 0 && !seriesSeasonCountCache.has(video.tmdb_id)) {
+        seriesSeasonCountCache.set(video.tmdb_id, trailerSeasons.length)
+      }
+    }
+  }, [video.type, video.tmdb_id, seasons.length, trailerSeasons.length])
+
+  const activeSeasonNumber = selectedSeason || seasons[0] || 1
+  const currentSeasonEpisodes = episodesBySeason[activeSeasonNumber] || []
+  const releasedEpisodesCount = currentSeasonEpisodes.filter(e => e.released || e.localVideo).length
+  const upcomingEpisodesCount = currentSeasonEpisodes.filter(e => !e.released && !e.localVideo).length
+  const libraryEpisodesCount = currentSeasonEpisodes.filter(e => Boolean(e.localVideo)).length
+
+  // Determine the smartest Up Next or Resume target for the series
+  const upNextEpisode = React.useMemo(() => {
+    if (video.type !== 'series' || episodeRows.length === 0) return null
+
+    // 1. In-progress episode (Resume)
+    const inProgress = episodeRows.find(ep => {
+      if (ep.localVideo && (ep.localVideo.last_watched_time || 0) > 10 && !ep.localVideo.completed) {
+        return true
+      }
+      const online = onlineEpisodeMap.get(`${ep.season}:${ep.episode}`)
+      if (online && online.position >= 10 && !online.completed) {
+        return true
+      }
+      return false
+    })
+    if (inProgress) return { ep: inProgress, type: 'resume' as const }
+
+    // 2. Next episode after last completed
+    let lastCompletedIdx = -1
+    episodeRows.forEach((ep, idx) => {
+      const isCompleted = ep.localVideo?.completed || onlineEpisodeMap.get(`${ep.season}:${ep.episode}`)?.completed
+      if (isCompleted) lastCompletedIdx = idx
+    })
+    if (lastCompletedIdx >= 0 && lastCompletedIdx < episodeRows.length - 1) {
+      const candidate = episodeRows[lastCompletedIdx + 1]
+      if (candidate.released || candidate.localVideo) {
+        return { ep: candidate, type: 'next' as const }
+      }
+    }
+
+    // 3. First released episode (Start)
+    const firstReleased = episodeRows.find(ep => ep.released || ep.localVideo)
+    if (firstReleased) {
+      return { ep: firstReleased, type: 'start' as const }
+    }
+
+    return null
+  }, [video.type, episodeRows, onlineEpisodeMap])
 
   useEffect(() => {
     if (video.type !== 'series' || seasons.length === 0) return
@@ -1604,8 +1964,31 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
     return `${m}m`
   }
 
+  const formatEpisodeTitle = (title?: string) => {
+    if (!title) return ''
+    const trimmed = title.trim()
+    if (trimmed === trimmed.toUpperCase() && trimmed.length > 3) {
+      return trimmed
+        .toLowerCase()
+        .replace(/(?:^|\s|-|\/)\S/g, char => char.toUpperCase())
+    }
+    return trimmed
+  }
+
+  const formatEpisodeAirDate = (dateStr?: string | null) => {
+    if (!dateStr) return null
+    try {
+      const d = new Date(dateStr)
+      if (isNaN(d.getTime())) return dateStr
+      return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })
+    } catch {
+      return dateStr
+    }
+  }
+
   const visibleVibes = tmdbKeywords
-    .map(k => k.split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' '))
+    .filter(k => Boolean(k && k.trim()))
+    .map(formatVibeLabel)
     .slice(0, 5)
   const sharePayload = getSharePayload()
   const sourceActionLabel = video.type === 'series'
@@ -1613,6 +1996,114 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
     : isLocalMedia
       ? 'Versions & Sources'
       : 'Choose Source'
+
+  const seriesAccordionRef = useRef<HTMLDivElement>(null)
+  const pillLeftContentRef = useRef<HTMLDivElement>(null)
+  const pillRightContentRef = useRef<HTMLDivElement>(null)
+  const newDropRef = useRef<HTMLDivElement>(null)
+  const [collapsedPillWidth, setCollapsedPillWidth] = useState<number | null>(null)
+
+  // Measure the collapsed pill's natural unconstrained width (strictly from the header row, never the catalog below)
+  useEffect(() => {
+    if (!isEpisodesExpanded) {
+      const leftW = pillLeftContentRef.current ? pillLeftContentRef.current.scrollWidth : 0
+      const rightW = pillRightContentRef.current ? pillRightContentRef.current.scrollWidth : 0
+      const bannerW = newDrop && newDropRef.current ? newDropRef.current.scrollWidth : 0
+
+      // Natural width = left items + right items + gap (12px) + horizontal padding (28px) + border (2px)
+      const headerContentWidth = leftW > 0 && rightW > 0 ? (leftW + rightW + 42) : 0
+      const naturalWidth = Math.max(headerContentWidth, bannerW > 0 ? (bannerW + 32) : 0)
+
+      if (naturalWidth > 0) {
+        setCollapsedPillWidth(Math.ceil(naturalWidth))
+      }
+    }
+  }, [
+    isEpisodesExpanded,
+    newDrop,
+    activeSeasonNumber,
+    currentSeasonEpisodes.length,
+    releasedEpisodesCount,
+    upcomingEpisodesCount,
+    libraryEpisodesCount
+  ])
+
+  const scrollAnimRef = useRef<number | null>(null)
+
+  // Clean up any ongoing scroll animation on unmount
+  useEffect(() => {
+    return () => {
+      if (scrollAnimRef.current) {
+        cancelAnimationFrame(scrollAnimRef.current)
+      }
+    }
+  }, [])
+
+  // Simultaneous width/height expansion + smooth progressive auto-scroll
+  // Uses continuous rAF loop to dynamically track expanding scrollHeight from frame 1
+  const handleToggleEpisodes = React.useCallback(() => {
+    setIsEpisodesExpanded(prev => {
+      const willExpand = !prev
+
+      // Always cancel any in-flight scroll animation first
+      if (scrollAnimRef.current) {
+        cancelAnimationFrame(scrollAnimRef.current)
+        scrollAnimRef.current = null
+      }
+
+      if (willExpand) {
+        // Run on next frame so DOM expansion has initialized
+        requestAnimationFrame(() => {
+          const scrollContainer = mainScrollRef.current
+          const accordionEl = seriesAccordionRef.current
+          if (!scrollContainer || !accordionEl) return
+
+          const containerRect = scrollContainer.getBoundingClientRect()
+          const accordionRect = accordionEl.getBoundingClientRect()
+
+          const startScroll = scrollContainer.scrollTop
+          const accordionOffsetTop = accordionRect.top - containerRect.top + startScroll
+          // Desired viewing position: accordion header comfortably 75px below top
+          const targetScroll = Math.max(0, accordionOffsetTop - 75)
+
+          // Only scroll if there's meaningful distance
+          if (Math.abs(startScroll - targetScroll) <= 12) return
+
+          const duration = 400
+          const startTime = performance.now()
+
+          // Yield immediately if user manually touches scroll wheel
+          const onUserWheel = () => {
+            if (scrollAnimRef.current) {
+              cancelAnimationFrame(scrollAnimRef.current)
+              scrollAnimRef.current = null
+            }
+          }
+          scrollContainer.addEventListener('wheel', onUserWheel, { once: true, passive: true })
+
+          const animateScroll = (currentTime: number) => {
+            const elapsed = currentTime - startTime
+            const progress = Math.min(1, elapsed / duration)
+            // Ease-out cubic curve (exact match to CSS cubic-bezier(0.16,1,0.3,1))
+            const ease = 1 - Math.pow(1 - progress, 3)
+
+            scrollContainer.scrollTop = startScroll + (targetScroll - startScroll) * ease
+
+            if (progress < 1) {
+              scrollAnimRef.current = requestAnimationFrame(animateScroll)
+            } else {
+              scrollAnimRef.current = null
+              scrollContainer.removeEventListener('wheel', onUserWheel)
+            }
+          }
+
+          scrollAnimRef.current = requestAnimationFrame(animateScroll)
+        })
+      }
+      return willExpand
+    })
+  }, [])
+
   return (
     <div
       style={{ left: 'var(--sidebar-width, 5rem)' }}
@@ -1656,7 +2147,7 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
         </div>
 
         {/* Content Section */}
-        <div className="flex-1 overflow-y-auto scrollbar-thin relative z-10 w-full animate-in slide-in-from-bottom-[100px] fade-in duration-700 [animation-timing-function:cubic-bezier(0.16,1,0.3,1)]">
+        <div ref={mainScrollRef} className="flex-1 overflow-y-auto scrollbar-thin relative z-10 w-full animate-in slide-in-from-bottom-[100px] fade-in duration-700 [animation-timing-function:cubic-bezier(0.16,1,0.3,1)]">
           <div className="min-h-full flex flex-col">
             {/* Spacer to push content down (reduced to move content higher) */}
             <div className="h-[13vh] shrink-0 pointer-events-none" />
@@ -1688,97 +2179,226 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
             </div>
 
             {/* Meta Info Row */}
-            <div className="flex flex-wrap items-center gap-2 text-[10px] font-black text-white/70 uppercase tracking-[0.13em]">
-              {video.vote_average ? (
-                <div className="flex items-center gap-1.5 bg-white/[0.07] px-3 py-1.5 rounded-full border border-white/10 text-white">
-                  <Star size={12} className="text-yellow-500 fill-yellow-500" />
-                  <span className="text-white/45">TMDB</span>
-                  <span>{video.vote_average.toFixed(1)}</span>
-                </div>
-              ) : null}
-              {video.release_year ? (
-                <div className="flex items-center gap-1.5 bg-white/[0.06] px-3 py-1.5 rounded-full border border-white/10">
-                  <Calendar size={12} className="text-white/45" />
-                  <span>{video.release_year}</span>
-                </div>
-              ) : null}
-              {releaseInfoLoading ? (
-                <div aria-hidden className="flex items-center gap-1.5 px-3 py-1.5 rounded-full border border-white/10 bg-white/[0.04] animate-pulse">
-                  <div className="h-3 w-20 rounded-full bg-white/10" />
-                </div>
-              ) : null}
-              {releaseInfo ? (() => {
-                let isFuture = false
-                let formattedDate = ''
-                
-                if (releaseInfo.releaseDate) {
-                  const rDate = new Date(releaseInfo.releaseDate)
-                  if (!isNaN(rDate.getTime())) {
-                    isFuture = rDate > new Date()
-                    formattedDate = rDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+            <div className={`flex flex-wrap items-center gap-2.5 text-xs font-medium ${isLight ? 'text-slate-800' : 'text-white/80'}`}>
+              {/* Smart Rating or Contextual Status Badge */}
+              {(() => {
+                const hasValidRating = typeof video.vote_average === 'number' && video.vote_average > 0
+
+                // 1. Valid TMDB Rating
+                if (hasValidRating) {
+                  return (
+                    <div className="inline-flex items-stretch rounded-lg overflow-hidden border border-amber-500/40 shadow-sm shrink-0">
+                      <div className="bg-amber-500 text-black font-black text-xs flex items-center gap-1 px-2.5 py-1">
+                        <Star size={11} className="fill-black text-black" />
+                        <span>{video.vote_average!.toFixed(1)}</span>
+                      </div>
+                      <div className="bg-black/80 px-2.5 py-1 text-[11px] font-bold text-amber-100 tracking-wider flex items-center border-l border-amber-500/30">
+                        TMDB
+                      </div>
+                    </div>
+                  )
+                }
+
+                // 2. Upcoming / Unreleased content
+                if (isContentUpcoming) {
+                  return (
+                    <div className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-bold tracking-wide shrink-0 ${
+                      isLight
+                        ? 'border border-amber-300 bg-amber-50 text-amber-900 shadow-sm'
+                        : 'border border-amber-500/30 bg-amber-500/15 text-amber-300 shadow-sm'
+                    }`}>
+                      <Calendar size={11} className={isLight ? 'text-amber-700' : 'text-amber-400'} />
+                      <span>Upcoming</span>
+                    </div>
+                  )
+                }
+
+                // 3. New Release with no votes yet (released within last 60 days)
+                const parsedReleaseTime = effectiveReleaseDate ? new Date(effectiveReleaseDate).getTime() : NaN
+                const isRecentRelease = (() => {
+                  if (isNaN(parsedReleaseTime)) return false
+                  const daysSince = (Date.now() - parsedReleaseTime) / (1000 * 60 * 60 * 24)
+                  return daysSince >= 0 && daysSince <= 60
+                })()
+
+                if (isRecentRelease) {
+                  return (
+                    <div className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-bold tracking-wide shrink-0 ${
+                      isLight
+                        ? 'border border-emerald-300 bg-emerald-50 text-emerald-900 shadow-sm'
+                        : 'border border-emerald-500/30 bg-emerald-500/15 text-emerald-300 shadow-sm'
+                    }`}>
+                      <Sparkles size={11} className={isLight ? 'text-emerald-700' : 'text-emerald-400'} />
+                      <span>New Release</span>
+                    </div>
+                  )
+                }
+
+                // 4. TMDB-backed catalog title with 0 votes / unrated
+                const contentCert = (video as any).certification || (video as any).content_rating || ''
+                const alreadyShowsUnratedCert = /^(NR|Not Rated|Unrated)$/i.test(String(contentCert).trim())
+
+                if (video.tmdb_id && !alreadyShowsUnratedCert) {
+                  return (
+                    <div className={`inline-flex items-stretch rounded-lg overflow-hidden border shadow-sm shrink-0 ${
+                      isLight
+                        ? 'border-slate-300 bg-slate-100 text-slate-700'
+                        : 'border-white/15 bg-white/5 text-white/70'
+                    }`}>
+                      <div className={`text-xs font-bold flex items-center gap-1 px-2.5 py-1 ${
+                        isLight ? 'bg-slate-200/80 text-slate-700' : 'bg-white/10 text-white/80'
+                      }`}>
+                        <span>Unrated</span>
+                      </div>
+                      <div className={`px-2 py-1 text-[11px] font-semibold tracking-wider flex items-center border-l ${
+                        isLight ? 'border-slate-300 bg-slate-100 text-slate-500' : 'border-white/10 bg-black/40 text-white/40'
+                      }`}>
+                        TMDB
+                      </div>
+                    </div>
+                  )
+                }
+
+                // 5. Local personal media or when unrated cert already displayed -> clean omission
+                return null
+              })()}
+
+              {/* Inline Metadata with Dot Separators (Image 3) */}
+              {(() => {
+                const detectedQuality = (() => {
+                  const name = `${video.file_path || ''} ${video.title || ''}`
+                  if (/\b(2160p|4k|uhd)\b/i.test(name)) return '4K UHD'
+                  if (/\b1080p?\b/i.test(name)) return '1080p'
+                  if (/\b720p?\b/i.test(name)) return '720p'
+                  return null
+                })()
+
+                const contentRating = (video as any).certification || (video as any).content_rating || null
+
+                const elements: React.ReactNode[] = []
+
+                const displayYearOrDate = (isContentUpcoming && formattedUpcomingReleaseDate)
+                  ? formattedUpcomingReleaseDate
+                  : (video.release_year || (effectiveReleaseDate ? effectiveReleaseDate.slice(0, 4) : null))
+
+                if (displayYearOrDate) {
+                  elements.push(
+                    <span key="year" className={`font-bold text-xs tracking-wide ${isLight ? 'text-slate-950' : 'text-white drop-shadow-sm'}`}>
+                      {displayYearOrDate}
+                    </span>
+                  )
+                }
+
+                if (contentRating) {
+                  elements.push(
+                    <span key="cert" className={`px-1.5 py-0.5 rounded text-[10px] font-bold tracking-wide ${
+                      isLight
+                        ? 'border border-slate-300 bg-slate-900/5 text-slate-800'
+                        : 'border border-white/20 bg-white/10 text-white/90 drop-shadow-sm'
+                    }`}>
+                      {contentRating}
+                    </span>
+                  )
+                }
+
+                {/* Duration for Movies, Season count for Series */}
+                if (video.type === 'series') {
+                  const cachedCount = video.tmdb_id ? seriesSeasonCountCache.get(video.tmdb_id) : undefined
+                  const seasonCount = seasons.length > 0
+                    ? seasons.length
+                    : (cachedCount || (trailerSeasons.length > 0 ? trailerSeasons.length : undefined))
+
+                  if (seasonCount && seasonCount > 0) {
+                    elements.push(
+                      <span key="series-info" className={`text-xs font-semibold ${isLight ? 'text-slate-700' : 'text-white/85 drop-shadow-sm'}`}>
+                        {seasonCount} {seasonCount === 1 ? 'Season' : 'Seasons'}
+                      </span>
+                    )
+                  } else if (catalogLoading || loading || (!catalogLoaded && Boolean(video.tmdb_id))) {
+                    elements.push(
+                      <span
+                        key="series-loading"
+                        className={`inline-block h-3.5 w-16 rounded animate-pulse align-middle ${isLight ? 'bg-slate-200' : 'bg-white/10'}`}
+                      />
+                    )
+                  } else if (video.season && video.season > 1) {
+                    elements.push(
+                      <span key="series-info" className={`text-xs font-semibold ${isLight ? 'text-slate-700' : 'text-white/85 drop-shadow-sm'}`}>
+                        Season {video.season}
+                      </span>
+                    )
+                  } else if (video.episode_count) {
+                    elements.push(
+                      <span key="series-info" className={`text-xs font-semibold ${isLight ? 'text-slate-700' : 'text-white/85 drop-shadow-sm'}`}>
+                        {video.episode_count} Episodes
+                      </span>
+                    )
+                  } else {
+                    elements.push(
+                      <span key="series-info" className={`text-xs font-semibold ${isLight ? 'text-slate-700' : 'text-white/85 drop-shadow-sm'}`}>
+                        TV Series
+                      </span>
+                    )
                   }
-                }
-                
-                if (isFuture && formattedDate) {
-                  return (
-                    <div className="flex items-center gap-1.5 bg-amber-500/15 px-3 py-1.5 rounded-full border border-amber-500/30 text-amber-200">
-                      <Calendar size={12} className="text-amber-200/50" />
-                      <span>Releases {formattedDate}</span>
-                    </div>
-                  )
-                }
-                
-                if (releaseInfo.providers && releaseInfo.providers.length > 0) {
-                  return (
-                    <div className="flex items-center gap-2 bg-emerald-500/15 px-3 py-1.5 rounded-full border border-emerald-500/30 text-emerald-100">
-                      <span>Streaming on</span>
-                      <div className="flex items-center gap-1">
-                        {releaseInfo.providers.slice(0, 3).map(p => (
-                          <img key={p.provider_name} src={p.logo_path} alt={p.provider_name} className="w-4 h-4 rounded-full object-cover" title={p.provider_name} />
-                        ))}
-                      </div>
-                    </div>
-                  )
-                } else if (releaseInfo.type === 'theatrical' && releaseInfo.releaseDate) {
-                  const rDate = new Date(releaseInfo.releaseDate)
-                  const now = new Date()
-                  const daysSinceRelease = (now.getTime() - rDate.getTime()) / (1000 * 3600 * 24)
-                  
-                  // Only show "In Theaters" if it was released within the last 90 days
-                  if (daysSinceRelease >= 0 && daysSinceRelease <= 90) {
-                    return (
-                      <div className="flex items-center gap-1.5 bg-blue-500/15 px-3 py-1.5 rounded-full border border-blue-500/30 text-blue-200">
-                        <Film size={12} className="text-blue-200/50" />
-                        <span>In Theaters</span>
-                      </div>
+                } else if (video.duration) {
+                  const dur = formatDuration(video.duration)
+                  if (dur) {
+                    elements.push(
+                      <span key="duration" className={`text-xs font-semibold ${isLight ? 'text-slate-700' : 'text-white/85 drop-shadow-sm'}`}>
+                        {dur}
+                      </span>
                     )
                   }
                 }
 
-                return null
-              })() : null}
-              {video.duration && (
-                <div className="flex items-center gap-1.5 bg-white/[0.06] px-3 py-1.5 rounded-full border border-white/10">
-                  <Clock size={12} className="text-white/45" />
-                  <span>{formatDuration(video.duration)}</span>
-                </div>
-              )}
+                if (detectedQuality) {
+                  elements.push(
+                    <span key="quality" className={`px-1.5 py-0.5 rounded text-[10px] font-bold tracking-wide ${
+                      isLight
+                        ? 'border border-slate-300 bg-slate-900/5 text-slate-800'
+                        : 'border border-white/20 bg-white/10 text-white/90 drop-shadow-sm'
+                    }`}>
+                      {detectedQuality}
+                    </span>
+                  )
+                }
+
+                if (video.genres) {
+                  const genreList = video.genres.split(',').map(g => g.trim()).filter(Boolean).slice(0, 2)
+                  if (genreList.length > 0) {
+                    elements.push(
+                      <span key="genres" className={`text-xs font-medium ${isLight ? 'text-slate-600' : 'text-white/75 drop-shadow-sm'}`}>
+                        {genreList.join(' / ')}
+                      </span>
+                    )
+                  }
+                }
+
+                return elements.map((item, idx) => (
+                  <React.Fragment key={idx}>
+                    {idx > 0 && (
+                      <span className={`select-none font-bold text-xs ${isLight ? 'text-slate-400' : 'text-white/30'}`}>·</span>
+                    )}
+                    {item}
+                  </React.Fragment>
+                ))
+              })()}
             </div>
 
-            {/* Vibe Tags — space is reserved with skeletons while loading so content below never shifts */}
+            {/* Vibe Tags (Image 2: Translucent Tinted Capsules with Title Case) */}
             {(keywordsLoading || visibleVibes.length > 0) && (
-            <div className="flex flex-wrap gap-2 min-h-[28px] max-w-2xl" aria-hidden={keywordsLoading}>
+            <div className="flex flex-wrap items-center gap-2 min-h-[30px] max-w-2xl pt-0.5" aria-hidden={keywordsLoading}>
               {keywordsLoading ? (
                 <>
-                  <span className="h-[26px] w-24 rounded-full border border-white/10 bg-white/[0.06] animate-pulse" />
-                  <span className="h-[26px] w-20 rounded-full border border-white/10 bg-white/[0.06] animate-pulse" />
-                  <span className="h-[26px] w-28 rounded-full border border-white/10 bg-white/[0.06] animate-pulse hidden sm:block" />
+                  <span className={`h-7 w-24 rounded-full border animate-pulse backdrop-blur-md ${isLight ? 'border-slate-200 bg-slate-200/70' : 'border-white/10 bg-white/[0.06]'}`} />
+                  <span className={`h-7 w-20 rounded-full border animate-pulse backdrop-blur-md ${isLight ? 'border-slate-200 bg-slate-200/70' : 'border-white/10 bg-white/[0.06]'}`} />
+                  <span className={`h-7 w-28 rounded-full border animate-pulse backdrop-blur-md hidden sm:block ${isLight ? 'border-slate-200 bg-slate-200/70' : 'border-white/10 bg-white/[0.06]'}`} />
                 </>
               ) : (
                 visibleVibes.map((vibe, idx) => (
                   <span
                     key={idx}
-                    className={`px-4 py-1.5 text-[9px] font-black uppercase tracking-widest rounded-full border shadow-lg transition-all hover:scale-105 hover:shadow-xl cursor-default bg-gradient-to-br ${getVibeColor(vibe)} detail-vibe-pill`}
+                    className={`px-3.5 py-1 text-xs font-semibold rounded-full border transition-all cursor-default detail-vibe-pill ${getAdaptiveVibeClass(vibe, isLight)}`}
                   >
                     {vibe}
                   </span>
@@ -2132,7 +2752,7 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
                         </>
                       )}
                     </div>
-                    {video.type === 'series' && video.tmdb_id && (
+                    {video.tmdb_id && (video.type === 'series' || (video.type === 'movie' && !isMovieOnOtt && !releaseInfoLoading)) && (
                       <div className="relative">
                         <button
                           onClick={handleToggleFollow}
@@ -2140,7 +2760,11 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
                           className={`p-3.5 rounded-xl border transition-all hover:-translate-y-0.5 active:scale-95 glass-effect detail-follow-btn ${
                             isFollowing ? 'bg-sky-500/20 border-sky-400 text-sky-300' : 'bg-white/5 border-white/10 text-white/40 hover:text-white'
                           } disabled:opacity-50 disabled:cursor-wait`}
-                          title={isFollowing ? 'Following — click to unfollow new-episode alerts' : 'Follow for new-episode alerts'}
+                          title={
+                            video.type === 'movie'
+                              ? isFollowing ? 'Following — click to unfollow OTT alerts' : 'Follow for OTT release alert'
+                              : isFollowing ? 'Following — click to unfollow new-episode alerts' : 'Follow for new-episode alerts'
+                          }
                         >
                           {followBusy ? <Loader2 size={20} className="animate-spin" /> : isFollowing ? <BellRing size={20} /> : <Bell size={20} />}
                         </button>
@@ -2238,6 +2862,109 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
                     )}
                   </div>
                 </div>
+                {/* Official Streaming Sources (Option A) */}
+                {isTmdbBacked && (releaseInfoLoading || (releaseInfo?.providers && releaseInfo.providers.length > 0) || releaseInfo?.justWatchLink) && (
+                  <div ref={officialSourcesRef}>
+                    <div className="flex items-center gap-2 mb-2">
+                      <p className="text-[10px] font-black uppercase tracking-[0.18em] text-white/35">
+                        Official Streaming Sources
+                      </p>
+                      {releaseInfo?.region && (
+                        <span className="rounded-md bg-white/[0.06] border border-white/10 px-1.5 py-0.5 text-[9px] font-black tracking-wider text-white/50 uppercase">
+                          {releaseInfo.region}
+                        </span>
+                      )}
+                    </div>
+                    <div className="flex flex-wrap items-center gap-2">
+                      {releaseInfoLoading ? (
+                        <>
+                          <div className="h-12 w-36 rounded-xl bg-white/5 animate-pulse border border-white/10" />
+                          <div className="h-12 w-32 rounded-xl bg-white/5 animate-pulse border border-white/10" />
+                        </>
+                      ) : releaseInfo?.providers && releaseInfo.providers.length > 0 ? (
+                        <>
+                          {releaseInfo.providers.map(p => (
+                            <button
+                              key={p.provider_name}
+                              onClick={() => void handleOpenStreamingProvider(p)}
+                              className="group flex h-12 max-w-[195px] shrink-0 items-center gap-2.5 px-3.5 bg-white/5 border border-white/10 rounded-xl hover:border-emerald-500/40 hover:bg-emerald-500/10 transition-all hover:-translate-y-0.5 active:scale-95 glass-effect text-white/80 hover:text-white shadow-sm"
+                              title={`Watch on ${p.provider_name}`}
+                            >
+                              {p.logo_path ? (
+                                <img
+                                  src={p.logo_path}
+                                  alt={p.provider_name}
+                                  className="h-6 w-6 shrink-0 rounded-lg object-cover shadow-sm group-hover:scale-105 transition-transform"
+                                />
+                              ) : (
+                                <Tv size={18} className="shrink-0 text-emerald-400" />
+                              )}
+                              <span className="truncate max-w-[120px] text-[11px] font-bold tracking-tight text-white/90 group-hover:text-white">
+                                {p.provider_name}
+                              </span>
+                              <ExternalLink size={13} className="shrink-0 text-white/30 group-hover:text-emerald-300 transition-colors ml-auto" />
+                            </button>
+                          ))}
+                          {releaseInfo.justWatchLink && (
+                            <button
+                              onClick={handleOpenJustWatch}
+                              className="flex h-12 shrink-0 items-center gap-1.5 px-3.5 bg-white/[0.03] border border-white/10 rounded-xl text-white/40 hover:text-white hover:border-white/20 hover:bg-white/[0.06] transition-all hover:-translate-y-0.5 active:scale-95 glass-effect text-[10px] font-bold uppercase tracking-wider"
+                              title="View full streaming guide on JustWatch"
+                            >
+                              <span className="text-amber-400 font-black">JW</span>
+                              <span>JustWatch</span>
+                              <ExternalLink size={12} className="opacity-60 shrink-0" />
+                            </button>
+                          )}
+                        </>
+                      ) : (
+                        <div className="flex flex-wrap items-center gap-2 text-white/50 text-[11px] font-medium py-1">
+                          <AlertCircle size={14} className="text-white/30 shrink-0" />
+                          <span>Not currently streaming on subscription platforms in {releaseInfo?.region || 'your region'}.</span>
+                          <button
+                            onClick={() => window.api.openExternalUrl?.(`https://www.netflix.com/search?q=${encodeURIComponent(displayTitle)}`)}
+                            className="px-2.5 py-1 rounded-lg bg-white/5 hover:bg-red-600/20 hover:text-red-300 border border-white/10 text-[10px] font-bold tracking-wide transition-colors flex items-center gap-1"
+                            title="Check directly on Netflix"
+                          >
+                            <span>Check Netflix</span>
+                            <ExternalLink size={10} className="opacity-60" />
+                          </button>
+                          <button
+                            onClick={() => window.api.openExternalUrl?.(`https://www.primevideo.com/search/ref=atv_nb_sr?phrase=${encodeURIComponent(displayTitle)}`)}
+                            className="px-2.5 py-1 rounded-lg bg-white/5 hover:bg-sky-600/20 hover:text-sky-300 border border-white/10 text-[10px] font-bold tracking-wide transition-colors flex items-center gap-1"
+                            title="Check directly on Prime Video"
+                          >
+                            <span>Check Prime</span>
+                            <ExternalLink size={10} className="opacity-60" />
+                          </button>
+                          {releaseInfo?.justWatchLink && (
+                            <button
+                              onClick={handleOpenJustWatch}
+                              className="text-primary hover:underline text-[10px] font-bold uppercase tracking-wider flex items-center gap-1 ml-1"
+                            >
+                              JustWatch <ExternalLink size={11} className="shrink-0" />
+                            </button>
+                          )}
+                          {isFollowing && (
+                            <button
+                              onClick={() => {
+                                if (video.tmdb_id) {
+                                  void safeUnfollowMovie(video.tmdb_id)
+                                  void safeMarkFollowedMovieSeen(video.tmdb_id)
+                                  setIsFollowing(false)
+                                }
+                              }}
+                              className="text-amber-400/80 hover:text-amber-300 text-[10px] font-bold underline ml-1 cursor-pointer"
+                              title="Dismiss OTT tracking for this movie"
+                            >
+                              Already on OTT? Dismiss alert
+                            </button>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
                 <div>
                   <p className="text-[10px] font-black uppercase tracking-[0.18em] text-white/35 mb-2">Download Websites</p>
                   <div className="flex flex-wrap items-center gap-2">
@@ -2277,8 +3004,8 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
             </div>
 
             {/* Share Modal */}
-            {showShareModal && sharePayload && (
-              <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm animate-in fade-in duration-200" onClick={() => setShowShareModal(false)}>
+            {showShareModal && sharePayload && createPortal(
+              <div className="fixed inset-0 z-[1000] flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-in fade-in duration-200" onClick={() => setShowShareModal(false)}>
                 <div
                   className="relative w-full max-w-md overflow-hidden rounded-2xl border border-white/10 bg-[#0f141d]/70 backdrop-blur-2xl shadow-2xl animate-in slide-in-from-bottom-4 duration-300"
                   onClick={e => e.stopPropagation()}
@@ -2368,12 +3095,13 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
                     </div>
                   </div>
                 </div>
-              </div>
+              </div>,
+              document.body
             )}
 
             {/* Media Info Modal */}
-            {showInfoModal && (
-              <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm animate-in fade-in duration-200" onClick={() => setShowInfoModal(false)}>
+            {showInfoModal && createPortal(
+              <div className="fixed inset-0 z-[1000] flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-in fade-in duration-200" onClick={() => setShowInfoModal(false)}>
                 <div
                   className="relative w-full max-w-lg bg-[#0f0f0f] border border-white/10 rounded-2xl shadow-2xl overflow-hidden animate-in slide-in-from-bottom-4 duration-300"
                   onClick={e => e.stopPropagation()}
@@ -2462,12 +3190,13 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
                     ) : null}
                   </div>
                 </div>
-              </div>
+              </div>,
+              document.body
             )}
 
-            {showTrailerModal && (
+            {showTrailerModal && createPortal(
               <div
-                className="fixed inset-0 z-[60] flex items-center justify-center p-4 md:p-8 bg-black/70 backdrop-blur-sm animate-in fade-in duration-200"
+                className="fixed inset-0 z-[1000] flex items-center justify-center p-4 md:p-8 bg-black/80 backdrop-blur-md animate-in fade-in duration-200"
                 onClick={() => setShowTrailerModal(false)}
               >
                 <div
@@ -2564,142 +3293,573 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
                     )}
                   </div>
                 </div>
+              </div>,
+              document.body
+            )}
+
+            {/* Franchise Timeline Rail (Prequels & Sequels - Option B) */}
+            {video.type === 'movie' && (franchiseLoading || (franchise && franchise.parts && franchise.parts.length > 1)) && (
+              <div className="border-t border-white/[0.08] pt-8 space-y-4">
+                <div className="flex flex-col gap-1 sm:flex-row sm:items-baseline sm:justify-between">
+                  <div className="flex items-center gap-2.5">
+                    <h3 className="text-lg font-bold tracking-tight text-white">
+                      {franchise?.collectionName || 'Franchise Timeline'}
+                    </h3>
+                    {franchise?.parts && (
+                      <span className="text-[10px] font-semibold tracking-wide text-white/40 px-2.5 py-0.5 rounded-full bg-white/5 border border-white/10">
+                        {franchise.parts.length} Films · Release Order
+                      </span>
+                    )}
+                  </div>
+                </div>
+
+                {franchiseLoading ? (
+                  <div className="flex items-center gap-3 py-6">
+                    <Loader2 size={18} className="animate-spin text-primary" />
+                    <span className="text-[11px] font-semibold uppercase tracking-widest text-white/40">Loading timeline...</span>
+                  </div>
+                ) : franchise && franchise.parts ? (
+                  <div className="flex gap-4 overflow-x-auto pb-4 pt-1 scrollbar-thin">
+                    {franchise.parts.map((part, idx) => {
+                      const isCurrent = part.id === video.tmdb_id
+                      const currentRelDate = video.release_date || (video.release_year ? `${video.release_year}-01-01` : '')
+                      const partRelDate = part.releaseDate || (part.releaseYear ? `${part.releaseYear}-01-01` : '')
+                      
+                      let partType: 'current' | 'prequel' | 'sequel' | 'upcoming' = 'sequel'
+                      if (isCurrent) {
+                        partType = 'current'
+                      } else if (partRelDate && currentRelDate && partRelDate < currentRelDate) {
+                        partType = 'prequel'
+                      } else if (partRelDate && currentRelDate && partRelDate > currentRelDate) {
+                        partType = 'sequel'
+                      } else if (!partRelDate) {
+                        partType = 'upcoming'
+                      }
+
+                      const localMatch = localLibraryVideos.find(v => v.tmdb_id === part.id || (v.title && part.title && v.title.toLowerCase() === part.title.toLowerCase()))
+
+                      return (
+                        <div
+                          key={part.id}
+                          onClick={() => {
+                            if (isCurrent) return
+                            const targetVideo: Video = localMatch ? { ...localMatch } : {
+                              id: 0,
+                              title: part.title,
+                              file_path: '',
+                              type: 'movie',
+                              tmdb_id: part.id,
+                              poster_path: part.posterPath || undefined,
+                              backdrop_path: part.backdropPath || undefined,
+                              overview: part.overview || undefined,
+                              release_date: part.releaseDate || undefined,
+                              release_year: part.releaseYear,
+                              vote_average: part.voteAverage,
+                              isExternal: true
+                            }
+                            if (onShowDetail) {
+                              onShowDetail(targetVideo)
+                            }
+                          }}
+                          className={`group relative flex-shrink-0 w-36 sm:w-40 transition-all duration-300 ${
+                            isCurrent ? 'cursor-default' : 'cursor-pointer select-none active:scale-95'
+                          }`}
+                        >
+                          {/* Poster Container — Minimal, rounded, no bulky outer card box */}
+                          <div className={`relative aspect-[2/3] w-full rounded-xl overflow-hidden bg-white/5 transition-all duration-300 ${
+                            isCurrent
+                              ? 'ring-2 ring-primary ring-offset-2 ring-offset-black shadow-[0_0_20px_rgba(229,9,20,0.35)] -translate-y-1'
+                              : 'hover:-translate-y-1.5 hover:shadow-xl ring-1 ring-white/10 hover:ring-white/25'
+                          }`}>
+                            {part.posterPath ? (
+                              <img
+                                src={part.posterPath}
+                                alt={part.title}
+                                loading="lazy"
+                                decoding="async"
+                                className={`h-full w-full object-cover transition-transform duration-500 ${
+                                  isCurrent ? 'scale-100' : 'group-hover:scale-105'
+                                }`}
+                              />
+                            ) : (
+                              <div className="flex h-full w-full items-center justify-center text-white/20">
+                                <Film size={26} />
+                              </div>
+                            )}
+
+                            {/* Clean, frosted micro-badge top-left */}
+                            <div className="absolute top-2 left-2 z-10">
+                              {partType === 'current' ? (
+                                <span className="flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[9px] font-black uppercase tracking-wider bg-primary text-white shadow">
+                                  <span className="w-1.5 h-1.5 rounded-full bg-white animate-pulse" />
+                                  Now
+                                </span>
+                              ) : partType === 'prequel' ? (
+                                <span className="px-2 py-0.5 rounded-full text-[9px] font-semibold uppercase tracking-wider bg-black/65 text-purple-300 backdrop-blur-md border border-purple-500/30 shadow-sm">
+                                  Prequel
+                                </span>
+                              ) : partType === 'sequel' ? (
+                                <span className="px-2 py-0.5 rounded-full text-[9px] font-semibold uppercase tracking-wider bg-black/65 text-emerald-300 backdrop-blur-md border border-emerald-500/30 shadow-sm">
+                                  Sequel
+                                </span>
+                              ) : (
+                                <span className="px-2 py-0.5 rounded-full text-[9px] font-semibold uppercase tracking-wider bg-black/65 text-amber-300 backdrop-blur-md border border-amber-500/30 shadow-sm">
+                                  Upcoming
+                                </span>
+                              )}
+                            </div>
+
+                            {/* Order Index Badge top-right */}
+                            <div className="absolute top-2 right-2 z-10">
+                              <span className="px-1.5 py-0.5 rounded-full text-[9px] font-bold tabular-nums bg-black/60 text-white/70 backdrop-blur-md border border-white/10">
+                                #{idx + 1}
+                              </span>
+                            </div>
+
+                            {/* Downloaded badge bottom-left */}
+                            {localMatch && (
+                              <div className="absolute bottom-2 left-2 z-10">
+                                <span className="flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[8px] font-bold uppercase tracking-wider bg-emerald-500 text-white shadow">
+                                  <HardDrive size={9} />
+                                  Saved
+                                </span>
+                              </div>
+                            )}
+                          </div>
+
+                          {/* Title & Metadata below poster */}
+                          <div className="mt-2 space-y-0.5">
+                            <h4 className={`text-xs font-semibold line-clamp-1 leading-snug transition-colors ${
+                              isCurrent ? 'text-primary' : 'text-white/90 group-hover:text-primary'
+                            }`}>
+                              {part.title}
+                            </h4>
+                            <div className="flex items-center justify-between text-[11px] font-medium text-white/40">
+                              <span>{part.releaseYear || 'TBA'}</span>
+                              {part.voteAverage ? (
+                                <span className="flex items-center gap-1 text-amber-400">
+                                  <Star size={10} fill="currentColor" />
+                                  <span className="tabular-nums font-bold text-[10px]">{part.voteAverage}</span>
+                                </span>
+                              ) : null}
+                            </div>
+                          </div>
+                        </div>
+                      )
+                    })}
+                  </div>
+                ) : null}
               </div>
             )}
 
-            {/* Released, local, and upcoming series episodes */}
+            {/* Series Episodes Accordion (Option B: Compact Expandable In-Place) */}
             {video.type === 'series' && (loading || catalogLoading || episodeRows.length > 0) && (
-              <div className="border-t border-white/[0.08] pt-8 space-y-4">
+              <div
+                ref={seriesAccordionRef}
+                style={{
+                  maxWidth: isEpisodesExpanded
+                    ? '42rem'
+                    : collapsedPillWidth ? `${collapsedPillWidth}px` : 'max-content'
+                }}
+                className={`cinema-series-card relative ${isEpisodesExpanded ? 'w-full' : 'w-fit'} rounded-2xl border overflow-hidden ${
+                isLight
+                  ? 'border-slate-200/90 bg-white/95 shadow-[0_2px_12px_rgba(0,0,0,0.04)] hover:shadow-md hover:border-slate-300'
+                  : 'border-white/10 bg-[#0c1017]/90 backdrop-blur-xl shadow-[0_8px_30px_rgba(0,0,0,0.4)] hover:border-white/20'
+              }`}>
+                {/* Just dropped notification banner */}
                 {newDrop && (
-                  <div className="flex flex-wrap items-center gap-3 rounded-2xl border border-sky-400/25 bg-sky-400/[0.08] px-5 py-4">
-                    <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-sky-500/20 text-sky-300">
-                      <BellRing size={16} />
+                  <div ref={newDropRef} className={`border-b px-3.5 py-1.5 flex flex-wrap items-center gap-2.5 ${
+                    isLight ? 'border-sky-200/80 bg-sky-50/80 text-sky-900' : 'border-sky-400/20 bg-sky-500/10 backdrop-blur-md text-white'
+                  }`}>
+                    <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-md bg-sky-500/20 text-sky-400">
+                      <BellRing size={11} />
                     </span>
                     <div className="min-w-0 flex-1">
-                      <p className="text-[9px] font-black uppercase tracking-[0.2em] text-sky-300">Just dropped</p>
-                      <p className="truncate text-[13px] font-bold text-white">
-                        {formatSeasonEpisode(newDrop.season, newDrop.episode)} is out — pick a source and keep watching
+                      <p className="text-[7.5px] font-black uppercase tracking-[0.2em] text-sky-500">Just dropped</p>
+                      <p className="truncate text-[11px] font-semibold">
+                        {formatSeasonEpisode(newDrop.season, newDrop.episode)} is out — click to watch
                       </p>
                     </div>
                     <button
-                      onClick={() => {
+                      onClick={(e) => {
+                        e.stopPropagation()
                         if (video.tmdb_id) void safeMarkFollowedSeen(video.tmdb_id)
                         setNewDrop(null)
                         void handleOpenEpisodeSources(newDrop.season, newDrop.episode)
                       }}
-                      className="shrink-0 rounded-xl bg-sky-500 px-4 py-2 text-[10px] font-black uppercase tracking-widest text-white transition-all hover:bg-sky-400 active:scale-95"
+                      className="shrink-0 rounded-lg bg-sky-500 px-2 py-0.5 text-[8.5px] font-black uppercase tracking-widest text-white transition-all hover:bg-sky-400 active:scale-95 shadow-sm shadow-sky-500/25"
                     >
-                      Watch now
+                      Watch
                     </button>
                   </div>
                 )}
-                <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
-                  <div>
-                    <p className="mb-1 text-[10px] font-black uppercase tracking-[0.2em] text-red-400">Browse the show</p>
-                    <h3 className="text-2xl font-black tracking-tight text-white">Episodes</h3>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    {seasons.length > 1 && (
-                      <label className="relative">
-                        <span className="sr-only">Select season</span>
-                        <select
-                          value={selectedSeason || seasons[0] || 1}
-                          onChange={(event) => setSelectedSeason(Number(event.target.value))}
-                          className="h-10 appearance-none rounded-xl border border-white/10 bg-white/[0.055] pl-3 pr-9 text-[10px] font-black uppercase tracking-[0.13em] text-white outline-none transition-colors hover:border-white/20 focus:border-red-500"
-                        >
-                          {seasons.map(s => <option key={s} value={s} className="bg-[#111826]">Season {s}</option>)}
-                        </select>
-                        <ChevronDown size={14} className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-white/55" />
-                      </label>
-                    )}
-                    <span className="h-10 rounded-xl border border-white/[0.08] bg-white/[0.035] px-3 flex items-center text-[10px] font-black uppercase tracking-widest text-white/45">
-                      {episodesBySeason[selectedSeason || seasons[0] || 1]?.length || 0} episodes
-                    </span>
-                  </div>
-                </div>
-                
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5 max-h-[400px] overflow-y-auto pr-2 scrollbar-thin">
-                  {loading || catalogLoading ? (
-                    <div className="col-span-full py-16 text-center">
-                      <div className="inline-block w-8 h-8 border-4 border-primary/30 border-t-primary rounded-full animate-spin mb-4" />
-                      <div className="text-muted font-black uppercase tracking-widest text-[10px]">Fetching episodes...</div>
-                    </div>
-                  ) : (
-                    (episodesBySeason[selectedSeason || 1] || []).map((ep, idx) => {
-                      const isCurrentEpisode = Boolean(ep.localVideo && getMediaUnitIdentity(ep.localVideo) === getMediaUnitIdentity(video))
-                      const epDownload = activeDownloads.find(d => 
-                        (d.mediaType === 'series' || (video.type === 'series' && d.mediaType !== 'movie')) && 
-                        d.tmdbId === video.tmdb_id && 
-                        Number(d.season) === ep.season && 
-                        Number(d.episode) === ep.episode &&
-                        d.status !== 'completed' && d.status !== 'done' && d.status !== 'error'
-                      )
-                      const isDownloading = Boolean(epDownload)
-                      const epDownloadProgress = epDownload ? Math.max(0, Math.min(100, Number(epDownload.progress || 0))) : 0
 
-                      const isUpcoming = !ep.released && !ep.localVideo && !isDownloading
-                      const isMissing = ep.released && !ep.localVideo && !isDownloading
-                      const onlineState = (!ep.localVideo && !isDownloading)
-                        ? onlineEpisodeMap.get(`${ep.season}:${ep.episode}`)
-                        : undefined
-                      const onlineLabel = onlineState
-                        ? onlineState.completed
-                          ? 'Watched online'
-                          : (onlineState.position >= 10 ? `Resume ${formatResumeTime(onlineState.position)} online` : null)
-                        : null
-                      return (
-                      <button
-                        key={`${ep.season}:${ep.episode}`}
-                        onClick={() => {
-                          if (ep.localVideo) onPlay(ep.localVideo)
-                          else if (isMissing || isDownloading) void handleOpenEpisodeSources(ep.season, ep.episode)
-                        }}
-                        disabled={isUpcoming}
-                        className={`flex min-h-[76px] items-center p-3 rounded-xl transition-all border group text-left relative overflow-hidden ${
-                          isCurrentEpisode
-                            ? 'bg-red-600/[0.12] border-red-500/45 shadow-[0_8px_28px_rgba(220,38,38,0.12)]'
-                          : isUpcoming
-                            ? 'cursor-default bg-white/[0.025] border-white/5 opacity-65'
-                            : 'bg-white/[0.045] border-white/[0.07] hover:bg-white/[0.08] hover:border-white/15'
-                        }`}
-                      >
-                        {isDownloading && (
-                          <div 
-                            className="absolute inset-y-0 left-0 bg-white/[0.06] z-0 transition-all duration-300"
-                            style={{ width: `${epDownloadProgress}%` }}
-                          />
-                        )}
-                        <div className={`w-32 h-[72px] shrink-0 rounded-lg flex items-center justify-center mr-4 transition-all text-sm font-black italic relative overflow-hidden shadow-md z-10 ${
-                          isCurrentEpisode ? 'bg-red-600 text-white' : isMissing ? 'bg-primary/15 text-primary' : 'bg-black/40 text-muted group-hover:bg-red-600 group-hover:text-white'
+                {/* Unified Interactive Accordion Header Bar (Entire Row is Clickable) */}
+                <button
+                  type="button"
+                  onClick={handleToggleEpisodes}
+                  className={`group w-full px-3 py-1.5 sm:px-3.5 sm:py-2 flex items-center ${
+                    isEpisodesExpanded ? 'justify-between' : 'justify-start gap-2.5 sm:gap-3'
+                  } text-left transition-colors duration-200 select-none cursor-pointer whitespace-nowrap ${
+                    isLight
+                      ? 'hover:bg-slate-50/90 active:bg-slate-100/80'
+                      : 'hover:bg-white/[0.04] active:bg-white/[0.08]'
+                  }`}
+                >
+                  {/* Left: Glanceable Compact Overview */}
+                  <div ref={pillLeftContentRef} className="flex flex-wrap items-center gap-2 sm:gap-2.5 min-w-0">
+                    <span className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-lg transition-transform duration-200 group-hover:scale-105 ${
+                      isLight ? 'bg-primary/10 text-primary' : 'bg-primary/15 text-primary'
+                    }`}>
+                      <Clapperboard size={12} />
+                    </span>
+
+                    <div className="flex items-baseline gap-1.5 flex-wrap">
+                      <h4 className={`text-xs sm:text-[13px] font-bold tracking-tight transition-colors duration-200 ${
+                        isLight ? 'text-slate-900 group-hover:text-primary' : 'text-white group-hover:text-primary'
+                      }`}>
+                        {seasons.length > 1 ? `Season ${activeSeasonNumber}` : 'Season 1'}
+                      </h4>
+                      <span className={`text-[10.5px] font-semibold ${isLight ? 'text-slate-400' : 'text-white/40'}`}>
+                        ({currentSeasonEpisodes.length} eps)
+                      </span>
+                    </div>
+
+                    {/* Micro release pills */}
+                    <div className="flex items-center gap-1.5 text-[9.5px] font-semibold">
+                      <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full ${
+                        isLight
+                          ? 'bg-emerald-50 text-emerald-700 border border-emerald-200/70'
+                          : 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
+                      }`}>
+                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                        {releasedEpisodesCount} Released
+                      </span>
+
+                      {upcomingEpisodesCount > 0 && (
+                        <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full ${
+                          isLight
+                            ? 'bg-amber-50 text-amber-700 border border-amber-200/70'
+                            : 'bg-amber-400/10 text-amber-300 border border-amber-400/20'
                         }`}>
-                          {ep.stillPath ? (
-                            <img src={getArtworkUrl(ep.stillPath, 'w342') || undefined} alt="" className="absolute inset-0 w-full h-full object-cover opacity-80 group-hover:opacity-100 transition-opacity" />
-                          ) : (
-                            <span className="relative z-10 opacity-50">
-                              {(idx + 1).toString().padStart(2, '0')}
-                            </span>
-                          )}
+                          <Calendar size={8.5} />
+                          {upcomingEpisodesCount} Upcoming
+                        </span>
+                      )}
+
+                      {libraryEpisodesCount > 0 && (
+                        <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full ${
+                          isLight
+                            ? 'bg-sky-50 text-sky-700 border border-sky-200/70'
+                            : 'bg-sky-500/10 text-sky-400 border border-sky-500/20'
+                        }`}>
+                          <HardDrive size={8.5} />
+                          {libraryEpisodesCount} Saved
+                        </span>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Right: Toggle label & chevron */}
+                  <div
+                    ref={pillRightContentRef}
+                    className={`flex items-center gap-1.5 shrink-0 ${
+                      isEpisodesExpanded
+                        ? 'pl-1'
+                        : isLight
+                          ? 'pl-2 border-l border-slate-200/90 ml-0.5'
+                          : 'pl-2 border-l border-white/10 ml-0.5'
+                    }`}
+                  >
+                    <span className={`text-[10.5px] font-semibold transition-colors duration-200 ${
+                      isEpisodesExpanded
+                        ? 'text-primary'
+                        : isLight ? 'text-slate-500 group-hover:text-slate-800' : 'text-white/50 group-hover:text-white'
+                    }`}>
+                      {isEpisodesExpanded ? 'Close' : 'Episodes'}
+                    </span>
+                    <ChevronDown
+                      size={14}
+                      className={`transition-transform duration-300 ease-[cubic-bezier(0.16,1,0.3,1)] ${
+                        isEpisodesExpanded
+                          ? 'rotate-180 text-primary'
+                          : isLight
+                            ? 'text-slate-400 group-hover:text-slate-700'
+                            : 'text-white/40 group-hover:text-white'
+                      }`}
+                    />
+                  </div>
+                </button>
+
+                {/* Collapsible Accordion Content (Option B: Industry-Grade Smooth CSS Grid Expansion) */}
+                <div className={`cinema-accordion-wrapper ${isEpisodesExpanded ? 'is-expanded' : ''}`}>
+                  <div className="cinema-accordion-inner">
+                    <div className={`cinema-accordion-content border-t ${
+                      isLight ? 'border-slate-200/80 bg-slate-50/60' : 'border-white/[0.08] bg-black/35'
+                    } p-2.5 sm:p-3 space-y-2.5 w-full min-w-[min(100%,38rem)]`}>
+                      {/* Season Segmented Switcher (if multi-season) */}
+                      {seasons.length > 1 && (
+                        <div className={`flex items-center gap-1 overflow-x-auto p-1 rounded-xl border scrollbar-none ${
+                          isLight ? 'bg-slate-200/50 border-slate-200' : 'bg-black/50 border-white/10'
+                        }`}>
+                          {seasons.map(s => {
+                            const isSel = (selectedSeason || seasons[0] || 1) === s
+                            return (
+                              <button
+                                key={s}
+                                type="button"
+                                onClick={() => setSelectedSeason(s)}
+                                className={`h-6 sm:h-6.5 px-2.5 sm:px-3 rounded-lg text-[10.5px] font-bold transition-all duration-200 ease-out whitespace-nowrap ${
+                                  isSel
+                                    ? 'bg-primary text-white shadow-sm shadow-primary/25'
+                                    : isLight
+                                      ? 'text-slate-600 hover:text-slate-900 hover:bg-white/80'
+                                      : 'text-white/60 hover:text-white hover:bg-white/5'
+                                }`}
+                              >
+                                Season {s}
+                              </button>
+                            )
+                          })}
                         </div>
-                        <div className="flex-1 truncate z-10">
-                          <div className="text-sm font-bold text-white truncate mb-0.5">
-                            S{ep.season.toString().padStart(2, '0')} E{ep.episode.toString().padStart(2, '0')}
+                      )}
+
+                      {/* Compact Episodes 2-Column Grid */}
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-2 sm:gap-2.5 max-h-[380px] overflow-y-auto pr-1 scrollbar-thin">
+                        {loading || catalogLoading ? (
+                          <div className="col-span-full py-10 text-center">
+                            <div className="inline-block w-5 h-5 border-2 border-primary/30 border-t-primary rounded-full animate-spin mb-2" />
+                            <div className={`font-bold uppercase tracking-widest text-[9px] ${isLight ? 'text-slate-400' : 'text-white/40'}`}>
+                              Fetching episodes...
+                            </div>
                           </div>
-                          <div className="text-[9px] text-muted font-black uppercase tracking-[0.1em] truncate opacity-60">
-                            {ep.title}{ep.versionCount > 1 ? ` • ${ep.versionCount} versions` : ''}
+                        ) : currentSeasonEpisodes.length === 0 ? (
+                          <div className={`col-span-full py-8 text-center ${isLight ? 'text-slate-400' : 'text-white/40'}`}>
+                            <Film size={20} className="mx-auto mb-1.5 opacity-40" />
+                            <p className="text-[11px] font-semibold">No episodes found for this season</p>
                           </div>
-                          <div className={`mt-1 text-[8px] font-black uppercase tracking-widest ${
-                            ep.localVideo ? 'text-emerald-300/70' : onlineLabel ? (onlineState?.completed ? 'text-emerald-300/70' : 'text-sky-300/80') : isMissing ? 'text-primary/80' : isDownloading ? 'text-white/50' : 'text-white/30'
-                          }`}>
-                            {ep.localVideo ? 'In library' : isDownloading ? `Saving • ${Math.round(epDownloadProgress)}% — open sources to Stream` : onlineLabel || (isMissing ? 'Released • choose source' : ep.airDate ? `Upcoming • ${ep.airDate}` : 'Upcoming')}
-                          </div>
-                        </div>
-                        <div className={`ml-4 transition-opacity z-10 ${isUpcoming ? 'opacity-40' : 'opacity-0 group-hover:opacity-100'}`}>
-                          {ep.localVideo ? <Play size={16} className="text-red-600" fill="currentColor" /> : isMissing || isDownloading ? <Download size={16} className="text-primary" /> : <Calendar size={16} className="text-white/40" />}
-                        </div>
-                      </button>
-                      )
-                    })
-                  )}
+                        ) : (
+                          currentSeasonEpisodes.map((ep, idx) => {
+                            const isCurrentEpisode = Boolean(ep.localVideo && getMediaUnitIdentity(ep.localVideo) === getMediaUnitIdentity(video))
+                            const epDownload = activeDownloads.find(d => 
+                              (d.mediaType === 'series' || (video.type === 'series' && d.mediaType !== 'movie')) && 
+                              d.tmdbId === video.tmdb_id && 
+                              Number(d.season) === ep.season && 
+                              Number(d.episode) === ep.episode &&
+                              d.status !== 'completed' && d.status !== 'done' && d.status !== 'error'
+                            )
+                            const isDownloading = Boolean(epDownload)
+                            const epDownloadProgress = epDownload ? Math.max(0, Math.min(100, Number(epDownload.progress || 0))) : 0
+
+                            const isUpcoming = !ep.released && !ep.localVideo && !isDownloading
+                            const isMissing = ep.released && !ep.localVideo && !isDownloading
+                            const onlineState = (!ep.localVideo && !isDownloading)
+                              ? onlineEpisodeMap.get(`${ep.season}:${ep.episode}`)
+                              : undefined
+
+                            const watchProgress = ep.localVideo?.duration && ep.localVideo.last_watched_time
+                              ? Math.min(100, Math.round((ep.localVideo.last_watched_time / ep.localVideo.duration) * 100))
+                              : onlineState?.duration && onlineState.position
+                                ? Math.min(100, Math.round((onlineState.position / onlineState.duration) * 100))
+                                : (onlineState?.completed || ep.localVideo?.completed)
+                                  ? 100
+                                  : 0
+
+                            const formattedTitle = formatEpisodeTitle(ep.title) || `Episode ${ep.episode}`
+                            const formattedDate = formatEpisodeAirDate(ep.airDate)
+
+                            return (
+                              <button
+                                key={`${ep.season}:${ep.episode}`}
+                                onClick={() => {
+                                  if (ep.localVideo) onPlay(ep.localVideo)
+                                  else if (isMissing || isDownloading) void handleOpenEpisodeSources(ep.season, ep.episode)
+                                }}
+                                disabled={isUpcoming}
+                                className={`group relative flex items-center gap-2.5 p-2 rounded-xl border text-left transition-all duration-200 ease-[cubic-bezier(0.16,1,0.3,1)] overflow-hidden ${
+                                  isCurrentEpisode
+                                    ? isLight
+                                      ? 'bg-red-500/[0.06] border-primary/50 ring-1 ring-primary/20 shadow-[0_2px_10px_rgba(229,9,20,0.08)]'
+                                      : 'bg-primary/10 border-primary/50 ring-1 ring-primary/30 shadow-[0_4px_20px_rgba(229,9,20,0.18)]'
+                                    : isUpcoming
+                                      ? isLight
+                                        ? 'cursor-default bg-slate-100/50 border-slate-200/50 opacity-55'
+                                        : 'cursor-default bg-black/25 border-white/5 opacity-55'
+                                      : isLight
+                                        ? 'bg-white hover:bg-white border-slate-200/80 hover:border-slate-300 shadow-[0_1px_3px_rgba(0,0,0,0.04)] hover:shadow-md hover:-translate-y-0.5 active:scale-[0.99]'
+                                        : 'bg-black/40 hover:bg-black/60 border-white/10 hover:border-white/25 shadow-sm hover:shadow-lg hover:-translate-y-0.5 active:scale-[0.99]'
+                                }`}
+                              >
+                                {/* Downloading background fill */}
+                                {isDownloading && (
+                                  <div 
+                                    className="absolute inset-y-0 left-0 bg-sky-500/10 z-0 transition-all duration-300 pointer-events-none"
+                                    style={{ width: `${epDownloadProgress}%` }}
+                                  />
+                                )}
+
+                                {/* Compact 16:9 Thumbnail */}
+                                <div className={`relative aspect-video w-20 sm:w-22 shrink-0 rounded-lg overflow-hidden shadow-sm ring-1 z-10 ${
+                                  isLight ? 'bg-slate-100 ring-slate-200/70' : 'bg-black/70 ring-white/10'
+                                }`}>
+                                  {ep.stillPath ? (
+                                    <img
+                                      src={getArtworkUrl(ep.stillPath, 'w342') || undefined}
+                                      alt=""
+                                      loading="lazy"
+                                      className="h-full w-full object-cover transition-transform duration-500 ease-[cubic-bezier(0.16,1,0.3,1)] group-hover:scale-105"
+                                    />
+                                  ) : (
+                                    <div className={`h-full w-full flex items-center justify-center text-[10px] font-bold ${
+                                      isLight ? 'text-slate-400 bg-slate-100' : 'text-white/30 bg-white/[0.03]'
+                                    }`}>
+                                      {String(ep.episode).padStart(2, '0')}
+                                    </div>
+                                  )}
+
+                                  {/* Top-left micro EP badge */}
+                                  <span className="absolute top-1 left-1 px-1 py-0.2 rounded bg-black/80 backdrop-blur-sm text-[8px] font-black uppercase tracking-wider text-white ring-1 ring-white/15">
+                                    EP {ep.episode}
+                                  </span>
+
+                                  {/* Hover Play Button Overlay */}
+                                  {!isUpcoming && (
+                                    <div className="absolute inset-0 bg-black/40 backdrop-blur-[1px] flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity duration-200 ease-out">
+                                      <div className="w-5 h-5 rounded-full bg-primary flex items-center justify-center text-white shadow-md transform scale-75 group-hover:scale-100 transition-transform duration-200 ease-[cubic-bezier(0.16,1,0.3,1)]">
+                                        <Play size={9} fill="currentColor" className="ml-0.5" />
+                                      </div>
+                                    </div>
+                                  )}
+
+                                  {/* Progress Bar */}
+                                  {watchProgress > 0 && !isDownloading && (
+                                    <div className="absolute bottom-0 inset-x-0 h-1 bg-black/40 z-20">
+                                      <div className="h-full bg-primary transition-all duration-300" style={{ width: `${watchProgress}%` }} />
+                                    </div>
+                                  )}
+                                  {isDownloading && (
+                                    <div className="absolute bottom-0 inset-x-0 h-1 bg-black/60 z-20">
+                                      <div className="h-full bg-sky-500 animate-pulse" style={{ width: `${epDownloadProgress}%` }} />
+                                    </div>
+                                  )}
+                                </div>
+
+                                {/* Episode Metadata & Info */}
+                                <div className="flex-1 min-w-0 z-10 space-y-0.5">
+                                  <h4 className={`text-[11.5px] font-bold line-clamp-1 leading-snug transition-colors duration-200 ${
+                                    isCurrentEpisode
+                                      ? 'text-primary'
+                                      : isLight
+                                        ? 'text-slate-900 group-hover:text-primary'
+                                        : 'text-white/95 group-hover:text-primary'
+                                  }`}>
+                                    {formattedTitle}
+                                  </h4>
+
+                                  <div className={`flex items-center gap-1.5 text-[10px] font-medium leading-none ${
+                                    isLight ? 'text-slate-500' : 'text-white/50'
+                                  }`}>
+                                    <span className={`font-semibold ${isLight ? 'text-slate-700' : 'text-white/70'}`}>
+                                      S{ep.season} · E{ep.episode}
+                                    </span>
+                                    {formattedDate && <span>• {formattedDate}</span>}
+                                    {ep.versionCount > 1 && (
+                                      <span className={`text-[8px] px-1 py-0.2 rounded font-semibold ${
+                                        isLight ? 'bg-slate-100 text-slate-600' : 'bg-white/10 text-white/70'
+                                      }`}>
+                                        {ep.versionCount} versions
+                                      </span>
+                                    )}
+                                  </div>
+
+                                  {/* Status Micro-Pill */}
+                                  <div className="pt-0.5">
+                                    {isCurrentEpisode ? (
+                                      <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[8.5px] font-bold tracking-wide ${
+                                        isLight
+                                          ? 'bg-red-50 text-red-600 border border-red-200/80'
+                                          : 'bg-primary/20 text-red-400 border border-primary/30'
+                                      }`}>
+                                        <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse" />
+                                        Playing Now
+                                      </span>
+                                    ) : ep.localVideo ? (
+                                      <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[8.5px] font-bold tracking-wide ${
+                                        isLight
+                                          ? 'bg-emerald-50 text-emerald-700 border border-emerald-200/70'
+                                          : 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/25'
+                                      }`}>
+                                        <HardDrive size={8.5} />
+                                        In Library
+                                      </span>
+                                    ) : isDownloading ? (
+                                      <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[8.5px] font-bold tracking-wide ${
+                                        isLight
+                                          ? 'bg-sky-50 text-sky-700 border border-sky-200/70'
+                                          : 'bg-sky-500/15 text-sky-400 border border-sky-500/25'
+                                      }`}>
+                                        <Download size={8.5} className="animate-bounce" />
+                                        Saving {Math.round(epDownloadProgress)}%
+                                      </span>
+                                    ) : (onlineState?.completed || ep.localVideo?.completed) ? (
+                                      <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[8.5px] font-bold tracking-wide ${
+                                        isLight
+                                          ? 'bg-slate-100 text-slate-700 border border-slate-200'
+                                          : 'bg-emerald-500/10 text-emerald-400/90 border border-emerald-500/20'
+                                      }`}>
+                                        <CheckCircle2 size={8.5} />
+                                        Watched
+                                      </span>
+                                    ) : (onlineState && onlineState.position >= 10) ? (
+                                      <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[8.5px] font-bold tracking-wide ${
+                                        isLight
+                                          ? 'bg-sky-50 text-sky-700 border border-sky-200/70'
+                                          : 'bg-sky-500/15 text-sky-400 border border-sky-500/25'
+                                      }`}>
+                                        <Play size={7.5} fill="currentColor" />
+                                        Resume {formatResumeTime(onlineState.position)}
+                                      </span>
+                                    ) : isMissing ? (
+                                      <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[8.5px] font-medium tracking-wide transition-colors duration-200 ${
+                                        isLight
+                                          ? 'bg-slate-100/80 text-slate-600 border border-slate-200/80 group-hover:text-primary group-hover:border-primary/30'
+                                          : 'bg-white/5 text-white/60 border border-white/10 group-hover:text-primary group-hover:border-primary/40'
+                                      }`}>
+                                        <Zap size={8.5} />
+                                        Stream Available
+                                      </span>
+                                    ) : (
+                                      <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[8.5px] font-medium tracking-wide ${
+                                        isLight
+                                          ? 'bg-slate-100/60 text-slate-400 border border-slate-200/50'
+                                          : 'bg-white/5 text-white/40 border border-white/5'
+                                      }`}>
+                                        <Calendar size={8.5} />
+                                        {formattedDate ? `Airs ${formattedDate}` : 'Upcoming'}
+                                      </span>
+                                    )}
+                                  </div>
+                                </div>
+
+                                {/* Hover action icon */}
+                                <div className={`ml-auto pl-1 shrink-0 transition-opacity duration-200 ease-out z-10 ${
+                                  isUpcoming ? 'opacity-30' : 'opacity-0 group-hover:opacity-100'
+                                }`}>
+                                  {ep.localVideo ? (
+                                    <Play size={13} className="text-primary" fill="currentColor" />
+                                  ) : isMissing || isDownloading ? (
+                                    <Download size={13} className={isLight ? 'text-slate-400 group-hover:text-primary' : 'text-white/60 group-hover:text-primary'} />
+                                  ) : (
+                                    <Calendar size={13} className={isLight ? 'text-slate-300' : 'text-white/30'} />
+                                  )}
+                                </div>
+                              </button>
+                            )
+                          })
+                        )}
+                      </div>
+                    </div>
+                  </div>
                 </div>
               </div>
             )}
@@ -2709,13 +3869,13 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
       </div>
       </div>
 
-      {showDownloadOptions && (
+      {showDownloadOptions && createPortal(
         <>
           <div
-            className="fixed inset-0 z-[70] bg-black/60 animate-in fade-in duration-150"
+            className="fixed inset-0 z-[1000] bg-black/70 backdrop-blur-sm animate-in fade-in duration-150"
             onClick={handleCloseDownloadOptions}
           />
-          <aside className="fixed inset-y-0 right-0 z-[80] flex w-full max-w-[580px] flex-col border-l border-white/10 bg-[#0C1017] shadow-[-32px_0_80px_rgba(0,0,0,0.65)] animate-in slide-in-from-right duration-300 detail-source-drawer">
+          <aside className="fixed inset-y-0 right-0 z-[1010] flex w-full max-w-[580px] flex-col border-l border-white/10 bg-[#0C1017] shadow-[-32px_0_80px_rgba(0,0,0,0.65)] animate-in slide-in-from-right duration-300 detail-source-drawer">
             <div className="relative border-b border-white/10 bg-[#0C1017] detail-source-header">
               {/* scan progress */}
               <div className="absolute inset-x-0 top-0 h-[2px] bg-white/5">
@@ -3229,7 +4389,8 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
               )}
             </div>
           </aside>
-        </>
+        </>,
+        document.body
       )}
 
       <style dangerouslySetInnerHTML={{ __html: `

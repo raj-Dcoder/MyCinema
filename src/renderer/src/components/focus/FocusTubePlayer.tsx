@@ -653,6 +653,7 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
   const settingsTabRef = useRef<'speed' | 'quality'>('speed')
   const stallTimestampsRef = useRef<number[]>([])
   const lastBufferWarningTimeRef = useRef<number>(0)
+  const lastReportedTimeRef = useRef<number>(Date.now())
   // Mirrors `captionsOn` so the bridge handler (registered once per video)
   // always sees the current toggle without a stale closure.
   // Default is OFF and it resets per video — see the reset effect below.
@@ -1403,6 +1404,7 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
 
       if (data.event === 'infoDelivery' && data.info && typeof data.info === 'object') {
         if (typeof data.info.currentTime === 'number' && data.info.currentTime >= 0) {
+          lastReportedTimeRef.current = Date.now()
           const reported = data.info.currentTime
           // If we recently seeked, ignore stale/intermediate timestamps until YouTube catches up
           if (seekLockRef.current) {
@@ -1536,6 +1538,29 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
       }
       ticks += 1
       if (ticks % 20 === 0) saveProgress(timeRef.current)
+
+      // Fallback: If playing but postMessage has not reported a time update in > 600ms,
+      // query the underlying YouTube frame directly and heal the widget handshake.
+      if (stateRef.current === STATE_PLAYING && Date.now() - lastReportedTimeRef.current > 600) {
+        sendHandshake()
+        window.api?.ftGetFrameTime?.().then((res) => {
+          if (res && typeof res.currentTime === 'number' && res.currentTime >= 0) {
+            lastReportedTimeRef.current = Date.now()
+            if (!scrubbingRef.current) {
+              timeRef.current = res.currentTime
+              setCurrentTime(res.currentTime)
+            }
+            if (typeof res.duration === 'number' && res.duration > 0 && durationRef.current !== res.duration) {
+              durationRef.current = res.duration
+              setDuration(res.duration)
+            }
+            if (typeof res.playerState === 'number' && stateRef.current !== res.playerState && !isPiPActiveRef.current) {
+              stateRef.current = res.playerState
+              setPlayerState(res.playerState)
+            }
+          }
+        }).catch(() => {})
+      }
 
       // SponsorBlock auto-skip: jump over crowd-flagged in-video segments.
       // Guarded per-segment so a manual seek-back is honoured once (the key
@@ -1848,18 +1873,18 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
       if (document.fullscreenElement) {
         void document.exitFullscreen().catch(() => {})
       }
+      const currentT = timeRef.current || currentTime || startSeconds
       withBridge(() => {
         cmd('pauseVideo', [])
         cmd('mute', [])
         cmd('setVolume', [0])
       })
+      window.api?.ftSeekFrame?.({ seconds: currentT, play: false }).catch(() => {})
       setPlayerState(STATE_PAUSED)
       stateRef.current = STATE_PAUSED
       setIsPiPActive(true)
       isPiPActiveRef.current = true
       pipClosedByUserRef.current = false
-
-      const currentT = timeRef.current || currentTime || startSeconds
       const payload = {
         video,
         currentTime: currentT,
@@ -1915,8 +1940,9 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
       if (restoreTime > 0) {
         setCurrentTime(restoreTime)
         timeRef.current = restoreTime
-        setActiveResumeAt(Math.floor(restoreTime))
       }
+      seekLockRef.current = null
+      lastReportedTimeRef.current = Date.now()
 
       if (isMinimizedRef.current) {
         transitionToMinimized(false)
@@ -1929,6 +1955,7 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
         setPlayerState(STATE_PAUSED)
         stateRef.current = STATE_PAUSED
         cmd('pauseVideo', [])
+        window.api?.ftSeekFrame?.({ seconds: restoreTime, play: false }).catch(() => {})
         return
       }
 
@@ -1939,20 +1966,34 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
 
       pokeBottom()
 
-      setTimeout(() => {
-        sendHandshake()
-        const vol = volumeRef.current
-        cmd('setVolume', [vol])
-        if (!mutedRef.current && vol > 0) {
-          cmd('unMute', [])
-        }
-        if (restoreTime > 0) {
-          cmd('seekTo', [restoreTime, true])
-        }
+      const vol = volumeRef.current
+      cmd('setVolume', [vol])
+      if (!mutedRef.current && vol > 0) {
+        cmd('unMute', [])
+      }
+      if (restoreTime > 0) {
+        cmd('seekTo', [restoreTime, true])
+        window.api?.ftSeekFrame?.({ seconds: restoreTime, play: state?.isPlaying !== false }).catch(() => {})
+      }
+      if (state?.isPlaying !== false) {
         cmd('playVideo', [])
         setPlayerState(STATE_PLAYING)
         stateRef.current = STATE_PLAYING
-      }, 120)
+      } else {
+        cmd('pauseVideo', [])
+        setPlayerState(STATE_PAUSED)
+        stateRef.current = STATE_PAUSED
+      }
+      sendHandshake()
+
+      setTimeout(() => {
+        sendHandshake()
+        if (state?.isPlaying !== false) {
+          cmd('playVideo', [])
+          setPlayerState(STATE_PLAYING)
+          stateRef.current = STATE_PLAYING
+        }
+      }, 100)
     })
 
     return () => {
@@ -2766,14 +2807,14 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
             <iframe
               ref={iframeRef}
               key={`${video.videoId}:${iframeKey}`}
-              src={isPiPActive ? 'about:blank' : embedSrc}
+              src={embedSrc}
               title={video.title}
               className="absolute inset-0 z-0 h-full w-full border-0 bg-black transform-gpu will-change-transform"
               allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
               allowFullScreen
               loading="eager"
               referrerPolicy="strict-origin-when-cross-origin"
-              onLoad={isPiPActive ? undefined : sendHandshake}
+              onLoad={sendHandshake}
             />
 
             {/* Tap layer: single tap = play/pause, double tap/click =

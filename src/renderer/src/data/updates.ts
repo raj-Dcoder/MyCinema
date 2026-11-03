@@ -56,6 +56,82 @@ export function normalizeUpdate(item: UpdateInput, defaultCategory = 'General'):
 
 export const APP_UPDATES: AppRelease[] = [
   {
+    "version": "v1.49.0",
+    "summary": "Movie OTT release alerts, franchise collection timeline rails, recently released and upcoming discover rows, direct OTT deep links, and root-level modal layering.",
+    "updates": [
+      {
+        "title": "Follow Movies for OTT Releases",
+        "description": "Track upcoming and in-theater movies to receive instant notifications when they become available for streaming on digital platforms (Netflix, Prime Video, Hotstar, and more).",
+        "category": "Movie OTT Release Alerts & Following"
+      },
+      {
+        "title": "Followed Content Hubs",
+        "description": "Access dedicated Followed Movies and Followed Series modals with live status indicators, manual update checks, and one-click removal.",
+        "category": "Movie OTT Release Alerts & Following"
+      },
+      {
+        "title": "Unseen Drop Notifications",
+        "description": "Persistent sparkle badges on cards and carousels highlight newly dropped movies and episodes until viewed.",
+        "category": "Movie OTT Release Alerts & Following"
+      },
+      {
+        "title": "Franchise Timeline Rail",
+        "description": "Movie detail pages now feature a dedicated franchise carousel displaying all prequels and sequels in chronological order with release years and ratings.",
+        "category": "Franchise & Universe Timelines"
+      },
+      {
+        "title": "Instant Movie Jumping",
+        "description": "Seamlessly explore and switch between connected franchise entries directly from the movie overview screen.",
+        "category": "Franchise & Universe Timelines"
+      },
+      {
+        "title": "Recently Released Rows",
+        "description": "Discover newly released movies and series on Home, Movies, and Series pages sorted reverse-chronologically.",
+        "category": "Discover & Content Rows"
+      },
+      {
+        "title": "Upcoming Cinema Previews",
+        "description": "Browse anticipated upcoming theatrical and digital releases with quick filters for All, Indian, and International cinema.",
+        "category": "Discover & Content Rows"
+      },
+      {
+        "title": "Regional Indian Language Badges",
+        "description": "Content cards display clear regional language tags (Hindi, Telugu, Tamil, Malayalam, Kannada, Bengali, Punjabi, Marathi) and formatted release dates.",
+        "category": "Discover & Content Rows"
+      },
+      {
+        "title": "Direct OTT Deep Linking",
+        "description": "Launch official streaming titles directly on Netflix, Prime Video, Hotstar, and other supported platforms via secure browser links.",
+        "category": "Streaming & Player Experience"
+      },
+      {
+        "title": "Ambilight & Theater Immersion",
+        "description": "Polished ambilight mode with upgraded default soft halo radiance and heightened playback aura intensity.",
+        "category": "Streaming & Player Experience"
+      },
+      {
+        "title": "FocusTube Playhead Sync",
+        "description": "Resilient direct frame polling recovers accurate playback time during stream buffering or PiP transitions.",
+        "category": "Streaming & Player Experience"
+      },
+      {
+        "title": "Root-Level Modal Layering",
+        "description": "Modals and dialogs render via React body portals with backdrop blur and elevated z-index, eliminating clipping and stacking conflicts.",
+        "category": "Window Controls & Modal Architecture"
+      },
+      {
+        "title": "Smart Window Controls Hover",
+        "description": "Refined hover intent delay (160ms) and compact trigger boundary prevent accidental activation of window control capsules.",
+        "category": "Window Controls & Modal Architecture"
+      },
+      {
+        "title": "Safe External Link Execution",
+        "description": "All outbound streaming and provider links are sanitized and dispatched through main-process handlers to enforce protocol validation.",
+        "category": "Security & Privacy"
+      }
+    ]
+  },
+  {
     "version": "v1.48.0",
     "summary": "Atmospheric Lighting & Signature Accent Studio with live interactive preview, in-player theater ambilight modes, auto-repaired download file paths, and bundled onboarding feature demo video.",
     "updates": [

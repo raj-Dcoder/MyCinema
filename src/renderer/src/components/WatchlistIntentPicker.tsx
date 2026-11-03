@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { Bookmark, CalendarDays, Check, Hourglass, Loader2, Trash2, X, Zap } from 'lucide-react'
 import type { WatchlistIntent } from '../types'
 import { WATCHLIST_INTENT_META } from '../utils/watchlistIntent'
@@ -100,9 +101,9 @@ const WatchlistIntentPicker: React.FC<WatchlistIntentPickerProps> = ({
   const isBusy = Boolean(busy)
   const showRemove = Boolean(currentIntent && onRemove)
 
-  return (
+  return createPortal(
     <div
-      className="fixed inset-0 z-[70] flex items-end justify-center p-4 sm:items-center"
+      className="fixed inset-0 z-[1000] flex items-end justify-center p-4 sm:items-center"
       role="dialog"
       aria-modal="true"
       aria-label="Save to watchlist"
@@ -234,7 +235,8 @@ const WatchlistIntentPicker: React.FC<WatchlistIntentPickerProps> = ({
           </div>
         )}
       </div>
-    </div>
+    </div>,
+    document.body
   )
 }
 

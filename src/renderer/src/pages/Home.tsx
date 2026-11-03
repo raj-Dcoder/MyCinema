@@ -1,12 +1,12 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react'
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { Video } from '../types'
 import VideoCard, { VideoCardSkeleton } from '../components/VideoCard'
 import HeroCarousel from '../components/HeroCarousel'
 import HorizontalScrollRow, { type HorizontalScrollRowHandle } from '../components/HorizontalScrollRow'
 import { groupSeriesCards } from '../utils/seriesCards'
 import { groupMovieCards } from '../utils/mediaVersions'
-import { streamRowToVideo, resumeOnlineStream, isOnlineProgressEnabled, isNewEpisodeNotifyEnabled, groupOnlineStreamRows, resolveOnlineNextEpisode, buildOnlineSeriesCard, formatSeasonEpisode, getOnlineResumeKey, safeGetStreamHistory, safeGetFollowedSeries, safeMarkFollowedSeen, safeCheckFollowedUpdates, shouldRunFollowCheck, stampFollowCheck, FOLLOW_TOAST_EVENT } from '../utils/streamResume'
-import { Search as SearchIcon, Bookmark, ChevronLeft, ChevronRight, Play, X, Loader2, Star, Film, Tv, HardDrive, Cloud, CheckCircle2, Bell } from 'lucide-react'
+import { streamRowToVideo, resumeOnlineStream, isOnlineProgressEnabled, isNewEpisodeNotifyEnabled, groupOnlineStreamRows, resolveOnlineNextEpisode, buildOnlineSeriesCard, formatSeasonEpisode, getOnlineResumeKey, safeGetStreamHistory, safeGetFollowedSeries, safeMarkFollowedSeen, safeCheckFollowedUpdates, shouldRunFollowCheck, stampFollowCheck, safeGetFollowedMovies, safeUnfollowMovie, safeMarkFollowedMovieSeen, safeCheckFollowedMovieUpdates, FOLLOW_TOAST_EVENT } from '../utils/streamResume'
+import { Search as SearchIcon, Bookmark, ChevronLeft, ChevronRight, Play, X, Loader2, Star, Film, Tv, HardDrive, Cloud, CheckCircle2, Bell, BellRing, Sparkles } from 'lucide-react'
 
 interface HomeProps {
   onPlay: (video: Video) => void
@@ -27,6 +27,10 @@ type HomeSnapshot = {
   recentSeries: Video[]
   trendingMovies: Video[]
   trendingSeries: Video[]
+  recentlyReleasedMovies?: Video[]
+  recentlyReleasedSeries?: Video[]
+  upcomingMovies?: Video[]
+  upcomingSeries?: Video[]
   trendingIndiaMovies: Video[]
   trendingIndiaSeries: Video[]
   trendingKdrama: Video[]
@@ -66,6 +70,10 @@ const readHomeSnapshot = (): HomeSnapshot | null => {
       recentSeries: Array.isArray(parsed.recentSeries) ? parsed.recentSeries : [],
       trendingMovies: Array.isArray(parsed.trendingMovies) ? parsed.trendingMovies : [],
       trendingSeries: Array.isArray(parsed.trendingSeries) ? parsed.trendingSeries : [],
+      recentlyReleasedMovies: Array.isArray(parsed.recentlyReleasedMovies) ? parsed.recentlyReleasedMovies : [],
+      recentlyReleasedSeries: Array.isArray(parsed.recentlyReleasedSeries) ? parsed.recentlyReleasedSeries : [],
+      upcomingMovies: Array.isArray(parsed.upcomingMovies) ? parsed.upcomingMovies : [],
+      upcomingSeries: Array.isArray(parsed.upcomingSeries) ? parsed.upcomingSeries : [],
       trendingIndiaMovies: Array.isArray(parsed.trendingIndiaMovies)
         ? parsed.trendingIndiaMovies
         : legacyTrendingIndia.filter(video => video.type !== 'series'),
@@ -96,6 +104,10 @@ const writeHomeSnapshot = (snapshot: Omit<HomeSnapshot, 'timestamp'>) => {
     snapshot.recentSeries,
     snapshot.trendingMovies,
     snapshot.trendingSeries,
+    snapshot.recentlyReleasedMovies || [],
+    snapshot.recentlyReleasedSeries || [],
+    snapshot.upcomingMovies || [],
+    snapshot.upcomingSeries || [],
     snapshot.trendingIndiaMovies,
     snapshot.trendingIndiaSeries,
     snapshot.trendingKdrama,
@@ -149,6 +161,7 @@ const mapTmdbSearchResult = (item: any): Video => {
     overview: item.overview || undefined,
     vote_average: typeof item.vote_average === 'number' ? item.vote_average : undefined,
     release_year: releaseYear,
+    release_date: releaseDate || undefined,
     tmdb_id: item.id,
     isExternal: true
   }
@@ -295,10 +308,15 @@ const ContinueWatchingCard: React.FC<{
               {episodeLabel}
             </div>
           )}
-          {video.isOnlineResume ? (
+          {video.onlineNewEpisode ? (
+            <div className="inline-flex items-center gap-1 rounded-md bg-primary px-2.5 py-1 text-[9px] font-black uppercase tracking-widest text-white shadow-lg shadow-red-950/40 backdrop-blur-md animate-pulse">
+              <Sparkles size={10} />
+              New Episode
+            </div>
+          ) : video.isOnlineResume ? (
             <div className="inline-flex items-center gap-1 rounded-md bg-sky-500/80 px-2 py-1 text-[9px] font-black uppercase tracking-widest text-white shadow-lg shadow-black/30 backdrop-blur-md">
               <Cloud size={10} />
-              {video.onlineNewEpisode ? 'New Episode' : (video.onlineNextEpisode || video.isNextEpisode) ? 'Up Next · Online' : 'Online'}
+              {(video.onlineNextEpisode || video.isNextEpisode) ? 'Up Next · Online' : 'Online'}
             </div>
           ) : video.isNextEpisode ? (
             <div className="inline-flex items-center gap-1 rounded-md bg-indigo-600/85 px-2 py-1 text-[9px] font-black uppercase tracking-widest text-white shadow-lg shadow-black/30 backdrop-blur-md">
@@ -428,102 +446,60 @@ const SearchResultCard: React.FC<{
   )
 }
 
-type SectionHeaderTone = 'red' | 'cyan' | 'amber' | 'violet' | 'emerald' | 'rose' | 'blue' | 'orange' | 'indigo'
-
-const sectionHeaderToneClasses: Record<SectionHeaderTone, {
-  icon: string
-  eyebrow: string
-  underline: string
-}> = {
-  red: {
-    icon: 'border-red-500/35 bg-red-500/15 text-red-300 shadow-red-950/20',
-    eyebrow: 'text-red-300',
-    underline: 'from-red-500 via-red-400 to-transparent'
-  },
-  cyan: {
-    icon: 'border-cyan-400/35 bg-cyan-400/15 text-cyan-200 shadow-cyan-950/20',
-    eyebrow: 'text-cyan-200',
-    underline: 'from-cyan-400 via-cyan-300 to-transparent'
-  },
-  amber: {
-    icon: 'border-amber-400/35 bg-amber-400/15 text-amber-200 shadow-amber-950/20',
-    eyebrow: 'text-amber-200',
-    underline: 'from-amber-400 via-amber-300 to-transparent'
-  },
-  violet: {
-    icon: 'border-violet-400/35 bg-violet-400/15 text-violet-200 shadow-violet-950/20',
-    eyebrow: 'text-violet-200',
-    underline: 'from-violet-400 via-violet-300 to-transparent'
-  },
-  emerald: {
-    icon: 'border-emerald-400/35 bg-emerald-400/15 text-emerald-200 shadow-emerald-950/20',
-    eyebrow: 'text-emerald-200',
-    underline: 'from-emerald-400 via-emerald-300 to-transparent'
-  },
-  rose: {
-    icon: 'border-rose-400/35 bg-rose-400/15 text-rose-200 shadow-rose-950/20',
-    eyebrow: 'text-rose-200',
-    underline: 'from-rose-400 via-rose-300 to-transparent'
-  },
-  blue: {
-    icon: 'border-blue-400/35 bg-blue-400/15 text-blue-200 shadow-blue-950/20',
-    eyebrow: 'text-blue-200',
-    underline: 'from-blue-400 via-blue-300 to-transparent'
-  },
-  orange: {
-    icon: 'border-orange-400/35 bg-orange-400/15 text-orange-200 shadow-orange-950/20',
-    eyebrow: 'text-orange-200',
-    underline: 'from-orange-400 via-orange-300 to-transparent'
-  },
-  indigo: {
-    icon: 'border-indigo-400/35 bg-indigo-400/15 text-indigo-200 shadow-indigo-950/20',
-    eyebrow: 'text-indigo-200',
-    underline: 'from-indigo-400 via-indigo-300 to-transparent'
-  }
-}
-
 const SectionHeader: React.FC<{
   title: string
-  eyebrow: string
-  icon: React.ReactNode
-  tone?: SectionHeaderTone
   action?: React.ReactNode
-  onRefresh?: () => void
-}> = ({ title, eyebrow, icon, tone = 'red', action, onRefresh }) => {
-  const toneClasses = sectionHeaderToneClasses[tone]
-  const iconTileClassName = `flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border transition-all ${toneClasses.icon}`
-  const iconTile = onRefresh ? (
-    <button
-      type="button"
-      aria-label={`Refresh ${title}`}
-      title="Refresh"
-      onClick={onRefresh}
-      className={`${iconTileClassName} cursor-pointer hover:-translate-y-0.5 hover:brightness-125 active:translate-y-0 active:scale-95`}
-    >
-      {icon}
-    </button>
-  ) : (
-    <div className={iconTileClassName}>
-      {icon}
-    </div>
-  )
-
+}> = ({ title, action }) => {
   return (
     <div className="relative z-10 mb-6 flex items-center justify-between gap-4">
-      <div className="flex min-w-0 items-center gap-3">
-        {iconTile}
-        <div className="min-w-0">
-          <h3 className="truncate text-2xl font-black leading-tight tracking-normal text-white">
-            {title}
-          </h3>
-          <p className={`mt-0.5 text-[10px] font-black uppercase tracking-[0.18em] ${toneClasses.eyebrow}`}>
-            {eyebrow}
-          </p>
-        </div>
-      </div>
+      <h3 className="truncate text-2xl font-black leading-tight tracking-normal text-white">
+        {title}
+      </h3>
       {action}
     </div>
   )
+}
+
+const isIndianContent = (video: Video): boolean => {
+  if (!video) return false
+  if (video.is_indian) return true
+  const originCountries = video.origin_country
+  if (Array.isArray(originCountries) && originCountries.includes('IN')) return true
+  if (typeof originCountries === 'string' && (originCountries as string).toUpperCase() === 'IN') return true
+  const lang = (video.original_language || '').toLowerCase().trim()
+  return ['hi', 'te', 'ta', 'ml', 'kn', 'pa', 'bn', 'mr', 'gu', 'or', 'as', 'ur'].includes(lang)
+}
+
+const sortUpcomingChronological = (items: Video[]): Video[] => {
+  const todayStr = new Date().toISOString().substring(0, 10)
+  return [...items]
+    .filter(item => {
+      const d = item.release_date || (item as any).first_air_date
+      return d && String(d).substring(0, 10) >= todayStr
+    })
+    .sort((a, b) => {
+      const dateA = String(a.release_date || (a as any).first_air_date || '')
+      const dateB = String(b.release_date || (b as any).first_air_date || '')
+      const diff = dateA.localeCompare(dateB)
+      if (diff !== 0) return diff
+      return (Number(b.popularity) || b.vote_average || 0) - (Number(a.popularity) || a.vote_average || 0)
+    })
+}
+
+const sortRecentlyReleasedReverseChronological = (items: Video[]): Video[] => {
+  const todayStr = new Date().toISOString().substring(0, 10)
+  return [...items]
+    .filter(item => {
+      const d = item.release_date || (item as any).first_air_date
+      return d && String(d).substring(0, 10) <= todayStr
+    })
+    .sort((a, b) => {
+      const dateA = String(a.release_date || (a as any).first_air_date || '')
+      const dateB = String(b.release_date || (b as any).first_air_date || '')
+      const diff = dateB.localeCompare(dateA) // Reverse chronological: newest first!
+      if (diff !== 0) return diff
+      return (Number(b.popularity) || b.vote_average || 0) - (Number(a.popularity) || a.vote_average || 0)
+    })
 }
 
 const Home: React.FC<HomeProps> = ({ onPlay, onShowDetail, onNavigate, refreshKey, isActive = true }) => {
@@ -545,6 +521,54 @@ const Home: React.FC<HomeProps> = ({ onPlay, onShowDetail, onNavigate, refreshKe
   const [trendingAppleSeries, setTrendingAppleSeries] = useState<Video[]>(() => initialSnapshotRef.current?.trendingAppleSeries || [])
   const [trendingPrimeMovies, setTrendingPrimeMovies] = useState<Video[]>(() => initialSnapshotRef.current?.trendingPrimeMovies || [])
   const [trendingPrimeSeries, setTrendingPrimeSeries] = useState<Video[]>(() => initialSnapshotRef.current?.trendingPrimeSeries || [])
+  const [recentlyReleasedMovies, setRecentlyReleasedMovies] = useState<Video[]>(() => initialSnapshotRef.current?.recentlyReleasedMovies || [])
+  const [recentlyReleasedSeries, setRecentlyReleasedSeries] = useState<Video[]>(() => initialSnapshotRef.current?.recentlyReleasedSeries || [])
+  const [recentMovieFilter, setRecentMovieFilter] = useState<'all' | 'indian' | 'international'>('all')
+  const [recentSeriesFilter, setRecentSeriesFilter] = useState<'all' | 'indian' | 'international'>('all')
+  const [upcomingMovies, setUpcomingMovies] = useState<Video[]>(() => initialSnapshotRef.current?.upcomingMovies || [])
+  const [upcomingSeries, setUpcomingSeries] = useState<Video[]>(() => initialSnapshotRef.current?.upcomingSeries || [])
+  const [upcomingMovieFilter, setUpcomingMovieFilter] = useState<'all' | 'indian' | 'international'>('all')
+  const [upcomingSeriesFilter, setUpcomingSeriesFilter] = useState<'all' | 'indian' | 'international'>('all')
+
+  const displayedRecentMovies = useMemo(() => {
+    if (recentMovieFilter === 'indian') {
+      return sortRecentlyReleasedReverseChronological(recentlyReleasedMovies.filter(isIndianContent))
+    }
+    if (recentMovieFilter === 'international') {
+      return sortRecentlyReleasedReverseChronological(recentlyReleasedMovies.filter(v => !isIndianContent(v)))
+    }
+    return recentlyReleasedMovies
+  }, [recentlyReleasedMovies, recentMovieFilter])
+
+  const displayedRecentSeries = useMemo(() => {
+    if (recentSeriesFilter === 'indian') {
+      return sortRecentlyReleasedReverseChronological(recentlyReleasedSeries.filter(isIndianContent))
+    }
+    if (recentSeriesFilter === 'international') {
+      return sortRecentlyReleasedReverseChronological(recentlyReleasedSeries.filter(v => !isIndianContent(v)))
+    }
+    return recentlyReleasedSeries
+  }, [recentlyReleasedSeries, recentSeriesFilter])
+
+  const displayedUpcomingMovies = useMemo(() => {
+    if (upcomingMovieFilter === 'indian') {
+      return sortUpcomingChronological(upcomingMovies.filter(isIndianContent))
+    }
+    if (upcomingMovieFilter === 'international') {
+      return sortUpcomingChronological(upcomingMovies.filter(v => !isIndianContent(v)))
+    }
+    return upcomingMovies
+  }, [upcomingMovies, upcomingMovieFilter])
+
+  const displayedUpcomingSeries = useMemo(() => {
+    if (upcomingSeriesFilter === 'indian') {
+      return sortUpcomingChronological(upcomingSeries.filter(isIndianContent))
+    }
+    if (upcomingSeriesFilter === 'international') {
+      return sortUpcomingChronological(upcomingSeries.filter(v => !isIndianContent(v)))
+    }
+    return upcomingSeries
+  }, [upcomingSeries, upcomingSeriesFilter])
   const [allLibraryVideos, setAllLibraryVideos] = useState<Video[]>([])
   const [localDataLoaded, setLocalDataLoaded] = useState(() => Boolean(initialSnapshotRef.current))
   const [homeFolderScanPath, setHomeFolderScanPath] = useState<string | null>(null)
@@ -552,6 +576,10 @@ const Home: React.FC<HomeProps> = ({ onPlay, onShowDetail, onNavigate, refreshKe
   const continueWatchingRef = useRef<HTMLDivElement>(null)
   const globalMoviesRef = useRef<HorizontalScrollRowHandle>(null)
   const globalSeriesRef = useRef<HorizontalScrollRowHandle>(null)
+  const recentlyReleasedMoviesRef = useRef<HorizontalScrollRowHandle>(null)
+  const recentlyReleasedSeriesRef = useRef<HorizontalScrollRowHandle>(null)
+  const upcomingMoviesRef = useRef<HorizontalScrollRowHandle>(null)
+  const upcomingSeriesRef = useRef<HorizontalScrollRowHandle>(null)
   const indiaMoviesRef = useRef<HorizontalScrollRowHandle>(null)
   const indiaSeriesRef = useRef<HorizontalScrollRowHandle>(null)
   const kdramaRef = useRef<HorizontalScrollRowHandle>(null)
@@ -587,18 +615,10 @@ const Home: React.FC<HomeProps> = ({ onPlay, onShowDetail, onNavigate, refreshKe
   const discoveryTimersRef = useRef<number[]>([])
   const lastDiscoveryFetchTimeRef = useRef<number>(0)
 
-  const refresh = (fetcher: () => Promise<any[]>, setter: (data: any[]) => void) => async () => {
-    try {
-      const results = await fetcher()
-      if (results.length > 0) setter(results)
-    } catch (err) {
-      console.error('Section refresh failed:', err)
-    }
-  }
 
   const refreshLocalHomeData = useCallback(async () => {
     try {
-      const [allVideos, cw, streamHistory, followed] = await Promise.all([
+      const [allVideos, cw, streamHistory, followed, followedMovies] = await Promise.all([
         window.api.getVideos(),
         window.api.getContinueWatching(),
         (async () => {
@@ -608,6 +628,9 @@ const Home: React.FC<HomeProps> = ({ onPlay, onShowDetail, onNavigate, refreshKe
         (async () => {
           if (!isOnlineProgressEnabled() || !isNewEpisodeNotifyEnabled()) return []
           return await safeGetFollowedSeries()
+        })(),
+        (async () => {
+          return await safeGetFollowedMovies()
         })()
       ])
       setFollowedSeries(followed as any[])
@@ -671,16 +694,83 @@ const Home: React.FC<HomeProps> = ({ onPlay, onShowDetail, onNavigate, refreshKe
       // New drops outrank plain recency (the Netflix model: the hero answers
       // "what needs you now"). Among drops, most-recently-detected wins; the
       // boost expires the moment the card is opened (flag cleared).
-      const dropDetectedAt = new Map(
-        (followed as any[])
+      const dropDetectedAt = new Map([
+        ...(followed as any[])
           .filter(f => f?.has_unseen_new)
-          .map(f => [Number(f.tmdb_id), new Date(f.last_checked || 0).getTime()])
-      )
-      const merged = [...groupContinueWatching(cw), ...onlineMovies, ...onlineSeriesCards, ...resurfacedCards]
+          .map(f => [Number(f.tmdb_id), new Date(f.last_checked || 0).getTime()] as [number, number]),
+        ...(followedMovies as any[])
+          .filter(m => m?.has_unseen_drop || m?.is_released_ott)
+          .map(m => [Number(m.tmdb_id), new Date(m.last_checked || 0).getTime()] as [number, number])
+      ])
+      // Stamp new episode drops onto local continue-watching rows
+      const localCw = groupContinueWatching(cw).map(card => {
+        if (card.tmdb_id && newDropIds.has(Number(card.tmdb_id))) {
+          const f = (followed as any[]).find(item => Number(item.tmdb_id) === Number(card.tmdb_id))
+          return {
+            ...card,
+            onlineNewEpisode: true,
+            tagline: f && f.last_known_season && f.last_known_episode
+              ? `New Episode: S${f.last_known_season} E${f.last_known_episode} just dropped`
+              : card.tagline || 'New episode just dropped'
+          }
+        }
+        return card
+      })
+
+      // Collect all TMDB IDs covered so far in localCw, onlineSeriesCards, and resurfacedCards
+      const handledTmdbIds = new Set<number>()
+      localCw.forEach(c => { if (c.tmdb_id) handledTmdbIds.add(Number(c.tmdb_id)) })
+      onlineSeriesCards.forEach(c => { if (c.tmdb_id) handledTmdbIds.add(Number(c.tmdb_id)) })
+      resurfacedCards.forEach(c => { if (c.tmdb_id) handledTmdbIds.add(Number(c.tmdb_id)) })
+
+      // Generate standalone cards for followed series that have drops but no watch progress yet
+      const freshFollowedDropCards: Video[] = (followed as any[])
+        .filter(f => f?.has_unseen_new && !handledTmdbIds.has(Number(f.tmdb_id)))
+        .map(f => ({
+          id: Number(f.tmdb_id),
+          tmdb_id: Number(f.tmdb_id),
+          type: 'series' as const,
+          title: f.title,
+          series_name: f.title,
+          poster_path: f.poster_path,
+          backdrop_path: f.backdrop_path,
+          overview: f.overview,
+          season: f.last_known_season ?? 1,
+          episode: f.last_known_episode ?? 1,
+          onlineNewEpisode: true,
+          onlineNextEpisode: true,
+          isOnlineResume: true,
+          tagline: f.last_known_season && f.last_known_episode
+            ? `New Episode: S${f.last_known_season} E${f.last_known_episode} just dropped`
+            : 'New episode just dropped',
+          file_path: '',
+          updated_at: f.last_checked || new Date().toISOString()
+        }))
+
+      // Generate standalone cards for followed movies that dropped on OTT
+      const freshFollowedMovieCards: Video[] = (followedMovies as any[])
+        .filter(m => (m?.is_released_ott || m?.has_unseen_drop) && !handledTmdbIds.has(Number(m.tmdb_id)))
+        .map(m => ({
+          id: Number(m.tmdb_id),
+          tmdb_id: Number(m.tmdb_id),
+          type: 'movie' as const,
+          title: m.title,
+          poster_path: m.poster_path,
+          backdrop_path: m.backdrop_path,
+          overview: m.overview,
+          release_date: m.theatrical_date || undefined,
+          onlineOttRelease: true,
+          ottPlatform: m.ott_platform || 'OTT',
+          tagline: m.ott_platform ? `Now streaming on ${m.ott_platform}` : 'Now available on OTT',
+          file_path: '',
+          updated_at: m.last_checked || new Date().toISOString()
+        }))
+
+      const merged = [...freshFollowedMovieCards, ...localCw, ...onlineMovies, ...onlineSeriesCards, ...resurfacedCards, ...freshFollowedDropCards]
         .sort((a, b) => {
-          // Priority 1: Brand new episode drops (unseen releases)
-          const aDrop = a.onlineNewEpisode ? 1 : 0
-          const bDrop = b.onlineNewEpisode ? 1 : 0
+          // Priority 1: Brand new episode drops & fresh OTT movie drops (unseen releases)
+          const aDrop = (a.onlineNewEpisode || a.onlineOttRelease) ? 1 : 0
+          const bDrop = (b.onlineNewEpisode || b.onlineOttRelease) ? 1 : 0
           if (aDrop !== bDrop) return bDrop - aDrop
           if (aDrop && bDrop) {
             const aAt = (a.tmdb_id && dropDetectedAt.get(Number(a.tmdb_id))) || 0
@@ -727,6 +817,20 @@ const Home: React.FC<HomeProps> = ({ onPlay, onShowDetail, onNavigate, refreshKe
 
     if (trendingM.length > 0) setTrendingMovies(trendingM)
     if (trendingS.length > 0) setTrendingSeries(trendingS)
+
+    const t0 = window.setTimeout(async () => {
+      const [recentM, recentS, upM, upS] = await Promise.all([
+        window.api.fetchRecentlyReleased('movie').catch(() => []),
+        window.api.fetchRecentlyReleased('series').catch(() => []),
+        window.api.fetchUpcoming('movie').catch(() => []),
+        window.api.fetchUpcoming('series').catch(() => [])
+      ])
+      if (recentM.length > 0) setRecentlyReleasedMovies(recentM)
+      if (recentS.length > 0) setRecentlyReleasedSeries(recentS)
+      if (upM.length > 0) setUpcomingMovies(upM)
+      if (upS.length > 0) setUpcomingSeries(upS)
+    }, 250)
+    discoveryTimersRef.current.push(t0)
 
     const t1 = window.setTimeout(async () => {
       const [indiaMovies, indiaSeries] = await Promise.all([
@@ -779,10 +883,18 @@ const Home: React.FC<HomeProps> = ({ onPlay, onShowDetail, onNavigate, refreshKe
     try {
       if (!isOnlineProgressEnabled() || !isNewEpisodeNotifyEnabled() || !shouldRunFollowCheck()) return
       stampFollowCheck()
-      const updated = await safeCheckFollowedUpdates()
-      if (updated) setFollowedSeries(updated)
+      const [updatedSeries, updatedMovies] = await Promise.all([
+        safeCheckFollowedUpdates(),
+        safeCheckFollowedMovieUpdates()
+      ])
+      if (updatedSeries) {
+        setFollowedSeries(updatedSeries)
+      }
+      if (updatedSeries?.some(f => f?.has_unseen_new) || updatedMovies?.some(m => m?.has_unseen_drop)) {
+        void refreshLocalHomeData()
+      }
     } catch { /* best-effort */ }
-  }, [])
+  }, [refreshLocalHomeData])
 
   const fetchData = useCallback(async () => {
     try {
@@ -863,6 +975,10 @@ const Home: React.FC<HomeProps> = ({ onPlay, onShowDetail, onNavigate, refreshKe
         recentSeries,
         trendingMovies,
         trendingSeries,
+        recentlyReleasedMovies,
+        recentlyReleasedSeries,
+        upcomingMovies,
+        upcomingSeries,
         trendingIndiaMovies,
         trendingIndiaSeries,
         trendingKdrama,
@@ -885,7 +1001,7 @@ const Home: React.FC<HomeProps> = ({ onPlay, onShowDetail, onNavigate, refreshKe
         snapshotTimerRef.current = null
       }
     }
-  }, [continueWatching, recentMovies, recentSeries, trendingMovies, trendingSeries, trendingIndiaMovies, trendingIndiaSeries, trendingKdrama, trendingAnime, trendingNetflixMovies, trendingNetflixSeries, trendingJioHotstarMovies, trendingJioHotstarSeries, trendingAppleMovies, trendingAppleSeries, trendingPrimeMovies, trendingPrimeSeries])
+  }, [continueWatching, recentMovies, recentSeries, trendingMovies, trendingSeries, recentlyReleasedMovies, recentlyReleasedSeries, upcomingMovies, upcomingSeries, trendingIndiaMovies, trendingIndiaSeries, trendingKdrama, trendingAnime, trendingNetflixMovies, trendingNetflixSeries, trendingJioHotstarMovies, trendingJioHotstarSeries, trendingAppleMovies, trendingAppleSeries, trendingPrimeMovies, trendingPrimeSeries])
 
   const suppressNextHomeClick = () => {
     suppressContentClickUntilRef.current = Date.now() + 350
@@ -1002,8 +1118,19 @@ const Home: React.FC<HomeProps> = ({ onPlay, onShowDetail, onNavigate, refreshKe
 
   const handlePlayFromHome = (video: Video) => {
     if (shouldSuppressHomeClick()) return
+    if (video.onlineOttRelease && video.tmdb_id) {
+      void safeUnfollowMovie(video.tmdb_id)
+      void safeMarkFollowedMovieSeen(video.tmdb_id)
+      setContinueWatching(prev => prev.filter(c => Number(c.tmdb_id) !== Number(video.tmdb_id)))
+      onShowDetail(video)
+      return
+    }
     if (video.isOnlineResume) {
       void handleOnlineResume(video)
+      return
+    }
+    if (!video.file_path && !video.streamSourceId && !video.streamUrl) {
+      onShowDetail(video)
       return
     }
     onPlay(video)
@@ -1012,6 +1139,11 @@ const Home: React.FC<HomeProps> = ({ onPlay, onShowDetail, onNavigate, refreshKe
   const handleShowDetailFromHome = (video: Video) => {
     if (shouldSuppressHomeClick()) return
     if (video.onlineNewEpisode) clearNewDropFlag(video.tmdb_id)
+    if (video.onlineOttRelease && video.tmdb_id) {
+      void safeUnfollowMovie(video.tmdb_id)
+      void safeMarkFollowedMovieSeen(video.tmdb_id)
+      setContinueWatching(prev => prev.filter(c => Number(c.tmdb_id) !== Number(video.tmdb_id)))
+    }
     onShowDetail(video)
   }
 
@@ -1271,7 +1403,7 @@ const Home: React.FC<HomeProps> = ({ onPlay, onShowDetail, onNavigate, refreshKe
               </h2>
             </div>
 
-            <div className="relative flex items-center gap-4" ref={searchBoxRef}>
+            <div className="relative flex items-center gap-3" ref={searchBoxRef}>
               <div
                 className={`relative transition-all duration-300 ease-out ${
                   isSearchOpen ? 'w-[min(420px,calc(100vw-4rem))]' : 'w-12'
@@ -1426,10 +1558,7 @@ const Home: React.FC<HomeProps> = ({ onPlay, onShowDetail, onNavigate, refreshKe
       {/* 2. Library Movies */}
       <section className="mx-auto mt-7 max-w-[1600px] px-8">
         <SectionHeader
-          eyebrow=""
           title="Your Library Movies"
-          icon={<Film size={18} />}
-          tone="emerald"
           action={(
             <button
               className="text-[10px] font-black uppercase tracking-widest text-primary flex items-center gap-1 hover:gap-2 transition-all"
@@ -1461,10 +1590,7 @@ const Home: React.FC<HomeProps> = ({ onPlay, onShowDetail, onNavigate, refreshKe
       {/* 3. Library Series */}
       <section className="mx-auto mt-7 max-w-[1600px] px-8">
         <SectionHeader
-          eyebrow=""
           title="Your Library Series"
-          icon={<Tv size={18} />}
-          tone="cyan"
           action={(
             <button
               className="text-[10px] font-black uppercase tracking-widest text-primary flex items-center gap-1 hover:gap-2 transition-all"
@@ -1495,13 +1621,7 @@ const Home: React.FC<HomeProps> = ({ onPlay, onShowDetail, onNavigate, refreshKe
 
       {/* 4. Global Trending Movies Section */}
       <section className="mx-auto mt-7 max-w-[1600px] px-8">
-        <SectionHeader
-          eyebrow=""
-          title="Global Trending Movies"
-          icon={<Film size={18} />}
-          tone="red"
-          onRefresh={refresh(() => window.api.fetchTrending('movie', true), setTrendingMovies)}
-        />
+        <SectionHeader title="Global Trending Movies" />
         <HorizontalScrollRow ref={globalMoviesRef} contentClassName="gap-5">
           {trendingMovies.map(video => (
             <div
@@ -1521,13 +1641,7 @@ const Home: React.FC<HomeProps> = ({ onPlay, onShowDetail, onNavigate, refreshKe
 
       {/* 4. Global Trending Series Section */}
       <section className="mx-auto mt-7 max-w-[1600px] px-8">
-        <SectionHeader
-          eyebrow=""
-          title="Global Trending Series"
-          icon={<Tv size={18} />}
-          tone="cyan"
-          onRefresh={refresh(() => window.api.fetchTrending('series', true), setTrendingSeries)}
-        />
+        <SectionHeader title="Global Trending Series" />
         <HorizontalScrollRow ref={globalSeriesRef} contentClassName="gap-5">
           {trendingSeries.map(video => (
             <div
@@ -1545,15 +1659,253 @@ const Home: React.FC<HomeProps> = ({ onPlay, onShowDetail, onNavigate, refreshKe
         </HorizontalScrollRow>
       </section>
 
-      {/* 5. India Trending Movies Section */}
+      {/* Recently Released Movies */}
       <section className="mx-auto mt-7 max-w-[1600px] px-8">
         <SectionHeader
-          eyebrow=""
-          title="Indian Trending Movies"
-          icon={<Film size={18} />}
-          tone="amber"
-          onRefresh={refresh(() => window.api.fetchTrendingIndia('movie', true), setTrendingIndiaMovies)}
+          title="Recently Released Movies"
+          action={
+            <div className="flex items-center gap-1 rounded-xl border border-white/10 bg-white/5 p-1 text-[11px] font-bold">
+              <button
+                onClick={() => setRecentMovieFilter('all')}
+                className={`rounded-lg px-2.5 py-1 transition-all ${
+                  recentMovieFilter === 'all'
+                    ? 'bg-primary text-white shadow-sm'
+                    : 'text-white/60 hover:text-white'
+                }`}
+              >
+                All Recent
+              </button>
+              <button
+                onClick={() => setRecentMovieFilter('indian')}
+                className={`rounded-lg px-2.5 py-1 transition-all ${
+                  recentMovieFilter === 'indian'
+                    ? 'bg-primary text-white shadow-sm'
+                    : 'text-white/60 hover:text-white'
+                }`}
+              >
+                Indian Cinema
+              </button>
+              <button
+                onClick={() => setRecentMovieFilter('international')}
+                className={`rounded-lg px-2.5 py-1 transition-all ${
+                  recentMovieFilter === 'international'
+                    ? 'bg-primary text-white shadow-sm'
+                    : 'text-white/60 hover:text-white'
+                }`}
+              >
+                International
+              </button>
+            </div>
+          }
         />
+        <HorizontalScrollRow ref={recentlyReleasedMoviesRef} contentClassName="gap-5">
+          {displayedRecentMovies.map(video => (
+            <div
+              key={video.tmdb_id || video.id}
+              className={POSTER_RAIL_CARD_CLASS}
+            >
+              <VideoCard video={video} onPlay={handlePlayFromHome} onShowDetail={handleShowDetailFromHome} />
+            </div>
+          ))}
+          {displayedRecentMovies.length === 0 && recentlyReleasedMovies.length === 0 && Array.from({ length: TRENDING_RAIL_LIMIT }, (_, i) => i + 1).map(i => (
+            <div key={i} className={POSTER_RAIL_CARD_CLASS}>
+              <VideoCardSkeleton />
+            </div>
+          ))}
+          {displayedRecentMovies.length === 0 && recentlyReleasedMovies.length > 0 && (
+            <div className="py-8 text-xs font-semibold text-white/50">
+              No recent movies found for this filter.
+            </div>
+          )}
+        </HorizontalScrollRow>
+      </section>
+
+      {/* Recently Released Series */}
+      <section className="mx-auto mt-7 max-w-[1600px] px-8">
+        <SectionHeader
+          title="Recently Released Series"
+          action={
+            <div className="flex items-center gap-1 rounded-xl border border-white/10 bg-white/5 p-1 text-[11px] font-bold">
+              <button
+                onClick={() => setRecentSeriesFilter('all')}
+                className={`rounded-lg px-2.5 py-1 transition-all ${
+                  recentSeriesFilter === 'all'
+                    ? 'bg-primary text-white shadow-sm'
+                    : 'text-white/60 hover:text-white'
+                }`}
+              >
+                All Recent
+              </button>
+              <button
+                onClick={() => setRecentSeriesFilter('indian')}
+                className={`rounded-lg px-2.5 py-1 transition-all ${
+                  recentSeriesFilter === 'indian'
+                    ? 'bg-primary text-white shadow-sm'
+                    : 'text-white/60 hover:text-white'
+                }`}
+              >
+                Indian Series
+              </button>
+              <button
+                onClick={() => setRecentSeriesFilter('international')}
+                className={`rounded-lg px-2.5 py-1 transition-all ${
+                  recentSeriesFilter === 'international'
+                    ? 'bg-primary text-white shadow-sm'
+                    : 'text-white/60 hover:text-white'
+                }`}
+              >
+                International
+              </button>
+            </div>
+          }
+        />
+        <HorizontalScrollRow ref={recentlyReleasedSeriesRef} contentClassName="gap-5">
+          {displayedRecentSeries.map(video => (
+            <div
+              key={video.tmdb_id || video.id}
+              className={POSTER_RAIL_CARD_CLASS}
+            >
+              <VideoCard video={video} onPlay={handlePlayFromHome} onShowDetail={handleShowDetailFromHome} />
+            </div>
+          ))}
+          {displayedRecentSeries.length === 0 && recentlyReleasedSeries.length === 0 && Array.from({ length: TRENDING_RAIL_LIMIT }, (_, i) => i + 1).map(i => (
+            <div key={i} className={POSTER_RAIL_CARD_CLASS}>
+              <VideoCardSkeleton />
+            </div>
+          ))}
+          {displayedRecentSeries.length === 0 && recentlyReleasedSeries.length > 0 && (
+            <div className="py-8 text-xs font-semibold text-white/50">
+              No recent series found for this filter.
+            </div>
+          )}
+        </HorizontalScrollRow>
+      </section>
+
+      {/* Upcoming Movies */}
+      <section className="mx-auto mt-7 max-w-[1600px] px-8">
+        <SectionHeader
+          title="Upcoming Movies"
+          action={
+            <div className="flex items-center gap-1 rounded-xl border border-white/10 bg-white/5 p-1 text-[11px] font-bold">
+              <button
+                onClick={() => setUpcomingMovieFilter('all')}
+                className={`rounded-lg px-2.5 py-1 transition-all ${
+                  upcomingMovieFilter === 'all'
+                    ? 'bg-primary text-white shadow-sm'
+                    : 'text-white/60 hover:text-white'
+                }`}
+              >
+                All Upcoming
+              </button>
+              <button
+                onClick={() => setUpcomingMovieFilter('indian')}
+                className={`rounded-lg px-2.5 py-1 transition-all ${
+                  upcomingMovieFilter === 'indian'
+                    ? 'bg-primary text-white shadow-sm'
+                    : 'text-white/60 hover:text-white'
+                }`}
+              >
+                Indian Cinema
+              </button>
+              <button
+                onClick={() => setUpcomingMovieFilter('international')}
+                className={`rounded-lg px-2.5 py-1 transition-all ${
+                  upcomingMovieFilter === 'international'
+                    ? 'bg-primary text-white shadow-sm'
+                    : 'text-white/60 hover:text-white'
+                }`}
+              >
+                International
+              </button>
+            </div>
+          }
+        />
+        <HorizontalScrollRow ref={upcomingMoviesRef} contentClassName="gap-5">
+          {displayedUpcomingMovies.map(video => (
+            <div
+              key={video.tmdb_id || video.id}
+              className={POSTER_RAIL_CARD_CLASS}
+            >
+              <VideoCard video={video} onPlay={handlePlayFromHome} onShowDetail={handleShowDetailFromHome} />
+            </div>
+          ))}
+          {displayedUpcomingMovies.length === 0 && upcomingMovies.length === 0 && Array.from({ length: TRENDING_RAIL_LIMIT }, (_, i) => i + 1).map(i => (
+            <div key={i} className={POSTER_RAIL_CARD_CLASS}>
+              <VideoCardSkeleton />
+            </div>
+          ))}
+          {displayedUpcomingMovies.length === 0 && upcomingMovies.length > 0 && (
+            <div className="py-8 text-xs font-semibold text-white/50">
+              No upcoming movies found for this filter.
+            </div>
+          )}
+        </HorizontalScrollRow>
+      </section>
+
+      {/* Upcoming Series */}
+      <section className="mx-auto mt-7 max-w-[1600px] px-8">
+        <SectionHeader
+          title="Upcoming Series"
+          action={
+            <div className="flex items-center gap-1 rounded-xl border border-white/10 bg-white/5 p-1 text-[11px] font-bold">
+              <button
+                onClick={() => setUpcomingSeriesFilter('all')}
+                className={`rounded-lg px-2.5 py-1 transition-all ${
+                  upcomingSeriesFilter === 'all'
+                    ? 'bg-primary text-white shadow-sm'
+                    : 'text-white/60 hover:text-white'
+                }`}
+              >
+                All Upcoming
+              </button>
+              <button
+                onClick={() => setUpcomingSeriesFilter('indian')}
+                className={`rounded-lg px-2.5 py-1 transition-all ${
+                  upcomingSeriesFilter === 'indian'
+                    ? 'bg-primary text-white shadow-sm'
+                    : 'text-white/60 hover:text-white'
+                }`}
+              >
+                Indian Series
+              </button>
+              <button
+                onClick={() => setUpcomingSeriesFilter('international')}
+                className={`rounded-lg px-2.5 py-1 transition-all ${
+                  upcomingSeriesFilter === 'international'
+                    ? 'bg-primary text-white shadow-sm'
+                    : 'text-white/60 hover:text-white'
+                }`}
+              >
+                International
+              </button>
+            </div>
+          }
+        />
+        <HorizontalScrollRow ref={upcomingSeriesRef} contentClassName="gap-5">
+          {displayedUpcomingSeries.map(video => (
+            <div
+              key={video.tmdb_id || video.id}
+              className={POSTER_RAIL_CARD_CLASS}
+            >
+              <VideoCard video={video} onPlay={handlePlayFromHome} onShowDetail={handleShowDetailFromHome} />
+            </div>
+          ))}
+          {displayedUpcomingSeries.length === 0 && upcomingSeries.length === 0 && Array.from({ length: TRENDING_RAIL_LIMIT }, (_, i) => i + 1).map(i => (
+            <div key={i} className={POSTER_RAIL_CARD_CLASS}>
+              <VideoCardSkeleton />
+            </div>
+          ))}
+          {displayedUpcomingSeries.length === 0 && upcomingSeries.length > 0 && (
+            <div className="py-8 text-xs font-semibold text-white/50">
+              No upcoming series found for this filter.
+            </div>
+          )}
+        </HorizontalScrollRow>
+      </section>
+
+      {/* 5. India Trending Movies Section */}
+      <section className="mx-auto mt-7 max-w-[1600px] px-8">
+        <SectionHeader title="Indian Trending Movies" />
         <HorizontalScrollRow ref={indiaMoviesRef} contentClassName="gap-5">
           {trendingIndiaMovies.map(video => (
             <div
@@ -1573,13 +1925,7 @@ const Home: React.FC<HomeProps> = ({ onPlay, onShowDetail, onNavigate, refreshKe
 
       {/* 6. India Trending Series Section */}
       <section className="mx-auto mt-7 max-w-[1600px] px-8">
-        <SectionHeader
-          eyebrow=""
-          title="Indian Trending Series"
-          icon={<Tv size={18} />}
-          tone="violet"
-          onRefresh={refresh(() => window.api.fetchTrendingIndia('series', true), setTrendingIndiaSeries)}
-        />
+        <SectionHeader title="Indian Trending Series" />
         <HorizontalScrollRow ref={indiaSeriesRef} contentClassName="gap-5">
           {trendingIndiaSeries.map(video => (
             <div
@@ -1599,13 +1945,7 @@ const Home: React.FC<HomeProps> = ({ onPlay, onShowDetail, onNavigate, refreshKe
 
       {/* 7. Trending Kdramas Section */}
       <section className="mx-auto mt-7 max-w-[1600px] px-8">
-        <SectionHeader
-          eyebrow=""
-          title="Trending Kdramas"
-          icon={<Tv size={18} />}
-          tone="rose"
-          onRefresh={refresh(() => window.api.fetchTrendingKdrama(true), setTrendingKdrama)}
-        />
+        <SectionHeader title="Trending Kdramas" />
         <HorizontalScrollRow ref={kdramaRef} contentClassName="gap-5">
           {trendingKdrama.map(video => (
             <div
@@ -1625,13 +1965,7 @@ const Home: React.FC<HomeProps> = ({ onPlay, onShowDetail, onNavigate, refreshKe
 
       {/* 8. Trending Animes Section */}
       <section className="mx-auto mt-7 max-w-[1600px] px-8">
-        <SectionHeader
-          eyebrow=""
-          title="Trending Animes"
-          icon={<Film size={18} />}
-          tone="orange"
-          onRefresh={refresh(() => window.api.fetchTrendingAnime(true), setTrendingAnime)}
-        />
+        <SectionHeader title="Trending Animes" />
         <HorizontalScrollRow ref={animeRef} contentClassName="gap-5">
           {trendingAnime.map(video => (
             <div
@@ -1651,7 +1985,7 @@ const Home: React.FC<HomeProps> = ({ onPlay, onShowDetail, onNavigate, refreshKe
 
       {/* 9. Netflix Movies Section */}
       <section className="mx-auto mt-7 max-w-[1600px] px-8">
-        <SectionHeader eyebrow="" title="Netflix Movies" icon={<Film size={18} />} tone="red" onRefresh={refresh(() => window.api.fetchTrendingNetflix('movie', true), setTrendingNetflixMovies)} />
+        <SectionHeader title="Netflix Movies" />
         <HorizontalScrollRow ref={netflixMoviesRef} contentClassName="gap-5">
           {trendingNetflixMovies.map(video => (
             <div key={video.tmdb_id || video.id} className={POSTER_RAIL_CARD_CLASS}>
@@ -1666,7 +2000,7 @@ const Home: React.FC<HomeProps> = ({ onPlay, onShowDetail, onNavigate, refreshKe
 
       {/* 10. Netflix Series Section */}
       <section className="mx-auto mt-7 max-w-[1600px] px-8">
-        <SectionHeader eyebrow="" title="Netflix Series" icon={<Tv size={18} />} tone="cyan" onRefresh={refresh(() => window.api.fetchTrendingNetflix('series', true), setTrendingNetflixSeries)} />
+        <SectionHeader title="Netflix Series" />
         <HorizontalScrollRow ref={netflixSeriesRef} contentClassName="gap-5">
           {trendingNetflixSeries.map(video => (
             <div key={video.tmdb_id || video.id} className={POSTER_RAIL_CARD_CLASS}>
@@ -1681,7 +2015,7 @@ const Home: React.FC<HomeProps> = ({ onPlay, onShowDetail, onNavigate, refreshKe
 
       {/* 11. JioHotstar Movies Section */}
       <section className="mx-auto mt-7 max-w-[1600px] px-8">
-        <SectionHeader eyebrow="" title="JioHotstar Movies" icon={<Film size={18} />} tone="amber" onRefresh={refresh(() => window.api.fetchTrendingJioHotstar('movie', true), setTrendingJioHotstarMovies)} />
+        <SectionHeader title="JioHotstar Movies" />
         <HorizontalScrollRow ref={jioHotstarMoviesRef} contentClassName="gap-5">
           {trendingJioHotstarMovies.map(video => (
             <div key={video.tmdb_id || video.id} className={POSTER_RAIL_CARD_CLASS}>
@@ -1696,7 +2030,7 @@ const Home: React.FC<HomeProps> = ({ onPlay, onShowDetail, onNavigate, refreshKe
 
       {/* 12. JioHotstar Series Section */}
       <section className="mx-auto mt-7 max-w-[1600px] px-8">
-        <SectionHeader eyebrow="" title="JioHotstar Series" icon={<Tv size={18} />} tone="violet" onRefresh={refresh(() => window.api.fetchTrendingJioHotstar('series', true), setTrendingJioHotstarSeries)} />
+        <SectionHeader title="JioHotstar Series" />
         <HorizontalScrollRow ref={jioHotstarSeriesRef} contentClassName="gap-5">
           {trendingJioHotstarSeries.map(video => (
             <div key={video.tmdb_id || video.id} className={POSTER_RAIL_CARD_CLASS}>
@@ -1711,7 +2045,7 @@ const Home: React.FC<HomeProps> = ({ onPlay, onShowDetail, onNavigate, refreshKe
 
       {/* 13. Apple TV Movies Section */}
       <section className="mx-auto mt-7 max-w-[1600px] px-8">
-        <SectionHeader eyebrow="" title="Apple TV Movies" icon={<Film size={18} />} tone="emerald" onRefresh={refresh(() => window.api.fetchTrendingAppleTv('movie', true), setTrendingAppleMovies)} />
+        <SectionHeader title="Apple TV Movies" />
         <HorizontalScrollRow ref={appleMoviesRef} contentClassName="gap-5">
           {trendingAppleMovies.map(video => (
             <div key={video.tmdb_id || video.id} className={POSTER_RAIL_CARD_CLASS}>
@@ -1726,7 +2060,7 @@ const Home: React.FC<HomeProps> = ({ onPlay, onShowDetail, onNavigate, refreshKe
 
       {/* 14. Apple TV Series Section */}
       <section className="mx-auto mt-7 max-w-[1600px] px-8">
-        <SectionHeader eyebrow="" title="Apple TV Series" icon={<Tv size={18} />} tone="rose" onRefresh={refresh(() => window.api.fetchTrendingAppleTv('series', true), setTrendingAppleSeries)} />
+        <SectionHeader title="Apple TV Series" />
         <HorizontalScrollRow ref={appleSeriesRef} contentClassName="gap-5">
           {trendingAppleSeries.map(video => (
             <div key={video.tmdb_id || video.id} className={POSTER_RAIL_CARD_CLASS}>
@@ -1741,7 +2075,7 @@ const Home: React.FC<HomeProps> = ({ onPlay, onShowDetail, onNavigate, refreshKe
 
       {/* 15. Prime Video Movies Section */}
       <section className="mx-auto mt-7 max-w-[1600px] px-8">
-        <SectionHeader eyebrow="" title="Prime Video Movies" icon={<Film size={18} />} tone="indigo" onRefresh={refresh(() => window.api.fetchTrendingPrimeVideo('movie', true), setTrendingPrimeMovies)} />
+        <SectionHeader title="Prime Video Movies" />
         <HorizontalScrollRow ref={primeMoviesRef} contentClassName="gap-5">
           {trendingPrimeMovies.map(video => (
             <div key={video.tmdb_id || video.id} className={POSTER_RAIL_CARD_CLASS}>
@@ -1756,7 +2090,7 @@ const Home: React.FC<HomeProps> = ({ onPlay, onShowDetail, onNavigate, refreshKe
 
       {/* 18. Prime Video Series Section */}
       <section className="mx-auto mt-7 max-w-[1600px] px-8">
-        <SectionHeader eyebrow="" title="Prime Video Series" icon={<Tv size={18} />} tone="violet" onRefresh={refresh(() => window.api.fetchTrendingPrimeVideo('series', true), setTrendingPrimeSeries)} />
+        <SectionHeader title="Prime Video Series" />
         <HorizontalScrollRow ref={primeSeriesRef} contentClassName="gap-5">
           {trendingPrimeSeries.map(video => (
             <div key={video.tmdb_id || video.id} className={POSTER_RAIL_CARD_CLASS}>

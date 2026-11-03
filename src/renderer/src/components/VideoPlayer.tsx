@@ -5068,7 +5068,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
       {isAmbilightActive && (
         <div
           className="pointer-events-none absolute inset-0 z-0 overflow-hidden select-none transition-opacity duration-700 ease-out"
-          style={{ opacity: isPlaying ? 0.38 : 0.68 }}
+          style={{ opacity: isPlaying ? 0.58 : 0.72 }}
           aria-hidden="true"
         >
           <div

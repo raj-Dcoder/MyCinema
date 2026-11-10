@@ -1434,18 +1434,35 @@ function parseRelativeTimeToIso(text: string | null | undefined): string {
   if (!text || typeof text !== 'string') return new Date().toISOString()
   const lower = text.toLowerCase().trim()
   const now = Date.now()
-  const match = lower.match(/(\d+)\s*(second|sec|minute|min|hour|hr|day|week|month|mo|year|yr)/)
+
+  // Match: (\d+)\s*(seconds?|sec|s|minutes?|min|m|hours?|hr|h|days?|d|weeks?|w|months?|mo|years?|yr|y)
+  const match = lower.match(/(\d+)\s*(seconds?|sec|s|minutes?|min|m|hours?|hr|h|days?|d|weeks?|w|months?|mo|years?|yr|y)(?:\s|$|ago)/i)
+    || lower.match(/(\d+)\s*([a-z]+)/i)
+
   if (!match) return new Date().toISOString()
   const num = parseInt(match[1], 10)
-  const unit = match[2]
+  if (Number.isNaN(num)) return new Date().toISOString()
+  const unit = match[2].toLowerCase()
+
   let ms = 0
-  if (unit.startsWith('sec')) ms = num * 1000
-  else if (unit.startsWith('min')) ms = num * 60 * 1000
-  else if (unit.startsWith('hour') || unit.startsWith('hr')) ms = num * 3600 * 1000
-  else if (unit.startsWith('day')) ms = num * 86400 * 1000
-  else if (unit.startsWith('week')) ms = num * 7 * 86400 * 1000
-  else if (unit.startsWith('month') || unit.startsWith('mo')) ms = num * 30 * 86400 * 1000
-  else if (unit.startsWith('year') || unit.startsWith('yr')) ms = num * 365 * 86400 * 1000
+  if (unit.startsWith('sec') || unit === 's') {
+    ms = num * 1000
+  } else if (unit === 'mo' || unit.startsWith('month')) {
+    ms = num * 30 * 86400 * 1000
+  } else if (unit.startsWith('min') || unit === 'm') {
+    ms = num * 60 * 1000
+  } else if (unit.startsWith('hour') || unit.startsWith('hr') || unit === 'h') {
+    ms = num * 3600 * 1000
+  } else if (unit.startsWith('day') || unit === 'd') {
+    ms = num * 86400 * 1000
+  } else if (unit.startsWith('week') || unit === 'w') {
+    ms = num * 7 * 86400 * 1000
+  } else if (unit.startsWith('year') || unit.startsWith('yr') || unit === 'y') {
+    ms = num * 365 * 86400 * 1000
+  } else {
+    return new Date().toISOString()
+  }
+
   return new Date(Math.max(0, now - ms)).toISOString()
 }
 
@@ -1571,13 +1588,14 @@ async function searchVideosInvidious(query: string, limit = 30): Promise<focusTu
  * Scrapes YouTube directly (filtering for videos) with redundant Invidious fallback.
  * Maps to FtVideo items enriched with local seen status & watch progress.
  */
-export async function searchYouTubeVideos(query: string, limit = 30): Promise<focusTube.FtVideo[]> {
+export async function searchYouTubeVideos(query: string, limit = 30, spFilter?: string): Promise<focusTube.FtVideo[]> {
   const trimmed = String(query || '').trim()
   if (!trimmed) return []
 
+  const spParam = spFilter || 'EgIQAQ%3D%3D'
   try {
     const { text, finalUrl } = await fetchText(
-      `https://www.youtube.com/results?search_query=${encodeURIComponent(trimmed)}&sp=EgIQAQ%3D%3D`,
+      `https://www.youtube.com/results?search_query=${encodeURIComponent(trimmed)}&sp=${spParam}`,
       12_000,
       2,
     )

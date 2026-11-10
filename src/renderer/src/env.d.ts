@@ -273,7 +273,7 @@ interface Api {
   ftRefreshFeeds: (options?: { force?: boolean }) => Promise<{ added: number; channelIds: string[]; failed: string[] }>
   ftResolveChannel: (query: string) => Promise<{ channelId: string; title: string; handle: string | null; avatarUrl: string | null; url: string } | { error: string }>
   ftSearchChannels: (query: string) => Promise<Array<{ channelId: string; title: string; handle: string | null; avatarUrl: string | null; subscriberText: string | null; videoCountText: string | null; descriptionSnippet: string | null }> | { error: string }>
-  ftSearchVideos: (query: string, limit?: number) => Promise<import('./types').FtVideo[]>
+  ftSearchVideos: (input: string | { query: string; limit?: number; uploadDate?: 'today' | 'this_week' | 'this_month' | 'this_year' | 'relevance' | 'all'; sp?: string }, limit?: number) => Promise<import('./types').FtVideo[]>
   ftGetVideoDetails: (videoId: string) => Promise<import('./types').FtVideoDetails>
   ftRefreshChannelAvatars: () => Promise<{ checked: number; updated: number } | { error: string }>
   ftSubscribeChannel: (channel: { channelId: string; title: string; handle?: string | null; avatarUrl?: string | null; url?: string | null }, categoryIds: number[]) => Promise<import('./types').FtChannel | { error: string }>
@@ -308,7 +308,7 @@ interface Api {
   ftSetFrameQuality?: (quality: string) => Promise<{ ok: boolean; error?: string }>
   ftGetFrameQuality?: () => Promise<{ quality: string | null; available?: string[] }>
   ftGetFrameTime?: () => Promise<{ currentTime: number; duration?: number | null; playerState?: number | null } | null>
-  ftSeekFrame?: (seconds: number, play?: boolean) => Promise<{ ok: boolean; error?: string }>
+  ftSeekFrame?: (input: { seconds: number; play?: boolean } | number, play?: boolean) => Promise<{ ok: boolean; error?: string }>
   ftGetAmbientFrame?: (bounds?: { x: number; y: number; width: number; height: number }) => Promise<{ dataUrl: string | null }>
   ftRequestImportAccess: (input: { name: string; email: string }) => Promise<{ ok?: boolean; message?: string; error?: string }>
   onFeedUpdated: (callback: (payload: { added: number; channelIds: string[] }) => void) => () => void

@@ -3801,7 +3801,7 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
                                         <Download size={8.5} className="animate-bounce" />
                                         Saving {Math.round(epDownloadProgress)}%
                                       </span>
-                                    ) : (onlineState?.completed || ep.localVideo?.completed) ? (
+                                    ) : (onlineState?.completed || (ep.localVideo as any)?.completed) ? (
                                       <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[8.5px] font-bold tracking-wide ${
                                         isLight
                                           ? 'bg-slate-100 text-slate-700 border border-slate-200'

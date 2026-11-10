@@ -1879,7 +1879,6 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
         cmd('mute', [])
         cmd('setVolume', [0])
       })
-      window.api?.ftSeekFrame?.({ seconds: currentT, play: false }).catch(() => {})
       setPlayerState(STATE_PAUSED)
       stateRef.current = STATE_PAUSED
       setIsPiPActive(true)
@@ -1954,8 +1953,15 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
         pipClosedByUserRef.current = true
         setPlayerState(STATE_PAUSED)
         stateRef.current = STATE_PAUSED
-        cmd('pauseVideo', [])
-        window.api?.ftSeekFrame?.({ seconds: restoreTime, play: false }).catch(() => {})
+        withBridge(() => {
+          cmd('pauseVideo', [])
+          if (restoreTime > 0) {
+            cmd('cueVideoById', [{
+              videoId: video.videoId,
+              startSeconds: Math.max(0, Math.floor(restoreTime))
+            }])
+          }
+        })
         return
       }
 
@@ -1966,34 +1972,51 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
 
       pokeBottom()
 
-      const vol = volumeRef.current
-      cmd('setVolume', [vol])
-      if (!mutedRef.current && vol > 0) {
-        cmd('unMute', [])
-      }
-      if (restoreTime > 0) {
-        cmd('seekTo', [restoreTime, true])
-        window.api?.ftSeekFrame?.({ seconds: restoreTime, play: state?.isPlaying !== false }).catch(() => {})
-      }
-      if (state?.isPlaying !== false) {
-        cmd('playVideo', [])
-        setPlayerState(STATE_PLAYING)
-        stateRef.current = STATE_PLAYING
-      } else {
-        cmd('pauseVideo', [])
-        setPlayerState(STATE_PAUSED)
-        stateRef.current = STATE_PAUSED
-      }
-      sendHandshake()
+      // Lock seek reports for 2.5s so stale postMessage info doesn't snap the seekbar
+      seekLockRef.current = { target: restoreTime, until: Date.now() + 2500 }
+      lastReportedTimeRef.current = Date.now()
 
-      setTimeout(() => {
-        sendHandshake()
+      // Use loadVideoById to start a clean adaptive DASH stream directly at restoreTime,
+      // exactly like clicking the video from the feed!
+      withBridge(() => {
         if (state?.isPlaying !== false) {
-          cmd('playVideo', [])
+          cmd('loadVideoById', [{
+            videoId: video.videoId,
+            startSeconds: Math.max(0, Math.floor(restoreTime))
+          }])
           setPlayerState(STATE_PLAYING)
           stateRef.current = STATE_PLAYING
+        } else {
+          cmd('cueVideoById', [{
+            videoId: video.videoId,
+            startSeconds: Math.max(0, Math.floor(restoreTime))
+          }])
+          setPlayerState(STATE_PAUSED)
+          stateRef.current = STATE_PAUSED
         }
-      }, 100)
+      })
+
+      // Re-apply audio volume, mute, speed, and preferred resolution once fresh stream initializes
+      window.setTimeout(() => {
+        withBridge(() => {
+          const vol = volumeRef.current
+          cmd('setVolume', [vol])
+          if (!mutedRef.current && vol > 0) {
+            cmd('unMute', [])
+          } else if (mutedRef.current) {
+            cmd('mute', [])
+          }
+          if (speedRef.current !== 1) {
+            cmd('setPlaybackRate', [speedRef.current])
+          }
+          const qp = qualityPrefRef.current
+          if (qp && qp !== 'auto') {
+            cmd('setPlaybackQuality', [qp])
+            cmd('setPlaybackQualityRange', ['auto', qp])
+          }
+        })
+        sendHandshake()
+      }, 300)
     })
 
     return () => {
@@ -2785,7 +2808,7 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
               ref={shellRef}
               className={
                 isMinimized
-                  ? `pointer-events-auto fixed bottom-4 right-4 z-[80] aspect-video w-[min(380px,calc(100vw-2rem))] overflow-hidden rounded-xl border border-white/15 bg-black shadow-[0_20px_60px_rgba(0,0,0,0.7)] keep-dark dark ${
+                  ? `pointer-events-auto fixed bottom-4 right-4 z-[80] aspect-video w-[min(330px,calc(100vw-2rem))] overflow-hidden rounded-xl border border-white/15 bg-black shadow-[0_20px_60px_rgba(0,0,0,0.7)] keep-dark dark ${
                       isTransitioning ? 'will-change-transform' : ''
                     }`
                   : fsActive
@@ -2809,7 +2832,7 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
               key={`${video.videoId}:${iframeKey}`}
               src={embedSrc}
               title={video.title}
-              className="absolute inset-0 z-0 h-full w-full border-0 bg-black transform-gpu will-change-transform"
+              className="absolute inset-0 z-0 h-full w-full border-0 bg-black"
               allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
               allowFullScreen
               loading="eager"

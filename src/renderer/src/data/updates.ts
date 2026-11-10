@@ -56,6 +56,72 @@ export function normalizeUpdate(item: UpdateInput, defaultCategory = 'General'):
 
 export const APP_UPDATES: AppRelease[] = [
   {
+    "version": "v1.50.0",
+    "summary": "High-signal anticipatory release curation with star-power recognition, FocusTube search suffix customization and settings hub, hardware-accelerated video decoding, and compact Picture-in-Picture playback.",
+    "updates": [
+      {
+        "title": "Curated Marquee Roster",
+        "description": "Pan-India superstars (Rajinikanth, Prabhas, Allu Arjun, Jr NTR, Ram Charan, Thalapathy Vijay, Ajith Kumar, Suriya, Mahesh Babu, Yash, Mohanlal, Mammootty) and Bollywood icons (Shah Rukh Khan, Salman Khan, Aamir Khan, Hrithik Roshan, Ranbir Kapoor) are recognized and promoted.",
+        "category": "Anticipatory Cinema Curation & Star Power"
+      },
+      {
+        "title": "Visionary Director Recognition",
+        "description": "Releases from acclaimed creators including SS Rajamouli, Prashanth Neel, Lokesh Kanagaraj, Sandeep Reddy Vanga, Shankar, Sukumar, and Mani Ratnam bypass noise gates and receive prominent placement.",
+        "category": "Anticipatory Cinema Curation & Star Power"
+      },
+      {
+        "title": "Anticipation-Weighted Ranking",
+        "description": "Replaced raw calendar date sorting with a composite hype and release proximity score, ensuring eagerly anticipated blockbusters lead the shelf instead of obscure low-budget filler.",
+        "category": "Anticipatory Cinema Curation & Star Power"
+      },
+      {
+        "title": "Strict Noise Filter",
+        "description": "Filtered out obscure micro-budget titles with a raised baseline popularity threshold (`>= 18.0`), keeping the Home screen focused on celebrated, buzzworthy productions.",
+        "category": "Anticipatory Cinema Curation & Star Power"
+      },
+      {
+        "title": "Dedicated FocusTube Settings Modal",
+        "description": "Configure your FocusTube preferences from a clean settings dialog conveniently placed next to the channel sync controls.",
+        "category": "FocusTube Search & Settings Hub"
+      },
+      {
+        "title": "Customizable Search Suffix",
+        "description": "Set a custom keyword extension (defaulting to \"latest\") that automatically appends when right-clicking category pills for refined YouTube search results.",
+        "category": "FocusTube Search & Settings Hub"
+      },
+      {
+        "title": "Cleaned Filtration Banner",
+        "description": "Removed repetitive in-banner buttons and fixed light-mode gradients to deliver a clean, readable header.",
+        "category": "FocusTube Search & Settings Hub"
+      },
+      {
+        "title": "Accurate Release Time Parsing",
+        "description": "Corrected YouTube search published time parsing and quick filters so older videos no longer erroneously show \"just now\".",
+        "category": "FocusTube Search & Settings Hub"
+      },
+      {
+        "title": "Hardware-Accelerated Decoding",
+        "description": "Enabled native Chromium GPU video decoding and zero-copy rasterization, eliminating stutter and low FPS for butter-smooth web video playback.",
+        "category": "Video Playback & Performance"
+      },
+      {
+        "title": "Compact Standard PiP",
+        "description": "Re-proportioned the floating Picture-in-Picture player to a sleek standard 16:9 footprint (`360x203`), saving screen real estate.",
+        "category": "Video Playback & Performance"
+      },
+      {
+        "title": "Flawless PiP Restore",
+        "description": "Fixed playback hitching and stream buffering when maximizing from PiP back to theater mode with atomic video re-synchronization.",
+        "category": "Video Playback & Performance"
+      },
+      {
+        "title": "Sanitized Search Terms & Media Feeds",
+        "description": "Search query suffixes and external video embed requests are strictly sanitized and dispatched through validated main-process protocol handlers.",
+        "category": "Security & Privacy"
+      }
+    ]
+  },
+  {
     "version": "v1.49.0",
     "summary": "Movie OTT release alerts, franchise collection timeline rails, recently released and upcoming discover rows, direct OTT deep links, and root-level modal layering.",
     "updates": [

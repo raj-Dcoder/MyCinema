@@ -261,7 +261,12 @@ const api = {
   ftRefreshFeeds: (options?: { force?: boolean }) => ipcRenderer.invoke('ft-refresh-feeds', options ?? { force: true }),
   ftResolveChannel: (query: string) => ipcRenderer.invoke('ft-resolve-channel', query),
   ftSearchChannels: (query: string) => ipcRenderer.invoke('ft-search-channels', query),
-  ftSearchVideos: (query: string, limit?: number) => ipcRenderer.invoke('ft-search-videos', { query, limit }),
+  ftSearchVideos: (input: string | { query: string; limit?: number; uploadDate?: string; sp?: string }, limit?: number) => {
+    if (typeof input === 'string') {
+      return ipcRenderer.invoke('ft-search-videos', { query: input, limit })
+    }
+    return ipcRenderer.invoke('ft-search-videos', input)
+  },
   ftGetVideoDetails: (videoId: string) => ipcRenderer.invoke('ft-get-video-details', videoId),
   ftRefreshChannelAvatars: () => ipcRenderer.invoke('ft-refresh-avatars'),
   ftSubscribeChannel: (channel: { channelId: string; title: string; handle?: string | null; avatarUrl?: string | null; url?: string | null }, categoryIds: number[]) =>
@@ -298,7 +303,12 @@ const api = {
   ftSetFrameQuality: (quality: string) => ipcRenderer.invoke('ft-set-frame-quality', quality),
   ftGetFrameQuality: () => ipcRenderer.invoke('ft-get-frame-quality'),
   ftGetFrameTime: () => ipcRenderer.invoke('ft-get-frame-time'),
-  ftSeekFrame: (seconds: number, play?: boolean) => ipcRenderer.invoke('ft-seek-frame', { seconds, play }),
+  ftSeekFrame: (input: { seconds: number; play?: boolean } | number, play?: boolean) => {
+    if (typeof input === 'object' && input !== null) {
+      return ipcRenderer.invoke('ft-seek-frame', input)
+    }
+    return ipcRenderer.invoke('ft-seek-frame', { seconds: input, play })
+  },
   ftGetAmbientFrame: (bounds?: { x: number; y: number; width: number; height: number }) =>
     ipcRenderer.invoke('ft-get-ambient-frame', bounds),
   ftRequestImportAccess: (input: { name: string; email: string }) =>

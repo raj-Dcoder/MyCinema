@@ -348,9 +348,12 @@ export const FocusTubePipPlayer: React.FC<FocusTubePipPlayerProps> = ({ initialP
       currentTime: currentTimeRef.current,
       isPlaying: playerStateRef.current === STATE_PLAYING,
     }
+    try {
+      post('pauseVideo', [])
+    } catch {}
     window.api?.ftSyncPipState?.(payload).catch(() => {})
     window.api?.ftRestorePip?.(payload).catch(() => {})
-  }, [])
+  }, [post])
 
   const handleClose = useCallback(() => {
     if (videoRef.current) {

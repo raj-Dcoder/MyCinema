@@ -151,7 +151,7 @@ function cacheKey(title: string, type: 'movie' | 'series'): string {
 // ─── Trending Cache ──────────────────────────────────────────────────────────
 
 const trendingCache: Record<string, { data: any[], timestamp: number }> = {}
-const TRENDING_CACHE_TTL = 1000 * 60 * 60 * 12 // 12 hours
+const TRENDING_CACHE_TTL = 1000 * 60 * 60 * 4 // 4 hours (fresher discovery data & reliable refreshes)
 const TMDB_FETCH_TIMEOUT_MS = 12000
 
 const youtubePlayableCache = new Map<string, { playable: boolean, timestamp: number }>()
@@ -541,20 +541,20 @@ export async function fetchTrending(type: 'movie' | 'series', forceRefresh = fal
     
     console.log(`[TMDB] Successfully fetched ${data.results?.length || 0} trending ${type}`)
     
-    const results = await Promise.all((data.results || []).map(async (item: any) => ({
+    const results = (data.results || []).map((item: any) => ({
       id: item.id,
       tmdb_id: item.id,
       title: item.title || item.name,
       overview: item.overview,
       poster_path: item.poster_path ? `${TMDB_IMG}${item.poster_path}` : null,
       backdrop_path: item.backdrop_path ? `${TMDB_BACKDROP}${item.backdrop_path}` : null,
-      logo_path: item.id ? await fetchTmdbTitleLogo(type, item.id) : null,
+      logo_path: null,
       vote_average: item.vote_average,
       release_year: parseInt((item.release_date || item.first_air_date || '').substring(0, 4), 10) || null,
       release_date: item.release_date || item.first_air_date,
       type: type,
       isExternal: true
-    })))
+    }))
 
     writeTmdbListCache(cacheKey, `trending ${type}`, results)
 
@@ -693,20 +693,20 @@ async function fetchTrendingByCountry(
 
     const ranked = candidates.slice(0, limit)
 
-    const results = await Promise.all(ranked.map(async ({ item, mediaType }) => ({
+    const results = ranked.map(({ item, mediaType }) => ({
       id: item.id,
       tmdb_id: item.id,
       title: item.title || item.name,
       overview: item.overview,
       poster_path: item.poster_path ? `${TMDB_IMG}${item.poster_path}` : null,
       backdrop_path: item.backdrop_path ? `${TMDB_BACKDROP}${item.backdrop_path}` : null,
-      logo_path: item.id ? await fetchTmdbTitleLogo(mediaType === 'tv' ? 'series' : 'movie', item.id) : null,
+      logo_path: null,
       vote_average: item.vote_average,
       release_year: getTmdbReleaseDate(item, mediaType).substring(0, 4),
       release_date: getTmdbReleaseDate(item, mediaType),
       type: mediaType === 'tv' ? 'series' : 'movie',
       isExternal: true
-    })))
+    }))
 
     console.log(`[TMDB] Built ${results.length} ${countryName} OTT trending ${type}`)
     if (results.length > 0) {
@@ -818,20 +818,20 @@ export async function fetchTrendingAnime(forceRefresh = false): Promise<any[]> {
     })
     const ranked = candidates.slice(0, 20)
 
-    const results = await Promise.all(ranked.map(async ({ item, mediaType }) => ({
+    const results = ranked.map(({ item, mediaType }) => ({
       id: item.id,
       tmdb_id: item.id,
       title: item.title || item.name,
       overview: item.overview,
       poster_path: item.poster_path ? `${TMDB_IMG}${item.poster_path}` : null,
       backdrop_path: item.backdrop_path ? `${TMDB_BACKDROP}${item.backdrop_path}` : null,
-      logo_path: item.id ? await fetchTmdbTitleLogo(mediaType === 'tv' ? 'series' : 'movie', item.id) : null,
+      logo_path: null,
       vote_average: item.vote_average,
       release_year: getTmdbReleaseDate(item, mediaType).substring(0, 4),
       release_date: getTmdbReleaseDate(item, mediaType),
       type: mediaType === 'tv' ? 'series' : 'movie',
       isExternal: true
-    })))
+    }))
 
     console.log(`[TMDB] Built ${results.length} trending anime`)
     if (results.length > 0) writeTmdbListCache(cacheKey, 'anime trending', results)
@@ -880,6 +880,66 @@ function isIndianTmdbItem(item: any): boolean {
   return false
 }
 
+// ── Curated Marquee Talent & Visionary Directors Registry ──────────────
+// Aggressively prioritizes celebrated pan-India cinema (South Indian + Bollywood)
+// and major global blockbusters while eliminating unknown micro-budget clutter.
+
+export const MARQUEE_INDIAN_TALENT: string[] = [
+  // South Indian Superstars & A-List Leads
+  'rajinikanth', 'kamal haasan', 'prabhas', 'allu arjun', 'jr ntr', 'jr. ntr', 'ntr jr', 'ram charan',
+  'thalapathy vijay', 'vijay', 'ajith kumar', 'ajith', 'suriya', 'mahesh babu', 'pawan kalyan',
+  'chiranjeevi', 'balakrishna', 'nandamuri balakrishna', 'yash', 'rishab shetty', 'dhanush',
+  'vikram', 'chiyaan vikram', 'sivakarthikeyan', 'karthi', 'vijay deverakonda', 'vijay devarakonda',
+  'nani', 'mohanlal', 'mammootty', 'fahadh faasil', 'dulquer salmaan', 'prithviraj sukumaran',
+  'tovino thomas', 'shiva rajkumar', 'kichcha sudeep', 'sudeep', 'rakshit shetty', 'upendra',
+
+  // Bollywood / Hindi Superstars & A-List Leads
+  'shah rukh khan', 'shahrukh khan', 'srk', 'salman khan', 'aamir khan', 'hrithik roshan',
+  'ranbir kapoor', 'ranveer singh', 'ajay devgn', 'akshay kumar', 'deepika padukone',
+  'alia bhatt', 'vicky kaushal', 'shahid kapoor', 'kartik aaryan', 'varun dhawan',
+
+  // Visionary Indian Directors
+  's. s. rajamouli', 'ss rajamouli', 'rajamouli', 'prashanth neel', 'lokesh kanagaraj',
+  'sukumar', 'sandeep reddy vanga', 'sandeep vanga', 'shankar', 's. shankar', 'mani ratnam',
+  'rohit shetty', 'atlee', 'trivikram', 'koratala siva', 'anurag kashyap', 'sanjay leela bhansali',
+  'vetrimaaran', 'pa. ranjith', 'pa ranjith', 'karthik subbaraj', 'nag ashwin', 'nelson dilipkumar',
+  'siddharth anand', 'ayan mukerji', 'maruthi', 'boyapati srinu', 'gautham menon', 'gautham vasudev menon',
+
+  // High-Anticipation Pan-India Franchises & Titles
+  'pushpa', 'kalki', 'salaar', 'kgf', 'baahubali', 'coolie', 'jailer', 'war 2', 'spirit',
+  'toxic', 'devara', 'game changer', 'vettaiyan', 'thug life', 'good bad ugly', 'leo',
+  'kantara', 'singham', 'pathaan', 'tiger 3', 'dhoom', 'don 3', 'brahmastra', 'ramayana',
+  'hanuman', 'mirzapur', 'panchayat', 'the family man', 'farzi', 'delhi crime', 'sacred games'
+]
+
+export const MARQUEE_GLOBAL_TALENT: string[] = [
+  // Global Visionary Directors & Mega Leads
+  'christopher nolan', 'james cameron', 'denis villeneuve', 'quentin tarantino',
+  'martin scorsese', 'ridley scott', 'david fincher', 'guillermo del toro', 'steven spielberg',
+  'greta gerwig', 'tom cruise', 'leonardo dicaprio', 'cillian murphy', 'keanu reeves',
+  'pedro pascal', 'zendaya', 'timothée chalamet', 'timothee chalamet',
+
+  // Mega Hollywood Franchises & Universes
+  'marvel', 'avengers', 'spider-man', 'spiderman', 'batman', 'superman', 'dc studios',
+  'star wars', 'avatar', 'dune', 'mission: impossible', 'mission impossible', 'gladiator',
+  'jurassic', 'fast & furious', 'fast and furious', 'harry potter', 'lord of the rings',
+  'stranger things', 'the last of us', 'house of the dragon', 'game of thrones'
+]
+
+export function matchesMarqueeRoster(item: any): boolean {
+  if (!item) return false
+  const text = `${item.title || ''} ${item.original_title || ''} ${item.name || ''} ${item.overview || ''}`.toLowerCase()
+  if (!text.trim()) return false
+
+  for (const name of MARQUEE_INDIAN_TALENT) {
+    if (text.includes(name)) return true
+  }
+  for (const name of MARQUEE_GLOBAL_TALENT) {
+    if (text.includes(name)) return true
+  }
+  return false
+}
+
 /**
  * Top 5% Quality & Hype Scoring Algorithm:
  * Eliminates the ~95% low-budget, obscure, direct-to-nowhere clutter on TMDB,
@@ -893,41 +953,64 @@ function scoreHighSignalRelease(
 ): number {
   if (!item?.id || item.adult) return -999
   if (!item.poster_path) return -999
-  // Discard empty or stub overviews (indicates uncurated/placeholder DB entry)
-  if (!item.overview || String(item.overview).trim().length < 20) return -999
+  // Discard empty or stub overviews (indicates uncurated/placeholder DB entry for released items)
+  // Upcoming releases often have brief loglines or placeholder descriptions before debut
+  if (mode === 'recent') {
+    if (!item.overview || String(item.overview).trim().length < 20) return -999
+  } else {
+    if (!item.overview || String(item.overview).trim().length < 5) {
+      if (Number(item.popularity || 0) < 15) return -999
+    }
+  }
 
   const pop = Number(item.popularity || 0)
   const votes = Number(item.vote_count || 0)
   const rating = Number(item.vote_average || 0)
   const isInd = isIndianTmdbItem(item)
+  const hasMarquee = matchesMarqueeRoster(item)
 
   // ─── 1. HARD NOISE REJECTION GATES (Rejects the 95% junk) ───
   if (mode === 'recent') {
     if (isInd) {
-      const isCurated = sources.has('now_playing') || sources.has('ott') || sources.has('trending')
-      if (!isCurated) {
-        // Discard obscure titles with no votes and negligible popularity
-        if (pop < 7.0 && votes < 5) return -999
-        if (votes === 0 && pop < 6.0) return -999
+      if (hasMarquee) {
+        // Star-backed / franchise Indian release: allow through even if vote counts are young
+        if (pop < 8.0 && votes === 0) return -999
+      } else {
+        // Unknown Indian title: strictly reject low-budget obscure clutter
+        // In TMDB, obscure Indian titles hover at 2.5 - 12.0 with few or zero votes.
+        // True mainstream / buzzy releases have popularity >= 18.0 or 15+ verified audience votes.
+        if (pop < 18.0 && votes < 15) return -999
+        if (votes === 0 && pop < 25.0) return -999
       }
     } else {
-      const isCurated = sources.has('now_playing') || sources.has('trending') || sources.has('ott')
-      if (!isCurated) {
+      if (hasMarquee) {
+        if (pop < 10.0 && votes === 0) return -999
+      } else {
         // Discard low-budget straight-to-VOD titles that have virtually no audience
-        if (votes < 20 && pop < 30.0) return -999
-        if (pop < 10.0) return -999
+        if (votes < 25 && pop < 28.0) return -999
+        if (pop < 14.0) return -999
       }
       // Mockbuster / universally panned trash filter (poor rating with decent vote count)
       if (votes >= 25 && rating > 0 && rating < 4.8 && pop < 60) return -999
     }
   } else {
     // Mode === 'upcoming'
-    // For upcoming releases, anticipation is signaled by pre-release popularity, watchlist traffic,
-    // and verified theatrical distributor schedules.
-    const isCurated = sources.has('upcoming_theatrical') || sources.has('trending')
-    if (!isCurated) {
-      if (isInd && pop < 3.5) return -999
-      if (!isInd && pop < 10.0) return -999
+    if (isInd) {
+      if (hasMarquee) {
+        // Recognized superstar, visionary director or blockbuster franchise
+        if (pop < 7.0) return -999
+      } else {
+        // Without marquee star power, pre-release titles MUST have established
+        // widespread anticipation (popularity >= 18.0 via search traffic / watchlists).
+        // This permanently blocks random low-budget indie Telugu/Tamil/Hindi filler.
+        if (pop < 18.0) return -999
+      }
+    } else {
+      if (hasMarquee) {
+        if (pop < 8.0) return -999
+      } else {
+        if (pop < 22.0) return -999
+      }
     }
   }
 
@@ -935,15 +1018,18 @@ function scoreHighSignalRelease(
   // A. Base Logarithmic Popularity (smooth curve: viral hits get ~100-130, indies get ~15-30)
   let score = Math.log10(pop + 1) * 35
 
-  // B. High-Authority Curated Source Bonuses
+  // B. Marquee Star-Power & Visionary Director Bonus (+55 points)
+  if (hasMarquee) score += 55
+
+  // C. High-Authority Curated Source Bonuses
   if (sources.has('trending')) score += 30 // Actively trending on TMDB this week
   if (sources.has('now_playing') || sources.has('upcoming_theatrical')) score += 25 // Confirmed commercial theatrical run
   if (sources.has('ott')) score += 20 // Major streaming distributor (Netflix, Prime, JioHotstar, etc.)
 
-  // C. Visual & Metadata Completeness Bonus
+  // D. Visual & Metadata Completeness Bonus
   if (item.backdrop_path) score += 10
 
-  // D. Audience Approval & Engagement (for recent releases)
+  // E. Audience Approval & Engagement (for recent releases)
   if (mode === 'recent' && votes >= 15) {
     score += (rating - 5.0) * 8 // Rewards genuine crowd favorites (e.g. 7.5 gets +20)
     score += Math.min(votes / 10, 25) // Real audience volume confirmation
@@ -953,7 +1039,7 @@ function scoreHighSignalRelease(
 }
 
 export async function fetchRecentlyReleased(type: 'movie' | 'series', forceRefresh = false): Promise<any[]> {
-  const cacheKey = `recent:v5:${type}`
+  const cacheKey = `recent:v6:${type}`
   if (!forceRefresh) {
     const cached = readTmdbListCache(cacheKey, `recently released ${type}`)
     if (cached && cached.length > 0) return cached
@@ -1103,14 +1189,25 @@ export async function fetchRecentlyReleased(type: 'movie' | 'series', forceRefre
       }
     }
 
-    // Sort both groups reverse-chronologically by release date (newest first);
-    // If release dates are close/equal, the higher Quality-Hype score wins.
+    // Composite Quality-Hype + Freshness Ranking:
+    // Balances audience excitement and star-power with release date proximity,
+    // ensuring major recent hits stay front-and-center instead of obscure zero-vote indies.
+    const calculateRecentRank = (cand: { item: any, score: number }) => {
+      let rank = cand.score
+      const dateStr = cand.item.release_date || cand.item.first_air_date
+      if (dateStr) {
+        const diffMs = Date.now() - new Date(dateStr).getTime()
+        const daysAgo = Math.max(0, Math.floor(diffMs / (1000 * 60 * 60 * 24)))
+        if (daysAgo <= 7) rank += 20
+        else if (daysAgo <= 21) rank += 12
+        else if (daysAgo <= 45) rank += 5
+        else if (daysAgo > 60) rank -= 10
+      }
+      return rank
+    }
+
     const sortRecentGroup = (a: { item: any, score: number }, b: { item: any, score: number }) => {
-      const dateA = String(a.item.release_date || a.item.first_air_date || '')
-      const dateB = String(b.item.release_date || b.item.first_air_date || '')
-      const diff = dateB.localeCompare(dateA) // Newest first
-      if (diff !== 0) return diff
-      return b.score - a.score
+      return calculateRecentRank(b) - calculateRecentRank(a)
     }
 
     const topIndian = indianList.sort(sortRecentGroup).slice(0, 20).map(x => x.item)
@@ -1133,7 +1230,7 @@ export async function fetchRecentlyReleased(type: 'movie' | 'series', forceRefre
       }
     }
 
-    const results = await Promise.all(blendedList.map(async (item: any) => {
+    const results = blendedList.map((item: any) => {
       const genreName = getGenreNameFromIds(item.genre_ids)
       return {
         id: item.id,
@@ -1142,7 +1239,7 @@ export async function fetchRecentlyReleased(type: 'movie' | 'series', forceRefre
         overview: item.overview,
         poster_path: item.poster_path ? `${TMDB_IMG}${item.poster_path}` : null,
         backdrop_path: item.backdrop_path ? `${TMDB_BACKDROP}${item.backdrop_path}` : null,
-        logo_path: item.id ? await fetchTmdbTitleLogo(type, item.id).catch(() => null) : null,
+        logo_path: null,
         vote_average: item.vote_average,
         release_year: parseInt((item.release_date || item.first_air_date || '').substring(0, 4), 10) || null,
         release_date: item.release_date || item.first_air_date,
@@ -1154,7 +1251,7 @@ export async function fetchRecentlyReleased(type: 'movie' | 'series', forceRefre
         type: type,
         isExternal: true
       }
-    }))
+    })
 
     console.log(`[TMDB] Built ${results.length} Top-5% curated recently released ${type} (${topIndian.length} Indian, ${topIntl.length} Intl)`)
     if (results.length > 0) {
@@ -1169,7 +1266,7 @@ export async function fetchRecentlyReleased(type: 'movie' | 'series', forceRefre
 }
 
 export async function fetchUpcoming(type: 'movie' | 'series', forceRefresh = false): Promise<any[]> {
-  const cacheKey = `upcoming:v5:${type}`
+  const cacheKey = `upcoming:v6:${type}`
   if (!forceRefresh) {
     const cached = readTmdbListCache(cacheKey, `upcoming ${type}`)
     if (cached && cached.length > 0) return cached
@@ -1202,8 +1299,23 @@ export async function fetchUpcoming(type: 'movie' | 'series', forceRefresh = fal
       if (!Array.isArray(items)) return
       for (const item of items) {
         if (!item?.id || item.adult) continue
-        const releaseDate = item.release_date || item.first_air_date
-        if (!releaseDate || String(releaseDate).substring(0, 10) < tomorrowStr) continue
+        let releaseDate = item.release_date || item.first_air_date
+
+        // For TV series from "upcoming_theatrical" (/tv/on_the_air or discover with air_date.gte):
+        // TMDB confirms upcoming episodes are actively premiering or airing within the next 7-30 days.
+        // Even if first_air_date (Season 1) is in the past, it represents an active upcoming drop.
+        if (type === 'series') {
+          if (sourceTag === 'upcoming_theatrical') {
+            if (!releaseDate || String(releaseDate).substring(0, 10) < tomorrowStr) {
+              releaseDate = tomorrowStr
+              item.release_date = tomorrowStr
+            }
+          } else {
+            if (!releaseDate || String(releaseDate).substring(0, 10) < tomorrowStr) continue
+          }
+        } else {
+          if (!releaseDate || String(releaseDate).substring(0, 10) < tomorrowStr) continue
+        }
 
         const existing = candidatesMap.get(item.id)
         if (existing) {
@@ -1266,9 +1378,14 @@ export async function fetchUpcoming(type: 'movie' | 'series', forceRefresh = fal
       )
     } else {
       // ─── UPCOMING SERIES STREAMS ───
-      // Stream 1: TV shows actively premiering / on the air
+      // Stream 1: TV shows actively premiering / on the air (Page 1 & 2)
       fetchTasks.push(
-        fetchTmdbJson(`${TMDB_BASE}/tv/on_the_air?api_key=${apiKey}&page=1`, apiKey, 'upcoming on the air series')
+        fetchTmdbJson(`${TMDB_BASE}/tv/on_the_air?api_key=${apiKey}&page=1`, apiKey, 'upcoming on the air series p1')
+          .then(data => registerItems(data?.results, 'upcoming_theatrical'))
+          .catch(() => {})
+      )
+      fetchTasks.push(
+        fetchTmdbJson(`${TMDB_BASE}/tv/on_the_air?api_key=${apiKey}&page=2`, apiKey, 'upcoming on the air series p2')
           .then(data => registerItems(data?.results, 'upcoming_theatrical'))
           .catch(() => {})
       )
@@ -1280,14 +1397,31 @@ export async function fetchUpcoming(type: 'movie' | 'series', forceRefresh = fal
           .catch(() => {})
       )
 
-      // Stream 3: High-popularity upcoming series discover
+      // Stream 3: High-popularity upcoming series discover (Brand-new series Page 1 & 2)
       fetchTasks.push(
-        fetchTmdbJson(`${TMDB_BASE}/discover/tv?api_key=${apiKey}&include_adult=false&language=en-US&page=1&sort_by=popularity.desc&first_air_date.gte=${tomorrowStr}&first_air_date.lte=${futureStr}`, apiKey, 'upcoming series discover')
+        fetchTmdbJson(`${TMDB_BASE}/discover/tv?api_key=${apiKey}&include_adult=false&language=en-US&page=1&sort_by=popularity.desc&first_air_date.gte=${tomorrowStr}&first_air_date.lte=${futureStr}`, apiKey, 'upcoming series discover p1')
+          .then(data => registerItems(data?.results, 'discover'))
+          .catch(() => {})
+      )
+      fetchTasks.push(
+        fetchTmdbJson(`${TMDB_BASE}/discover/tv?api_key=${apiKey}&include_adult=false&language=en-US&page=2&sort_by=popularity.desc&first_air_date.gte=${tomorrowStr}&first_air_date.lte=${futureStr}`, apiKey, 'upcoming series discover p2')
           .then(data => registerItems(data?.results, 'discover'))
           .catch(() => {})
       )
 
-      // Stream 4: High-popularity upcoming Indian series discover
+      // Stream 4: Upcoming seasons & episodes discover (Captures returning shows)
+      fetchTasks.push(
+        fetchTmdbJson(`${TMDB_BASE}/discover/tv?api_key=${apiKey}&include_adult=false&language=en-US&page=1&sort_by=popularity.desc&air_date.gte=${tomorrowStr}&air_date.lte=${futureStr}`, apiKey, 'upcoming seasons discover')
+          .then(data => registerItems(data?.results, 'upcoming_theatrical'))
+          .catch(() => {})
+      )
+
+      // Stream 5: High-popularity upcoming Indian series discover
+      fetchTasks.push(
+        fetchTmdbJson(`${TMDB_BASE}/discover/tv?api_key=${apiKey}&include_adult=false&language=en-US&page=1&sort_by=popularity.desc&with_original_language=hi|te|ta|ml|kn|pa|bn&air_date.gte=${tomorrowStr}&air_date.lte=${futureStr}`, apiKey, 'upcoming indian seasons discover')
+          .then(data => registerItems(data?.results, 'discover'))
+          .catch(() => {})
+      )
       fetchTasks.push(
         fetchTmdbJson(`${TMDB_BASE}/discover/tv?api_key=${apiKey}&include_adult=false&language=en-US&page=1&sort_by=popularity.desc&with_original_language=hi|te|ta|ml|kn|pa|bn&first_air_date.gte=${tomorrowStr}&first_air_date.lte=${futureStr}`, apiKey, 'upcoming indian series discover')
           .then(data => registerItems(data?.results, 'discover'))
@@ -1314,14 +1448,26 @@ export async function fetchUpcoming(type: 'movie' | 'series', forceRefresh = fal
       }
     }
 
-    // Sort upcoming chronologically by release date ascending (earliest releasing first);
-    // If release dates match, the higher anticipation score wins.
+    // Anticipation-Weighted Ranking:
+    // Combines star power, pre-release buzz (popularity) and release proximity,
+    // so eagerly awaited blockbusters (e.g. Rajinikanth, Prabhas, Nolan) dominate
+    // the shelf rather than obscure titles releasing tomorrow.
+    const calculateUpcomingRank = (cand: { item: any, score: number }) => {
+      let rank = cand.score
+      const dateStr = cand.item.release_date || cand.item.first_air_date
+      if (dateStr) {
+        const diffMs = new Date(dateStr).getTime() - Date.now()
+        const daysUntil = Math.max(0, Math.floor(diffMs / (1000 * 60 * 60 * 24)))
+        if (daysUntil <= 14) rank += 25       // Imminent release hype
+        else if (daysUntil <= 45) rank += 15  // Next in line
+        else if (daysUntil <= 90) rank += 5   // In season
+        else if (daysUntil > 180) rank -= 15  // Distant horizon
+      }
+      return rank
+    }
+
     const sortUpcomingGroup = (a: { item: any, score: number }, b: { item: any, score: number }) => {
-      const dateA = String(a.item.release_date || a.item.first_air_date || '')
-      const dateB = String(b.item.release_date || b.item.first_air_date || '')
-      const diff = dateA.localeCompare(dateB) // Earliest first
-      if (diff !== 0) return diff
-      return b.score - a.score
+      return calculateUpcomingRank(b) - calculateUpcomingRank(a)
     }
 
     const topIndian = indianList.sort(sortUpcomingGroup).slice(0, 20).map(x => x.item)
@@ -1343,7 +1489,7 @@ export async function fetchUpcoming(type: 'movie' | 'series', forceRefresh = fal
       }
     }
 
-    const results = await Promise.all(blendedList.map(async (item: any) => {
+    const results = blendedList.map((item: any) => {
       const genreName = getGenreNameFromIds(item.genre_ids)
       return {
         id: item.id,
@@ -1352,7 +1498,7 @@ export async function fetchUpcoming(type: 'movie' | 'series', forceRefresh = fal
         overview: item.overview,
         poster_path: item.poster_path ? `${TMDB_IMG}${item.poster_path}` : null,
         backdrop_path: item.backdrop_path ? `${TMDB_BACKDROP}${item.backdrop_path}` : null,
-        logo_path: item.id ? await fetchTmdbTitleLogo(type, item.id).catch(() => null) : null,
+        logo_path: null,
         vote_average: item.vote_average,
         release_year: parseInt((item.release_date || item.first_air_date || '').substring(0, 4), 10) || null,
         release_date: item.release_date || item.first_air_date,
@@ -1364,7 +1510,7 @@ export async function fetchUpcoming(type: 'movie' | 'series', forceRefresh = fal
         type: type,
         isExternal: true
       }
-    }))
+    })
 
     console.log(`[TMDB] Built ${results.length} Top-5% curated upcoming ${type} (${topIndian.length} Indian, ${topIntl.length} Intl)`)
     if (results.length > 0) {

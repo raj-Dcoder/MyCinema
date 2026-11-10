@@ -2,16 +2,23 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   ArrowDownWideNarrow,
   ArrowUpNarrowWide,
+  Calendar,
   Check,
   CheckCheck,
   ChevronLeft,
   ChevronRight,
+  Clock,
+  Flame,
   Layers,
+  Pencil,
   Play,
   Plus,
   RefreshCw,
   Search,
+  Settings,
   SlidersHorizontal,
+  Sparkles,
+  Trash2,
   Users,
   X,
 } from 'lucide-react'
@@ -20,12 +27,14 @@ import QuickSubscribeModal from '../components/focus/QuickSubscribeModal'
 import FocusTubeCard from '../components/focus/FocusTubeCard'
 import FocusTubePlayer from '../components/focus/FocusTubePlayer'
 import ChannelManager from '../components/focus/ChannelManager'
+import FocusTubeSettingsModal from '../components/focus/FocusTubeSettingsModal'
 import { categoryDot, formatAgo, formatPublishedExact } from '../utils/focusTube'
 import { useTheme } from '../theme/ThemeContext'
 
 const HIDE_SHORTS_KEY = 'mycinema_ft_hide_shorts'
 const AUTOPLAY_NEXT_KEY = 'mycinema_ft_autoplay_next'
 const SORT_ORDER_KEY = 'mycinema_ft_sort_order'
+const SEARCH_SUFFIX_KEY = 'mycinema_ft_search_suffix'
 
 interface FocusTubeProps {
   activeTab?: string
@@ -73,6 +82,12 @@ const FocusTube: React.FC<FocusTubeProps> = ({ activeTab = 'focustube' }) => {
   // Which pill is being renamed via double-click.
   const [editingId, setEditingId] = useState<number | null>(null)
   const [editName, setEditName] = useState('')
+  const [categoryMenu, setCategoryMenu] = useState<{
+    category: FtCategory
+    x: number
+    y: number
+  } | null>(null)
+  const categoryMenuRef = useRef<HTMLDivElement>(null)
   const [managing, setManaging] = useState(false)
   const [totalChannels, setTotalChannels] = useState(0)
   const [channels, setChannels] = useState<FtChannel[]>([])
@@ -81,6 +96,17 @@ const FocusTube: React.FC<FocusTubeProps> = ({ activeTab = 'focustube' }) => {
   const [isSearchingYouTube, setIsSearchingYouTube] = useState(false)
   const [searchError, setSearchError] = useState<string | null>(null)
   const [searchDropdownOpen, setSearchDropdownOpen] = useState(false)
+  const [searchSuffix, setSearchSuffix] = useState<string>(() => {
+    try {
+      const saved = localStorage.getItem(SEARCH_SUFFIX_KEY)
+      return saved !== null ? saved : 'latest'
+    } catch {
+      return 'latest'
+    }
+  })
+  const [searchBaseTopic, setSearchBaseTopic] = useState<string | null>(null)
+  const [activeSearchFilter, setActiveSearchFilter] = useState<'this_week' | 'today' | 'this_month' | 'relevance'>('this_week')
+  const [settingsOpen, setSettingsOpen] = useState(false)
   const [playingFromSearch, setPlayingFromSearch] = useState(false)
   const [subscribeModalChannel, setSubscribeModalChannel] = useState<{
     channelId: string
@@ -153,6 +179,31 @@ const FocusTube: React.FC<FocusTubeProps> = ({ activeTab = 'focustube' }) => {
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
   }, [])
+
+  // Close category options menu on outside click, scroll, resize, or Escape
+  useEffect(() => {
+    if (!categoryMenu) return
+    const handlePointerDown = (e: MouseEvent) => {
+      if (categoryMenuRef.current && !categoryMenuRef.current.contains(e.target as Node)) {
+        setCategoryMenu(null)
+      }
+    }
+    const handleClose = () => setCategoryMenu(null)
+    const handleKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setCategoryMenu(null)
+    }
+
+    window.addEventListener('pointerdown', handlePointerDown)
+    window.addEventListener('resize', handleClose)
+    window.addEventListener('wheel', handleClose, { passive: true })
+    window.addEventListener('keydown', handleKey)
+    return () => {
+      window.removeEventListener('pointerdown', handlePointerDown)
+      window.removeEventListener('resize', handleClose)
+      window.removeEventListener('wheel', handleClose)
+      window.removeEventListener('keydown', handleKey)
+    }
+  }, [categoryMenu])
 
   // Progress is read on play rather than fetched for the whole feed.
   const progressCacheRef = useRef(new Map<string, number>())
@@ -232,6 +283,7 @@ const FocusTube: React.FC<FocusTubeProps> = ({ activeTab = 'focustube' }) => {
   const selectCategory = useCallback(async (categoryId: number | null) => {
     // Any pill interaction disarms a pending delete confirmation elsewhere.
     setConfirmDeleteId(null)
+    setCategoryMenu(null)
     // Re-clicking the active pill (including the two clicks that precede a
     // double-click to rename) must not reload and flash the skeleton.
     if (categoryId === activeCategoryId) return
@@ -364,6 +416,7 @@ const FocusTube: React.FC<FocusTubeProps> = ({ activeTab = 'focustube' }) => {
     await window.api.ftDeleteCategory(category.id)
     setConfirmDeleteId(null)
     setEditingId(null)
+    setCategoryMenu(null)
     const list = await loadCategories()
     const nextId = list.length ? list[0].id : null
     setActiveCategoryId(nextId)
@@ -386,15 +439,50 @@ const FocusTube: React.FC<FocusTubeProps> = ({ activeTab = 'focustube' }) => {
     await loadFeed(activeCategoryId)
   }, [activeCategoryId, loadCategories, loadFeed])
 
-  const handleExecuteYouTubeSearch = useCallback(async (query: string) => {
+  const getCategoryCustomSuffix = useCallback((categoryId?: number | null): string | null => {
+    if (!categoryId) return null
+    try {
+      return localStorage.getItem(`mycinema_ft_cat_suffix_${categoryId}`)
+    } catch {
+      return null
+    }
+  }, [])
+
+  const getEffectiveCategorySuffix = useCallback((categoryId?: number | null): string => {
+    const custom = getCategoryCustomSuffix(categoryId)
+    return custom !== null ? custom : searchSuffix
+  }, [getCategoryCustomSuffix, searchSuffix])
+
+  const handleUpdateSearchSuffix = useCallback((newSuffix: string) => {
+    setSearchSuffix(newSuffix)
+    try {
+      localStorage.setItem(SEARCH_SUFFIX_KEY, newSuffix)
+    } catch {}
+  }, [])
+
+  const handleExecuteYouTubeSearch = useCallback(async (
+    query: string,
+    baseTopic?: string,
+    filterOption?: 'this_week' | 'today' | 'this_month' | 'relevance'
+  ) => {
     const trimmed = query.trim()
     if (!trimmed) return
+    const filter = filterOption ?? 'this_week'
+    setActiveSearchFilter(filter)
+    setSearch(trimmed)
+    setCategoryMenu(null)
     setSearchDropdownOpen(false)
     setYoutubeSearchQuery(trimmed)
+    const topic = baseTopic?.trim() || trimmed.replace(/\s+(latest|news\s+this\s+week|news|today|\d{4})$/i, '').trim() || trimmed
+    setSearchBaseTopic(topic)
     setIsSearchingYouTube(true)
     setSearchError(null)
     try {
-      const results = await window.api.ftSearchVideos(trimmed, 30)
+      const results = await window.api.ftSearchVideos({
+        query: trimmed,
+        limit: 30,
+        uploadDate: filter,
+      })
       setYoutubeSearchResults(results || [])
       if (!results || results.length === 0) {
         setSearchError(`No YouTube videos found matching "${trimmed}"`)
@@ -419,6 +507,8 @@ const FocusTube: React.FC<FocusTubeProps> = ({ activeTab = 'focustube' }) => {
   const handleClearYouTubeSearch = useCallback(() => {
     setYoutubeSearchQuery(null)
     setYoutubeSearchResults([])
+    setSearchBaseTopic(null)
+    setActiveSearchFilter('this_week')
     setSearchError(null)
     setSearch('')
     void loadFeed(activeCategoryId, { search: undefined })
@@ -537,7 +627,8 @@ const FocusTube: React.FC<FocusTubeProps> = ({ activeTab = 'focustube' }) => {
     }
   }, [activeCategoryId, loadFeed, search])
 
-  const { ftBrandLock } = useTheme()
+  const { theme, ftBrandLock } = useTheme()
+  const isLight = theme === 'light'
 
   return (
     <div className={`space-y-5 focustube-container ${ftBrandLock ? 'ft-brand-locked' : ''}`}>
@@ -661,7 +752,11 @@ const FocusTube: React.FC<FocusTubeProps> = ({ activeTab = 'focustube' }) => {
             data-tour="focustube-channels"
             onClick={() => setManaging(true)}
             title="Manage Subscribed Channels"
-            className="inline-flex h-9 items-center gap-1.5 rounded-xl border border-white/10 bg-white/5 px-3 text-xs font-bold text-white/70 transition-colors hover:border-white/20 hover:bg-white/10 hover:text-white"
+            className={`inline-flex h-9 items-center gap-1.5 rounded-xl px-3 text-xs font-bold transition-colors ${
+              isLight
+                ? 'border border-slate-200/90 bg-white text-slate-700 shadow-sm hover:border-slate-300 hover:bg-slate-50'
+                : 'border border-white/10 bg-white/5 text-white/70 hover:border-white/20 hover:bg-white/10 hover:text-white'
+            }`}
           >
             <SlidersHorizontal size={13} />
             <span className="hidden sm:inline">Channels</span>
@@ -673,44 +768,150 @@ const FocusTube: React.FC<FocusTubeProps> = ({ activeTab = 'focustube' }) => {
             disabled={refreshing}
             aria-label="Sync latest videos"
             title="Sync latest uploads from YouTube"
-            className="inline-flex h-9 items-center gap-1.5 rounded-xl border border-white/10 bg-white/5 px-3 text-xs font-bold text-white/70 transition-colors hover:border-white/20 hover:bg-white/10 hover:text-white disabled:opacity-40"
+            className={`inline-flex h-9 items-center gap-1.5 rounded-xl px-3 text-xs font-bold transition-colors disabled:opacity-40 ${
+              isLight
+                ? 'border border-slate-200/90 bg-white text-slate-700 shadow-sm hover:border-slate-300 hover:bg-slate-50'
+                : 'border border-white/10 bg-white/5 text-white/70 hover:border-white/20 hover:bg-white/10 hover:text-white'
+            }`}
           >
             <RefreshCw size={13} className={refreshing ? 'animate-spin text-primary' : undefined} />
             <span className="hidden sm:inline">{refreshing ? 'Syncing…' : 'Sync'}</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setSettingsOpen(true)}
+            title="FocusTube Settings"
+            aria-label="FocusTube Settings"
+            className={`inline-flex h-9 items-center gap-1.5 rounded-xl px-3 text-xs font-bold transition-colors ${
+              isLight
+                ? 'border border-slate-200/90 bg-white text-slate-700 shadow-sm hover:border-slate-300 hover:bg-slate-50 hover:text-slate-900'
+                : 'border border-white/10 bg-white/5 text-white/70 hover:border-white/20 hover:bg-white/10 hover:text-white'
+            }`}
+          >
+            <Settings size={13} className={isLight ? 'text-slate-500' : 'text-white/60'} />
+            <span className="hidden sm:inline">Settings</span>
           </button>
         </div>
       </header>
 
       {/* ── YOUTUBE SEARCH ACTIVE BAR OR CATEGORY CAROUSEL ── */}
       {youtubeSearchQuery ? (
-        <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-primary/25 bg-gradient-to-r from-primary/15 via-[#0e1018] to-[#0e1018] px-4 py-3 shadow-lg">
-          <div className="flex items-center gap-3 min-w-0">
-            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-primary text-white shadow-[0_0_18px_rgba(var(--c-accent),0.55)]">
-              <Search size={16} strokeWidth={2.5} />
-            </div>
-            <div className="min-w-0">
-              <div className="flex items-center gap-2">
-                <h2 className="text-sm font-black text-white truncate">
-                  YouTube Results for &ldquo;{youtubeSearchQuery}&rdquo;
-                </h2>
-                <span className="rounded-full bg-primary/20 px-2 py-0.5 text-[10px] font-bold text-primary">
-                  {isSearchingYouTube ? 'Searching…' : `${youtubeSearchResults.length} videos`}
-                </span>
+        <div
+          className={`flex flex-col gap-3 rounded-2xl p-4 transition-all ${
+            isLight
+              ? 'border border-primary/20 bg-gradient-to-r from-primary/10 via-white to-white shadow-sm ring-1 ring-slate-900/5'
+              : 'border border-primary/25 bg-gradient-to-r from-primary/15 via-[#0e1018] to-[#0e1018] shadow-lg'
+          }`}
+        >
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="flex items-center gap-3 min-w-0">
+              <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-primary text-white shadow-[0_0_18px_rgba(var(--c-accent),0.55)]">
+                <Search size={16} strokeWidth={2.5} />
               </div>
-              <p className="text-[11px] text-white/40 truncate">
-                Click any video to play; the remaining videos will load in the player side panel playlist
-              </p>
+              <div className="min-w-0">
+                <div className="flex items-center gap-2">
+                  <h2 className={`text-sm font-black truncate ${isLight ? 'text-slate-900' : 'text-white'}`}>
+                    YouTube Results for &ldquo;{youtubeSearchQuery}&rdquo;
+                  </h2>
+                  <span className="rounded-full bg-primary/20 px-2 py-0.5 text-[10px] font-bold text-primary">
+                    {isSearchingYouTube ? 'Searching…' : `${youtubeSearchResults.length} videos`}
+                  </span>
+                </div>
+                <p className={`text-[11px] truncate ${isLight ? 'text-slate-500 font-medium' : 'text-white/40'}`}>
+                  Click any video to play; the remaining videos will load in the player side panel playlist
+                </p>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={handleClearYouTubeSearch}
+                className={`inline-flex shrink-0 items-center gap-1.5 rounded-xl px-3 py-1.5 text-xs font-bold transition-all ${
+                  isLight
+                    ? 'border border-slate-200/90 bg-white text-slate-700 shadow-sm hover:border-slate-300 hover:bg-slate-50 hover:text-slate-900'
+                    : 'border border-white/10 bg-white/5 text-white/80 hover:bg-white/10 hover:text-white'
+                }`}
+              >
+                <X size={13} />
+                <span>Back to Subscriptions</span>
+              </button>
             </div>
           </div>
 
-          <button
-            type="button"
-            onClick={handleClearYouTubeSearch}
-            className="inline-flex shrink-0 items-center gap-1.5 rounded-xl border border-white/10 bg-white/5 px-3 py-1.5 text-xs font-bold text-white/80 transition-colors hover:bg-white/10 hover:text-white"
-          >
-            <X size={13} />
-            <span>Back to Subscriptions</span>
-          </button>
+          {/* Quick Filter Chips */}
+          {searchBaseTopic && (
+            <div className={`flex flex-wrap items-center gap-2 pt-2 border-t ${isLight ? 'border-slate-200/80' : 'border-white/[0.08]'}`}>
+              <span className={`text-[11px] font-semibold mr-1 ${isLight ? 'text-slate-500 font-bold' : 'text-white/40'}`}>
+                Date Filter:
+              </span>
+
+              {/* This Week (Latest) Chip */}
+              <button
+                type="button"
+                onClick={() => void handleExecuteYouTubeSearch(searchBaseTopic, searchBaseTopic, 'this_week')}
+                className={`inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-xs font-bold transition-all ${
+                  activeSearchFilter === 'this_week'
+                    ? 'bg-primary text-white shadow-md'
+                    : isLight
+                    ? 'bg-white border border-slate-200/90 text-slate-700 shadow-sm hover:bg-slate-50 hover:text-slate-900'
+                    : 'bg-white/5 border border-white/10 text-white/70 hover:border-white/20 hover:bg-white/10 hover:text-white'
+                }`}
+              >
+                <Clock size={12} />
+                <span>This Week (Latest)</span>
+              </button>
+
+              {/* Today Chip */}
+              <button
+                type="button"
+                onClick={() => void handleExecuteYouTubeSearch(searchBaseTopic, searchBaseTopic, 'today')}
+                className={`inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-xs font-bold transition-all ${
+                  activeSearchFilter === 'today'
+                    ? 'bg-primary text-white shadow-md'
+                    : isLight
+                    ? 'bg-white border border-slate-200/90 text-slate-700 shadow-sm hover:bg-slate-50 hover:text-slate-900'
+                    : 'bg-white/5 border border-white/10 text-white/70 hover:border-white/20 hover:bg-white/10 hover:text-white'
+                }`}
+              >
+                <Sparkles size={12} />
+                <span>Today</span>
+              </button>
+
+              {/* This Month Chip */}
+              <button
+                type="button"
+                onClick={() => void handleExecuteYouTubeSearch(searchBaseTopic, searchBaseTopic, 'this_month')}
+                className={`inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-xs font-bold transition-all ${
+                  activeSearchFilter === 'this_month'
+                    ? 'bg-primary text-white shadow-md'
+                    : isLight
+                    ? 'bg-white border border-slate-200/90 text-slate-700 shadow-sm hover:bg-slate-50 hover:text-slate-900'
+                    : 'bg-white/5 border border-white/10 text-white/70 hover:border-white/20 hover:bg-white/10 hover:text-white'
+                }`}
+              >
+                <Calendar size={12} />
+                <span>This Month</span>
+              </button>
+
+              {/* Top Relevant Chip */}
+              <button
+                type="button"
+                onClick={() => void handleExecuteYouTubeSearch(searchBaseTopic, searchBaseTopic, 'relevance')}
+                className={`inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-xs font-bold transition-all ${
+                  activeSearchFilter === 'relevance'
+                    ? 'bg-primary text-white shadow-md'
+                    : isLight
+                    ? 'bg-white border border-slate-200/90 text-slate-700 shadow-sm hover:bg-slate-50 hover:text-slate-900'
+                    : 'bg-white/5 border border-white/10 text-white/70 hover:border-white/20 hover:bg-white/10 hover:text-white'
+                }`}
+              >
+                <Flame size={12} />
+                <span>Top Relevant</span>
+              </button>
+            </div>
+          )}
         </div>
       ) : (
       <div className="flex flex-col gap-3 py-1 lg:flex-row lg:items-center lg:justify-between">
@@ -832,16 +1033,26 @@ const FocusTube: React.FC<FocusTubeProps> = ({ activeTab = 'focustube' }) => {
                   <button
                     type="button"
                     onClick={() => void selectCategory(category.id)}
-                    onDoubleClick={() => {
-                      setEditingId(category.id)
-                      setEditName(category.name)
+                    onDoubleClick={(e) => {
+                      e.preventDefault()
+                      e.stopPropagation()
                       setConfirmDeleteId(null)
+                      const rect = e.currentTarget.getBoundingClientRect()
+                      setCategoryMenu({
+                        category,
+                        x: Math.max(10, Math.min(rect.left, window.innerWidth - 170)),
+                        y: rect.bottom + 6,
+                      })
                     }}
                     onContextMenu={(e) => {
                       e.preventDefault()
-                      setConfirmDeleteId(category.id)
+                      setCategoryMenu(null)
+                      setConfirmDeleteId(null)
+                      const suffix = getEffectiveCategorySuffix(category.id).trim()
+                      const finalQuery = (!suffix || suffix.toLowerCase() === 'latest') ? category.name : `${category.name} ${suffix}`
+                      void handleExecuteYouTubeSearch(finalQuery, category.name, 'this_week')
                     }}
-                    title={`${category.name}${hasUnseen ? ` (${category.unseenCount} new)` : ''} · Double-click to rename · Right-click to delete`}
+                    title={`${category.name}${hasUnseen ? ` (${category.unseenCount} new)` : ''} · Right-click to search YouTube (${getEffectiveCategorySuffix(category.id) ? `+${getEffectiveCategorySuffix(category.id)}` : 'exact'}) · Double-click for options`}
                     className={`ft-category-pill inline-flex items-center rounded-xl px-4 py-1.5 text-xs font-bold transition-all ${
                       isActive
                         ? 'bg-primary text-white shadow-[0_0_15px_rgba(var(--c-accent),0.45)]'
@@ -1278,6 +1489,90 @@ const FocusTube: React.FC<FocusTubeProps> = ({ activeTab = 'focustube' }) => {
           onToggleSortOrder={handleSortChange}
         />
       )}
+
+      {/* Category options context menu (opened via double-click on category pill) */}
+      {categoryMenu && (
+        <div
+          ref={categoryMenuRef}
+          style={{
+            position: 'fixed',
+            left: `${categoryMenu.x}px`,
+            top: `${categoryMenu.y}px`,
+          }}
+          className={`z-50 min-w-[155px] overflow-hidden rounded-xl p-1.5 shadow-2xl backdrop-blur-2xl animate-in fade-in zoom-in-95 duration-100 ${
+            isLight
+              ? 'border border-slate-200/90 bg-white/95 text-slate-800 shadow-xl ring-1 ring-slate-900/5'
+              : 'border border-white/15 bg-[#14161f]/95 text-white/80 ring-1 ring-black/50'
+          }`}
+        >
+          <div className={`px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider truncate max-w-[180px] ${
+            isLight ? 'text-slate-400' : 'text-white/40'
+          }`}>
+            {categoryMenu.category.name}
+          </div>
+          <button
+            type="button"
+            onClick={() => {
+              const cat = categoryMenu.category
+              setCategoryMenu(null)
+              setEditingId(cat.id)
+              setEditName(cat.name)
+              setConfirmDeleteId(null)
+            }}
+            className={`flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-xs font-semibold transition-colors ${
+              isLight ? 'text-slate-700 hover:bg-slate-100 hover:text-slate-900' : 'text-white/80 hover:bg-white/10 hover:text-white'
+            }`}
+          >
+            <Pencil size={13} className={isLight ? 'text-slate-400' : 'text-white/60'} />
+            <span>Rename</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              const cat = categoryMenu.category
+              setCategoryMenu(null)
+              const suffix = getEffectiveCategorySuffix(cat.id).trim()
+              const finalQuery = (!suffix || suffix.toLowerCase() === 'latest') ? cat.name : `${cat.name} ${suffix}`
+              void handleExecuteYouTubeSearch(finalQuery, cat.name, 'this_week')
+            }}
+            className={`flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-xs font-semibold transition-colors ${
+              isLight ? 'text-slate-700 hover:bg-slate-100 hover:text-slate-900' : 'text-white/80 hover:bg-white/10 hover:text-white'
+            }`}
+          >
+            <Search size={13} className="text-primary" />
+            <span>Search YouTube</span>
+          </button>
+          <div className={`my-1 border-t ${isLight ? 'border-slate-200' : 'border-white/10'}`} />
+          <button
+            type="button"
+            onClick={() => {
+              const cat = categoryMenu.category
+              setCategoryMenu(null)
+              setConfirmDeleteId(cat.id)
+            }}
+            className={`flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-xs font-semibold transition-colors ${
+              isLight ? 'text-red-600 hover:bg-red-50 hover:text-red-700' : 'text-red-400 hover:bg-red-500/15 hover:text-red-300'
+            }`}
+          >
+            <Trash2 size={13} className={isLight ? 'text-red-500' : 'text-red-400/80'} />
+            <span>Delete</span>
+          </button>
+        </div>
+      )}
+
+      {/* FocusTube Dedicated Settings Modal */}
+      <FocusTubeSettingsModal
+        isOpen={settingsOpen}
+        onClose={() => setSettingsOpen(false)}
+        searchSuffix={searchSuffix}
+        onUpdateSearchSuffix={handleUpdateSearchSuffix}
+        hideShorts={hideShorts}
+        onToggleHideShorts={toggleShorts}
+        autoplayNext={autoplayNext}
+        onToggleAutoplayNext={toggleAutoplayNext}
+        sortOrder={sortOrder}
+        onToggleSortOrder={handleSortChange}
+      />
     </div>
   )
 }

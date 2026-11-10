@@ -111,38 +111,38 @@ const UPDATE_ICONS: Record<UpdateIconKey, { icon: React.ReactNode; tile: string 
 }
 
 export const LATEST_RELEASE: ReleaseNotes = {
-  version: '1.49.0',
-  title: 'Movie OTT alerts & franchise timelines.',
-  highlight: 'Movie OTT alerts',
+  version: '1.50.0',
+  title: 'Anticipatory cinema & smoother playback.',
+  highlight: 'Anticipatory cinema',
   description:
-    'Track movies for digital drops on Netflix, Prime Video, and Hotstar, explore complete franchise timelines, and browse upcoming cinema.',
+    'Celebrated star-power cinema curation, dedicated FocusTube search controls, hardware-accelerated video decoding, and compact PiP.',
   tourId: null,
   video: null,
   updates: [
     {
-      icon: 'bell',
-      title: 'Movie OTT release alerts',
-      description: 'Get notified immediately when followed movies drop on streaming platforms.',
-    },
-    {
       icon: 'sparkles',
-      title: 'Franchise timeline rails',
-      description: 'Explore prequels and sequels in chronological order on movie detail screens.',
-    },
-    {
-      icon: 'play',
-      title: 'Recently released & upcoming',
-      description: 'Discover fresh digital drops and upcoming cinema with regional language tags.',
+      title: 'Star-power cinema curation',
+      description: 'Marquee Indian superstars and visionary directors lead the Home screen.',
     },
     {
       icon: 'layers',
-      title: 'Direct OTT deep links',
-      description: 'Open titles directly on Netflix, Prime Video, and Hotstar in your browser.',
+      title: 'FocusTube search customization',
+      description: 'Set custom keyword extensions for category pill search in FocusTube.',
+    },
+    {
+      icon: 'play',
+      title: 'Hardware-accelerated playback',
+      description: 'Native GPU decoding and zero-copy rendering eliminate video jitter.',
     },
     {
       icon: 'fix',
-      title: 'Root-level dialog layering',
-      description: 'Modals now render smoothly above all screens without visual conflicts.',
+      title: 'Compact standard PiP',
+      description: 'Smaller floating Picture-in-Picture window with flawless restore sync.',
+    },
+    {
+      icon: 'shield',
+      title: 'Strict noise filtration',
+      description: 'Raised popularity threshold filters obscure low-budget filler releases.',
     },
   ],
 }

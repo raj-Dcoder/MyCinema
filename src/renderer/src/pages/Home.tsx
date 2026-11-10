@@ -6,7 +6,7 @@ import HorizontalScrollRow, { type HorizontalScrollRowHandle } from '../componen
 import { groupSeriesCards } from '../utils/seriesCards'
 import { groupMovieCards } from '../utils/mediaVersions'
 import { streamRowToVideo, resumeOnlineStream, isOnlineProgressEnabled, isNewEpisodeNotifyEnabled, groupOnlineStreamRows, resolveOnlineNextEpisode, buildOnlineSeriesCard, formatSeasonEpisode, getOnlineResumeKey, safeGetStreamHistory, safeGetFollowedSeries, safeMarkFollowedSeen, safeCheckFollowedUpdates, shouldRunFollowCheck, stampFollowCheck, safeGetFollowedMovies, safeUnfollowMovie, safeMarkFollowedMovieSeen, safeCheckFollowedMovieUpdates, FOLLOW_TOAST_EVENT } from '../utils/streamResume'
-import { Search as SearchIcon, Bookmark, ChevronLeft, ChevronRight, Play, X, Loader2, Star, Film, Tv, HardDrive, Cloud, CheckCircle2, Bell, BellRing, Sparkles } from 'lucide-react'
+import { Search as SearchIcon, Bookmark, ChevronLeft, ChevronRight, Play, X, Loader2, Star, Film, Tv, HardDrive, Cloud, CheckCircle2, Bell, BellRing, Sparkles, RotateCcw } from 'lucide-react'
 
 interface HomeProps {
   onPlay: (video: Video) => void
@@ -19,7 +19,7 @@ interface HomeProps {
 const TRENDING_RAIL_LIMIT = 10
 const HERO_CAROUSEL_LIMIT = 10
 const POSTER_RAIL_CARD_CLASS = 'basis-[calc((100%_-_1.25rem)/2)] flex-shrink-0 md:basis-[calc((100%_-_3.75rem)/4)] lg:basis-[calc((100%_-_6.25rem)/6)]'
-const HOME_SNAPSHOT_STORAGE_KEY = 'mycinema_home_snapshot_v2'
+const HOME_SNAPSHOT_STORAGE_KEY = 'mycinema_home_snapshot_v3'
 
 type HomeSnapshot = {
   continueWatching: Video[]
@@ -470,37 +470,6 @@ const isIndianContent = (video: Video): boolean => {
   return ['hi', 'te', 'ta', 'ml', 'kn', 'pa', 'bn', 'mr', 'gu', 'or', 'as', 'ur'].includes(lang)
 }
 
-const sortUpcomingChronological = (items: Video[]): Video[] => {
-  const todayStr = new Date().toISOString().substring(0, 10)
-  return [...items]
-    .filter(item => {
-      const d = item.release_date || (item as any).first_air_date
-      return d && String(d).substring(0, 10) >= todayStr
-    })
-    .sort((a, b) => {
-      const dateA = String(a.release_date || (a as any).first_air_date || '')
-      const dateB = String(b.release_date || (b as any).first_air_date || '')
-      const diff = dateA.localeCompare(dateB)
-      if (diff !== 0) return diff
-      return (Number(b.popularity) || b.vote_average || 0) - (Number(a.popularity) || a.vote_average || 0)
-    })
-}
-
-const sortRecentlyReleasedReverseChronological = (items: Video[]): Video[] => {
-  const todayStr = new Date().toISOString().substring(0, 10)
-  return [...items]
-    .filter(item => {
-      const d = item.release_date || (item as any).first_air_date
-      return d && String(d).substring(0, 10) <= todayStr
-    })
-    .sort((a, b) => {
-      const dateA = String(a.release_date || (a as any).first_air_date || '')
-      const dateB = String(b.release_date || (b as any).first_air_date || '')
-      const diff = dateB.localeCompare(dateA) // Reverse chronological: newest first!
-      if (diff !== 0) return diff
-      return (Number(b.popularity) || b.vote_average || 0) - (Number(a.popularity) || a.vote_average || 0)
-    })
-}
 
 const Home: React.FC<HomeProps> = ({ onPlay, onShowDetail, onNavigate, refreshKey, isActive = true }) => {
   const initialSnapshotRef = useRef<HomeSnapshot | null>(readHomeSnapshot())
@@ -529,43 +498,44 @@ const Home: React.FC<HomeProps> = ({ onPlay, onShowDetail, onNavigate, refreshKe
   const [upcomingSeries, setUpcomingSeries] = useState<Video[]>(() => initialSnapshotRef.current?.upcomingSeries || [])
   const [upcomingMovieFilter, setUpcomingMovieFilter] = useState<'all' | 'indian' | 'international'>('all')
   const [upcomingSeriesFilter, setUpcomingSeriesFilter] = useState<'all' | 'indian' | 'international'>('all')
+  const [isRefreshingDiscovery, setIsRefreshingDiscovery] = useState(false)
 
   const displayedRecentMovies = useMemo(() => {
     if (recentMovieFilter === 'indian') {
-      return sortRecentlyReleasedReverseChronological(recentlyReleasedMovies.filter(isIndianContent))
+      return recentlyReleasedMovies.filter(isIndianContent)
     }
     if (recentMovieFilter === 'international') {
-      return sortRecentlyReleasedReverseChronological(recentlyReleasedMovies.filter(v => !isIndianContent(v)))
+      return recentlyReleasedMovies.filter(v => !isIndianContent(v))
     }
     return recentlyReleasedMovies
   }, [recentlyReleasedMovies, recentMovieFilter])
 
   const displayedRecentSeries = useMemo(() => {
     if (recentSeriesFilter === 'indian') {
-      return sortRecentlyReleasedReverseChronological(recentlyReleasedSeries.filter(isIndianContent))
+      return recentlyReleasedSeries.filter(isIndianContent)
     }
     if (recentSeriesFilter === 'international') {
-      return sortRecentlyReleasedReverseChronological(recentlyReleasedSeries.filter(v => !isIndianContent(v)))
+      return recentlyReleasedSeries.filter(v => !isIndianContent(v))
     }
     return recentlyReleasedSeries
   }, [recentlyReleasedSeries, recentSeriesFilter])
 
   const displayedUpcomingMovies = useMemo(() => {
     if (upcomingMovieFilter === 'indian') {
-      return sortUpcomingChronological(upcomingMovies.filter(isIndianContent))
+      return upcomingMovies.filter(isIndianContent)
     }
     if (upcomingMovieFilter === 'international') {
-      return sortUpcomingChronological(upcomingMovies.filter(v => !isIndianContent(v)))
+      return upcomingMovies.filter(v => !isIndianContent(v))
     }
     return upcomingMovies
   }, [upcomingMovies, upcomingMovieFilter])
 
   const displayedUpcomingSeries = useMemo(() => {
     if (upcomingSeriesFilter === 'indian') {
-      return sortUpcomingChronological(upcomingSeries.filter(isIndianContent))
+      return upcomingSeries.filter(isIndianContent)
     }
     if (upcomingSeriesFilter === 'international') {
-      return sortUpcomingChronological(upcomingSeries.filter(v => !isIndianContent(v)))
+      return upcomingSeries.filter(v => !isIndianContent(v))
     }
     return upcomingSeries
   }, [upcomingSeries, upcomingSeriesFilter])
@@ -613,7 +583,7 @@ const Home: React.FC<HomeProps> = ({ onPlay, onShowDetail, onNavigate, refreshKe
   const suppressContentClickUntilRef = useRef(0)
   const didRunInitialRefreshRef = useRef(false)
   const discoveryTimersRef = useRef<number[]>([])
-  const lastDiscoveryFetchTimeRef = useRef<number>(0)
+  const lastDiscoveryFetchTimeRef = useRef<number>(initialSnapshotRef.current?.timestamp || 0)
 
 
   const refreshLocalHomeData = useCallback(async () => {
@@ -800,9 +770,10 @@ const Home: React.FC<HomeProps> = ({ onPlay, onShowDetail, onNavigate, refreshKe
   }, [])
 
   const fetchDiscoveryData = useCallback(async (force = false) => {
-    const DISCOVERY_CACHE_TTL_MS = 20 * 60 * 1000 // 20 minutes
+    const DISCOVERY_CACHE_TTL_MS = 60 * 60 * 1000 // 60 minutes
     const isCacheFresh = (Date.now() - lastDiscoveryFetchTimeRef.current) < DISCOVERY_CACHE_TTL_MS
-    if (!force && isCacheFresh && (trendingMovies.length > 0 || trendingSeries.length > 0)) {
+    const hasFullDiscoveryData = trendingMovies.length > 0 && recentlyReleasedMovies.length > 0 && upcomingMovies.length > 0
+    if (!force && isCacheFresh && hasFullDiscoveryData) {
       return
     }
     lastDiscoveryFetchTimeRef.current = Date.now()
@@ -810,43 +781,51 @@ const Home: React.FC<HomeProps> = ({ onPlay, onShowDetail, onNavigate, refreshKe
     discoveryTimersRef.current.forEach(clearTimeout)
     discoveryTimersRef.current = []
 
-    const [trendingM, trendingS] = await Promise.all([
-      window.api.fetchTrending('movie').catch(() => []),
-      window.api.fetchTrending('series').catch(() => [])
-    ])
+    // If cold start / not forced, stagger gently so initial window mount is completely fluid
+    const delayTrending = force ? 0 : 800
+    const delayRecentAndUpcoming = force ? 40 : 2000
+    const delayRegional = force ? 80 : 3400
+    const delayOtt = force ? 120 : 4800
 
-    if (trendingM.length > 0) setTrendingMovies(trendingM)
-    if (trendingS.length > 0) setTrendingSeries(trendingS)
+    const tTrending = window.setTimeout(async () => {
+      const [trendingM, trendingS] = await Promise.all([
+        window.api.fetchTrending('movie', force).catch(() => []),
+        window.api.fetchTrending('series', force).catch(() => [])
+      ])
+      if (trendingM.length > 0) setTrendingMovies(trendingM)
+      if (trendingS.length > 0) setTrendingSeries(trendingS)
+    }, delayTrending)
+    discoveryTimersRef.current.push(tTrending)
 
     const t0 = window.setTimeout(async () => {
       const [recentM, recentS, upM, upS] = await Promise.all([
-        window.api.fetchRecentlyReleased('movie').catch(() => []),
-        window.api.fetchRecentlyReleased('series').catch(() => []),
-        window.api.fetchUpcoming('movie').catch(() => []),
-        window.api.fetchUpcoming('series').catch(() => [])
+        window.api.fetchRecentlyReleased('movie', force).catch(() => []),
+        window.api.fetchRecentlyReleased('series', force).catch(() => []),
+        window.api.fetchUpcoming('movie', force).catch(() => []),
+        window.api.fetchUpcoming('series', force).catch(() => [])
       ])
       if (recentM.length > 0) setRecentlyReleasedMovies(recentM)
       if (recentS.length > 0) setRecentlyReleasedSeries(recentS)
       if (upM.length > 0) setUpcomingMovies(upM)
       if (upS.length > 0) setUpcomingSeries(upS)
-    }, 250)
+    }, delayRecentAndUpcoming)
     discoveryTimersRef.current.push(t0)
 
     const t1 = window.setTimeout(async () => {
       const [indiaMovies, indiaSeries] = await Promise.all([
-        window.api.fetchTrendingIndia('movie').catch(() => []),
-        window.api.fetchTrendingIndia('series').catch(() => [])
+        window.api.fetchTrendingIndia('movie', force).catch(() => []),
+        window.api.fetchTrendingIndia('series', force).catch(() => [])
       ])
       if (indiaMovies.length > 0) setTrendingIndiaMovies(indiaMovies)
       if (indiaSeries.length > 0) setTrendingIndiaSeries(indiaSeries)
 
       const [kdrama, anime] = await Promise.all([
-        window.api.fetchTrendingKdrama().catch(() => []),
-        window.api.fetchTrendingAnime().catch(() => [])
+        window.api.fetchTrendingKdrama(force).catch(() => []),
+        window.api.fetchTrendingAnime(force).catch(() => [])
       ])
       if (kdrama.length > 0) setTrendingKdrama(kdrama)
       if (anime.length > 0) setTrendingAnime(anime)
-    }, 500)
+    }, delayRegional)
     discoveryTimersRef.current.push(t1)
 
     const t2 = window.setTimeout(async () => {
@@ -856,14 +835,14 @@ const Home: React.FC<HomeProps> = ({ onPlay, onShowDetail, onNavigate, refreshKe
         appleM, appleS,
         primeM, primeS
       ] = await Promise.all([
-        window.api.fetchTrendingNetflix('movie').catch(() => []),
-        window.api.fetchTrendingNetflix('series').catch(() => []),
-        window.api.fetchTrendingJioHotstar('movie').catch(() => []),
-        window.api.fetchTrendingJioHotstar('series').catch(() => []),
-        window.api.fetchTrendingAppleTv('movie').catch(() => []),
-        window.api.fetchTrendingAppleTv('series').catch(() => []),
-        window.api.fetchTrendingPrimeVideo('movie').catch(() => []),
-        window.api.fetchTrendingPrimeVideo('series').catch(() => [])
+        window.api.fetchTrendingNetflix('movie', force).catch(() => []),
+        window.api.fetchTrendingNetflix('series', force).catch(() => []),
+        window.api.fetchTrendingJioHotstar('movie', force).catch(() => []),
+        window.api.fetchTrendingJioHotstar('series', force).catch(() => []),
+        window.api.fetchTrendingAppleTv('movie', force).catch(() => []),
+        window.api.fetchTrendingAppleTv('series', force).catch(() => []),
+        window.api.fetchTrendingPrimeVideo('movie', force).catch(() => []),
+        window.api.fetchTrendingPrimeVideo('series', force).catch(() => [])
       ])
       if (netflixM.length > 0) setTrendingNetflixMovies(netflixM)
       if (netflixS.length > 0) setTrendingNetflixSeries(netflixS)
@@ -873,9 +852,37 @@ const Home: React.FC<HomeProps> = ({ onPlay, onShowDetail, onNavigate, refreshKe
       if (appleS.length > 0) setTrendingAppleSeries(appleS)
       if (primeM.length > 0) setTrendingPrimeMovies(primeM)
       if (primeS.length > 0) setTrendingPrimeSeries(primeS)
-    }, 1500)
+    }, delayOtt)
     discoveryTimersRef.current.push(t2)
   }, [])
+
+  const handleRefreshDiscovery = useCallback(async () => {
+    if (isRefreshingDiscovery) return
+    setIsRefreshingDiscovery(true)
+    try {
+      await fetchDiscoveryData(true)
+      await refreshLocalHomeData()
+    } finally {
+      setTimeout(() => {
+        setIsRefreshingDiscovery(false)
+      }, 600)
+    }
+  }, [isRefreshingDiscovery, fetchDiscoveryData, refreshLocalHomeData])
+
+  useEffect(() => {
+    if (!isActive) return
+    const handleKeyDown = (e: KeyboardEvent) => {
+      const tag = (e.target as HTMLElement)?.tagName?.toLowerCase()
+      if (tag === 'input' || tag === 'textarea') return
+
+      if (e.key === 'F5' || ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'r')) {
+        e.preventDefault()
+        handleRefreshDiscovery()
+      }
+    }
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [isActive, handleRefreshDiscovery])
 
   // #3: throttled new-episode check (max ~1/day). Runs before the home
   // refresh so fresh drop flags are visible immediately.
@@ -898,12 +905,19 @@ const Home: React.FC<HomeProps> = ({ onPlay, onShowDetail, onNavigate, refreshKe
 
   const fetchData = useCallback(async () => {
     try {
-      await runFollowCheck()
+      // 1. Immediately load local SQLite data & watchlist (instant 10ms read)
       await Promise.all([
         refreshLocalHomeData(),
-        fetchDiscoveryData(),
         window.api.getWatchlist().then(setWatchlistItems).catch(console.error)
       ])
+
+      // 2. Trigger discovery fetch (skipped if cached snapshot is fresh)
+      void fetchDiscoveryData()
+
+      // 3. Defer followed series episode check so it never blocks app opening
+      window.setTimeout(() => {
+        void runFollowCheck()
+      }, 3500)
     } catch (err) {
       console.error('Home fetchData error:', err)
     }

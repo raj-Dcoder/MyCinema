@@ -1,3 +1,29 @@
+# MyCinema v1.50.0
+
+High-signal anticipatory release curation with star-power recognition, FocusTube search suffix customization and settings hub, hardware-accelerated video decoding, and compact Picture-in-Picture playback.
+
+### Anticipatory Cinema Curation & Star Power
+- **Curated Marquee Roster**: Pan-India superstars (Rajinikanth, Prabhas, Allu Arjun, Jr NTR, Ram Charan, Thalapathy Vijay, Ajith Kumar, Suriya, Mahesh Babu, Yash, Mohanlal, Mammootty) and Bollywood icons (Shah Rukh Khan, Salman Khan, Aamir Khan, Hrithik Roshan, Ranbir Kapoor) are recognized and promoted.
+- **Visionary Director Recognition**: Releases from acclaimed creators including SS Rajamouli, Prashanth Neel, Lokesh Kanagaraj, Sandeep Reddy Vanga, Shankar, Sukumar, and Mani Ratnam bypass noise gates and receive prominent placement.
+- **Anticipation-Weighted Ranking**: Replaced raw calendar date sorting with a composite hype and release proximity score, ensuring eagerly anticipated blockbusters lead the shelf instead of obscure low-budget filler.
+- **Strict Noise Filter**: Filtered out obscure micro-budget titles with a raised baseline popularity threshold (`>= 18.0`), keeping the Home screen focused on celebrated, buzzworthy productions.
+
+### FocusTube Search & Settings Hub
+- **Dedicated FocusTube Settings Modal**: Configure your FocusTube preferences from a clean settings dialog conveniently placed next to the channel sync controls.
+- **Customizable Search Suffix**: Set a custom keyword extension (defaulting to "latest") that automatically appends when right-clicking category pills for refined YouTube search results.
+- **Cleaned Filtration Banner**: Removed repetitive in-banner buttons and fixed light-mode gradients to deliver a clean, readable header.
+- **Accurate Release Time Parsing**: Corrected YouTube search published time parsing and quick filters so older videos no longer erroneously show "just now".
+
+### Video Playback & Performance
+- **Hardware-Accelerated Decoding**: Enabled native Chromium GPU video decoding and zero-copy rasterization, eliminating stutter and low FPS for butter-smooth web video playback.
+- **Compact Standard PiP**: Re-proportioned the floating Picture-in-Picture player to a sleek standard 16:9 footprint (`360x203`), saving screen real estate.
+- **Flawless PiP Restore**: Fixed playback hitching and stream buffering when maximizing from PiP back to theater mode with atomic video re-synchronization.
+
+### Security & Privacy
+- **Sanitized Search Terms & Media Feeds**: Search query suffixes and external video embed requests are strictly sanitized and dispatched through validated main-process protocol handlers.
+
+***
+
 # MyCinema v1.49.0
 
 Movie OTT release alerts, franchise collection timeline rails, recently released and upcoming discover rows, direct OTT deep links, and root-level modal layering.

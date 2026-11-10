@@ -1581,9 +1581,13 @@ function registerAudioProtocol(): void {
 
 app.commandLine.appendSwitch('enable-blink-features', 'AudioVideoTracks')
 
-// Prevent hardware video decoder underflow / deadlocks on Windows
-// Software VP9/AV1 decoding (VpxVideoDecoder) avoids D3D11 texture binding stalls
-app.commandLine.appendSwitch('disable-accelerated-video-decode')
+// Hardware video decoding & GPU acceleration optimizations
+// Enable native D3D11 GPU video decoding & zero-copy rasterization for buttery smooth 60fps YouTube & media playback
+app.commandLine.appendSwitch('ignore-gpu-blocklist')
+app.commandLine.appendSwitch('enable-gpu-rasterization')
+app.commandLine.appendSwitch('enable-zero-copy')
+app.commandLine.appendSwitch('enable-accelerated-video-decode')
+app.commandLine.appendSwitch('enable-features', 'PlatformHEVCDecoderSupport')
 app.commandLine.appendSwitch('disable-features', 'CalculateNativeWinOcclusion')
 // Prevent UDP/QUIC packet loss and ISP throttling from stalling YouTube (googlevideo.com) DASH streams
 app.commandLine.appendSwitch('disable-quic')
@@ -2258,22 +2262,22 @@ function openFtPip(payload: any): boolean {
   const primaryDisplay = screen.getPrimaryDisplay()
   const { width: screenWidth, height: screenHeight, x: displayX, y: displayY } = primaryDisplay.workArea
 
-  const defaultWidth = 512
-  const defaultHeight = 288
-  const width = Math.min(Math.max(lastFtPipBounds?.width || defaultWidth, 320), screenWidth)
+  const defaultWidth = 360
+  const defaultHeight = 203
+  const width = Math.min(Math.max(lastFtPipBounds?.width || defaultWidth, 260), screenWidth)
   const height = lastFtPipBounds?.height ? Math.round(lastFtPipBounds.height) : Math.round(width * 9 / 16)
-  const x = lastFtPipBounds?.x ?? (displayX + screenWidth - width - 24)
-  const y = lastFtPipBounds?.y ?? (displayY + screenHeight - height - 24)
+  const x = lastFtPipBounds?.x ?? (displayX + screenWidth - width - 20)
+  const y = lastFtPipBounds?.y ?? (displayY + screenHeight - height - 20)
 
   ftPipWindow = new BrowserWindow({
     width,
     height,
     x,
     y,
-    minWidth: 320,
-    minHeight: 180,
-    maxWidth: 1280,
-    maxHeight: 720,
+    minWidth: 260,
+    minHeight: 146,
+    maxWidth: 960,
+    maxHeight: 540,
     alwaysOnTop: true,
     frame: false,
     resizable: true,
@@ -9092,11 +9096,19 @@ ipcMain.handle('ft-search-channels', async (_e, query: string) => {
   }
 })
 
-ipcMain.handle('ft-search-videos', async (_e, input: { query: string; limit?: number } | string) => {
+ipcMain.handle('ft-search-videos', async (_e, input: { query: string; limit?: number; uploadDate?: string; sp?: string } | string) => {
   try {
     const q = typeof input === 'string' ? input : input?.query
     const limit = typeof input === 'object' && typeof input?.limit === 'number' ? input.limit : 30
-    return await focusTubeFeed.searchYouTubeVideos(q, limit)
+    let sp: string | undefined = typeof input === 'object' ? input?.sp : undefined
+    if (!sp && typeof input === 'object' && input?.uploadDate) {
+      if (input.uploadDate === 'today') sp = 'EgIIAg%3D%3D'
+      else if (input.uploadDate === 'this_week') sp = 'EgIIAw%3D%3D'
+      else if (input.uploadDate === 'this_month') sp = 'EgIIBA%3D%3D'
+      else if (input.uploadDate === 'this_year') sp = 'EgIIBQ%3D%3D'
+      else if (input.uploadDate === 'relevance' || input.uploadDate === 'all') sp = 'EgIQAQ%3D%3D'
+    }
+    return await focusTubeFeed.searchYouTubeVideos(q, limit, sp)
   } catch (err: any) {
     console.error('[FocusTube] Video search failed:', err?.message)
     return []
@@ -9476,6 +9488,7 @@ ipcMain.handle('ft-get-frame-quality', async () => {
 ipcMain.handle('ft-seek-frame', async (_e, input: { seconds: number; play?: boolean } | number) => {
   const seconds = typeof input === 'number' ? input : Number(input?.seconds || 0)
   const shouldPlay = typeof input === 'object' && input !== null ? input.play !== false : true
+  if (!Number.isFinite(seconds) || seconds < 0) return { ok: false, error: 'Invalid seconds' }
   try {
     const frames = getYouTubeEmbedFrames()
     let applied = false

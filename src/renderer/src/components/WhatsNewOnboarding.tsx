@@ -111,38 +111,23 @@ const UPDATE_ICONS: Record<UpdateIconKey, { icon: React.ReactNode; tile: string 
 }
 
 export const LATEST_RELEASE: ReleaseNotes = {
-  version: '1.50.0',
-  title: 'Anticipatory cinema & smoother playback.',
-  highlight: 'Anticipatory cinema',
+  version: '1.50.1',
+  title: 'Smoother stream buffering.',
+  highlight: 'buffering.',
   description:
-    'Celebrated star-power cinema curation, dedicated FocusTube search controls, hardware-accelerated video decoding, and compact PiP.',
+    'Disabled hardware decoding in FocusTube to prevent player stalls and ensure stable playback.',
   tourId: null,
   video: null,
   updates: [
     {
-      icon: 'sparkles',
-      title: 'Star-power cinema curation',
-      description: 'Marquee Indian superstars and visionary directors lead the Home screen.',
-    },
-    {
-      icon: 'layers',
-      title: 'FocusTube search customization',
-      description: 'Set custom keyword extensions for category pill search in FocusTube.',
+      icon: 'fix',
+      title: 'Buffering stalls eliminated',
+      description: 'Restored dedicated software decoding to prevent video freezes on Windows.',
     },
     {
       icon: 'play',
-      title: 'Hardware-accelerated playback',
-      description: 'Native GPU decoding and zero-copy rendering eliminate video jitter.',
-    },
-    {
-      icon: 'fix',
-      title: 'Compact standard PiP',
-      description: 'Smaller floating Picture-in-Picture window with flawless restore sync.',
-    },
-    {
-      icon: 'shield',
-      title: 'Strict noise filtration',
-      description: 'Raised popularity threshold filters obscure low-budget filler releases.',
+      title: 'Reliable stream playback',
+      description: 'Avoids decoder texture stalls during high-bitrate YouTube playback.',
     },
   ],
 }

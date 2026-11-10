@@ -1,3 +1,13 @@
+# MyCinema v1.50.1
+
+Disabled hardware video decoding in FocusTube to eliminate D3D11 buffer underflow and excessive playback buffering.
+
+### Video Playback & Stability
+- **Software Video Decoding Restored**: Replaced hardware-accelerated video decoding switches with dedicated software VP9/AV1 decoding flags (`disable-accelerated-video-decode`).
+- **Buffering & Stutter Elimination**: Solved D3D11 texture binding stalls and buffer underflow on Windows, delivering continuous, freeze-free FocusTube streaming.
+
+***
+
 # MyCinema v1.50.0
 
 High-signal anticipatory release curation with star-power recognition, FocusTube search suffix customization and settings hub, hardware-accelerated video decoding, and compact Picture-in-Picture playback.

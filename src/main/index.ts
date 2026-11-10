@@ -1581,13 +1581,9 @@ function registerAudioProtocol(): void {
 
 app.commandLine.appendSwitch('enable-blink-features', 'AudioVideoTracks')
 
-// Hardware video decoding & GPU acceleration optimizations
-// Enable native D3D11 GPU video decoding & zero-copy rasterization for buttery smooth 60fps YouTube & media playback
-app.commandLine.appendSwitch('ignore-gpu-blocklist')
-app.commandLine.appendSwitch('enable-gpu-rasterization')
-app.commandLine.appendSwitch('enable-zero-copy')
-app.commandLine.appendSwitch('enable-accelerated-video-decode')
-app.commandLine.appendSwitch('enable-features', 'PlatformHEVCDecoderSupport')
+// Prevent hardware video decoder underflow / deadlocks on Windows
+// Software VP9/AV1 decoding (VpxVideoDecoder) avoids D3D11 texture binding stalls and buffering
+app.commandLine.appendSwitch('disable-accelerated-video-decode')
 app.commandLine.appendSwitch('disable-features', 'CalculateNativeWinOcclusion')
 // Prevent UDP/QUIC packet loss and ISP throttling from stalling YouTube (googlevideo.com) DASH streams
 app.commandLine.appendSwitch('disable-quic')

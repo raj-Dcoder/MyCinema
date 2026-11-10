@@ -850,7 +850,7 @@ const FocusTube: React.FC<FocusTubeProps> = ({ activeTab = 'focustube' }) => {
               {/* This Week (Latest) Chip */}
               <button
                 type="button"
-                onClick={() => void handleExecuteYouTubeSearch(searchBaseTopic, searchBaseTopic, 'this_week')}
+                onClick={() => void handleExecuteYouTubeSearch(youtubeSearchQuery || searchBaseTopic, searchBaseTopic, 'this_week')}
                 className={`inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-xs font-bold transition-all ${
                   activeSearchFilter === 'this_week'
                     ? 'bg-primary text-white shadow-md'
@@ -866,7 +866,7 @@ const FocusTube: React.FC<FocusTubeProps> = ({ activeTab = 'focustube' }) => {
               {/* Today Chip */}
               <button
                 type="button"
-                onClick={() => void handleExecuteYouTubeSearch(searchBaseTopic, searchBaseTopic, 'today')}
+                onClick={() => void handleExecuteYouTubeSearch(youtubeSearchQuery || searchBaseTopic, searchBaseTopic, 'today')}
                 className={`inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-xs font-bold transition-all ${
                   activeSearchFilter === 'today'
                     ? 'bg-primary text-white shadow-md'
@@ -882,7 +882,7 @@ const FocusTube: React.FC<FocusTubeProps> = ({ activeTab = 'focustube' }) => {
               {/* This Month Chip */}
               <button
                 type="button"
-                onClick={() => void handleExecuteYouTubeSearch(searchBaseTopic, searchBaseTopic, 'this_month')}
+                onClick={() => void handleExecuteYouTubeSearch(youtubeSearchQuery || searchBaseTopic, searchBaseTopic, 'this_month')}
                 className={`inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-xs font-bold transition-all ${
                   activeSearchFilter === 'this_month'
                     ? 'bg-primary text-white shadow-md'
@@ -898,7 +898,7 @@ const FocusTube: React.FC<FocusTubeProps> = ({ activeTab = 'focustube' }) => {
               {/* Top Relevant Chip */}
               <button
                 type="button"
-                onClick={() => void handleExecuteYouTubeSearch(searchBaseTopic, searchBaseTopic, 'relevance')}
+                onClick={() => void handleExecuteYouTubeSearch(youtubeSearchQuery || searchBaseTopic, searchBaseTopic, 'relevance')}
                 className={`inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-xs font-bold transition-all ${
                   activeSearchFilter === 'relevance'
                     ? 'bg-primary text-white shadow-md'
@@ -1049,7 +1049,7 @@ const FocusTube: React.FC<FocusTubeProps> = ({ activeTab = 'focustube' }) => {
                       setCategoryMenu(null)
                       setConfirmDeleteId(null)
                       const suffix = getEffectiveCategorySuffix(category.id).trim()
-                      const finalQuery = (!suffix || suffix.toLowerCase() === 'latest') ? category.name : `${category.name} ${suffix}`
+                      const finalQuery = suffix ? `${category.name} ${suffix}` : category.name
                       void handleExecuteYouTubeSearch(finalQuery, category.name, 'this_week')
                     }}
                     title={`${category.name}${hasUnseen ? ` (${category.unseenCount} new)` : ''} · Right-click to search YouTube (${getEffectiveCategorySuffix(category.id) ? `+${getEffectiveCategorySuffix(category.id)}` : 'exact'}) · Double-click for options`}
@@ -1532,7 +1532,7 @@ const FocusTube: React.FC<FocusTubeProps> = ({ activeTab = 'focustube' }) => {
               const cat = categoryMenu.category
               setCategoryMenu(null)
               const suffix = getEffectiveCategorySuffix(cat.id).trim()
-              const finalQuery = (!suffix || suffix.toLowerCase() === 'latest') ? cat.name : `${cat.name} ${suffix}`
+              const finalQuery = suffix ? `${cat.name} ${suffix}` : cat.name
               void handleExecuteYouTubeSearch(finalQuery, cat.name, 'this_week')
             }}
             className={`flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-xs font-semibold transition-colors ${

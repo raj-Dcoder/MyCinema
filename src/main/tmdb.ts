@@ -10,6 +10,7 @@ const { fetch, Agent, setGlobalDispatcher } = require('undici')
 
 // ─── DNS-over-HTTPS (DoH) Logic ──────────────────────────────────────────────
 
+const TMDB_FETCH_TIMEOUT_MS = 12000
 let cachedTmdbIp: string | null = null
 
 /**
@@ -152,7 +153,6 @@ function cacheKey(title: string, type: 'movie' | 'series'): string {
 
 const trendingCache: Record<string, { data: any[], timestamp: number }> = {}
 const TRENDING_CACHE_TTL = 1000 * 60 * 60 * 4 // 4 hours (fresher discovery data & reliable refreshes)
-const TMDB_FETCH_TIMEOUT_MS = 12000
 
 const youtubePlayableCache = new Map<string, { playable: boolean, timestamp: number }>()
 const YOUTUBE_PLAYABLE_CACHE_TTL = 1000 * 60 * 60 * 12
@@ -884,67 +884,100 @@ function isIndianTmdbItem(item: any): boolean {
 // Aggressively prioritizes celebrated pan-India cinema (South Indian + Bollywood)
 // and major global blockbusters while eliminating unknown micro-budget clutter.
 
-export const MARQUEE_INDIAN_TALENT: string[] = [
-  // South Indian Superstars & A-List Leads
-  'rajinikanth', 'kamal haasan', 'prabhas', 'allu arjun', 'jr ntr', 'jr. ntr', 'ntr jr', 'ram charan',
-  'thalapathy vijay', 'vijay sethupathi', 'vijay deverakonda', 'vijay devarakonda', 'vijay antony',
-  'ajith kumar', 'ajith', 'suriya', 'mahesh babu', 'pawan kalyan', 'chiranjeevi', 'balakrishna',
-  'nandamuri balakrishna', 'yash', 'rishab shetty', 'dhanush', 'vikram', 'chiyaan vikram',
-  'sivakarthikeyan', 'karthi', 'nani', 'mohanlal', 'mammootty', 'fahadh faasil', 'dulquer salmaan',
-  'prithviraj sukumaran', 'prithviraj', 'tovino thomas', 'shiva rajkumar', 'kichcha sudeep', 'sudeep',
-  'rakshit shetty', 'upendra',
-
-  // Bollywood / Hindi Superstars & A-List Leads
-  'shah rukh khan', 'shahrukh khan', 'srk', 'salman khan', 'aamir khan', 'hrithik roshan',
+export const MARQUEE_INDIAN_STARS = new Set([
+  // Hindi Superstars & A-List Leads
+  'shah rukh khan', 'shahrukh khan', 'salman khan', 'aamir khan', 'hrithik roshan',
   'ranbir kapoor', 'ranveer singh', 'ajay devgn', 'akshay kumar', 'deepika padukone',
   'alia bhatt', 'vicky kaushal', 'shahid kapoor', 'kartik aaryan', 'varun dhawan',
-  'ayushmann khurrana', 'shraddha kapoor', 'rashmika mandanna', 'sunny deol', 'pankaj tripathi',
-  'keerthy suresh', 'sai pallavi', 'samantha', 'nayanthara', 'trisha', 'priyanka chopra',
+  'ayushmann khurrana', 'shraddha kapoor', 'sunny deol', 'pankaj tripathi',
 
-  // Visionary Indian Directors
+  // South Indian Superstars & A-List Leads
+  'rajinikanth', 'kamal haasan', 'prabhas', 'allu arjun', 'jr. ntr', 'jr ntr', 'ntr jr', 'n.t. rama rao jr.',
+  'ram charan', 'thalapathy vijay', 'vijay', 'ajith kumar', 'suriya', 'mahesh babu', 'pawan kalyan',
+  'chiranjeevi', 'balakrishna', 'nandamuri balakrishna', 'yash', 'rishab shetty', 'dhanush',
+  'vikram', 'chiyaan vikram', 'sivakarthikeyan', 'karthi', 'nani', 'mohanlal', 'mammootty',
+  'fahadh faasil', 'dulquer salmaan', 'prithviraj sukumaran', 'tovino thomas', 'shiva rajkumar',
+  'kichcha sudeep', 'vijay deverakonda', 'vijay devarakonda', 'vijay sethupathi', 'rashmika mandanna',
+  'keerthy suresh', 'sai pallavi', 'priyanka chopra', 'priyanka chopra jonas'
+])
+
+export const MARQUEE_INDIAN_DIRECTORS = new Set([
   's. s. rajamouli', 'ss rajamouli', 'rajamouli', 'prashanth neel', 'lokesh kanagaraj',
-  'sukumar', 'sandeep reddy vanga', 'sandeep vanga', 'shankar', 's. shankar', 'mani ratnam',
-  'rohit shetty', 'atlee', 'trivikram', 'koratala siva', 'anurag kashyap', 'sanjay leela bhansali',
-  'vetrimaaran', 'pa. ranjith', 'pa ranjith', 'karthik subbaraj', 'nag ashwin', 'nelson dilipkumar',
-  'siddharth anand', 'ayan mukerji', 'maruthi', 'boyapati srinu', 'gautham menon', 'gautham vasudev menon',
-  'sooraj barjatya', 'amal neerad', 'laxman utekar', 'tharun bhascker', 'mysskin',
+  'sukumar', 'sandeep reddy vanga', 'sandeep vanga', 's. shankar', 'shankar shanmugam',
+  'mani ratnam', 'rohit shetty', 'atlee', 'trivikram', 'trivikram srinivas', 'sanjay leela bhansali',
+  'siddharth anand', 'sooraj barjatya', 'ayan mukerji', 'nag ashwin', 'nelson dilipkumar',
+  'vetrimaaran', 'mysskin', 'laxman utekar', 'amal neerad', 'hanu raghavapudi', 'sujoy ghosh',
+  'anurag kashyap', 'koratala siva', 'pa. ranjith', 'pa ranjith', 'karthik subbaraj',
+  'boyapati srinu', 'gautham vasudev menon', 'gautham menon', 'tharun bhascker'
+])
 
-  // High-Anticipation Pan-India Franchises & Titles
+export const MARQUEE_INDIAN_FRANCHISES = [
   'pushpa', 'kalki', 'salaar', 'kgf', 'baahubali', 'coolie', 'jailer', 'war 2', 'spirit',
   'toxic', 'devara', 'game changer', 'vettaiyan', 'thug life', 'good bad ugly', 'leo',
   'kantara', 'singham', 'pathaan', 'tiger 3', 'dhoom', 'don 3', 'brahmastra', 'ramayana',
-  'hanuman', 'king', 'love & war', 'golmaal 5', 'dragon', 'fauzi', 'vaaranasi', 'vāranāsi', 'om: chapter 1',
-  'mirzapur', 'panchayat', 'the family man', 'farzi', 'delhi crime', 'sacred games', 'paatal lok',
-  'asur', 'rana naidu', 'taaza khabar', 'gullak', 'special ops', 'matka king'
+  'king', 'love & war', 'golmaal 5', 'dragon', 'fauzi', 'vaaranasi', 'vāranāsi', 'om: chapter 1'
 ]
 
-export const MARQUEE_GLOBAL_TALENT: string[] = [
-  // Global Visionary Directors & Mega Leads
+export const MARQUEE_GLOBAL_TALENT = new Set([
   'christopher nolan', 'james cameron', 'denis villeneuve', 'quentin tarantino',
   'martin scorsese', 'ridley scott', 'david fincher', 'guillermo del toro', 'steven spielberg',
   'greta gerwig', 'tom cruise', 'leonardo dicaprio', 'cillian murphy', 'keanu reeves',
-  'pedro pascal', 'zendaya', 'timothée chalamet', 'timothee chalamet',
+  'pedro pascal', 'zendaya', 'timothée chalamet', 'timothee chalamet'
+])
 
-  // Mega Hollywood Franchises & Universes
+export const MARQUEE_GLOBAL_FRANCHISES = [
   'marvel', 'avengers', 'spider-man', 'spiderman', 'batman', 'superman', 'dc studios',
   'star wars', 'avatar', 'dune', 'mission: impossible', 'mission impossible', 'gladiator',
   'jurassic', 'fast & furious', 'fast and furious', 'harry potter', 'lord of the rings',
-  'stranger things', 'the last of us', 'house of the dragon', 'game of thrones'
+  'sonic', 'jumanji', 'stranger things', 'blade runner', 'neuromancer', 'the last of us',
+  'house of the dragon', 'game of thrones'
+]
+
+// Backward compatibility export if needed
+export const MARQUEE_INDIAN_TALENT: string[] = [
+  ...Array.from(MARQUEE_INDIAN_STARS),
+  ...Array.from(MARQUEE_INDIAN_DIRECTORS),
+  ...MARQUEE_INDIAN_FRANCHISES
 ]
 
 export function matchesMarqueeRoster(item: any): boolean {
   if (!item) return false
-  const castStr = Array.isArray(item.topCast) ? item.topCast.join(' ') : ''
-  const dirStr = Array.isArray(item.directors) ? item.directors.join(' ') : ''
-  const text = `${item.title || ''} ${item.original_title || ''} ${item.name || ''} ${item.overview || ''} ${castStr} ${dirStr}`.toLowerCase()
-  if (!text.trim()) return false
 
-  for (const name of MARQUEE_INDIAN_TALENT) {
-    if (text.includes(name)) return true
+  const title = (item.title || item.name || '').toLowerCase().trim()
+  const origTitle = (item.original_title || item.original_name || '').toLowerCase().trim()
+
+  // 1. Franchise or marquee title check (word boundary match, never check overview)
+  for (const franchise of MARQUEE_INDIAN_FRANCHISES) {
+    const pattern = new RegExp(`(^|[^a-z0-9])${franchise}([^a-z0-9]|$)`, 'i')
+    if (pattern.test(title) || pattern.test(origTitle)) {
+      return true
+    }
   }
-  for (const name of MARQUEE_GLOBAL_TALENT) {
-    if (text.includes(name)) return true
+
+  for (const kw of MARQUEE_GLOBAL_FRANCHISES) {
+    if (title.includes(kw) || origTitle.includes(kw)) {
+      return true
+    }
   }
+
+  // 2. Check top 3 lead actors (exact normalized match)
+  const topLeads = Array.isArray(item.topCast) ? item.topCast.slice(0, 3) : []
+  for (const lead of topLeads) {
+    const cleanLead = String(lead).toLowerCase().trim()
+    if (MARQUEE_INDIAN_STARS.has(cleanLead) || MARQUEE_GLOBAL_TALENT.has(cleanLead)) {
+      return true
+    }
+  }
+
+  // 3. Check directors (exact normalized match)
+  const dirs = Array.isArray(item.directors) ? item.directors : []
+  for (const dir of dirs) {
+    const cleanDir = String(dir).toLowerCase().trim()
+    if (MARQUEE_INDIAN_DIRECTORS.has(cleanDir) || MARQUEE_GLOBAL_TALENT.has(cleanDir)) {
+      return true
+    }
+  }
+
   return false
 }
 
@@ -961,7 +994,12 @@ function scoreHighSignalRelease(
 ): number {
   if (!item?.id || item.adult) return -999
   if (!item.poster_path) return -999
-  if (mediaType === 'series' && Array.isArray(item.genre_ids) && item.genre_ids.includes(10766)) return -999 // Discard daily TV soap operas
+  if (mediaType === 'series' && Array.isArray(item.genre_ids)) {
+    // Discard daily TV soap operas (10766), talk shows (10767), reality TV (10764), news (10763)
+    if (item.genre_ids.some((id: number) => [10766, 10767, 10764, 10763].includes(id))) {
+      return -999
+    }
+  }
 
   // Discard empty or stub overviews (indicates uncurated/placeholder DB entry for released items)
   // Upcoming releases often have brief loglines or placeholder descriptions before debut
@@ -1006,23 +1044,20 @@ function scoreHighSignalRelease(
   } else {
     // Mode === 'upcoming'
     if (isInd) {
-      if (hasMarquee) {
-        // Recognized superstar, visionary director or blockbuster franchise.
-        // Pre-release Indian blockbusters on TMDB hover between popularity 1.2 to 5.0.
-        // Star-backed titles are automatically preserved as long as valid metadata exists.
+      if (mediaType === 'movie') {
+        // For upcoming Indian movies: strictly require verified marquee star power, visionary director or blockbuster title.
+        // This eliminates 100% of obscure B-grade clutter (e.g. Delivery Boy, DNK, Bouma, Bokshi).
+        if (!hasMarquee) return -999
         if (pop < 0.5) return -999
       } else {
-        // Without marquee star power, pre-release titles must have established buzz
-        // (pop >= 2.0 on TMDB) and a non-empty synopsis (>= 30 chars).
-        // This blocks obscure, zero-budget micro-budget submissions.
-        if (pop < 2.0) return -999
-        if (!item.overview || String(item.overview).trim().length < 30) return -999
+        // For upcoming Indian series: require marquee or established baseline popularity
+        if (!hasMarquee && pop < 1.0) return -999
       }
     } else {
       if (hasMarquee) {
         if (pop < 2.0) return -999
       } else {
-        if (pop < 10.0) return -999
+        if (pop < 4.0) return -999
       }
     }
   }
@@ -1052,7 +1087,7 @@ function scoreHighSignalRelease(
 }
 
 export async function fetchRecentlyReleased(type: 'movie' | 'series', forceRefresh = false): Promise<any[]> {
-  const cacheKey = `recent:v7:${type}`
+  const cacheKey = `recent:v8:${type}`
   if (!forceRefresh) {
     const cached = readTmdbListCache(cacheKey, `recently released ${type}`)
     if (cached && cached.length > 0) return cached
@@ -1310,7 +1345,7 @@ export async function fetchRecentlyReleased(type: 'movie' | 'series', forceRefre
 }
 
 export async function fetchUpcoming(type: 'movie' | 'series', forceRefresh = false): Promise<any[]> {
-  const cacheKey = `upcoming:v7:${type}`
+  const cacheKey = `upcoming:v8:${type}`
   if (!forceRefresh) {
     const cached = readTmdbListCache(cacheKey, `upcoming ${type}`)
     if (cached && cached.length > 0) return cached
@@ -1343,22 +1378,9 @@ export async function fetchUpcoming(type: 'movie' | 'series', forceRefresh = fal
       if (!Array.isArray(items)) return
       for (const item of items) {
         if (!item?.id || item.adult) continue
-        let releaseDate = item.release_date || item.first_air_date
-
-        // For TV series from "upcoming_theatrical" (/tv/on_the_air, returning series, or discover with air_date.gte):
-        // TMDB confirms upcoming episodes are actively premiering or airing within the schedule.
-        if (type === 'series') {
-          if (sourceTag === 'upcoming_theatrical') {
-            if (!releaseDate || String(releaseDate).substring(0, 10) < tomorrowStr) {
-              releaseDate = tomorrowStr
-              item.release_date = tomorrowStr
-            }
-          } else {
-            if (!releaseDate || String(releaseDate).substring(0, 10) < tomorrowStr) continue
-          }
-        } else {
-          if (!releaseDate || String(releaseDate).substring(0, 10) < tomorrowStr) continue
-        }
+        const releaseDate = item.release_date || item.first_air_date
+        // Strictly require verified future date. Never fabricate dates or overwrite original dates.
+        if (!releaseDate || String(releaseDate).substring(0, 10) < tomorrowStr) continue
 
         const existing = candidatesMap.get(item.id)
         if (existing) {
@@ -1427,27 +1449,8 @@ export async function fetchUpcoming(type: 'movie' | 'series', forceRefresh = fal
           .catch(() => {})
       )
     } else {
-      // ─── UPCOMING SERIES STREAMS ───
-      // Stream 1: TV shows actively premiering / on the air (Page 1 & 2)
-      fetchTasks.push(
-        fetchTmdbJson(`${TMDB_BASE}/tv/on_the_air?api_key=${apiKey}&page=1`, apiKey, 'upcoming on the air series p1')
-          .then(data => registerItems(data?.results, 'upcoming_theatrical'))
-          .catch(() => {})
-      )
-      fetchTasks.push(
-        fetchTmdbJson(`${TMDB_BASE}/tv/on_the_air?api_key=${apiKey}&page=2`, apiKey, 'upcoming on the air series p2')
-          .then(data => registerItems(data?.results, 'upcoming_theatrical'))
-          .catch(() => {})
-      )
-
-      // Stream 2: Trending upcoming series
-      fetchTasks.push(
-        fetchTmdbJson(`${TMDB_BASE}/trending/tv/week?api_key=${apiKey}`, apiKey, 'upcoming trending series')
-          .then(data => registerItems(data?.results, 'trending'))
-          .catch(() => {})
-      )
-
-      // Stream 3: High-popularity upcoming series discover (Brand-new series Page 1 & 2)
+      // ─── UPCOMING SERIES STREAMS (Strictly authentic upcoming premiere air dates) ───
+      // Stream 1: High-popularity upcoming series discover globally (Brand-new series Page 1 & 2)
       fetchTasks.push(
         fetchTmdbJson(`${TMDB_BASE}/discover/tv?api_key=${apiKey}&include_adult=false&language=en-US&page=1&sort_by=popularity.desc&first_air_date.gte=${tomorrowStr}&first_air_date.lte=${futureStr}`, apiKey, 'upcoming series discover p1')
           .then(data => registerItems(data?.results, 'discover'))
@@ -1459,55 +1462,46 @@ export async function fetchUpcoming(type: 'movie' | 'series', forceRefresh = fal
           .catch(() => {})
       )
 
-      // Stream 4: Upcoming seasons & episodes discover (Captures returning shows)
+      // Stream 2: Trending series that have confirmed future premiere dates
       fetchTasks.push(
-        fetchTmdbJson(`${TMDB_BASE}/discover/tv?api_key=${apiKey}&include_adult=false&language=en-US&page=1&sort_by=popularity.desc&air_date.gte=${tomorrowStr}&air_date.lte=${futureStr}`, apiKey, 'upcoming seasons discover')
-          .then(data => registerItems(data?.results, 'upcoming_theatrical'))
+        fetchTmdbJson(`${TMDB_BASE}/trending/tv/week?api_key=${apiKey}`, apiKey, 'upcoming trending series')
+          .then(data => registerItems(data?.results, 'trending'))
           .catch(() => {})
       )
 
-      // Stream 5: Upcoming Indian series seasons discover (Country of origin IN)
+      // Stream 3: Upcoming Indian series discover by origin country (Page 1 & 2)
       fetchTasks.push(
-        fetchTmdbJson(`${TMDB_BASE}/discover/tv?api_key=${apiKey}&include_adult=false&language=en-US&page=1&sort_by=popularity.desc&with_origin_country=IN&air_date.gte=${tomorrowStr}&air_date.lte=${futureStr}`, apiKey, 'upcoming indian seasons discover')
-          .then(data => registerItems(data?.results, 'upcoming_theatrical'))
+        fetchTmdbJson(`${TMDB_BASE}/discover/tv?api_key=${apiKey}&include_adult=false&language=en-US&page=1&sort_by=popularity.desc&with_origin_country=IN&first_air_date.gte=${tomorrowStr}&first_air_date.lte=${futureStr}`, apiKey, 'upcoming indian series discover p1')
+          .then(data => registerItems(data?.results, 'discover'))
           .catch(() => {})
       )
-
-      // Stream 6: Brand-new upcoming Indian series discover
       fetchTasks.push(
-        fetchTmdbJson(`${TMDB_BASE}/discover/tv?api_key=${apiKey}&include_adult=false&language=en-US&page=1&sort_by=popularity.desc&with_origin_country=IN&first_air_date.gte=${tomorrowStr}&first_air_date.lte=${futureStr}`, apiKey, 'upcoming indian series discover')
+        fetchTmdbJson(`${TMDB_BASE}/discover/tv?api_key=${apiKey}&include_adult=false&language=en-US&page=2&sort_by=popularity.desc&with_origin_country=IN&first_air_date.gte=${tomorrowStr}&first_air_date.lte=${futureStr}`, apiKey, 'upcoming indian series discover p2')
           .then(data => registerItems(data?.results, 'discover'))
           .catch(() => {})
       )
 
-      // Stream 7: Flagship anticipated Indian web series returning or in-production
-      const anticipatedIndianShows = [
-        'Mirzapur', 'The Family Man', 'Panchayat', 'Farzi', 'Delhi Crime',
-        'Paatal Lok', 'Asur', 'Rana Naidu', 'Taaza Khabar', 'Matka King'
-      ]
-      for (const name of anticipatedIndianShows) {
-        fetchTasks.push(
-          fetchTmdbJson(`${TMDB_BASE}/search/tv?api_key=${apiKey}&query=${encodeURIComponent(name)}&include_adult=false`, apiKey, `search ${name}`)
-            .then(data => {
-              const top = (data?.results || [])[0]
-              if (top && isIndianTmdbItem(top)) {
-                registerItems([top], 'upcoming_theatrical')
-              }
-            })
-            .catch(() => {})
-        )
-      }
+      // Stream 4: Brand-new upcoming Indian series discover by regional language
+      fetchTasks.push(
+        fetchTmdbJson(`${TMDB_BASE}/discover/tv?api_key=${apiKey}&include_adult=false&language=en-US&page=1&sort_by=popularity.desc&with_original_language=hi|te|ta|ml|kn&first_air_date.gte=${tomorrowStr}&first_air_date.lte=${futureStr}`, apiKey, 'upcoming indian lang series discover')
+          .then(data => registerItems(data?.results, 'discover'))
+          .catch(() => {})
+      )
     }
 
     await Promise.all(fetchTasks)
 
-    // Enrich Indian candidates with credits (cast & crew) to unlock marquee recognition
+    // Enrich candidates with credits (cast & crew) to unlock marquee recognition
     const indianCandidates = Array.from(candidatesMap.values())
       .filter(cand => isIndianTmdbItem(cand.item))
-      .slice(0, 35)
+      .slice(0, 40)
 
-    await Promise.all(
-      indianCandidates.map(async ({ item }) => {
+    const intlCandidates = Array.from(candidatesMap.values())
+      .filter(cand => !isIndianTmdbItem(cand.item))
+      .slice(0, 30)
+
+    await Promise.all([
+      ...indianCandidates.map(async ({ item }) => {
         try {
           const creds = await fetchTmdbJson(`${TMDB_BASE}/${type === 'series' ? 'tv' : 'movie'}/${item.id}/credits?api_key=${apiKey}`, apiKey, `credits ${item.id}`)
           if (creds) {
@@ -1515,8 +1509,17 @@ export async function fetchUpcoming(type: 'movie' | 'series', forceRefresh = fal
             item.directors = (creds.crew || []).filter((c: any) => c.job === 'Director').map((c: any) => c.name)
           }
         } catch {}
+      }),
+      ...intlCandidates.map(async ({ item }) => {
+        try {
+          const creds = await fetchTmdbJson(`${TMDB_BASE}/${type === 'series' ? 'tv' : 'movie'}/${item.id}/credits?api_key=${apiKey}`, apiKey, `credits intl ${item.id}`)
+          if (creds) {
+            item.topCast = (creds.cast || []).slice(0, 5).map((c: any) => c.name)
+            item.directors = (creds.crew || []).filter((c: any) => c.job === 'Director').map((c: any) => c.name)
+          }
+        } catch {}
       })
-    )
+    ])
 
     // ─── Filter & Score Upcoming Candidates via High-Signal Algo ───
     const indianList: Array<{ item: any, score: number }> = []

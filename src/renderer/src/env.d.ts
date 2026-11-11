@@ -225,13 +225,15 @@ interface Api {
   isFullscreen: () => Promise<boolean>
   closeWindow: () => Promise<void>
   onFullscreenChanged: (callback: (isFullscreen: boolean) => void) => () => void
-  getAppSettings: () => Promise<{ launchFullscreen: boolean; rememberOnlineProgress: boolean; notifyNewEpisodes: boolean; focusTubeEnabled: boolean; showDownloadTray?: boolean; downloadPath?: string; userName?: string; profileImage?: string | null }>
+  getAppSettings: () => Promise<{ launchFullscreen: boolean; rememberOnlineProgress: boolean; notifyNewEpisodes: boolean; focusTubeEnabled: boolean; hardwareVideoDecoding?: boolean; showDownloadTray?: boolean; downloadPath?: string; userName?: string; profileImage?: string | null }>
   setUserProfile: (profile: { userName?: string; profileImage?: string | null }) => Promise<{ launchFullscreen: boolean; rememberOnlineProgress: boolean; notifyNewEpisodes: boolean; focusTubeEnabled: boolean; showDownloadTray?: boolean; downloadPath?: string; userName?: string; profileImage?: string | null }>
   setLaunchFullscreen: (launchFullscreen: boolean) => Promise<{ launchFullscreen: boolean; rememberOnlineProgress: boolean; notifyNewEpisodes: boolean; focusTubeEnabled: boolean; showDownloadTray?: boolean; downloadPath?: string }>
   setRememberOnlineProgress: (enabled: boolean) => Promise<{ launchFullscreen: boolean; rememberOnlineProgress: boolean; notifyNewEpisodes: boolean; focusTubeEnabled: boolean; showDownloadTray?: boolean; downloadPath?: string }>
   setNotifyNewEpisodes: (enabled: boolean) => Promise<{ launchFullscreen: boolean; rememberOnlineProgress: boolean; notifyNewEpisodes: boolean; focusTubeEnabled: boolean; showDownloadTray?: boolean; downloadPath?: string }>
-  setFocusTubeEnabled: (enabled: boolean) => Promise<{ launchFullscreen: boolean; rememberOnlineProgress: boolean; notifyNewEpisodes: boolean; focusTubeEnabled: boolean; showDownloadTray?: boolean; downloadPath?: string }>
-  setShowDownloadTray: (enabled: boolean) => Promise<{ launchFullscreen: boolean; rememberOnlineProgress: boolean; notifyNewEpisodes: boolean; focusTubeEnabled: boolean; showDownloadTray?: boolean; downloadPath?: string }>
+  setFocusTubeEnabled: (enabled: boolean) => Promise<{ launchFullscreen: boolean; rememberOnlineProgress: boolean; notifyNewEpisodes: boolean; focusTubeEnabled: boolean; hardwareVideoDecoding?: boolean; showDownloadTray?: boolean; downloadPath?: string }>
+  setHardwareVideoDecoding: (enabled: boolean) => Promise<{ launchFullscreen: boolean; rememberOnlineProgress: boolean; notifyNewEpisodes: boolean; focusTubeEnabled: boolean; hardwareVideoDecoding?: boolean; showDownloadTray?: boolean; downloadPath?: string }>
+  relaunchApp: () => Promise<void>
+  setShowDownloadTray: (enabled: boolean) => Promise<{ launchFullscreen: boolean; rememberOnlineProgress: boolean; notifyNewEpisodes: boolean; focusTubeEnabled: boolean; hardwareVideoDecoding?: boolean; showDownloadTray?: boolean; downloadPath?: string }>
   followSeries: (input: { tmdb_id: number; title?: string; poster_path?: string | null; backdrop_path?: string | null; overview?: string | null; season?: number | null; episode?: number | null }) => Promise<{ followed: boolean; isNew?: boolean; hasNewDrop?: boolean; dropSeason?: number; dropEpisode?: number }>
   unfollowSeries: (tmdbId: number) => Promise<{ unfollowed: boolean }>
   getFollowedSeries: () => Promise<any[]>

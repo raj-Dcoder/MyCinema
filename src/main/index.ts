@@ -595,6 +595,9 @@ type AppSettings = {
   // watch progress and seen state all stay in the database and come straight
   // back when it is switched on again.
   focusTubeEnabled: boolean
+  // Hardware-accelerated video decoding toggle (configured via FocusTube / Settings)
+  // Default is false (software decoding via VP9/AV1) to prevent D3D11 buffer underflow stalls on Windows
+  hardwareVideoDecoding?: boolean
   // Custom directory for all file downloads (magnets, torrents, web downloads)
   downloadPath?: string
   // Floating download progress HUD in bottom right corner
@@ -610,6 +613,7 @@ const defaultAppSettings: AppSettings = {
   notifyNewEpisodes: true,
   maxConcurrentDownloads: 0,
   focusTubeEnabled: true,
+  hardwareVideoDecoding: false,
   downloadPath: '',
   showDownloadTray: true,
   userName: 'User',
@@ -1581,15 +1585,24 @@ function registerAudioProtocol(): void {
 
 app.commandLine.appendSwitch('enable-blink-features', 'AudioVideoTracks')
 
-// CRITICAL ANTI-BUFFERING SAFEGUARD FOR FOCUSTUBE & STREAMING:
-// DO NOT RE-ENABLE HARDWARE VIDEO DECODING (enable-accelerated-video-decode / D3D11VideoDecoder).
-// Hardware video decoding on Windows causes D3D11 texture binding stalls, VRAM underflows,
-// and excessive YouTube video buffering (especially at >1x speed and 1080p/4K).
-// We strictly enforce software video decoding (VpxVideoDecoder for VP9, dav1d for AV1, software ffmpeg/H.264).
-app.commandLine.appendSwitch('disable-accelerated-video-decode')
-app.commandLine.appendSwitch('disable-accelerated-video-encode')
-app.commandLine.appendSwitch('disable-gpu-memory-buffer-video-frames')
-app.commandLine.appendSwitch('disable-features', 'D3D11VideoDecoder,MediaFoundationVideoDecoder,VaapiVideoDecoder,CalculateNativeWinOcclusion')
+// Hardware video decoding preference (configured by user in FocusTube / Settings)
+const currentAppSettings = loadAppSettings()
+if (currentAppSettings.hardwareVideoDecoding === true) {
+  // User explicitly enabled GPU hardware video decoding
+  app.commandLine.appendSwitch('ignore-gpu-blocklist')
+  app.commandLine.appendSwitch('enable-gpu-rasterization')
+  app.commandLine.appendSwitch('enable-zero-copy')
+  app.commandLine.appendSwitch('enable-accelerated-video-decode')
+  app.commandLine.appendSwitch('enable-features', 'D3D11VideoDecoder,PlatformHEVCDecoderSupport')
+  app.commandLine.appendSwitch('disable-features', 'CalculateNativeWinOcclusion')
+} else {
+  // Default: Buffer-safe software video decoding (VpxVideoDecoder for VP9, dav1d for AV1)
+  // Completely eliminates D3D11 texture binding stalls and excessive buffering on Windows
+  app.commandLine.appendSwitch('disable-accelerated-video-decode')
+  app.commandLine.appendSwitch('disable-accelerated-video-encode')
+  app.commandLine.appendSwitch('disable-gpu-memory-buffer-video-frames')
+  app.commandLine.appendSwitch('disable-features', 'D3D11VideoDecoder,MediaFoundationVideoDecoder,VaapiVideoDecoder,CalculateNativeWinOcclusion')
+}
 // Prevent UDP/QUIC packet loss and ISP throttling from stalling YouTube (googlevideo.com) DASH streams
 app.commandLine.appendSwitch('disable-quic')
 // Prevent Windows from throttling backgrounded or overlay-covered renderer video streams
@@ -3366,6 +3379,24 @@ ipcMain.handle('set-show-download-tray', (_event, enabled: boolean) => {
   })
 
   return settings
+})
+
+ipcMain.handle('set-hardware-video-decoding', (_event, enabled: boolean) => {
+  const settings = { ...loadAppSettings(), hardwareVideoDecoding: Boolean(enabled) }
+  saveAppSettings(settings)
+
+  BrowserWindow.getAllWindows().forEach(window => {
+    if (!window.isDestroyed()) {
+      window.webContents.send('app-settings-changed', settings)
+    }
+  })
+
+  return settings
+})
+
+ipcMain.handle('relaunch-app', () => {
+  app.relaunch()
+  app.exit(0)
 })
 
 ipcMain.handle('set-user-profile', (_event, { userName, profileImage }: { userName?: string; profileImage?: string | null }) => {

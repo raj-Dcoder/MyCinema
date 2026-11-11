@@ -208,6 +208,8 @@ const api = {
   setShowDownloadTray: (enabled: boolean) => ipcRenderer.invoke('set-show-download-tray', enabled),
   setNotifyNewEpisodes: (enabled: boolean) => ipcRenderer.invoke('set-notify-new-episodes', enabled),
   setFocusTubeEnabled: (enabled: boolean) => ipcRenderer.invoke('set-focus-tube-enabled', enabled),
+  setHardwareVideoDecoding: (enabled: boolean) => ipcRenderer.invoke('set-hardware-video-decoding', enabled),
+  relaunchApp: () => ipcRenderer.invoke('relaunch-app'),
   followSeries: (input: { tmdb_id: number; title?: string; poster_path?: string | null; backdrop_path?: string | null; overview?: string | null; season?: number | null; episode?: number | null }) =>
     ipcRenderer.invoke('follow-series', input),
   unfollowSeries: (tmdbId: number) => ipcRenderer.invoke('unfollow-series', tmdbId),

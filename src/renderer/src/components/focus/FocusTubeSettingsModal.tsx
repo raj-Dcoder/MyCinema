@@ -67,6 +67,31 @@ const FocusTubeSettingsModal: React.FC<FocusTubeSettingsModalProps> = ({
       return true
     }
   })
+  const [hwDecode, setHwDecode] = useState(false)
+  const [initialHwDecode, setInitialHwDecode] = useState(false)
+  const [needsRelaunch, setNeedsRelaunch] = useState(false)
+
+  useEffect(() => {
+    if (!isOpen) return
+    window.api?.getAppSettings?.().then((settings) => {
+      const enabled = Boolean(settings?.hardwareVideoDecoding)
+      setHwDecode(enabled)
+      setInitialHwDecode(enabled)
+    }).catch(() => {})
+  }, [isOpen])
+
+  const handleHwDecodeToggle = async () => {
+    const next = !hwDecode
+    setHwDecode(next)
+    setNeedsRelaunch(next !== initialHwDecode)
+    try {
+      await window.api?.setHardwareVideoDecoding?.(next)
+      setSavedSuccess(true)
+      setTimeout(() => setSavedSuccess(false), 2000)
+    } catch (err) {
+      console.error('Failed to update hardware decoding setting:', err)
+    }
+  }
 
   const handleQualityChange = (q: string) => {
     setPreferredQuality(q)
@@ -484,27 +509,61 @@ const FocusTubeSettingsModal: React.FC<FocusTubeSettingsModalProps> = ({
                 </button>
               </div>
 
-              {/* Hardware Video Decoding Status Badge */}
-              <div className={`flex items-center justify-between p-3.5 rounded-xl border ${
-                isLight ? 'bg-blue-50/70 border-blue-200/60' : 'bg-blue-500/[0.06] border-blue-500/20'
-              }`}>
-                <div className="flex items-center gap-2.5">
-                  <ShieldCheck size={16} className="text-blue-500 shrink-0" />
-                  <div>
-                    <span className={`text-[11px] font-bold block ${isLight ? 'text-blue-900' : 'text-blue-300'}`}>
-                      Hardware Video Decoding: Disabled
-                    </span>
-                    <span className={`text-[10px] ${isLight ? 'text-blue-700/70' : 'text-blue-300/60'}`}>
-                      Software VP9/AV1 Decoder Active (Anti-Buffering Safe)
+              {/* Hardware Accelerated Video Decoding Toggle */}
+              <div className="flex items-center justify-between p-4 gap-4">
+                <div>
+                  <div className="flex items-center gap-2">
+                    <h4 className={`text-xs font-bold ${isLight ? 'text-slate-900' : 'text-white'}`}>
+                      Hardware-Accelerated Video Decoding
+                    </h4>
+                    <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
+                      hwDecode
+                        ? (isLight ? 'bg-amber-100 text-amber-800' : 'bg-amber-500/20 text-amber-300')
+                        : (isLight ? 'bg-emerald-100 text-emerald-800' : 'bg-emerald-500/20 text-emerald-300')
+                    }`}>
+                      {hwDecode ? 'GPU D3D11 Active' : 'Buffer-Safe (Recommended)'}
                     </span>
                   </div>
+                  <p className={`text-[11px] mt-0.5 ${isLight ? 'text-slate-500' : 'text-white/40'}`}>
+                    {hwDecode
+                      ? 'ON: Uses GPU hardware decoder. If you experience buffering on Windows, turn this OFF.'
+                      : 'OFF (Recommended): Uses software VP9/AV1 decoding to completely eliminate playback buffering and D3D11 stalls.'}
+                  </p>
                 </div>
-                <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
-                  isLight ? 'bg-blue-100 text-blue-800' : 'bg-blue-500/20 text-blue-300'
-                }`}>
-                  Buffer-Safe
-                </span>
+                <button
+                  type="button"
+                  onClick={handleHwDecodeToggle}
+                  aria-pressed={hwDecode}
+                  className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+                    hwDecode ? 'bg-amber-500' : isLight ? 'bg-slate-300' : 'bg-white/20'
+                  }`}
+                >
+                  <span
+                    className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-lg ring-0 transition duration-200 ease-in-out ${
+                      hwDecode ? 'translate-x-5' : 'translate-x-0'
+                    }`}
+                  />
+                </button>
               </div>
+
+              {/* Relaunch Banner when HW decode setting is changed */}
+              {needsRelaunch && (
+                <div className={`mx-4 mb-4 flex items-center justify-between p-3 rounded-xl border ${
+                  isLight ? 'bg-amber-50 border-amber-200 text-amber-900' : 'bg-amber-500/10 border-amber-500/30 text-amber-200'
+                }`}>
+                  <div className="flex items-center gap-2 text-xs">
+                    <RotateCcw size={14} className="shrink-0 animate-spin-slow" />
+                    <span>Relaunch required to apply decoder changes.</span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => window.api?.relaunchApp?.()}
+                    className="px-3 py-1 rounded-lg text-xs font-bold bg-amber-500 hover:bg-amber-600 text-white transition-colors cursor-pointer"
+                  >
+                    Relaunch Now
+                  </button>
+                </div>
+              )}
             </div>
           </div>
         </div>

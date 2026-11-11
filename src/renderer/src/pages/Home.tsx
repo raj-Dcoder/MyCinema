@@ -19,7 +19,7 @@ interface HomeProps {
 const TRENDING_RAIL_LIMIT = 10
 const HERO_CAROUSEL_LIMIT = 10
 const POSTER_RAIL_CARD_CLASS = 'basis-[calc((100%_-_1.25rem)/2)] flex-shrink-0 md:basis-[calc((100%_-_3.75rem)/4)] lg:basis-[calc((100%_-_6.25rem)/6)]'
-const HOME_SNAPSHOT_STORAGE_KEY = 'mycinema_home_snapshot_v3'
+const HOME_SNAPSHOT_STORAGE_KEY = 'mycinema_home_snapshot_v4'
 
 type HomeSnapshot = {
   continueWatching: Video[]

@@ -56,6 +56,57 @@ export function normalizeUpdate(item: UpdateInput, defaultCategory = 'General'):
 
 export const APP_UPDATES: AppRelease[] = [
   {
+    "version": "v1.51.0",
+    "summary": "Liquid glass smoked dark theme sidebar, refined ambient atmosphere, seamless media detail backdrop, unified settings cards, and enhanced anticipatory Indian cinema curation.",
+    "updates": [
+      {
+        "title": "Smoked Liquid Glass Sidebar",
+        "description": "Overhauled the dark theme sidebar with multi-stop obsidian smoked translucency, specular top bevel highlights, and high-saturation refraction for an ultra-premium aesthetic.",
+        "category": "Visual Design & Liquid Glass Styling"
+      },
+      {
+        "title": "Adaptive Glowing Navigation Tabs",
+        "description": "Active tabs now illuminate with a soft atmospheric accent halo, specular top edge, and vibrant drop shadow without any white border flash.",
+        "category": "Visual Design & Liquid Glass Styling"
+      },
+      {
+        "title": "Symmetric Collapsed Navigation",
+        "description": "Symmetrically centered all icons and profile avatar containers within precise 48x48px boundaries in collapsed sidebar mode.",
+        "category": "Visual Design & Liquid Glass Styling"
+      },
+      {
+        "title": "Unified Settings Experience",
+        "description": "Redesigned the Settings header banner to seamlessly match the geometry, padding, and subtle surface styling of all configuration panels in both light and dark modes.",
+        "category": "Visual Design & Liquid Glass Styling"
+      },
+      {
+        "title": "Full-Bleed Media Backdrop",
+        "description": "Calibrated the detail view backdrop zoom (110%-112%) and horizontal framing offset, completely eliminating the left-edge gap while preserving optimal focal composition.",
+        "category": "Media Detail & Cinematic Presentation"
+      },
+      {
+        "title": "Ambient Lighting Calibration",
+        "description": "Calibrated atmospheric halo diffusion, opacity, and positioning to deliver a comfortable, low-glare evening viewing experience.",
+        "category": "Media Detail & Cinematic Presentation"
+      },
+      {
+        "title": "Anticipatory Indian Cinema Curation",
+        "description": "Enriched upcoming Indian theatrical and streaming releases with director and top-cast credit mapping, realistic popularity gating, and sanitized release windows.",
+        "category": "Discovery & TMDB Enrichment"
+      },
+      {
+        "title": "Fake Release Date Filter",
+        "description": "Filtered out unconfirmed and placeholder dates so only authentic, confirmed upcoming titles populate the Home discovery rail.",
+        "category": "Discovery & TMDB Enrichment"
+      },
+      {
+        "title": "Hardened Metadata & Asset Parsing",
+        "description": "All newly enriched TMDB credits and external backdrop URLs are strictly sanitized before passing to client presentation components.",
+        "category": "Security & Privacy"
+      }
+    ]
+  },
+  {
     "version": "v1.50.1",
     "summary": "Disabled hardware video decoding in FocusTube to eliminate D3D11 buffer underflow and excessive playback buffering.",
     "updates": [

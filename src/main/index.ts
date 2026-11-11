@@ -1618,6 +1618,22 @@ if (!gotTheLock) {
   process.exit(0)
 }
 
+function broadcastToWindows(channel: string, ...args: any[]): void {
+  for (const win of BrowserWindow.getAllWindows()) {
+    try {
+      if (!win.isDestroyed() && !win.webContents?.isDestroyed?.()) {
+        win.webContents.send(channel, ...args)
+      }
+    } catch {
+      // Ignore destroyed window race conditions
+    }
+  }
+}
+
+function broadcastLibraryUpdated(): void {
+  broadcastToWindows('library-updated')
+}
+
 let pendingExternalFilePath: string | null = null;
 let pendingSharedMediaTarget: SharedMediaTarget | null = null
 const allowedExternalDirs = new Set<string>();
@@ -1867,7 +1883,12 @@ function getBackupDefaultPath(): string {
 
 function parseBackupFile(filePath: string): any {
   const raw = fs.readFileSync(filePath, 'utf8')
-  const parsed = JSON.parse(raw)
+  let parsed: any
+  try {
+    parsed = JSON.parse(raw)
+  } catch (err: any) {
+    throw new Error(`Corrupted backup file: ${err?.message || 'Invalid JSON format'}`)
+  }
 
   if (
     !parsed ||
@@ -3951,6 +3972,10 @@ ipcMain.handle('get-videos', () => {
   return db.getVideos();
 })
 
+ipcMain.handle('play-video', (_, videoId: number) => {
+  return db.getVideos().find((v: any) => v.id === videoId) || null
+})
+
 ipcMain.handle('get-video-progress', (_, videoId) => {
   return db.getVideoProgress(videoId)
 })
@@ -3959,7 +3984,7 @@ ipcMain.on('update-video-progress', (_, videoId, time, completed, isClosing) => 
   if (videoId === -1) return; // Don't save progress for ad-hoc external files (crashes DB FK constraint)
   db.updateVideoProgress(videoId, time, completed, Boolean(isClosing))
   if (isClosing) {
-    BrowserWindow.getAllWindows().forEach(w => w.webContents.send('library-updated'))
+    broadcastLibraryUpdated()
   }
 })
 
@@ -3979,7 +4004,7 @@ ipcMain.on('update-stream-progress', (_, entry) => {
   } catch { /* default to writing if settings unreadable */ }
   db.upsertStreamProgress(entry)
   if (entry.isClosing) {
-    BrowserWindow.getAllWindows().forEach(w => w.webContents.send('library-updated'))
+    broadcastLibraryUpdated()
   }
 })
 
@@ -4008,7 +4033,7 @@ ipcMain.handle('get-series-info', (_, seriesName) => {
 ipcMain.handle('set-preferred-video-version', (_, videoId: number) => {
   const changed = db.setPreferredVideoVersion(videoId)
   if (changed) {
-    BrowserWindow.getAllWindows().forEach(w => w.webContents.send('library-updated'))
+    broadcastLibraryUpdated()
   }
   return changed
 })
@@ -4211,7 +4236,7 @@ ipcMain.handle('import-user-backup', async (): Promise<BackupImportSummary | { i
 ipcMain.handle('remove-folder', (_, folderPath: string) => {
   detachFolderWatcher(folderPath) // stop watching before removing
   db.removeFolder(folderPath)
-  BrowserWindow.getAllWindows().forEach(w => w.webContents.send('library-updated'))
+  broadcastLibraryUpdated()
   return true
 })
 
@@ -5530,9 +5555,7 @@ ipcMain.handle('remove-from-watchlist-external', (_, tmdbId: number) => {
 
 ipcMain.handle('set-watchlist-priority', (_, input: { videoId?: number | null; tmdbId?: number | null; isExternal?: boolean; priority: unknown }) => {
   const result = db.setWatchlistPriority(input || ({} as any))
-  try {
-    BrowserWindow.getAllWindows().forEach(w => w.webContents.send('library-updated'))
-  } catch { /* broadcast is best-effort */ }
+  broadcastLibraryUpdated()
   return result
 })
 
@@ -5545,10 +5568,6 @@ ipcMain.handle('get-favorites', () => {
 })
 
 // ─── Collections Auto-Curator ───────────────────────────────────────────────
-const broadcastLibraryUpdated = () => {
-  BrowserWindow.getAllWindows().forEach(w => w.webContents.send('library-updated'))
-}
-
 ipcMain.handle('get-collections', () => {
   return collections.getCollections()
 })
@@ -7569,12 +7588,12 @@ function getQueuedDownloads(): any[] {
 function broadcastQueuedState(id: string): void {
   const row = db.getDownloads().find((d: any) => d.id === id)
   if (!row) return
-  BrowserWindow.getAllWindows().forEach(w => w.webContents.send('torrent-progress', {
+  broadcastToWindows('torrent-progress', {
     ...row,
     status: 'queued',
     downloadSpeed: '0 B/s',
     timeRemaining: '—'
-  }))
+  })
 }
 
 // Start now if a slot is free, otherwise park as queued. The slot is claimed
@@ -7931,7 +7950,7 @@ ipcMain.handle('pause-resume-torrent', async (_, id: string) => {
     if (existing && existing.status === 'queued') {
       const updated = { ...existing, status: 'paused', downloadSpeed: '0 B/s', timeRemaining: '—' }
       db.updateDownload(updated)
-      BrowserWindow.getAllWindows().forEach(w => w.webContents.send('torrent-progress', updated))
+      broadcastToWindows('torrent-progress', updated)
       return true
     }
 
@@ -8690,10 +8709,10 @@ ipcMain.handle('remove-download', async (_, id: string, deleteFile: boolean = fa
       httpDownloader.cancelHttpDownload(id, deleteFile)
       downloadRecordsCache.delete(id)
       db.removeDownloadRow(id)
-      BrowserWindow.getAllWindows().forEach(w => w.webContents.send('downloads-changed'))
+      broadcastToWindows('downloads-changed')
       void pumpDownloadQueue()
       if (deleteFile) {
-        BrowserWindow.getAllWindows().forEach(w => w.webContents.send('library-updated'))
+        broadcastLibraryUpdated()
       }
       return true
     }
@@ -8713,14 +8732,14 @@ ipcMain.handle('remove-download', async (_, id: string, deleteFile: boolean = fa
     // 2. Delete download row from DB
     downloadRecordsCache.delete(id)
     db.removeDownloadRow(id)
-    BrowserWindow.getAllWindows().forEach(w => w.webContents.send('downloads-changed'))
+    broadcastToWindows('downloads-changed')
     // Removing a running download frees a slot.
     void pumpDownloadQueue()
 
     // 3. Optionally hard delete physical files and related library metadata
     if (deleteFile) {
       await hardDeletePaths(deleteTargets)
-      BrowserWindow.getAllWindows().forEach(w => w.webContents.send('library-updated'))
+      broadcastLibraryUpdated()
     }
     
     return true

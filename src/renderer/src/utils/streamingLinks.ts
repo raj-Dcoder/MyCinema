@@ -167,5 +167,7 @@ export function getStreamingDeepLink(
   if (provider.link) return provider.link
 
   // Universal search fallback
-  return `https://www.google.com/search?q=${encodeURIComponent(`watch "${cleanTitle}" on ${provider.provider_name}`)}`
+  const providerLabel = provider.provider_name || 'streaming'
+  const query = cleanTitle ? `watch "${cleanTitle}" on ${providerLabel}` : `watch on ${providerLabel}`
+  return `https://www.google.com/search?q=${encodeURIComponent(query)}`
 }

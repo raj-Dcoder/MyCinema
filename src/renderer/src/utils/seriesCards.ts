@@ -28,7 +28,8 @@ export function groupSeriesCards(videos: Video[]) {
   }
 
   for (const versions of versionsByEpisode.values()) {
-    const episode = pickPreferredVersion(versions)!
+    const episode = pickPreferredVersion(versions)
+    if (!episode) continue
     const key = getSeriesKey(episode)
     if (!key) continue
 

@@ -1,3 +1,26 @@
+# MyCinema v1.51.0
+
+Liquid glass smoked dark theme sidebar, refined ambient atmosphere, seamless media detail backdrop, unified settings cards, and enhanced anticipatory Indian cinema curation.
+
+### Visual Design & Liquid Glass Styling
+- **Smoked Liquid Glass Sidebar**: Overhauled the dark theme sidebar with multi-stop obsidian smoked translucency, specular top bevel highlights, and high-saturation refraction for an ultra-premium aesthetic.
+- **Adaptive Glowing Navigation Tabs**: Active tabs now illuminate with a soft atmospheric accent halo, specular top edge, and vibrant drop shadow without any white border flash.
+- **Symmetric Collapsed Navigation**: Symmetrically centered all icons and profile avatar containers within precise 48x48px boundaries in collapsed sidebar mode.
+- **Unified Settings Experience**: Redesigned the Settings header banner to seamlessly match the geometry, padding, and subtle surface styling of all configuration panels in both light and dark modes.
+
+### Media Detail & Cinematic Presentation
+- **Full-Bleed Media Backdrop**: Calibrated the detail view backdrop zoom (110%-112%) and horizontal framing offset, completely eliminating the left-edge gap while preserving optimal focal composition.
+- **Ambient Lighting Calibration**: Calibrated atmospheric halo diffusion, opacity, and positioning to deliver a comfortable, low-glare evening viewing experience.
+
+### Discovery & TMDB Enrichment
+- **Anticipatory Indian Cinema Curation**: Enriched upcoming Indian theatrical and streaming releases with director and top-cast credit mapping, realistic popularity gating, and sanitized release windows.
+- **Fake Release Date Filter**: Filtered out unconfirmed and placeholder dates so only authentic, confirmed upcoming titles populate the Home discovery rail.
+
+### Security & Privacy
+- **Hardened Metadata & Asset Parsing**: All newly enriched TMDB credits and external backdrop URLs are strictly sanitized before passing to client presentation components.
+
+***
+
 # MyCinema v1.50.1
 
 Disabled hardware video decoding in FocusTube to eliminate D3D11 buffer underflow and excessive playback buffering.

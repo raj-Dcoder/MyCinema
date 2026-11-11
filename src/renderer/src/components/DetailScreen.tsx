@@ -2129,7 +2129,7 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
               alt={video.title} 
               loading="eager"
               decoding="async"
-              className="h-full w-full object-cover object-center opacity-85 md:opacity-95 scale-[1.03] translate-x-[2%] md:translate-x-[4%] detail-screen-backdrop"
+              className="h-full w-full object-cover object-center opacity-85 md:opacity-95 scale-110 md:scale-[1.12] translate-x-[2%] md:translate-x-[3%] detail-screen-backdrop"
             />
           ) : posterUrl ? (
             <img 

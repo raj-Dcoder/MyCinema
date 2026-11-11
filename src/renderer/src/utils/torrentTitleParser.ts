@@ -151,13 +151,16 @@ export function parseSpeedToBytes(speedStr?: string): number {
   if (unit === 'KB') return num * 1024
   if (unit === 'MB') return num * 1024 * 1024
   if (unit === 'GB') return num * 1024 * 1024 * 1024
+  if (unit === 'TB') return num * 1024 * 1024 * 1024 * 1024
+  if (unit === 'PB') return num * 1024 * 1024 * 1024 * 1024 * 1024
   return num
 }
 
 export function formatTransferSpeed(bytesPerSec: number): string {
   if (!Number.isFinite(bytesPerSec) || bytesPerSec <= 0) return '0 B/s'
-  const units = ['B/s', 'KB/s', 'MB/s', 'GB/s']
-  const index = Math.min(Math.floor(Math.log(bytesPerSec) / Math.log(1024)), units.length - 1)
+  if (bytesPerSec < 1) return `${bytesPerSec.toFixed(1)} B/s`
+  const units = ['B/s', 'KB/s', 'MB/s', 'GB/s', 'TB/s']
+  const index = Math.max(0, Math.min(Math.floor(Math.log(bytesPerSec) / Math.log(1024)), units.length - 1))
   const val = bytesPerSec / Math.pow(1024, index)
   return `${val >= 10 || index === 0 ? val.toFixed(0) : val.toFixed(1)} ${units[index]}`
 }

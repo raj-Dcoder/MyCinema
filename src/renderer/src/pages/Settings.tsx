@@ -533,74 +533,17 @@ const Settings: React.FC = () => {
 
   return (
     <div className="settings-page max-w-5xl space-y-8 pb-12">
-      <div
-        className="settings-banner relative mb-10 overflow-hidden rounded-[2rem] p-8 border border-white/5 shadow-2xl transition-all duration-500"
-        style={{
-          background: !atmosphericStudioEnabled
-            ? theme === 'light'
-              ? 'linear-gradient(135deg, rgba(241, 245, 249, 0.8) 0%, #ffffff 100%)'
-              : 'linear-gradient(to right, rgba(255, 255, 255, 0.03), rgba(10, 15, 24, 0.55), transparent)'
-            : theme === 'light'
-              ? `linear-gradient(135deg, rgb(${currentAccent.rgb} / 0.08) 0%, rgba(241, 245, 249, 0.9) 45%, #ffffff 100%)`
-              : `linear-gradient(to right, rgb(${currentAccent.rgb} / 0.2), rgba(10, 15, 24, 0.55), transparent)`,
-        }}
-      >
-        {atmosphericStudioEnabled && (
-          <>
-            <div
-              className="absolute top-0 right-0 -mr-20 -mt-20 h-64 w-64 rounded-full blur-3xl pointer-events-none transition-all duration-500"
-              style={{ backgroundColor: `rgb(${currentAccent.rgb} / ${theme === 'light' ? '0.12' : '0.3'})` }}
-            />
-            <div
-              className="absolute bottom-0 left-0 -ml-20 -mb-20 h-64 w-64 rounded-full blur-3xl pointer-events-none transition-all duration-500"
-              style={{ backgroundColor: `rgb(${currentAccent.secondaryRgb} / ${theme === 'light' ? '0.08' : '0.2'})` }}
-            />
-          </>
-        )}
-        
-        <div className="relative z-10 flex items-center gap-6">
-          <div
-            className="flex h-16 w-16 items-center justify-center rounded-2xl shadow-xl ring-1 transition-all duration-500"
-            style={{
-              backgroundColor: !atmosphericStudioEnabled
-                ? theme === 'light'
-                  ? 'rgba(0, 0, 0, 0.04)'
-                  : 'rgba(255, 255, 255, 0.05)'
-                : theme === 'light'
-                  ? `rgb(${currentAccent.rgb} / 0.12)`
-                  : `rgb(${currentAccent.rgb} / 0.18)`,
-              borderColor: !atmosphericStudioEnabled
-                ? theme === 'light'
-                  ? 'rgba(0, 0, 0, 0.08)'
-                  : 'rgba(255, 255, 255, 0.1)'
-                : `rgb(${currentAccent.rgb} / ${theme === 'light' ? '0.25' : '0.4'})`,
-              boxShadow: !atmosphericStudioEnabled
-                ? 'none'
-                : `0 8px 30px rgb(${currentAccent.rgb} / ${theme === 'light' ? '0.12' : '0.35'})`,
-            }}
-          >
-            <HardDrive
-              size={28}
-              style={{
-                color: !atmosphericStudioEnabled
-                  ? theme === 'light'
-                    ? '#475569'
-                    : 'rgba(255, 255, 255, 0.75)'
-                  : contrastAccentHex,
-              }}
-            />
-          </div>
-          <div>
-            <h2
-              className="text-4xl font-black italic tracking-tighter uppercase drop-shadow-sm"
-              style={{ color: theme === 'light' ? '#0f172a' : '#ffffff' }}
-            >
-              Settings
-            </h2>
-            <p className="mt-1.5 text-sm font-bold uppercase tracking-widest text-slate-500 dark:text-white/40">
-              Manage library, backups, and application data
-            </p>
-          </div>
+      <div className={`${panelClass} settings-banner relative mb-10 overflow-hidden p-6 sm:p-7 flex items-center gap-5 sm:gap-6`}>
+        <div className="settings-icon-box flex h-14 w-14 sm:h-16 sm:w-16 flex-shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-white/10 to-white/5 text-slate-700 dark:text-white/70 shadow-[inset_0_1px_1px_rgba(255,255,255,0.1)] ring-1 ring-white/5">
+          <HardDrive size={28} className="text-current" />
+        </div>
+        <div>
+          <h2 className="text-3xl sm:text-4xl font-black italic tracking-tighter uppercase text-slate-900 dark:text-white">
+            Settings
+          </h2>
+          <p className="mt-1 text-xs sm:text-sm font-bold uppercase tracking-widest text-slate-500 dark:text-white/60">
+            Manage library, backups, and application data
+          </p>
         </div>
       </div>
 

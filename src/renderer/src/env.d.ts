@@ -18,7 +18,8 @@ interface Api {
   updateVideoProgress: (videoId: number, time: number, completed: boolean, isClosing?: boolean) => void
   scanFolder: (path: string) => Promise<void>
   getContinueWatching: () => Promise<any[]>
-  playVideo: (videoId: number) => Promise<void>
+  playVideo: (videoId: number) => Promise<any>
+  findVideoByTmdbId: (tmdbId: number) => Promise<any>
   getSeriesInfo: (seriesName: string) => Promise<any[]>
   setPreferredVideoVersion: (videoId: number) => Promise<boolean>
   getSubtitlePath: (filePath: string) => Promise<string | null>

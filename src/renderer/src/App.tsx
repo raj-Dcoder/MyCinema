@@ -825,114 +825,123 @@ const App: React.FC = () => {
             {navItems.map(item => {
               const isDownloadTab = item.id === 'download'
               const showDlIndicator = isDownloadTab && dlTotalActive > 0
+              const isCollectionStart = item.id === 'collections'
               // SVG ring constants
               const ringR = 13
               const ringC = 2 * Math.PI * ringR
 
               return (
-                <button
-                  key={item.id}
-                  data-tour={item.id === 'focustube' ? 'sidebar-focustube' : undefined}
-                  onClick={() => navigateToTab(item.id)}
-                  className={`relative w-full flex items-center rounded-xl transition-colors duration-200 group ${
-                    showDlIndicator && isSidebarExpanded ? 'h-auto py-2' : 'h-12'
-                  } ${
-                    activeTab === item.id ? 'bg-primary/10 text-primary' : 'text-white/40 hover:bg-white/5 hover:text-white'
-                  }`}
-                >
-                  <div className="w-12 h-12 flex flex-col items-center justify-center flex-shrink-0 text-current relative">
-                    {/* Progress ring around icon when downloads are active */}
-                    {showDlIndicator ? (
-                      <span className="relative flex items-center justify-center" style={{ width: 30, height: 30 }}>
-                        {/* Background track */}
-                        <svg
-                          width="30" height="30"
-                          className="absolute inset-0 -rotate-90"
-                          viewBox="0 0 30 30"
-                          style={{ overflow: 'visible' }}
-                        >
-                          <circle cx="15" cy="15" r={ringR} fill="none" stroke="rgba(255,255,255,0.08)" strokeWidth="2" />
-                          <circle
-                            cx="15" cy="15" r={ringR}
-                            fill="none"
-                            stroke={activeTab === item.id ? 'var(--color-primary, #e50914)' : 'rgba(34,211,238,0.7)'}
-                            strokeWidth="2"
-                            strokeLinecap="round"
-                            strokeDasharray={ringC}
-                            strokeDashoffset={ringC * (1 - dlAvgProgress / 100)}
-                            className="transition-all duration-500"
-                          />
-                        </svg>
-                        <span className="relative z-10 flex items-center justify-center" style={{ width: 20, height: 20 }}>
-                          {item.icon}
-                        </span>
-                        {/* Count badge */}
-                        <span
-                          className="absolute -top-1.5 -right-1.5 flex h-[14px] min-w-[14px] items-center justify-center rounded-full bg-cyan-400 px-[3px] text-[8px] font-black text-black leading-none shadow-[0_0_6px_rgba(34,211,238,0.6)]"
-                        >
-                          {dlTotalActive}
-                        </span>
-                      </span>
-                    ) : (
-                      <>
-                        <span className="flex items-center justify-center leading-none">{item.icon}</span>
-                        {'badge' in item && (item as { badge?: string }).badge && !isSidebarExpanded && (
+                <React.Fragment key={item.id}>
+                  {isCollectionStart && <div className="my-2 mx-1.5 sidebar-section-divider" />}
+                  <button
+                    data-tour={item.id === 'focustube' ? 'sidebar-focustube' : undefined}
+                    onClick={() => navigateToTab(item.id)}
+                    className={`relative flex items-center rounded-xl border border-transparent outline-none focus:outline-none focus-visible:outline-none transition-[background-color,border-color,color,box-shadow,width] duration-150 ease-out group ${
+                      isSidebarExpanded
+                        ? `w-full ${showDlIndicator ? 'h-auto py-2' : 'h-12'}`
+                        : 'w-12 h-12 mx-auto justify-center'
+                    } ${
+                      activeTab === item.id
+                        ? 'nav-item-active font-bold'
+                        : 'text-white/45 hover:bg-white/5 hover:text-white'
+                    }`}
+                  >
+                    <div className={`flex flex-col items-center justify-center text-current relative ${
+                      isSidebarExpanded ? 'w-12 h-12 flex-shrink-0' : 'w-full h-full'
+                    }`}>
+                      {/* Progress ring around icon when downloads are active */}
+                      {showDlIndicator ? (
+                        <span className="relative flex items-center justify-center" style={{ width: 30, height: 30 }}>
+                          {/* Background track */}
+                          <svg
+                            width="30" height="30"
+                            className="absolute inset-0 -rotate-90"
+                            viewBox="0 0 30 30"
+                            style={{ overflow: 'visible' }}
+                          >
+                            <circle cx="15" cy="15" r={ringR} fill="none" stroke="rgba(255,255,255,0.08)" strokeWidth="2" />
+                            <circle
+                              cx="15" cy="15" r={ringR}
+                              fill="none"
+                              stroke={activeTab === item.id ? 'var(--color-primary, #e50914)' : 'rgba(34,211,238,0.7)'}
+                              strokeWidth="2"
+                              strokeLinecap="round"
+                              strokeDasharray={ringC}
+                              strokeDashoffset={ringC * (1 - dlAvgProgress / 100)}
+                              className="transition-all duration-500"
+                            />
+                          </svg>
+                          <span className="relative z-10 flex items-center justify-center" style={{ width: 20, height: 20 }}>
+                            {item.icon}
+                          </span>
+                          {/* Count badge */}
                           <span
-                            title={`${item.label} is in beta`}
-                            className="mt-[3px] inline-flex items-center justify-center rounded border border-amber-300/25 bg-amber-400/15 px-[3px] py-px text-[6px] font-bold uppercase leading-none tracking-[0.08em] text-amber-200/90"
+                            className="absolute -top-1.5 -right-1.5 flex h-[14px] min-w-[14px] items-center justify-center rounded-full bg-cyan-400 px-[3px] text-[8px] font-black text-black leading-none shadow-[0_0_6px_rgba(34,211,238,0.6)]"
+                          >
+                            {dlTotalActive}
+                          </span>
+                        </span>
+                      ) : (
+                        <>
+                          <span className="flex items-center justify-center leading-none">{item.icon}</span>
+                          {'badge' in item && (item as { badge?: string }).badge && !isSidebarExpanded && (
+                            <span
+                              title={`${item.label} is in beta`}
+                              className="mt-[3px] inline-flex items-center justify-center rounded border border-amber-300/25 bg-amber-400/15 px-[3px] py-px text-[6px] font-bold uppercase leading-none tracking-[0.08em] text-amber-200/90"
+                            >
+                              {(item as { badge?: string }).badge}
+                            </span>
+                          )}
+                        </>
+                      )}
+                    </div>
+                    <div className={`absolute left-12 right-3 transition-all duration-300 ${
+                      isSidebarExpanded ? 'opacity-100 translate-x-0' : 'opacity-0 -translate-x-2 pointer-events-none'
+                    }`}>
+                      <div className="flex items-center gap-1.5">
+                        <span className="whitespace-nowrap text-sm font-bold">{item.label}</span>
+                        {'badge' in item && (item as { badge?: string }).badge && (
+                          <span
+                            title={`${item.label} is in beta — some things may still change`}
+                            className="inline-flex items-center rounded border border-amber-300/20 bg-amber-400/10 px-1 py-[1px] text-[8px] font-bold uppercase leading-none tracking-[0.08em] text-amber-200/90"
                           >
                             {(item as { badge?: string }).badge}
                           </span>
                         )}
-                      </>
-                    )}
-                  </div>
-                  <div className={`absolute left-12 right-3 transition-all duration-300 ${
-                    isSidebarExpanded ? 'opacity-100 translate-x-0' : 'opacity-0 -translate-x-2 pointer-events-none'
-                  }`}>
-                    <div className="flex items-center gap-1.5">
-                      <span className="whitespace-nowrap text-sm font-bold">{item.label}</span>
-                      {'badge' in item && (item as { badge?: string }).badge && (
-                        <span
-                          title={`${item.label} is in beta — some things may still change`}
-                          className="inline-flex items-center rounded border border-amber-300/20 bg-amber-400/10 px-1 py-[1px] text-[8px] font-bold uppercase leading-none tracking-[0.08em] text-amber-200/90"
-                        >
-                          {(item as { badge?: string }).badge}
-                        </span>
-                      )}
-                      {/* Inline download status when sidebar is expanded */}
-                      {showDlIndicator && (
-                        <span className="ml-auto flex items-center gap-1 shrink-0">
-                          <span className="h-1.5 w-1.5 rounded-full bg-cyan-400 animate-pulse" />
-                          <span className="text-[10px] font-bold text-cyan-400">
-                            {dlActiveCount > 0 ? `${Math.round(dlAvgProgress)}%` : `${dlQueuedCount} queued`}
+                        {/* Inline download status when sidebar is expanded */}
+                        {showDlIndicator && (
+                          <span className="ml-auto flex items-center gap-1 shrink-0">
+                            <span className="h-1.5 w-1.5 rounded-full bg-cyan-400 animate-pulse" />
+                            <span className="text-[10px] font-bold text-cyan-400">
+                              {dlActiveCount > 0 ? `${Math.round(dlAvgProgress)}%` : `${dlQueuedCount} queued`}
+                            </span>
                           </span>
-                        </span>
-                      )}
-                    </div>
-                    {/* Progress bar — only when downloads active */}
-                    {showDlIndicator && (
-                      <div className="mt-1.5 space-y-1">
-                        <div className="h-[3px] w-full overflow-hidden rounded-full bg-white/8">
-                          <div
-                            className="h-full rounded-full transition-all duration-500 bg-gradient-to-r from-cyan-400 to-primary"
-                            style={{ width: `${dlAvgProgress}%` }}
-                          />
-                        </div>
-                        {dlTopDownload?.downloadSpeed && dlTopDownload.downloadSpeed !== '0 B/s' && (
-                          <p className="text-[9px] font-semibold text-white/35 leading-none">
-                            {dlTopDownload.downloadSpeed}{dlActiveCount > 1 ? ` · ${dlActiveCount} active` : ''}{dlQueuedCount > 0 ? ` · ${dlQueuedCount} queued` : ''}
-                          </p>
-                        )}
-                        {(dlTopDownload?.downloadSpeed === '0 B/s' || !dlTopDownload?.downloadSpeed) && (
-                          <p className="text-[9px] font-semibold text-white/35 leading-none">
-                            {dlActiveCount > 0 ? `${dlActiveCount} downloading` : ''}{dlQueuedCount > 0 ? `${dlActiveCount > 0 ? ' · ' : ''}${dlQueuedCount} queued` : ''}
-                          </p>
                         )}
                       </div>
-                    )}
-                  </div>
-                </button>
+                      {/* Progress bar — only when downloads active */}
+                      {showDlIndicator && (
+                        <div className="mt-1.5 space-y-1">
+                          <div className="h-[3px] w-full overflow-hidden rounded-full bg-white/8">
+                            <div
+                              className="h-full rounded-full transition-all duration-500 bg-gradient-to-r from-cyan-400 to-primary"
+                              style={{ width: `${dlAvgProgress}%` }}
+                            />
+                          </div>
+                          {dlTopDownload?.downloadSpeed && dlTopDownload.downloadSpeed !== '0 B/s' && (
+                            <p className="text-[9px] font-semibold text-white/35 leading-none">
+                              {dlTopDownload.downloadSpeed}{dlActiveCount > 1 ? ` · ${dlActiveCount} active` : ''}{dlQueuedCount > 0 ? ` · ${dlQueuedCount} queued` : ''}
+                            </p>
+                          )}
+                          {(dlTopDownload?.downloadSpeed === '0 B/s' || !dlTopDownload?.downloadSpeed) && (
+                            <p className="text-[9px] font-semibold text-white/35 leading-none">
+                              {dlActiveCount > 0 ? `${dlActiveCount} downloading` : ''}{dlQueuedCount > 0 ? `${dlActiveCount > 0 ? ' · ' : ''}${dlQueuedCount} queued` : ''}
+                            </p>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  </button>
+                </React.Fragment>
               )
             })}
           </nav>
@@ -1059,15 +1068,21 @@ const App: React.FC = () => {
 
         {/* User Profile */}
         {/* Updates Tab - Positioned directly above Profile / Settings */}
-        <div className="px-4 pb-2 mt-auto">
+        <div className="px-4 pb-2 mt-auto flex justify-center">
           <button
             onClick={() => navigateToTab('updates')}
-            className={`relative w-full flex items-center h-12 rounded-xl transition-colors duration-200 group ${
-              activeTab === 'updates' ? 'bg-primary/10 text-primary' : 'text-white/40 hover:bg-white/5 hover:text-white'
+            className={`relative flex items-center rounded-xl border border-transparent outline-none focus:outline-none focus-visible:outline-none transition-[background-color,border-color,color,box-shadow,width] duration-150 ease-out group ${
+              isSidebarExpanded ? 'w-full h-12' : 'w-12 h-12 mx-auto justify-center'
+            } ${
+              activeTab === 'updates'
+                ? 'nav-item-active font-bold'
+                : 'text-white/45 hover:bg-white/5 hover:text-white'
             }`}
             title="Updates & Changelog"
           >
-            <div className="w-12 h-full flex items-center justify-center flex-shrink-0 text-current">
+            <div className={`flex items-center justify-center text-current ${
+              isSidebarExpanded ? 'w-12 h-12 flex-shrink-0' : 'w-full h-full'
+            }`}>
               <Megaphone size={19} strokeWidth={2.2} />
             </div>
             <div className={`absolute left-12 right-2 flex items-center justify-between whitespace-nowrap transition-all duration-300 ${
@@ -1081,15 +1096,26 @@ const App: React.FC = () => {
           </button>
         </div>
 
-        <div className="p-4 pt-0">
-          <div className="relative flex items-center bg-white/5 rounded-2xl border border-white/5 h-[52px] w-full overflow-hidden transition-all duration-300">
-            
-            {/* Avatar (Fixed Left) */}
-            <div className="absolute left-1 w-10 h-10 flex-shrink-0 flex items-center justify-center">
+        <div className="p-4 pt-0 flex justify-center">
+          <button
+            onClick={() => navigateToTab('settings')}
+            className={`relative flex items-center border transition-[background-color,border-color,box-shadow,transform,width] duration-150 ease-out outline-none focus:outline-none focus-visible:outline-none group ${
+              isSidebarExpanded ? 'w-full h-[52px] rounded-2xl' : 'w-12 h-12 justify-center rounded-xl'
+            } ${
+              activeTab === 'settings'
+                ? 'profile-card-active'
+                : 'bg-white/[0.04] border-white/10 hover:bg-white/[0.08] hover:border-white/20'
+            }`}
+            title="Settings & Profile"
+          >
+            {/* Avatar */}
+            <div className={`flex items-center justify-center flex-shrink-0 pointer-events-none ${isSidebarExpanded ? 'absolute left-1.5 w-9 h-9' : 'w-full h-full'}`}>
               <div 
-                className={`relative w-full h-full rounded-xl ${profileImage && !profileImageFailed ? 'bg-transparent' : 'bg-red-600'} flex items-center justify-center text-white font-black text-lg shadow-lg italic cursor-pointer hover:scale-105 transition-transform overflow-hidden`}
-                onClick={() => navigateToTab('settings')}
-                title="Settings & Profile"
+                className={`relative rounded-xl ${profileImage && !profileImageFailed ? 'bg-transparent' : 'bg-red-600'} flex items-center justify-center text-white font-black text-sm shadow-md italic transition-transform overflow-hidden ${
+                  isSidebarExpanded ? 'w-9 h-9' : 'w-8 h-8'
+                } ${
+                  activeTab === 'settings' ? 'ring-2 ring-white/30' : ''
+                }`}
               >
                 {profileImage && !profileImageFailed ? (
                   <img
@@ -1105,20 +1131,19 @@ const App: React.FC = () => {
             </div>
 
             {/* Expanded Content */}
-            <div className={`absolute left-14 right-2 flex items-center justify-between transition-all duration-300 ${isSidebarExpanded ? 'opacity-100 translate-x-0' : 'opacity-0 -translate-x-2 pointer-events-none'}`}>
-              <div className="flex-1 min-w-0 cursor-pointer" onClick={() => navigateToTab('settings')}>
+            <div className={`absolute left-14 right-3 flex items-center justify-between transition-all duration-300 pointer-events-none ${
+              isSidebarExpanded ? 'opacity-100 translate-x-0' : 'opacity-0 -translate-x-2'
+            }`}>
+              <div className="flex-1 min-w-0">
                 <h4 className="text-sm font-bold text-white truncate italic">{userName}</h4>
               </div>
-              <button 
-                onClick={() => navigateToTab('settings')}
-                className="p-1.5 rounded-lg text-white/40 hover:text-white hover:bg-white/10 transition-colors flex-shrink-0"
-                title="Settings"
-              >
-                <SettingsIcon size={18} />
-              </button>
+              <div className={`p-1.5 rounded-lg transition-colors flex-shrink-0 ${
+                activeTab === 'settings' ? 'text-white' : 'text-white/40 group-hover:text-white'
+              }`}>
+                <SettingsIcon size={18} className="settings-gear-icon transition-transform duration-300 group-hover:rotate-45" />
+              </div>
             </div>
-
-          </div>
+          </button>
         </div>
       </div>
 

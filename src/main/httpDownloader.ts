@@ -527,8 +527,15 @@ export async function resumeHttpDownload(id: string): Promise<boolean> {
   let item = activeHttpDownloads.get(id)
   if (!item) {
     let savePath = row.download_path
-    let partPath = savePath ? `${savePath}.part` : ''
-    if (!savePath) {
+    let partPath = ''
+    if (savePath) {
+      if (savePath.toLowerCase().endsWith('.part')) {
+        partPath = savePath
+        savePath = savePath.slice(0, -5)
+      } else {
+        partPath = `${savePath}.part`
+      }
+    } else {
       const dest = getDownloadDestination(row.name || row.title)
       savePath = dest.savePath
       partPath = dest.partPath
@@ -603,9 +610,9 @@ export function cancelHttpDownload(id: string, deleteFile = false): boolean {
 }
 
 function formatBytes(bytes: number): string {
-  if (bytes === 0) return '0 B'
+  if (!bytes || bytes <= 0 || !Number.isFinite(bytes)) return '0 B'
   const k = 1024
-  const sizes = ['B', 'KB', 'MB', 'GB', 'TB']
-  const i = Math.floor(Math.log(bytes) / Math.log(k))
+  const sizes = ['B', 'KB', 'MB', 'GB', 'TB', 'PB']
+  const i = Math.min(sizes.length - 1, Math.max(0, Math.floor(Math.log(bytes) / Math.log(k))))
   return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i]
 }

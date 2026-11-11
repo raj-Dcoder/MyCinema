@@ -192,6 +192,9 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
     }
   }
 
+  const progressPercent = duration > 0 ? Math.max(0, Math.min(100, ((seekPreview ?? currentTime) / duration) * 100)) : 0
+  const currentPercent = duration > 0 ? Math.max(0, Math.min(100, (currentTime / duration) * 100)) : 0
+
   return (
     <div className={`absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/90 to-transparent px-10 pb-10 pt-20 transition-opacity duration-300 video-controls z-40 ${showControls ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}>
       {/* Progress Bar Wrapper */}
@@ -228,7 +231,7 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
         <input 
           type="range"
           min="0"
-          max={duration}
+          max={duration > 0 ? duration : 100}
           step="0.1"
           value={currentTime}
           onChange={handleSeekChange}
@@ -243,7 +246,7 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
         <div className="absolute left-0 right-0 top-1/2 -translate-y-1/2 h-1 bg-gray-600 rounded-full" />
         <div 
           className="absolute left-0 top-1/2 -translate-y-1/2 h-1 bg-primary rounded-full transition-[height] group-hover/progress:h-1.5 duration-100" 
-          style={{ width: `${((seekPreview ?? currentTime) / duration) * 100}%` }}
+          style={{ width: `${progressPercent}%` }}
         />
         {duration > 0 && introDbSegments.map(segment => {
           const startPercent = Math.max(0, Math.min(100, (segment.startSec / duration) * 100))
@@ -282,7 +285,7 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
         
         <div 
           className="absolute w-3 h-3 bg-primary rounded-full shadow-lg opacity-0 group-hover/progress:opacity-100 transition-opacity top-1/2 -translate-y-1/2 z-10 group-hover/progress:scale-125"
-          style={{ left: `calc(${(currentTime / duration) * 100}% - 6px)` }}
+          style={{ left: `calc(${currentPercent}% - 6px)` }}
         />
       </div>
 

@@ -29,14 +29,14 @@ const getProgressUpdatedTime = (video: Video) => {
   return Number.isFinite(timestamp) ? timestamp : 0
 }
 
-export const pickPreferredVersion = (versions: Video[], fallback?: Video) => {
-  if (versions.length === 0) return fallback
+export const pickPreferredVersion = (versions: Video[], fallback?: Video): Video | undefined => {
+  if (!versions || versions.length === 0) return fallback
   return versions.find(version => Boolean(version.is_preferred))
     || [...versions].sort((a, b) => {
       const progressDifference = getProgressUpdatedTime(b) - getProgressUpdatedTime(a)
       if (progressDifference !== 0) return progressDifference
       return b.id - a.id
-    })[0]
+    })[0] || fallback
 }
 
 export type MediaVersionGroup = {
@@ -70,7 +70,7 @@ export const groupMovieCards = (videos: Video[]) => (
 )
 
 export const getVersionLabel = (video: Video) => {
-  const name = video.file_path.split(/[\\/]/).pop() || video.title
+  const name = (video.file_path ? video.file_path.split(/[\\/]/).pop() : null) || video.title || ''
   const quality = name.match(/\b(2160p|4k|uhd|1440p|1080p|720p|480p)\b/i)?.[1]?.toUpperCase()
   const audio = name.match(/\b(dual[ ._-]?audio|multi[ ._-]?audio|hindi|english|tamil|telugu)\b/i)?.[1]
     ?.replace(/[._-]+/g, ' ')

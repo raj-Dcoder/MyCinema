@@ -96,8 +96,8 @@ export interface FtDescriptionPart {
   seconds?: number
 }
 
-const URL_RE = /https?:\/\/[^\s)]+/y
-const TS_RE = /(?:(\d{1,2}):)?([0-5]?\d):([0-5]\d)/y
+const URL_RE = /https?:\/\/[^\s)]+/g
+const TS_RE = /(?:(\d{1,2}):)?([0-5]?\d):([0-5]\d)/g
 
 export function splitDescription(description: string): FtDescriptionPart[] {
   const parts: FtDescriptionPart[] = []

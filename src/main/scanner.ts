@@ -29,7 +29,13 @@ function normalizeVideoPath(filePath: string) {
 }
 
 function sendLibraryUpdated() {
-  BrowserWindow.getAllWindows().forEach(w => w.webContents.send('library-updated'))
+  BrowserWindow.getAllWindows().forEach(w => {
+    try {
+      if (!w.isDestroyed() && !w.webContents.isDestroyed()) {
+        w.webContents.send('library-updated')
+      }
+    } catch {}
+  })
 }
 
 function createLibraryUpdateNotifier() {
@@ -287,9 +293,11 @@ export async function scanFolder(rootPath: string) {
       
       // Reclaim disk space if it was a dynamically generated extraction
       if (dbVideo.poster_path && dbVideo.poster_path.includes('-snap.jpg')) {
-        if (fs.existsSync(dbVideo.poster_path)) {
-          fs.unlinkSync(dbVideo.poster_path)
-        }
+        try {
+          if (fs.existsSync(dbVideo.poster_path)) {
+            fs.unlinkSync(dbVideo.poster_path)
+          }
+        } catch {}
       }
       libraryUpdates.schedule()
     }
@@ -596,7 +604,7 @@ function parseFilename(filePath: string): VideoMetadata {
   let year: number | undefined
   const yearMatch = fileName.match(/[._\s(](19|20)\d{2}([._\s)]|$)/)
   if (yearMatch) {
-    year = parseInt(yearMatch[0].replace(/[^0-9]/g, ''))
+    year = parseInt(yearMatch[0].replace(/[^0-9]/g, ''), 10)
   }
 
   // 2. Robust Series patterns (applied to the FULL filename)
@@ -640,15 +648,27 @@ function parseFilename(filePath: string): VideoMetadata {
       noise.forEach(p => { seriesName = seriesName.replace(p, ' ') })
       seriesName = seriesName.replace(/\s+/g, ' ').trim()
 
-      const isShortMatch = !match[4]
-      const season = isShortMatch ? 1 : parseInt(match[2])
-      const episode = isShortMatch ? parseInt(match[2]) : parseInt(match[3])
-      const extra = (match[4] || match[3] || '').replace(/^[. -]+/, '').trim()
+      const isShortMatch = i >= 4
+      const season = isShortMatch ? 1 : parseInt(match[2], 10)
+      const episode = isShortMatch ? parseInt(match[2], 10) : parseInt(match[3], 10)
+      const rawExtra = (isShortMatch ? match[3] : match[4]) || ''
       
       if (isShortMatch && (episode > 1900 && episode < 2100)) continue;
-      if (isAggressivePattern && episode < 10 && !extra) continue;
 
-      const episodeTitle = extra ? extra : `S${season.toString().padStart(2, '0')}E${episode.toString().padStart(2, '0')}`
+      let cleanedExtra = rawExtra.replace(/^[. -]+/, '').trim()
+      const extraNoise = [
+        /\b\d{3,4}p\b/gi, /\bWEBRip\b/gi, /\bBluRay\b/gi, /\bx264\b/gi, /\bx265\b/gi, /\bh264\b/gi, /\bh265\b/gi,
+        /\bHDR\b/gi, /\bDVDRip\b/gi, /\bBDRip\b/gi, /\bHDRip\b/gi, /\bAAC\b/gi, /\bDTS\b/gi, /\bDD5\.1\b/gi, /\b10bit\b/gi, /\bWEB-DL\b/gi,
+        /\bHDTV\b/gi, /\bProper\b/gi, /\bRepack\b/gi, /\bDual Audio\b/gi, /\bMulti Audio\b/gi, /\bHindi\b/gi, /\bEnglish\b/gi, /\bESub\b/gi,
+        /\[.*?\]/g, /\(.*?\)/g, /[._-]/g
+      ]
+      extraNoise.forEach(p => { cleanedExtra = cleanedExtra.replace(p, ' ') })
+      cleanedExtra = cleanedExtra.replace(/\s+/g, ' ').trim()
+
+      if (isAggressivePattern && episode < 10 && !cleanedExtra) continue;
+
+      const sTag = `S${season.toString().padStart(2, '0')}E${episode.toString().padStart(2, '0')}`
+      const episodeTitle = cleanedExtra ? `${sTag} - ${cleanedExtra}` : sTag
 
       return {
         title: `${seriesName} - ${episodeTitle}`,

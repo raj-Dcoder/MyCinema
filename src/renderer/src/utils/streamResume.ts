@@ -311,6 +311,13 @@ export interface OnlineSeriesGroup {
   release_year?: number | null
 }
 
+const parseRowTime = (dateVal: unknown): number => {
+  if (!dateVal) return 0
+  const normalized = String(dateVal).replace(' ', 'T')
+  const t = new Date(normalized).getTime()
+  return Number.isFinite(t) ? t : 0
+}
+
 /** Split stream_history rows into movie rows + per-series groups. */
 export const groupOnlineStreamRows = (rows: any[]): { movieRows: any[]; seriesGroups: OnlineSeriesGroup[] } => {
   const movieRows: any[] = []
@@ -333,12 +340,12 @@ export const groupOnlineStreamRows = (rows: any[]): { movieRows: any[]; seriesGr
     const top = sorted[sorted.length - 1]
     const activeRow = [...list]
       .filter(r => !r.completed)
-      .sort((a, b) => new Date(b.updated_at || 0).getTime() - new Date(a.updated_at || 0).getTime())[0] || null
+      .sort((a, b) => parseRowTime(b.updated_at) - parseRowTime(a.updated_at))[0] || null
     const latestUpdate = [...list]
-      .map(r => new Date(r.updated_at || 0).getTime())
+      .map(r => parseRowTime(r.updated_at))
       .reduce((m, t) => Math.max(m, t), 0)
     const freshest = [...list].sort((a, b) => (
-      new Date(b.updated_at || 0).getTime() - new Date(a.updated_at || 0).getTime()
+      parseRowTime(b.updated_at) - parseRowTime(a.updated_at)
     ))[0]
     seriesGroups.push({
       tmdb_id: tmdbId,
@@ -347,7 +354,7 @@ export const groupOnlineStreamRows = (rows: any[]): { movieRows: any[]; seriesGr
       maxSeason: Number(top?.season || 0),
       maxEpisode: Number(top?.episode || 0),
       activeRow,
-      latestUpdate: new Date(latestUpdate || 0).toISOString(),
+      latestUpdate: new Date(latestUpdate || Date.now()).toISOString(),
       poster_path: freshest?.poster_path ?? top?.poster_path ?? null,
       backdrop_path: freshest?.backdrop_path ?? top?.backdrop_path ?? null,
       overview: freshest?.overview ?? top?.overview ?? null,

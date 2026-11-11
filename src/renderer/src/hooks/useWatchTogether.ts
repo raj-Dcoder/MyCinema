@@ -65,6 +65,7 @@ export function useWatchTogether(): UseWatchTogetherReturn {
   const participantsRef = useRef<Participant[]>([]);
   const hostNameRef = useRef<string>('Host');
   const notifCounterRef = useRef(0);
+  const connectionTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const [notifications, setNotifications] = useState<{ id: number; text: string }[]>([]);
 
@@ -93,6 +94,10 @@ export function useWatchTogether(): UseWatchTogetherReturn {
   }, []);
 
   const cleanup = useCallback((clearError = true) => {
+    if (connectionTimeoutRef.current) {
+      clearTimeout(connectionTimeoutRef.current);
+      connectionTimeoutRef.current = null;
+    }
     connectionsRef.current.forEach(c => c.close());
     connectionsRef.current = [];
     if (hostConnectionRef.current) {
@@ -204,11 +209,14 @@ export function useWatchTogether(): UseWatchTogetherReturn {
     addLog(`[Host] Created ID: ${fullId}. Creating Peer object...`);
     
     // Safety timeout
+    if (connectionTimeoutRef.current) clearTimeout(connectionTimeoutRef.current);
     const timeoutInfo = setTimeout(() => {
+      connectionTimeoutRef.current = null;
       addLog(`[Host] 20 seconds elapsed. Still no open event. PeerJS might be blocked or invalid.`);
       setError('Connection timed out. PeerJS server unreachable or blocked.');
       setIsConnecting(false);
     }, 20000);
+    connectionTimeoutRef.current = timeoutInfo;
 
     try {
       const peer = createPeerSetup(fullId);
@@ -218,6 +226,7 @@ export function useWatchTogether(): UseWatchTogetherReturn {
 
       peer.on('open', (id) => {
         clearTimeout(timeoutInfo);
+        connectionTimeoutRef.current = null;
         addLog(`[Host] Peer OPEN event fired! ID: ${id}`);
         localPeerIdRef.current = id;
         setIsHost(true);
@@ -260,6 +269,7 @@ peer.on('connection', (conn: any) => {
 
       peer.on('error', (err: any) => {
         clearTimeout(timeoutInfo);
+        connectionTimeoutRef.current = null;
         addLog(`[Host] Peer ERROR: ${err.message || 'Unknown error'}`);
         setError(err.message || 'Connection failed.');
         setIsConnecting(false);
@@ -267,6 +277,7 @@ peer.on('connection', (conn: any) => {
       });
     } catch (e: any) {
       clearTimeout(timeoutInfo);
+      connectionTimeoutRef.current = null;
       addLog(`[Host] Error during instantiation: ${e.message}`);
       setError(e.message);
       setIsConnecting(false);
@@ -279,17 +290,21 @@ peer.on('connection', (conn: any) => {
     addLog(`[Guest] Attempting to join ${idToJoin}, initializing peer...`);
     
     // Safety timeout for guest
+    if (connectionTimeoutRef.current) clearTimeout(connectionTimeoutRef.current);
     const timeoutInfo = setTimeout(() => {
+      connectionTimeoutRef.current = null;
       addLog(`[Guest] 20 seconds elapsed. PeerJS open event never fired. Server unreachable.`);
       setError('Connection timed out while joining. PeerJS server unreachable.');
       setIsConnecting(false);
     }, 20000);
+    connectionTimeoutRef.current = timeoutInfo;
 
     const peer = createPeerSetup();
     peerRef.current = peer;
 
     peer.on('open', () => {
       clearTimeout(timeoutInfo);
+      connectionTimeoutRef.current = null;
       addLog(`[Guest] Peer OPEN event fired! Connecting to host...`);
       localPeerIdRef.current = peer.id;
       const fullHostId = `mycinema-wt-${idToJoin.toUpperCase()}`;
@@ -325,6 +340,8 @@ peer.on('connection', (conn: any) => {
     bindIncomingVoiceCalls(peer);
 
     peer.on('error', (err) => {
+      clearTimeout(timeoutInfo);
+      connectionTimeoutRef.current = null;
       setError(err.message);
       setIsConnecting(false);
       cleanup();

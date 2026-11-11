@@ -12,6 +12,7 @@ const api = {
   scanFolder: (path: string) => ipcRenderer.invoke('scan-folder', path),
   getContinueWatching: () => ipcRenderer.invoke('get-continue-watching'),
   playVideo: (videoId: number) => ipcRenderer.invoke('play-video', videoId),
+  findVideoByTmdbId: (tmdbId: number) => ipcRenderer.invoke('find-video-by-tmdb-id', tmdbId),
   getSeriesInfo: (seriesName: string) => ipcRenderer.invoke('get-series-info', seriesName),
   setPreferredVideoVersion: (videoId: number) => ipcRenderer.invoke('set-preferred-video-version', videoId),
   getSubtitlePath: (filePath: string) => ipcRenderer.invoke('get-subtitles', filePath),

@@ -111,38 +111,38 @@ const UPDATE_ICONS: Record<UpdateIconKey, { icon: React.ReactNode; tile: string 
 }
 
 export const LATEST_RELEASE: ReleaseNotes = {
-  version: '1.51.0',
-  title: 'Smoked liquid glass & refined ambient atmosphere.',
-  highlight: 'atmosphere.',
+  version: '1.51.1',
+  title: 'Hardware decoder controls & authentic upcoming releases.',
+  highlight: 'controls',
   description:
-    'Experience an ultra-premium dark theme with obsidian smoked glass, seamless full-bleed backdrops, and unified settings cards.',
+    'Take full control of video decoding in FocusTube to eliminate buffering stalls, and enjoy verified authentic upcoming movie and series releases.',
   tourId: null,
   video: null,
   updates: [
     {
+      icon: 'shield',
+      title: 'Hardware decoder switch',
+      description: 'Toggle GPU decoding or buffer-safe software decoding under FocusTube Settings.',
+    },
+    {
       icon: 'sparkles',
-      title: 'Smoked glass sidebar',
-      description: 'Multi-stop obsidian smoked translucency with specular edge highlights and refractive blur.',
-    },
-    {
-      icon: 'layers',
-      title: 'Adaptive tab illumination',
-      description: 'Active navigation tabs glow with atmospheric halo lighting and zero border flicker.',
-    },
-    {
-      icon: 'play',
-      title: 'Full-bleed media backdrops',
-      description: 'Eliminated backdrop gaps in the detail view with calibrated overscan framing.',
+      title: 'One-click relaunch banner',
+      description: 'Instantly restart the app to apply new video decoder flags with zero friction.',
     },
     {
       icon: 'fix',
-      title: 'Unified settings styling',
-      description: 'Header banner and configuration panels now share a clean, cohesive visual surface.',
+      title: 'Authentic release dates',
+      description: 'Eliminated synthetic placeholder dates for upcoming series and movies on Home.',
     },
     {
-      icon: 'bell',
-      title: 'Anticipatory Indian cinema',
-      description: 'Enriched upcoming Indian releases with confirmed release dates and star cast recognition.',
+      icon: 'play',
+      title: 'Precision star power curation',
+      description: 'Strict lead actor and director matching eliminates obscure clutter from upcoming rails.',
+    },
+    {
+      icon: 'layers',
+      title: 'Purged discovery cache',
+      description: 'Automatically refreshes discovery rails with verified upcoming blockbuster titles.',
     },
   ],
 }

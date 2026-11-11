@@ -1,3 +1,22 @@
+# MyCinema v1.51.1
+
+User-configurable hardware video decoding in FocusTube settings, strict TMDB authentic upcoming release dates, and precision A-list star power filtering.
+
+### FocusTube Video Playback & Settings
+- **Hardware Video Decoding Switch**: Added a dedicated Hardware-Accelerated Video Decoding toggle in FocusTube Settings. Defaults to buffer-safe software VP9/AV1 decoding to completely eliminate playback buffering and D3D11 texture stalls on Windows.
+- **One-Click Relaunch Prompt**: Changing decoder preferences displays a seamless notification banner with a "Relaunch Now" action to apply Chromium decoding flags instantly.
+- **Accurate Settings Status**: Replaced the previous misleading static acceleration badge with a live, accurate decoder status indicator.
+
+### Discovery & TMDB Upcoming Curation
+- **Authentic Release Dates Enforced**: Eliminated all artificial placeholder release dates. Shows without announced premiere dates on TMDB (such as *Asur* and *Matka King*) no longer display synthetic future dates.
+- **Precision Star-Power Matching**: Refined marquee talent detection to strictly check primary lead actors and directors against curated A-list rosters, completely filtering out obscure micro-budget titles (*Delivery Boy*, *DNK*, etc.) while preserving anticipated blockbusters.
+- **Fresh Discovery Snapshot**: Bumped client and backend discovery cache keys to automatically purge stale upcoming cards on app launch.
+
+### Security & Privacy
+- **Sanitized Decoder Flags & Preferences**: Hardware decoding preferences and relaunch parameters are strictly validated and handled via isolated IPC channels.
+
+***
+
 # MyCinema v1.51.0
 
 Liquid glass smoked dark theme sidebar, refined ambient atmosphere, seamless media detail backdrop, unified settings cards, and enhanced anticipatory Indian cinema curation.

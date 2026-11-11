@@ -56,6 +56,47 @@ export function normalizeUpdate(item: UpdateInput, defaultCategory = 'General'):
 
 export const APP_UPDATES: AppRelease[] = [
   {
+    "version": "v1.51.1",
+    "summary": "User-configurable hardware video decoding in FocusTube settings, strict TMDB authentic upcoming release dates, and precision A-list star power filtering.",
+    "updates": [
+      {
+        "title": "Hardware Video Decoding Switch",
+        "description": "Added a dedicated Hardware-Accelerated Video Decoding toggle in FocusTube Settings. Defaults to buffer-safe software VP9/AV1 decoding to completely eliminate playback buffering and D3D11 texture stalls on Windows.",
+        "category": "FocusTube Video Playback & Settings"
+      },
+      {
+        "title": "One-Click Relaunch Prompt",
+        "description": "Changing decoder preferences displays a seamless notification banner with a \"Relaunch Now\" action to apply Chromium decoding flags instantly.",
+        "category": "FocusTube Video Playback & Settings"
+      },
+      {
+        "title": "Accurate Settings Status",
+        "description": "Replaced the previous misleading static acceleration badge with a live, accurate decoder status indicator.",
+        "category": "FocusTube Video Playback & Settings"
+      },
+      {
+        "title": "Authentic Release Dates Enforced",
+        "description": "Eliminated all artificial placeholder release dates. Shows without announced premiere dates on TMDB (such as *Asur* and *Matka King*) no longer display synthetic future dates.",
+        "category": "Discovery & TMDB Upcoming Curation"
+      },
+      {
+        "title": "Precision Star-Power Matching",
+        "description": "Refined marquee talent detection to strictly check primary lead actors and directors against curated A-list rosters, completely filtering out obscure micro-budget titles (*Delivery Boy*, *DNK*, etc.) while preserving anticipated blockbusters.",
+        "category": "Discovery & TMDB Upcoming Curation"
+      },
+      {
+        "title": "Fresh Discovery Snapshot",
+        "description": "Bumped client and backend discovery cache keys to automatically purge stale upcoming cards on app launch.",
+        "category": "Discovery & TMDB Upcoming Curation"
+      },
+      {
+        "title": "Sanitized Decoder Flags & Preferences",
+        "description": "Hardware decoding preferences and relaunch parameters are strictly validated and handled via isolated IPC channels.",
+        "category": "Security & Privacy"
+      }
+    ]
+  },
+  {
     "version": "v1.51.0",
     "summary": "Liquid glass smoked dark theme sidebar, refined ambient atmosphere, seamless media detail backdrop, unified settings cards, and enhanced anticipatory Indian cinema curation.",
     "updates": [

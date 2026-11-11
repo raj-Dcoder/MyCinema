@@ -1581,10 +1581,15 @@ function registerAudioProtocol(): void {
 
 app.commandLine.appendSwitch('enable-blink-features', 'AudioVideoTracks')
 
-// Prevent hardware video decoder underflow / deadlocks on Windows
-// Software VP9/AV1 decoding (VpxVideoDecoder) avoids D3D11 texture binding stalls and buffering
+// CRITICAL ANTI-BUFFERING SAFEGUARD FOR FOCUSTUBE & STREAMING:
+// DO NOT RE-ENABLE HARDWARE VIDEO DECODING (enable-accelerated-video-decode / D3D11VideoDecoder).
+// Hardware video decoding on Windows causes D3D11 texture binding stalls, VRAM underflows,
+// and excessive YouTube video buffering (especially at >1x speed and 1080p/4K).
+// We strictly enforce software video decoding (VpxVideoDecoder for VP9, dav1d for AV1, software ffmpeg/H.264).
 app.commandLine.appendSwitch('disable-accelerated-video-decode')
-app.commandLine.appendSwitch('disable-features', 'CalculateNativeWinOcclusion')
+app.commandLine.appendSwitch('disable-accelerated-video-encode')
+app.commandLine.appendSwitch('disable-gpu-memory-buffer-video-frames')
+app.commandLine.appendSwitch('disable-features', 'D3D11VideoDecoder,MediaFoundationVideoDecoder,VaapiVideoDecoder,CalculateNativeWinOcclusion')
 // Prevent UDP/QUIC packet loss and ISP throttling from stalling YouTube (googlevideo.com) DASH streams
 app.commandLine.appendSwitch('disable-quic')
 // Prevent Windows from throttling backgrounded or overlay-covered renderer video streams

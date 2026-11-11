@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { ArrowDownWideNarrow, ArrowUpNarrowWide, Check, Gauge, Play, RotateCcw, Search, Settings, Sparkles, X, Zap } from 'lucide-react'
+import { ArrowDownWideNarrow, ArrowUpNarrowWide, Check, Gauge, Play, RotateCcw, Search, Settings, ShieldCheck, Sparkles, X, Zap } from 'lucide-react'
 import { useTheme } from '../../theme/ThemeContext'
 
 const YouTubeIcon: React.FC<{ size?: number; className?: string }> = ({ size = 16, className = '' }) => (
@@ -484,18 +484,25 @@ const FocusTubeSettingsModal: React.FC<FocusTubeSettingsModalProps> = ({
                 </button>
               </div>
 
-              {/* Hardware Acceleration Status Badge */}
-              <div className="flex items-center justify-between p-3.5 bg-emerald-500/[0.04]">
-                <div className="flex items-center gap-2">
-                  <Zap size={14} className="text-emerald-500" />
-                  <span className={`text-[11px] font-bold ${isLight ? 'text-emerald-700' : 'text-emerald-400'}`}>
-                    GPU Hardware Decode & D3D11 Acceleration Active
-                  </span>
+              {/* Hardware Video Decoding Status Badge */}
+              <div className={`flex items-center justify-between p-3.5 rounded-xl border ${
+                isLight ? 'bg-blue-50/70 border-blue-200/60' : 'bg-blue-500/[0.06] border-blue-500/20'
+              }`}>
+                <div className="flex items-center gap-2.5">
+                  <ShieldCheck size={16} className="text-blue-500 shrink-0" />
+                  <div>
+                    <span className={`text-[11px] font-bold block ${isLight ? 'text-blue-900' : 'text-blue-300'}`}>
+                      Hardware Video Decoding: Disabled
+                    </span>
+                    <span className={`text-[10px] ${isLight ? 'text-blue-700/70' : 'text-blue-300/60'}`}>
+                      Software VP9/AV1 Decoder Active (Anti-Buffering Safe)
+                    </span>
+                  </div>
                 </div>
-                <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${
-                  isLight ? 'bg-emerald-100 text-emerald-800' : 'bg-emerald-500/20 text-emerald-300'
+                <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
+                  isLight ? 'bg-blue-100 text-blue-800' : 'bg-blue-500/20 text-blue-300'
                 }`}>
-                  60 FPS Smooth
+                  Buffer-Safe
                 </span>
               </div>
             </div>

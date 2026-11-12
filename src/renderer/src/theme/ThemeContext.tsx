@@ -174,6 +174,7 @@ const FT_BRAND_LOCK_KEY = 'mycinema_ft_brand_lock'
 const PLAYER_AMBILIGHT_MODE_KEY = 'mycinema_player_ambilight_mode'
 const HALO_BREATHING_KEY = 'mycinema_halo_breathing'
 const DETAIL_AMBIENT_SHADE_KEY = 'mycinema_detail_ambient_shade'
+const FLUID_AMBIENT_STORAGE_KEY = 'mycinema_fluid_ambient_enabled'
 const ATMOSPHERIC_STUDIO_STORAGE_KEY = 'mycinema_atmospheric_studio_enabled'
 
 export interface ThemeContextValue {
@@ -224,6 +225,10 @@ export interface ThemeContextValue {
   detailAmbientShade: boolean
   setDetailAmbientShade: (enabled: boolean) => void
 
+  // Dynamic Fluid Light (Native WebGL 30fps mesh gradient)
+  fluidAmbient: boolean
+  setFluidAmbient: (enabled: boolean) => void
+
   resetToDefaults: () => void
 }
 
@@ -256,6 +261,8 @@ const ThemeContext = createContext<ThemeContextValue>({
   setHaloBreathing: () => {},
   detailAmbientShade: true,
   setDetailAmbientShade: () => {},
+  fluidAmbient: true,
+  setFluidAmbient: () => {},
   resetToDefaults: () => {},
 })
 
@@ -351,6 +358,14 @@ const getInitialDetailAmbientShade = (): boolean => {
   return true // Default: ON (Ambient / Theme Color)
 }
 
+const getInitialFluidAmbient = (): boolean => {
+  try {
+    const saved = localStorage.getItem(FLUID_AMBIENT_STORAGE_KEY)
+    if (saved !== null) return saved === 'true'
+  } catch {}
+  return true // Default: ON (Dynamic Fluid Light)
+}
+
 const getInitialAtmosphericStudioEnabled = (): boolean => {
   try {
     const saved = localStorage.getItem(ATMOSPHERIC_STUDIO_STORAGE_KEY)
@@ -376,6 +391,7 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const [playerAmbilightMode, setPlayerAmbilightModeState] = useState<PlayerAmbilightMode>(getInitialPlayerAmbilightMode)
   const [haloBreathing, setHaloBreathingState] = useState<boolean>(getInitialHaloBreathing)
   const [detailAmbientShade, setDetailAmbientShadeState] = useState<boolean>(getInitialDetailAmbientShade)
+  const [fluidAmbient, setFluidAmbientState] = useState<boolean>(getInitialFluidAmbient)
 
   const currentAccent = ACCENT_PALETTE.find((a) => a.id === accent) || ACCENT_PALETTE[0]
   const currentHaloPreset =
@@ -455,6 +471,7 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ childre
             playerAmbilightMode: 'blackout',
             haloBreathing: false,
             detailAmbientShade: false,
+            fluidAmbient: false,
           },
         }),
       )
@@ -485,6 +502,7 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     root.setAttribute('data-halo-intensity', haloIntensity)
     root.setAttribute('data-accent', accent)
     root.setAttribute('data-detail-shade', detailAmbientShade ? 'ambient' : 'black')
+    root.setAttribute('data-fluid-ambient', fluidAmbient ? 'enabled' : 'disabled')
 
     try {
       localStorage.setItem(ATMOSPHERIC_STUDIO_STORAGE_KEY, 'true')
@@ -498,6 +516,7 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       localStorage.setItem(PLAYER_AMBILIGHT_MODE_KEY, playerAmbilightMode)
       localStorage.setItem(HALO_BREATHING_KEY, String(haloBreathing))
       localStorage.setItem(DETAIL_AMBIENT_SHADE_KEY, String(detailAmbientShade))
+      localStorage.setItem(FLUID_AMBIENT_STORAGE_KEY, String(fluidAmbient))
     } catch {}
 
     window.dispatchEvent(
@@ -514,6 +533,7 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           playerAmbilightMode,
           haloBreathing,
           detailAmbientShade,
+          fluidAmbient,
         },
       }),
     )
@@ -533,6 +553,7 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     playerAmbilightMode,
     haloBreathing,
     detailAmbientShade,
+    fluidAmbient,
   ])
 
   const setTheme = useCallback((t: AppTheme) => setThemeState(t), [])
@@ -557,6 +578,7 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const setPlayerAmbilightMode = useCallback((m: PlayerAmbilightMode) => setPlayerAmbilightModeState(m), [])
   const setHaloBreathing = useCallback((b: boolean) => setHaloBreathingState(b), [])
   const setDetailAmbientShade = useCallback((enabled: boolean) => setDetailAmbientShadeState(enabled), [])
+  const setFluidAmbient = useCallback((enabled: boolean) => setFluidAmbientState(enabled), [])
 
   const resetToDefaults = useCallback(() => {
     setAtmosphericStudioEnabledState(true)
@@ -570,6 +592,7 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     setPlayerAmbilightModeState('soft_halo')
     setHaloBreathingState(false)
     setDetailAmbientShadeState(true)
+    setFluidAmbientState(true)
   }, [])
 
   return (
@@ -603,6 +626,8 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         setHaloBreathing,
         detailAmbientShade,
         setDetailAmbientShade,
+        fluidAmbient,
+        setFluidAmbient,
         resetToDefaults,
       }}
     >

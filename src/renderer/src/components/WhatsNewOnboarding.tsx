@@ -18,8 +18,8 @@ import {
   Maximize,
   Check,
 } from 'lucide-react'
-import demoVideo from '../assets/demo/theme_update_demo.mp4'
-import demoPoster from '../assets/demo/theme_update_demo_poster.jpg'
+import demoVideo from '../assets/demo/fluid_light_demo.mp4'
+import demoPoster from '../assets/demo/fluid_light_demo_poster.jpg'
 
 // ─── Release-notes data model ───────────────────────────────────────────────
 // The modal renders entirely from LATEST_RELEASE below. For a new app
@@ -111,38 +111,44 @@ const UPDATE_ICONS: Record<UpdateIconKey, { icon: React.ReactNode; tile: string 
 }
 
 export const LATEST_RELEASE: ReleaseNotes = {
-  version: '1.51.1',
-  title: 'Hardware decoder controls & authentic upcoming releases.',
-  highlight: 'controls',
+  version: '1.52.0',
+  title: 'Dynamic fluid light & velvety ambient atmosphere.',
+  highlight: 'fluid light',
   description:
-    'Take full control of video decoding in FocusTube to eliminate buffering stalls, and enjoy verified authentic upcoming movie and series releases.',
+    'Experience living liquid silk mesh gradients across your app background, fully responsive to all 12 color accents and optimized for zero-lag playback.',
   tourId: null,
-  video: null,
+  video: {
+    src: demoVideo,
+    poster: demoPoster,
+    caption: 'Feature Walkthrough',
+    autoPlay: true,
+    loop: true,
+  },
   updates: [
     {
-      icon: 'shield',
-      title: 'Hardware decoder switch',
-      description: 'Toggle GPU decoding or buffer-safe software decoding under FocusTube Settings.',
-    },
-    {
       icon: 'sparkles',
-      title: 'One-click relaunch banner',
-      description: 'Instantly restart the app to apply new video decoder flags with zero friction.',
-    },
-    {
-      icon: 'fix',
-      title: 'Authentic release dates',
-      description: 'Eliminated synthetic placeholder dates for upcoming series and movies on Home.',
-    },
-    {
-      icon: 'play',
-      title: 'Precision star power curation',
-      description: 'Strict lead actor and director matching eliminates obscure clutter from upcoming rails.',
+      title: 'Dynamic fluid light',
+      description: 'Smooth WebGL liquid silk waves replace static ambient backdrops.',
     },
     {
       icon: 'layers',
-      title: 'Purged discovery cache',
-      description: 'Automatically refreshes discovery rails with verified upcoming blockbuster titles.',
+      title: 'Dedicated settings switch',
+      description: 'Toggle fluid light anytime under Atmospheric Cinematic Studio.',
+    },
+    {
+      icon: 'play',
+      title: 'Zero-lag playback guard',
+      description: 'Automatically pauses background shader while videos are playing.',
+    },
+    {
+      icon: 'shield',
+      title: 'Velvety dark mode',
+      description: 'Toned down glare and lifted contrast for comfortable dark viewing.',
+    },
+    {
+      icon: 'sparkles',
+      title: 'Twelve reactive accents',
+      description: 'Background instantly matches your selected color theme and mode.',
     },
   ],
 }

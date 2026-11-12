@@ -56,6 +56,47 @@ export function normalizeUpdate(item: UpdateInput, defaultCategory = 'General'):
 
 export const APP_UPDATES: AppRelease[] = [
   {
+    "version": "v1.52.0",
+    "summary": "Native WebGL Dynamic Fluid Light ambient background, dedicated Atmospheric Studio settings switch with zero-lag playback pauses, velvety dark mode tuning, and in-app feature onboarding video.",
+    "updates": [
+      {
+        "title": "Native WebGL Dynamic Fluid Light",
+        "description": "Introduced a high-performance 3D liquid silk ambient mesh gradient running on a lightweight WebGL quad shader, replacing static backdrops with organic morphing waves.",
+        "category": "Visual Design & Atmospheric Studio"
+      },
+      {
+        "title": "Dedicated Settings Switch",
+        "description": "Added a \"Dynamic Fluid Light\" toggle switch under Settings > Atmospheric Cinematic Studio, letting users toggle between the new fluid shader and the classic halo glow.",
+        "category": "Visual Design & Atmospheric Studio"
+      },
+      {
+        "title": "Dynamic Color Reactivity",
+        "description": "Custom-calibrated curated palettes for all 12 accent themes (Emerald, Azure, Crimson, Amethyst, Solaris, Tangerine, Fuchsia, Glacier, Indigo, Voltage, Terracotta, Platinum) across both Light and Dark modes.",
+        "category": "Visual Design & Atmospheric Studio"
+      },
+      {
+        "title": "Velvety Dark Mode Calibration",
+        "description": "Attenuated specular crest highlights, softened contrast chasms, and lifted background pedestals to deliver deep, comfortable cinema immersion without harsh gloss or fiery hotspots.",
+        "category": "Visual Design & Atmospheric Studio"
+      },
+      {
+        "title": "Zero-Lag Playback Guard",
+        "description": "The WebGL fragment rendering loop automatically suspends whenever a movie or video is actively playing, ensuring 0% GPU interference during media playback.",
+        "category": "Visual Design & Atmospheric Studio"
+      },
+      {
+        "title": "In-App Onboarding Walkthrough",
+        "description": "Integrated an interactive high-definition feature walkthrough video directly in the What's New dialog demonstrating how to toggle and customize the new fluid light.",
+        "category": "Visual Design & Atmospheric Studio"
+      },
+      {
+        "title": "Client-Side Shader Execution",
+        "description": "The WebGL fluid engine executes purely within client hardware buffers without external network calls, remote assets, or unsafe parameter injection.",
+        "category": "Security & Privacy"
+      }
+    ]
+  },
+  {
     "version": "v1.51.1",
     "summary": "User-configurable hardware video decoding in FocusTube settings, strict TMDB authentic upcoming release dates, and precision A-list star power filtering.",
     "updates": [

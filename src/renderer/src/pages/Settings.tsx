@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react'
-import { FolderOpen, Trash2, Plus, HardDrive, AlertTriangle, Check, X as CloseIcon, Maximize2, Download, Upload, Image as ImageIcon, Wifi, Bell, Compass, RotateCcw, Layers, Sun, Moon, Sparkles, Palette, ChevronDown, ChevronUp, Play, Star, Film, Wind, Sliders } from 'lucide-react'
+import { FolderOpen, Trash2, Plus, HardDrive, AlertTriangle, Check, X as CloseIcon, Maximize2, Download, Upload, Image as ImageIcon, Wifi, Bell, Compass, RotateCcw, Layers, Sun, Moon, Sparkles, Palette, ChevronDown, ChevronUp, Play, Star, Film, Wind, Sliders, Waves } from 'lucide-react'
 import ProfilePictureModal from '../components/ProfilePictureModal'
 import { normalizeProfileImage, resolveProfileImageUrl } from '../utils/profileImage'
 import { useTheme, ACCENT_PALETTE, HALO_INTENSITY_PRESETS, ButtonAccentMode, PlayerAmbilightMode } from '../theme/ThemeContext'
@@ -66,6 +66,8 @@ const Settings: React.FC = () => {
     setHaloBreathing,
     detailAmbientShade,
     setDetailAmbientShade,
+    fluidAmbient,
+    setFluidAmbient,
     resetToDefaults,
   } = useTheme()
   const [folders, setFolders] = useState<any[]>([])
@@ -977,7 +979,47 @@ const Settings: React.FC = () => {
                     </div>
                   </div>
 
-                  {/* 1.4 Organic Breathing Pulse */}
+                  {/* 1.4 Dynamic Fluid Light (Native WebGL) */}
+                  <div className="flex items-center justify-between gap-6 p-4 rounded-2xl border border-white/5 bg-white/[0.02]">
+                    <div className="flex items-center gap-3.5 min-w-0">
+                      <div className={iconBoxClass}>
+                        <Waves size={17} style={{ color: contrastAccentHex }} />
+                      </div>
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-2">
+                          <h5 className="text-xs font-black text-white uppercase tracking-tight">
+                            Dynamic Fluid Light
+                          </h5>
+                          <span
+                            className="inline-flex items-center rounded-md border border-cyan-400/30 bg-cyan-400/10 px-1.5 py-0.5 text-[8px] font-black uppercase tracking-wider text-cyan-300"
+                          >
+                            Native WebGL · Zero-Lag
+                          </span>
+                        </div>
+                        <p className="mt-0.5 text-[11px] font-medium leading-4 text-white/35">
+                          Real-time silk mesh wave lighting shader. Runs at zero-lag 30 FPS virtual buffer and auto-sleeps during video playback.
+                        </p>
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      role="switch"
+                      aria-checked={fluidAmbient}
+                      onClick={() => setFluidAmbient(!fluidAmbient)}
+                      className={`settings-switch relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+                        fluidAmbient ? 'bg-primary' : 'bg-white/10'
+                      }`}
+                      title={fluidAmbient ? 'Switch to Classic Atmospheric Orbs' : 'Enable Dynamic Fluid Light Shader'}
+                    >
+                      <span
+                        className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                          fluidAmbient ? 'translate-x-5' : 'translate-x-0'
+                        }`}
+                      />
+                    </button>
+                  </div>
+
+                  {/* 1.5 Organic Breathing Pulse */}
                   <div className="flex items-center justify-between gap-6 p-4 rounded-2xl border border-white/5 bg-white/[0.02]">
                     <div className="flex items-center gap-3.5 min-w-0">
                       <div className={iconBoxClass}>
@@ -988,7 +1030,7 @@ const Settings: React.FC = () => {
                           Organic Breathing Pulse
                         </h5>
                         <p className="mt-0.5 text-[11px] font-medium leading-4 text-white/35">
-                          Slow 12-second gentle living pulse for the ambient halo orbs across the application.
+                          Slow 12-second gentle living pulse for the classic ambient halo orbs across the application.
                         </p>
                       </div>
                     </div>

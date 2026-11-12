@@ -1,5 +1,6 @@
 import React, { useMemo } from 'react'
 import { useTheme } from '../theme/ThemeContext'
+import FluidAmbientCanvas from './FluidAmbientCanvas'
 
 interface AmbientAtmosphereProps {
   isPlaybackActive?: boolean
@@ -10,9 +11,29 @@ export const AmbientAtmosphere: React.FC<AmbientAtmosphereProps> = ({
   isPlaybackActive = false,
   className = '',
 }) => {
-  const { atmosphericStudioEnabled, currentAccent, haloIntensity, currentHaloPreset, haloDiffusion, haloChroma, theme, haloBreathing } = useTheme()
+  const {
+    atmosphericStudioEnabled,
+    currentAccent,
+    haloIntensity,
+    currentHaloPreset,
+    haloDiffusion,
+    haloChroma,
+    theme,
+    haloBreathing,
+    fluidAmbient,
+  } = useTheme()
 
   const isStealth = !atmosphericStudioEnabled || haloIntensity === 'stealth' || isPlaybackActive
+
+  // If stealth or active playback, render nothing
+  if (isStealth) {
+    return null
+  }
+
+  // When Dynamic Fluid Light is enabled, render the high-performance WebGL shader
+  if (fluidAmbient) {
+    return <FluidAmbientCanvas isPlaybackActive={isPlaybackActive} className={className} />
+  }
 
   // Calculate dynamic intense opacity and blur parameters
   const computedStyle = useMemo(() => {

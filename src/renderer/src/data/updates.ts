@@ -56,6 +56,77 @@ export function normalizeUpdate(item: UpdateInput, defaultCategory = 'General'):
 
 export const APP_UPDATES: AppRelease[] = [
   {
+    "version": "v1.53.0",
+    "summary": "Smart one-click streaming with health-scored source picking, next-episode smart targeting, rich contextual download management, and independent FocusTube PiP quality control.",
+    "updates": [
+      {
+        "title": "Smart Source Auto-Selection",
+        "description": "Clicking Play now automatically evaluates torrent health scores, seed-to-peer ratios, and codecs to choose the cleanest, fastest HD stream (prioritizing 1080p sweet spots and filtering out low-grade CAM rips).",
+        "category": "Streaming & Playback Intelligence"
+      },
+      {
+        "title": "Intelligent Next-Episode Targeting",
+        "description": "Detail screen dynamically resolves your watch history to target the next unwatched episode on series (e.g. \"Resume S01E03\" or \"Play S01E01\") with live progress indicators.",
+        "category": "Streaming & Playback Intelligence"
+      },
+      {
+        "title": "Directory Video Auto-Resolution",
+        "description": "Torrent and multi-file downloads saved in directories now resolve the main video file automatically across streaming protocols and media players.",
+        "category": "Streaming & Playback Intelligence"
+      },
+      {
+        "title": "Auto-Enriched Media Metadata",
+        "description": "Partial or in-progress downloads opened in Detail view automatically enrich missing backdrops, overviews, ratings, and tags from TMDB.",
+        "category": "Streaming & Playback Intelligence"
+      },
+      {
+        "title": "Contextual Download Action Menu",
+        "description": "Upgraded the download management interface with a multi-action popup menu offering instant playback, details lookup, folder revelation, source link sharing, and safe list removal or permanent disk deletion.",
+        "category": "Downloads & Queue Management"
+      },
+      {
+        "title": "Concurrent Queue Synchronization",
+        "description": "Improved background queue coordination for multi-download operations with reliable paused and queued status retention.",
+        "category": "Downloads & Queue Management"
+      },
+      {
+        "title": "Independent PiP Video Quality",
+        "description": "Added an independent quality selector for Picture-in-Picture mode in FocusTube settings, allowing lightweight data-saver playback (360p) in PiP while maintaining high-definition playback in the main window.",
+        "category": "FocusTube & Picture-in-Picture"
+      },
+      {
+        "title": "Sender-Aware Frame Messaging",
+        "description": "Hardened multi-window IPC routing so player commands and quality changes strictly target their respective window contexts without cross-window interference.",
+        "category": "FocusTube & Picture-in-Picture"
+      },
+      {
+        "title": "Instant Discovery Sync",
+        "description": "Added a dedicated \"Sync Discovery\" button with real-time spin and check animations in the Home header to manually refresh content rails on demand.",
+        "category": "Discovery & Performance"
+      },
+      {
+        "title": "Authentic Hindi Series Curation",
+        "description": "Refined upcoming series filters to authenticate air dates via direct episode verification and filter out non-Hindi regional titles for clutter-free discovery.",
+        "category": "Discovery & Performance"
+      },
+      {
+        "title": "Fluid Sidebar Animation",
+        "description": "Enhanced sidebar collapse and expand transitions with cubic-bezier timing and smooth download status pill indicators.",
+        "category": "Discovery & Performance"
+      },
+      {
+        "title": "Isolated Frame Script Execution",
+        "description": "Multi-window FocusTube player scripts strictly isolate execution contexts by sender WebContents, preventing cross-window state manipulation.",
+        "category": "Security & Privacy"
+      },
+      {
+        "title": "Safe Media Protocol Boundaries",
+        "description": "Local file paths in custom media and audio protocols are strictly verified for directory containment and media file formats before streaming.",
+        "category": "Security & Privacy"
+      }
+    ]
+  },
+  {
     "version": "v1.52.0",
     "summary": "Native WebGL Dynamic Fluid Light ambient background, dedicated Atmospheric Studio settings switch with zero-lag playback pauses, velvety dark mode tuning, and in-app feature onboarding video.",
     "updates": [

@@ -11,8 +11,7 @@ import {
   Download as DownloadIcon,
   Check,
   Search,
-  X,
-  Info
+  X
 } from 'lucide-react'
 import { Video } from '../types'
 import { DownloadOptionsGuide, ConcurrentDownloadsGuide } from './FeatureGuides'
@@ -58,7 +57,7 @@ interface DownloadQueueProps {
   onRetry: (id: string) => void
   onPlay?: (video: Video) => void
   onShowDetail?: (video: Video) => void
-  onRequestRemove: (id: string) => void
+  onRequestRemove: (id: string, rect?: { top: number; bottom: number; left: number; right: number }) => void
   onOpenFolder: (targetPath?: string) => void
   refreshDownloadsStorage: () => void
   loadingDetailId: string | null
@@ -219,9 +218,36 @@ export const DownloadQueue: React.FC<DownloadQueueProps> = ({
     onRetry(id)
   }
 
+  const [loadingDetailId, setLoadingDetailId] = useState<string | null>(null)
+
   // Direct video playback: starts movie or series (Episode 1)
-  const handleDirectPlay = (dl: ActiveDownload, matchingVideo?: Video, parsedTitle?: { cleanTitle: string }) => {
-    if (matchingVideo) {
+  const handleDirectPlay = async (dl: ActiveDownload, matchingVideo?: Video, parsedTitle?: { cleanTitle: string }) => {
+    // 1. Authoritative check via main process first (handles folders, library lookup, disk verification, ffprobe duration)
+    try {
+      const playable = await window.api.getPlayableVideoForDownload?.(dl.id)
+      if (playable && playable.file_path) {
+        if (playable.type === 'series' || playable.series_name) {
+          const seriesEpisodes = allVideos
+            .filter(v => (v.tmdb_id && v.tmdb_id === playable.tmdb_id) || (v.series_name && v.series_name.toLowerCase() === playable.series_name?.toLowerCase()))
+            .sort((a, b) => {
+              const sDiff = (a.season || 1) - (b.season || 1)
+              if (sDiff !== 0) return sDiff
+              return (a.episode || 1) - (b.episode || 1)
+            })
+          if (seriesEpisodes.length > 0) {
+            onPlay?.(seriesEpisodes[0])
+            return
+          }
+        }
+        onPlay?.(playable)
+        return
+      }
+    } catch (err) {
+      console.warn('[DownloadQueue] getPlayableVideoForDownload failed, falling back:', err)
+    }
+
+    // 2. Fallback to matchingVideo if valid
+    if (matchingVideo && matchingVideo.file_path) {
       // If this is a TV series, find all episodes and start Episode 1 (or earliest episode)
       if (matchingVideo.type === 'series' || matchingVideo.series_name) {
         const seriesEpisodes = allVideos
@@ -239,22 +265,44 @@ export const DownloadQueue: React.FC<DownloadQueueProps> = ({
       onPlay?.(matchingVideo)
       return
     }
+  }
 
-    // Direct playback fallback if file is still on disk but not yet indexed in library DB
-    if (dl.downloadPath) {
-      const fallbackVideo: Video = {
-        id: -Date.now(),
-        title: parsedTitle?.cleanTitle || dl.title || 'Downloaded Video',
-        file_path: dl.downloadPath,
-        type: 'movie',
-        category: 'Movies',
-        duration: 0,
-        is_favorite: false,
-        is_watchlist: false,
-        updated_at: new Date().toISOString()
-      }
-      onPlay?.(fallbackVideo)
+  // Handle clicking download title: ensures rich TMDB metadata is fetched before opening DetailScreen
+  const handleTitleClick = async (dl: ActiveDownload, matchingVideo?: Video, parsed?: any) => {
+    // 1. If video already exists in library with full metadata, open immediately
+    if (matchingVideo && (matchingVideo.overview || matchingVideo.poster_path)) {
+      onShowDetail?.(matchingVideo)
+      return
     }
+
+    setLoadingDetailId(dl.id)
+    try {
+      // 2. Fetch enriched media details from TMDB / main process
+      const enriched = await window.api.getDetailMediaForDownload?.(dl.id)
+      if (enriched) {
+        onShowDetail?.(enriched)
+        return
+      }
+    } catch (err) {
+      console.warn('[DownloadQueue] Failed to resolve enriched media for download:', err)
+    } finally {
+      setLoadingDetailId(null)
+    }
+
+    // 3. Fallback to basic skeleton Video
+    const fallbackVideo: Video = matchingVideo || {
+      id: dl.tmdbId ? -dl.tmdbId : -Date.now(),
+      title: parsed?.cleanTitle || dl.title || 'Movie',
+      file_path: dl.downloadPath || '',
+      tmdb_id: dl.tmdbId,
+      type: 'movie',
+      category: 'Movies',
+      duration: 0,
+      is_favorite: false,
+      is_watchlist: false,
+      updated_at: new Date().toISOString()
+    }
+    onShowDetail?.(fallbackVideo)
   }
 
   return (
@@ -476,6 +524,15 @@ export const DownloadQueue: React.FC<DownloadQueueProps> = ({
             return (
               <div
                 key={dl.id}
+                onContextMenu={(e) => {
+                  e.preventDefault()
+                  onRequestRemove(dl.id, {
+                    top: e.clientY,
+                    bottom: e.clientY,
+                    left: e.clientX,
+                    right: e.clientX
+                  })
+                }}
                 className={`download-queue-row group px-5 py-3.5 transition-colors ${
                   isDownloading
                     ? 'is-downloading bg-primary/[0.015] hover:bg-primary/[0.03]'
@@ -534,13 +591,16 @@ export const DownloadQueue: React.FC<DownloadQueueProps> = ({
                     <div className="min-w-0 flex-1">
                       <div className="flex flex-wrap items-center gap-2">
                         <span
-                          className="download-queue-title text-sm font-semibold truncate max-w-md transition-colors cursor-pointer hover:text-primary text-white"
+                          className="download-queue-title text-sm font-semibold truncate max-w-md transition-colors cursor-pointer hover:text-primary text-white inline-flex items-center gap-1.5"
                           title={dl.name || dl.title}
-                          onClick={() => onShowDetail?.(targetVideo)}
+                          onClick={() => handleTitleClick(dl, matchingVideo, parsed)}
                         >
-                          {parsed.cleanTitle}
+                          <span>{parsed.cleanTitle}</span>
                           {parsed.year && (
-                            <span className="text-white/45 font-medium ml-1.5">({parsed.year})</span>
+                            <span className="text-white/45 font-medium">({parsed.year})</span>
+                          )}
+                          {loadingDetailId === dl.id && (
+                            <Loader2 size={12} className="animate-spin text-primary shrink-0" />
                           )}
                         </span>
 
@@ -644,21 +704,15 @@ export const DownloadQueue: React.FC<DownloadQueueProps> = ({
                         <>
                           {/* Direct Play button: starts playback instantly! */}
                           <button
-                            onClick={() => handleDirectPlay(dl, matchingVideo, parsed)}
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              handleDirectPlay(dl, matchingVideo, parsed)
+                            }}
                             className="flex items-center gap-1.5 px-3 py-1 rounded-lg bg-primary hover:bg-primary/90 text-white text-xs font-bold transition-all shadow-sm shadow-primary/20 hover:scale-[1.02]"
                             title={matchingVideo?.type === 'series' || matchingVideo?.series_name ? "Play Episode 1" : "Play Movie"}
                           >
                             <Play size={11} fill="currentColor" />
                             <span>Play</span>
-                          </button>
-
-                          {/* Info button to open detail screen - ALWAYS visible for all completed titles */}
-                          <button
-                            onClick={() => onShowDetail?.(targetVideo)}
-                            className="download-queue-icon-btn p-1.5 rounded-lg bg-white/5 hover:bg-white/10 text-white/60 hover:text-white transition-colors"
-                            title="View Details"
-                          >
-                            <Info size={14} />
                           </button>
 
                           {/* Open Folder shortcut (sole folder button - non-redundant!) */}
@@ -697,15 +751,27 @@ export const DownloadQueue: React.FC<DownloadQueueProps> = ({
                       )}
 
                       {/* More Options Dropdown Button (Share & Remove) */}
-                      <button
-                        id={`dl-btn-${dl.id}`}
-                        onClick={() => onRequestRemove(dl.id)}
-                        className="download-queue-icon-btn p-1.5 rounded-lg text-white/40 hover:text-white hover:bg-white/10 transition-colors relative"
-                        title="More Options"
-                      >
-                        <MoreVertical size={14} />
+                      <div className="relative flex items-center">
+                        <button
+                          id={`dl-btn-${dl.id}`}
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            const rect = e.currentTarget.getBoundingClientRect()
+                            onRequestRemove(dl.id, {
+                              top: rect.top,
+                              bottom: rect.bottom,
+                              left: rect.left,
+                              right: rect.right
+                            })
+                          }}
+                          className="download-queue-icon-btn p-1.5 rounded-lg text-white/40 hover:text-white hover:bg-white/10 transition-colors"
+                          title="More Options"
+                        >
+                          <MoreVertical size={14} />
+                        </button>
                         {idx === 0 && <DownloadOptionsGuide />}
-                      </button>
+                      </div>
                     </div>
                   </div>
                 </div>

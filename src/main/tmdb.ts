@@ -152,7 +152,7 @@ function cacheKey(title: string, type: 'movie' | 'series'): string {
 // ─── Trending Cache ──────────────────────────────────────────────────────────
 
 const trendingCache: Record<string, { data: any[], timestamp: number }> = {}
-const TRENDING_CACHE_TTL = 1000 * 60 * 60 * 4 // 4 hours (fresher discovery data & reliable refreshes)
+const TRENDING_CACHE_TTL = 1000 * 60 * 60 * 12 // 12 hours (optimal 12-24h refresh window)
 
 const youtubePlayableCache = new Map<string, { playable: boolean, timestamp: number }>()
 const YOUTUBE_PLAYABLE_CACHE_TTL = 1000 * 60 * 60 * 12
@@ -506,7 +506,7 @@ export async function fetchTmdbTitleLogo(type: 'movie' | 'series', tmdbId: numbe
 }
 
 export async function fetchTrending(type: 'movie' | 'series', forceRefresh = false): Promise<any[]> {
-  const cacheKey = `trending:v4:${type}:week`
+  const cacheKey = `trending:v5:${type}:week`
   if (!forceRefresh) {
     const cached = readTmdbListCache(cacheKey, `trending ${type}`)
     if (cached && cached.length > 0) return cached
@@ -520,42 +520,55 @@ export async function fetchTrending(type: 'movie' | 'series', forceRefresh = fal
 
   try {
     const endpoint = type === 'series' ? 'tv' : 'movie'
-    const url = `${TMDB_BASE}/trending/${endpoint}/week?api_key=${apiKey}`
-    console.log(`[TMDB] Fetching trending ${type} from: ${url.replace(apiKey, 'REDACTED')}`)
-    
     if (!cachedTmdbIp) {
       await resolveDnsDoH('api.themoviedb.org')
     }
 
-    const response = await fetch(url, {
-      dispatcher: tmdbDispatcher,
-      signal: AbortSignal.timeout(TMDB_FETCH_TIMEOUT_MS),
-      headers: {
-        'User-Agent': 'MyCinema/1.3.0',
-        'Accept': 'application/json'
+    // Fetch pages 1 and 2 to ensure we have a full rail of at least 20 watchable released titles after filtering
+    const [p1, p2] = await Promise.all([
+      fetchTmdbJson(`${TMDB_BASE}/trending/${endpoint}/week?api_key=${apiKey}&page=1`, apiKey, `trending ${type} p1`).catch(() => null),
+      fetchTmdbJson(`${TMDB_BASE}/trending/${endpoint}/week?api_key=${apiKey}&page=2`, apiKey, `trending ${type} p2`).catch(() => null)
+    ])
+
+    const rawList = [
+      ...(Array.isArray(p1?.results) ? p1.results : []),
+      ...(Array.isArray(p2?.results) ? p2.results : [])
+    ]
+
+    const todayStr = formatTmdbDate(new Date())
+    const seenIds = new Set<number>()
+    const results: any[] = []
+
+    for (const item of rawList) {
+      if (!item?.id || item.adult) continue
+      if (seenIds.has(item.id)) continue
+      seenIds.add(item.id)
+
+      const releaseDate = item.release_date || item.first_air_date
+      // Strictly exclude unreleased content: must have a confirmed release date that is <= today
+      if (!releaseDate || String(releaseDate).substring(0, 10) > todayStr) {
+        continue
       }
-    })
 
-    if (!response.ok) throw new Error(`HTTP ${response.status}`)
-    const data = await response.json() as any
-    
-    console.log(`[TMDB] Successfully fetched ${data.results?.length || 0} trending ${type}`)
-    
-    const results = (data.results || []).map((item: any) => ({
-      id: item.id,
-      tmdb_id: item.id,
-      title: item.title || item.name,
-      overview: item.overview,
-      poster_path: item.poster_path ? `${TMDB_IMG}${item.poster_path}` : null,
-      backdrop_path: item.backdrop_path ? `${TMDB_BACKDROP}${item.backdrop_path}` : null,
-      logo_path: null,
-      vote_average: item.vote_average,
-      release_year: parseInt((item.release_date || item.first_air_date || '').substring(0, 4), 10) || null,
-      release_date: item.release_date || item.first_air_date,
-      type: type,
-      isExternal: true
-    }))
+      results.push({
+        id: item.id,
+        tmdb_id: item.id,
+        title: item.title || item.name,
+        overview: item.overview,
+        poster_path: item.poster_path ? `${TMDB_IMG}${item.poster_path}` : null,
+        backdrop_path: item.backdrop_path ? `${TMDB_BACKDROP}${item.backdrop_path}` : null,
+        logo_path: null,
+        vote_average: item.vote_average,
+        release_year: parseInt((releaseDate || '').substring(0, 4), 10) || null,
+        release_date: releaseDate,
+        type: type,
+        isExternal: true
+      })
 
+      if (results.length >= 20) break
+    }
+
+    console.log(`[TMDB] Successfully fetched & filtered ${results.length} watchable released trending ${type}`)
     writeTmdbListCache(cacheKey, `trending ${type}`, results)
 
     return results
@@ -1087,7 +1100,7 @@ function scoreHighSignalRelease(
 }
 
 export async function fetchRecentlyReleased(type: 'movie' | 'series', forceRefresh = false): Promise<any[]> {
-  const cacheKey = `recent:v8:${type}`
+  const cacheKey = `recent:v9:${type}`
   if (!forceRefresh) {
     const cached = readTmdbListCache(cacheKey, `recently released ${type}`)
     if (cached && cached.length > 0) return cached
@@ -1309,6 +1322,14 @@ export async function fetchRecentlyReleased(type: 'movie' | 'series', forceRefre
       }
     }
 
+    // Sort antichronologically: newest / most recently released titles appear first
+    blendedList.sort((a: any, b: any) => {
+      const dateA = a.release_date || a.first_air_date ? new Date(a.release_date || a.first_air_date).getTime() : 0
+      const dateB = b.release_date || b.first_air_date ? new Date(b.release_date || b.first_air_date).getTime() : 0
+      if (dateB !== dateA) return dateB - dateA
+      return (b.popularity || 0) - (a.popularity || 0)
+    })
+
     const results = blendedList.map((item: any) => {
       const genreName = getGenreNameFromIds(item.genre_ids)
       return {
@@ -1345,7 +1366,7 @@ export async function fetchRecentlyReleased(type: 'movie' | 'series', forceRefre
 }
 
 export async function fetchUpcoming(type: 'movie' | 'series', forceRefresh = false): Promise<any[]> {
-  const cacheKey = `upcoming:v8:${type}`
+  const cacheKey = `upcoming:v10:${type}`
   if (!forceRefresh) {
     const cached = readTmdbListCache(cacheKey, `upcoming ${type}`)
     if (cached && cached.length > 0) return cached
@@ -1374,13 +1395,16 @@ export async function fetchUpcoming(type: 'movie' | 'series', forceRefresh = fal
     const futureStr = formatTmdbDate(futureDate)
 
     const candidatesMap = new Map<number, { item: any, sources: Set<string> }>()
-    const registerItems = (items: any[], sourceTag: string) => {
+    const registerItems = (items: any[], sourceTag: string, allowAiringCheck = false) => {
       if (!Array.isArray(items)) return
       for (const item of items) {
         if (!item?.id || item.adult) continue
         const releaseDate = item.release_date || item.first_air_date
-        // Strictly require verified future date. Never fabricate dates or overwrite original dates.
-        if (!releaseDate || String(releaseDate).substring(0, 10) < tomorrowStr) continue
+        const isFutureDate = Boolean(releaseDate && String(releaseDate).substring(0, 10) >= tomorrowStr)
+
+        // For series with an upcoming season/episode query (allowAiringCheck),
+        // the series might have an older first_air_date, but its next season/episode airs in the future window.
+        if (!isFutureDate && !allowAiringCheck) continue
 
         const existing = candidatesMap.get(item.id)
         if (existing) {
@@ -1389,7 +1413,10 @@ export async function fetchUpcoming(type: 'movie' | 'series', forceRefresh = fal
             existing.item = item
           }
         } else {
-          candidatesMap.set(item.id, { item, sources: new Set([sourceTag]) })
+          candidatesMap.set(item.id, {
+            item: { ...item, _checkNextAiring: !isFutureDate },
+            sources: new Set([sourceTag])
+          })
         }
       }
     }
@@ -1469,27 +1496,65 @@ export async function fetchUpcoming(type: 'movie' | 'series', forceRefresh = fal
           .catch(() => {})
       )
 
-      // Stream 3: Upcoming Indian series discover by origin country (Page 1 & 2)
+      // Stream 3: Brand-new upcoming Hindi series discover (strictly Hindi only, no regional)
       fetchTasks.push(
-        fetchTmdbJson(`${TMDB_BASE}/discover/tv?api_key=${apiKey}&include_adult=false&language=en-US&page=1&sort_by=popularity.desc&with_origin_country=IN&first_air_date.gte=${tomorrowStr}&first_air_date.lte=${futureStr}`, apiKey, 'upcoming indian series discover p1')
+        fetchTmdbJson(`${TMDB_BASE}/discover/tv?api_key=${apiKey}&include_adult=false&language=en-US&page=1&sort_by=popularity.desc&with_original_language=hi&first_air_date.gte=${tomorrowStr}&first_air_date.lte=${futureStr}`, apiKey, 'upcoming hindi series debut p1')
           .then(data => registerItems(data?.results, 'discover'))
           .catch(() => {})
       )
       fetchTasks.push(
-        fetchTmdbJson(`${TMDB_BASE}/discover/tv?api_key=${apiKey}&include_adult=false&language=en-US&page=2&sort_by=popularity.desc&with_origin_country=IN&first_air_date.gte=${tomorrowStr}&first_air_date.lte=${futureStr}`, apiKey, 'upcoming indian series discover p2')
+        fetchTmdbJson(`${TMDB_BASE}/discover/tv?api_key=${apiKey}&include_adult=false&language=en-US&page=2&sort_by=popularity.desc&with_original_language=hi&first_air_date.gte=${tomorrowStr}&first_air_date.lte=${futureStr}`, apiKey, 'upcoming hindi series debut p2')
           .then(data => registerItems(data?.results, 'discover'))
           .catch(() => {})
       )
 
-      // Stream 4: Brand-new upcoming Indian series discover by regional language
+      // Stream 4: Upcoming returning seasons / episodes of popular Hindi series (Panchayat, Mirzapur, Family Man, Farzi, etc.)
       fetchTasks.push(
-        fetchTmdbJson(`${TMDB_BASE}/discover/tv?api_key=${apiKey}&include_adult=false&language=en-US&page=1&sort_by=popularity.desc&with_original_language=hi|te|ta|ml|kn&first_air_date.gte=${tomorrowStr}&first_air_date.lte=${futureStr}`, apiKey, 'upcoming indian lang series discover')
-          .then(data => registerItems(data?.results, 'discover'))
+        fetchTmdbJson(`${TMDB_BASE}/discover/tv?api_key=${apiKey}&include_adult=false&language=en-US&page=1&sort_by=popularity.desc&with_original_language=hi&air_date.gte=${tomorrowStr}&air_date.lte=${futureStr}`, apiKey, 'upcoming hindi series returning p1')
+          .then(data => registerItems(data?.results, 'discover', true))
+          .catch(() => {})
+      )
+      fetchTasks.push(
+        fetchTmdbJson(`${TMDB_BASE}/discover/tv?api_key=${apiKey}&include_adult=false&language=en-US&page=2&sort_by=popularity.desc&with_original_language=hi&air_date.gte=${tomorrowStr}&air_date.lte=${futureStr}`, apiKey, 'upcoming hindi series returning p2')
+          .then(data => registerItems(data?.results, 'discover', true))
+          .catch(() => {})
+      )
+
+      // Stream 5: Hindi web series from major Indian OTT networks (Prime, Netflix, Hotstar, SonyLIV, Zee5)
+      fetchTasks.push(
+        fetchTmdbJson(`${TMDB_BASE}/discover/tv?api_key=${apiKey}&include_adult=false&language=en-US&page=1&sort_by=popularity.desc&with_origin_country=IN&with_original_language=hi&air_date.gte=${tomorrowStr}&air_date.lte=${futureStr}`, apiKey, 'upcoming indian hindi ott series')
+          .then(data => registerItems(data?.results, 'ott', true))
           .catch(() => {})
       )
     }
 
     await Promise.all(fetchTasks)
+
+    // For series candidates returned via air_date window (returning seasons),
+    // fetch /tv/${id} to resolve authentic next_episode_to_air air_date
+    const returningSeriesCandidates = Array.from(candidatesMap.values())
+      .filter(cand => type === 'series' && cand.item._checkNextAiring)
+
+    await Promise.all(
+      returningSeriesCandidates.map(async ({ item }) => {
+        try {
+          const details = await fetchTmdbJson(`${TMDB_BASE}/tv/${item.id}?api_key=${apiKey}`, apiKey, `tv details ${item.id}`)
+          const nextEp = details?.next_episode_to_air
+          if (nextEp?.air_date && String(nextEp.air_date).substring(0, 10) >= tomorrowStr) {
+            item.release_date = nextEp.air_date
+            item.first_air_date = nextEp.air_date
+            if (nextEp.season_number) {
+              item.upcoming_season = nextEp.season_number
+            }
+          } else {
+            // No confirmed future air date
+            candidatesMap.delete(item.id)
+          }
+        } catch {
+          candidatesMap.delete(item.id)
+        }
+      })
+    )
 
     // Enrich candidates with credits (cast & crew) to unlock marquee recognition
     const indianCandidates = Array.from(candidatesMap.values())
@@ -1529,12 +1594,28 @@ export async function fetchUpcoming(type: 'movie' | 'series', forceRefresh = fal
       const score = scoreHighSignalRelease(item, sources, 'upcoming', type)
       if (score <= 0) continue // Rejected by noise gate!
 
-      if (isIndianTmdbItem(item)) {
-        item.origin_country = ['IN']
-        item.is_indian = true
-        indianList.push({ item, score })
+      if (type === 'series') {
+        const lang = String(item.original_language || '').toLowerCase().trim()
+        const isInd = isIndianTmdbItem(item)
+        if (isInd) {
+          // Strictly Hindi only for upcoming series, discarding other regional languages as requested
+          if (lang === 'hi') {
+            item.origin_country = ['IN']
+            item.is_indian = true
+            indianList.push({ item, score })
+          }
+          // Note: Non-Hindi Indian regional series are completely skipped to prevent clutter
+        } else {
+          intlList.push({ item, score })
+        }
       } else {
-        intlList.push({ item, score })
+        if (isIndianTmdbItem(item)) {
+          item.origin_country = ['IN']
+          item.is_indian = true
+          indianList.push({ item, score })
+        } else {
+          intlList.push({ item, score })
+        }
       }
     }
 
@@ -1579,13 +1660,23 @@ export async function fetchUpcoming(type: 'movie' | 'series', forceRefresh = fal
       }
     }
 
+    // Sort chronologically: closest / earliest upcoming release dates appear first
+    blendedList.sort((a: any, b: any) => {
+      const dateA = a.release_date || a.first_air_date ? new Date(a.release_date || a.first_air_date).getTime() : Infinity
+      const dateB = b.release_date || b.first_air_date ? new Date(b.release_date || b.first_air_date).getTime() : Infinity
+      if (dateA !== dateB) return dateA - dateB
+      return (b.popularity || 0) - (a.popularity || 0)
+    })
+
     const results = blendedList.map((item: any) => {
       const genreName = getGenreNameFromIds(item.genre_ids)
+      const isSeriesSeason = type === 'series' && item.upcoming_season
       return {
         id: item.id,
         tmdb_id: item.id,
         title: item.title || item.name,
         overview: item.overview,
+        tagline: isSeriesSeason ? `Season ${item.upcoming_season} Premiere` : undefined,
         poster_path: item.poster_path ? `${TMDB_IMG}${item.poster_path}` : null,
         backdrop_path: item.backdrop_path ? `${TMDB_BACKDROP}${item.backdrop_path}` : null,
         logo_path: null,

@@ -181,6 +181,9 @@ export function embedUrl(videoId: string, startSeconds = 0, qualityPreference?: 
   return `https://www.youtube.com/embed/${videoId}?${params.toString()}`
 }
 
+export const PIP_QUALITY_PREF_KEY = 'mycinema_ft_pip_preferred_quality'
+export const DEFAULT_PIP_QUALITY = 'medium' // 360p (Data Saver / Lightweight for PiP)
+
 export function avatarHue(name: string | null | undefined): number {
   if (!name) return 0
   let hash = 0

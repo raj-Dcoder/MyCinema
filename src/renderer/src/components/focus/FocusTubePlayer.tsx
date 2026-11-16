@@ -38,7 +38,7 @@ import {
 } from 'lucide-react'
 import type { FtCategory, FtComment, FtVideo } from '../../types'
 import { useTheme } from '../../theme/ThemeContext'
-import { categoryDot, embedUrl, formatAgo, formatDuration, formatPublishedExact, formatViews, thumbnailUrl, watchUrl } from '../../utils/focusTube'
+import { categoryDot, embedUrl, formatAgo, formatDuration, formatPublishedExact, formatViews, thumbnailUrl, watchUrl, PIP_QUALITY_PREF_KEY, DEFAULT_PIP_QUALITY } from '../../utils/focusTube'
 import {
   parseChapters,
   getActiveChapterIndex,
@@ -1875,7 +1875,9 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
       }
       const currentT = timeRef.current || currentTime || startSeconds
       withBridge(() => {
-        cmd('pauseVideo', [])
+        // Stop background stream so active DASH chunk downloads and decoding halt completely,
+        // leaving 100% of bandwidth and decoder resources for the PiP window.
+        cmd('stopVideo', [])
         cmd('mute', [])
         cmd('setVolume', [0])
       })
@@ -1884,6 +1886,10 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
       setIsPiPActive(true)
       isPiPActiveRef.current = true
       pipClosedByUserRef.current = false
+      let pipQuality = DEFAULT_PIP_QUALITY
+      try {
+        pipQuality = localStorage.getItem(PIP_QUALITY_PREF_KEY) || DEFAULT_PIP_QUALITY
+      } catch {}
       const payload = {
         video,
         currentTime: currentT,
@@ -1894,6 +1900,7 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
         queue: queueItems,
         hasNext,
         nextTitle,
+        pipQuality,
       }
 
       await window.api?.ftOpenPip?.(payload)
@@ -2642,6 +2649,8 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
         fsActive ? 'left-0' : ''
       } ${
         isFullscreenLayer ? 'z-[100]' : 'z-[70]'
+      } ${
+        fsActive || isTransitioning ? '' : 'transition-[left] duration-300 ease-out will-change-[left]'
       } ${ftBrandLock ? 'ft-brand-locked' : ''} m-0 flex flex-col text-white select-none bg-transparent ${
         isMinimized && !isTransitioning
           ? 'pointer-events-none'
@@ -2653,7 +2662,7 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
       {/* Smooth Dark Theater Backdrop that cross-fades during dock / restore / fullscreen */}
       <div
         aria-hidden
-        className={`absolute inset-0 bg-[#090a0f] pointer-events-none transition-opacity duration-300 ease-[cubic-bezier(0.16,1,0.3,1)] ${
+        className={`absolute inset-y-0 right-0 -left-[24rem] bg-[#090a0f] pointer-events-none transition-opacity duration-300 ease-out ${
           isMinimized || fsActive ? 'opacity-0' : 'opacity-100'
         }`}
       />
@@ -2832,7 +2841,7 @@ const FocusTubePlayer: React.FC<FocusTubePlayerProps> = ({
               key={`${video.videoId}:${iframeKey}`}
               src={embedSrc}
               title={video.title}
-              className="absolute inset-0 z-0 h-full w-full border-0 bg-black"
+              className={`absolute inset-0 z-0 h-full w-full border-0 bg-black ${isPiPActive ? 'pointer-events-none opacity-0 invisible' : ''}`}
               allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
               allowFullScreen
               loading="eager"

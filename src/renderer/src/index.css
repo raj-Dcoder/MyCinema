@@ -769,19 +769,48 @@
   color: #111827 !important;
 }
 
-/* Category Scroll Nav Buttons */
-.light .bg-\[\#14161f\]\/95 {
-  background-color: #ffffff !important;
-  border: 1px solid #d1d5db !important;
+/* FocusTube Category Scroll Nav Buttons (Floating frosted glass chevrons) */
+.ft-carousel-btn {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 20;
+  display: flex;
+  height: 1.75rem;
+  width: 1.75rem;
+  align-items: center;
+  justify-content: center;
+  border-radius: 9999px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background-color: rgba(10, 12, 18, 0.7);
+  color: rgba(255, 255, 255, 0.85);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.4);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.ft-carousel-btn:hover {
+  transform: translateY(-50%) scale(1.1);
+  background-color: rgba(255, 255, 255, 0.2);
+  border-color: rgba(255, 255, 255, 0.35);
+  color: #ffffff;
+}
+
+.ft-carousel-btn:active {
+  transform: translateY(-50%) scale(0.95);
+}
+
+.light .ft-carousel-btn {
+  background-color: rgba(255, 255, 255, 0.88) !important;
+  border-color: rgba(0, 0, 0, 0.12) !important;
   color: #111827 !important;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12) !important;
 }
 
-.light .ft-carousel-fade--left {
-  background: linear-gradient(to right, rgb(var(--c-ambient, 241 243 246) / 0.7) 0%, rgb(var(--c-ambient, 241 243 246) / 0.25) 55%, transparent 100%) !important;
-}
-.light .ft-carousel-fade--right {
-  background: linear-gradient(to left, rgb(var(--c-ambient, 241 243 246) / 0.7) 0%, rgb(var(--c-ambient, 241 243 246) / 0.25) 55%, transparent 100%) !important;
+.light .ft-carousel-btn:hover {
+  background-color: #ffffff !important;
+  border-color: rgba(0, 0, 0, 0.25) !important;
 }
 
 /* Search Dropdown in FocusTube */
@@ -876,6 +905,12 @@
 .light .subtle-scrollbar::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
 
 /* Sidebar in Light Mode */
+.group\/sidebar {
+  outline: none !important;
+  transform: translateZ(0);
+  backface-visibility: hidden;
+}
+
 .light .group\/sidebar {
   background-color: #ffffff !important;
   border-right: 1px solid #e5e7eb !important;

@@ -15,7 +15,7 @@ export interface HttpDownloadItem {
   partPath: string
   totalBytes: number
   downloadedBytes: number
-  status: 'downloading' | 'paused' | 'done' | 'error' | 'queued'
+  status: 'downloading' | 'connecting' | 'paused' | 'done' | 'error' | 'queued'
   speed: number
   timeRemaining: number
   lastBytes: number
@@ -55,6 +55,12 @@ export function getActiveHttpDownload(id: string): HttpDownloadItem | undefined 
   return activeHttpDownloads.get(id)
 }
 
+export function getActiveHttpDownloadCount(): number {
+  return [...activeHttpDownloads.values()].filter(
+    (i) => i.status === 'downloading' || i.status === 'connecting'
+  ).length
+}
+
 let downloadDirResolver: (() => string) | null = null
 
 export function registerDownloadDirResolver(fn: () => string): void {
@@ -73,7 +79,7 @@ export function getDownloadRoot(): string {
   return path.join(app.getPath('downloads'), 'MyCinema')
 }
 
-function getDownloadDestination(fileName: string, explicitRoot?: string): { savePath: string; partPath: string } {
+export function getDownloadDestination(fileName: string, explicitRoot?: string): { savePath: string; partPath: string } {
   const root = explicitRoot || getDownloadRoot()
   if (!fs.existsSync(root)) {
     fs.mkdirSync(root, { recursive: true })
@@ -244,6 +250,9 @@ export async function startHttpDownload(params: {
 
   // Run the download worker stream
   runDownloadStream(item).catch(err => {
+    if (item.status === 'paused' || item.status === 'queued' || item.abortController?.signal.aborted) {
+      return
+    }
     console.error(`[HttpDownloader] Stream error for ${item.fileName}:`, err)
     item.status = 'error'
     item.errorMessage = err?.message || 'Download failed'
@@ -473,8 +482,8 @@ function notifyProgress(item: HttpDownloadItem, status: string, errorMessage?: s
     item.id,
     {
       progress: progressRatio,
-      downloadSpeed: item.status === 'paused' || item.status === 'done' ? 0 : item.speed,
-      timeRemaining: item.timeRemaining,
+      downloadSpeed: item.status === 'paused' || item.status === 'queued' || item.status === 'done' ? 0 : item.speed,
+      timeRemaining: item.status === 'paused' || item.status === 'queued' || item.status === 'done' ? 0 : item.timeRemaining,
       length: total,
       downloaded: item.downloadedBytes,
       name: item.fileName,
@@ -487,13 +496,13 @@ function notifyProgress(item: HttpDownloadItem, status: string, errorMessage?: s
   )
 }
 
-export function pauseHttpDownload(id: string): boolean {
+export function pauseHttpDownload(id: string, newStatus: 'paused' | 'queued' = 'paused'): boolean {
   const item = activeHttpDownloads.get(id)
   if (!item) {
     // Check if recorded in DB
     const row = db.getDownloads().find((d: any) => d.id === id)
     if (row) {
-      row.status = 'paused'
+      row.status = newStatus
       row.downloadSpeed = '0 B/s'
       row.timeRemaining = '—'
       db.updateDownload(row)
@@ -502,7 +511,7 @@ export function pauseHttpDownload(id: string): boolean {
     return false
   }
 
-  item.status = 'paused'
+  item.status = newStatus
   item.speed = 0
   item.timeRemaining = 0
   if (item.progressTimer) {
@@ -516,7 +525,15 @@ export function pauseHttpDownload(id: string): boolean {
     item.fileStream.close()
   }
 
-  notifyProgress(item, 'paused')
+  const row = db.getDownloads().find((d: any) => d.id === id)
+  if (row) {
+    row.status = newStatus
+    row.downloadSpeed = '0 B/s'
+    row.timeRemaining = '—'
+    try { db.updateDownload(row) } catch {}
+  }
+
+  notifyProgress(item, newStatus)
   return true
 }
 
@@ -526,7 +543,7 @@ export async function resumeHttpDownload(id: string): Promise<boolean> {
 
   let item = activeHttpDownloads.get(id)
   if (!item) {
-    let savePath = row.download_path
+    let savePath = row.downloadPath || row.download_path
     let partPath = ''
     if (savePath) {
       if (savePath.toLowerCase().endsWith('.part')) {
@@ -559,7 +576,7 @@ export async function resumeHttpDownload(id: string): Promise<boolean> {
       timeRemaining: 0,
       lastBytes: existingBytes,
       lastTime: Date.now(),
-      tmdbId: row.tmdb_id
+      tmdbId: row.tmdbId ?? row.tmdb_id
     }
     activeHttpDownloads.set(id, item)
   }
@@ -568,8 +585,18 @@ export async function resumeHttpDownload(id: string): Promise<boolean> {
   item.lastTime = Date.now()
   item.lastBytes = item.downloadedBytes
 
+  const dlRow = {
+    ...row,
+    status: 'downloading',
+    downloadSpeed: '0 B/s'
+  }
+  try { db.updateDownload(dlRow) } catch {}
+
   notifyProgress(item, 'downloading')
   runDownloadStream(item).catch(err => {
+    if (item.status === 'paused' || item.status === 'queued' || item.abortController?.signal.aborted) {
+      return
+    }
     console.error(`[HttpDownloader] Resume error for ${item?.fileName}:`, err)
     if (item) {
       item.status = 'error'

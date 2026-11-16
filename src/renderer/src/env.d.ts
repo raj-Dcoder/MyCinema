@@ -145,6 +145,8 @@ interface Api {
   getMaxConcurrentDownloads: () => Promise<number>
   setMaxConcurrentDownloads: (value: number) => Promise<number>
   getActiveDownloads: () => Promise<any[]>
+  getPlayableVideoForDownload?: (downloadId: string) => Promise<any | null>
+  getDetailMediaForDownload?: (downloadId: string) => Promise<any | null>
   prepareTorrentStream: (id: string) => Promise<{ url?: string; fileName?: string; size?: number; error?: string }>
   startTempStream: (magnetUrl: string, title?: string, options?: { fileIndex?: number; season?: number; episode?: number }) => Promise<{ url?: string; fileName?: string; size?: number; streamId?: string; parsedSeason?: number | null; parsedEpisode?: number | null; error?: string }>
   stopTempStream: (id: string) => Promise<boolean>

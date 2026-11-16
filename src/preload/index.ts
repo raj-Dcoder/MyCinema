@@ -127,6 +127,10 @@ const api = {
     ipcRenderer.invoke('set-max-concurrent-downloads', value),
   getActiveDownloads: () => 
     ipcRenderer.invoke('get-active-downloads'),
+  getPlayableVideoForDownload: (downloadId: string) =>
+    ipcRenderer.invoke('get-playable-video-for-download', downloadId),
+  getDetailMediaForDownload: (downloadId: string) =>
+    ipcRenderer.invoke('get-detail-media-for-download', downloadId),
   prepareTorrentStream: (id: string) =>
     ipcRenderer.invoke('prepare-torrent-stream', id),
   startTempStream: (magnetUrl: string, title?: string, options?: { fileIndex?: number; season?: number; episode?: number }) =>

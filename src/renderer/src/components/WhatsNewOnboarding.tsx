@@ -18,8 +18,6 @@ import {
   Maximize,
   Check,
 } from 'lucide-react'
-import demoVideo from '../assets/demo/fluid_light_demo.mp4'
-import demoPoster from '../assets/demo/fluid_light_demo_poster.jpg'
 
 // ─── Release-notes data model ───────────────────────────────────────────────
 // The modal renders entirely from LATEST_RELEASE below. For a new app
@@ -111,44 +109,38 @@ const UPDATE_ICONS: Record<UpdateIconKey, { icon: React.ReactNode; tile: string 
 }
 
 export const LATEST_RELEASE: ReleaseNotes = {
-  version: '1.52.0',
-  title: 'Dynamic fluid light & velvety ambient atmosphere.',
-  highlight: 'fluid light',
+  version: '1.53.0',
+  title: 'Smarter streaming and richer download control.',
+  highlight: 'Smarter streaming',
   description:
-    'Experience living liquid silk mesh gradients across your app background, fully responsive to all 12 color accents and optimized for zero-lag playback.',
+    'Experience instant playback with automatic best-source selection, next-episode smart targeting, and a powerful new downloads menu.',
   tourId: null,
-  video: {
-    src: demoVideo,
-    poster: demoPoster,
-    caption: 'Feature Walkthrough',
-    autoPlay: true,
-    loop: true,
-  },
+  video: null,
   updates: [
     {
+      icon: 'play',
+      title: 'Smart streaming selection',
+      description: 'Automatically picks the cleanest and fastest HD source when playing.',
+    },
+    {
       icon: 'sparkles',
-      title: 'Dynamic fluid light',
-      description: 'Smooth WebGL liquid silk waves replace static ambient backdrops.',
+      title: 'Next-episode smart targeting',
+      description: 'Action button tracks and cues up your next unwatched series episode.',
+    },
+    {
+      icon: 'download',
+      title: 'Enhanced download menu',
+      description: 'Quickly play, inspect details, open folder, share links, or delete.',
     },
     {
       icon: 'layers',
-      title: 'Dedicated settings switch',
-      description: 'Toggle fluid light anytime under Atmospheric Cinematic Studio.',
-    },
-    {
-      icon: 'play',
-      title: 'Zero-lag playback guard',
-      description: 'Automatically pauses background shader while videos are playing.',
-    },
-    {
-      icon: 'shield',
-      title: 'Velvety dark mode',
-      description: 'Toned down glare and lifted contrast for comfortable dark viewing.',
+      title: 'FocusTube PiP quality',
+      description: 'Set custom video resolution independently for Picture-in-Picture mode.',
     },
     {
       icon: 'sparkles',
-      title: 'Twelve reactive accents',
-      description: 'Background instantly matches your selected color theme and mode.',
+      title: 'Quick discovery sync',
+      description: 'One-click refresh in the header to instantly reload movies and series.',
     },
   ],
 }

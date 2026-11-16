@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { ArrowDownWideNarrow, ArrowUpNarrowWide, Check, Gauge, Play, RotateCcw, Search, Settings, ShieldCheck, Sparkles, X, Zap } from 'lucide-react'
 import { useTheme } from '../../theme/ThemeContext'
+import { PIP_QUALITY_PREF_KEY, DEFAULT_PIP_QUALITY } from '../../utils/focusTube'
 
 const YouTubeIcon: React.FC<{ size?: number; className?: string }> = ({ size = 16, className = '' }) => (
   <svg
@@ -97,6 +98,21 @@ const FocusTubeSettingsModal: React.FC<FocusTubeSettingsModalProps> = ({
     setPreferredQuality(q)
     try {
       localStorage.setItem('mycinema_ft_preferred_quality', q)
+    } catch {}
+  }
+
+  const [pipPreferredQuality, setPipPreferredQuality] = useState(() => {
+    try {
+      return localStorage.getItem(PIP_QUALITY_PREF_KEY) || DEFAULT_PIP_QUALITY
+    } catch {
+      return DEFAULT_PIP_QUALITY
+    }
+  })
+
+  const handlePipQualityChange = (q: string) => {
+    setPipPreferredQuality(q)
+    try {
+      localStorage.setItem(PIP_QUALITY_PREF_KEY, q)
     } catch {}
   }
 
@@ -444,10 +460,10 @@ const FocusTubeSettingsModal: React.FC<FocusTubeSettingsModalProps> = ({
                 <div className="flex items-center justify-between gap-4">
                   <div>
                     <h4 className={`text-xs font-bold ${isLight ? 'text-slate-900' : 'text-white'}`}>
-                      Target Video Quality
+                      Theater Target Video Quality
                     </h4>
                     <p className={`text-[11px] mt-0.5 ${isLight ? 'text-slate-500' : 'text-white/40'}`}>
-                      Select your preferred resolution. Auto adapts to your network for jitter-free 60 FPS playback.
+                      Select your preferred resolution for theater mode. Auto adapts to your network for jitter-free 60 FPS playback.
                     </p>
                   </div>
                 </div>
@@ -465,6 +481,50 @@ const FocusTubeSettingsModal: React.FC<FocusTubeSettingsModalProps> = ({
                         key={q.id}
                         type="button"
                         onClick={() => handleQualityChange(q.id)}
+                        className={`flex flex-col items-start p-2.5 rounded-xl border text-left transition-all ${
+                          isSelected
+                            ? 'border-primary bg-primary/10 text-primary shadow-sm'
+                            : isLight
+                            ? 'border-slate-200 bg-white text-slate-700 hover:border-slate-300 hover:bg-slate-50'
+                            : 'border-white/10 bg-white/5 text-white/70 hover:border-white/20 hover:bg-white/10 hover:text-white'
+                        }`}
+                      >
+                        <span className="text-xs font-bold">{q.label}</span>
+                        <span className={`text-[10px] mt-0.5 ${isSelected ? 'text-primary/80 font-medium' : isLight ? 'text-slate-400' : 'text-white/40'}`}>
+                          {q.hint}
+                        </span>
+                      </button>
+                    )
+                  })}
+                </div>
+              </div>
+
+              {/* Preferred PiP Playback Quality */}
+              <div className="p-4 space-y-3">
+                <div className="flex items-center justify-between gap-4">
+                  <div>
+                    <h4 className={`text-xs font-bold ${isLight ? 'text-slate-900' : 'text-white'}`}>
+                      Picture-in-Picture (PiP) Quality
+                    </h4>
+                    <p className={`text-[11px] mt-0.5 ${isLight ? 'text-slate-500' : 'text-white/40'}`}>
+                      Resolution for the floating mini player. 360p (Default) or 480p is recommended for instant loading and zero buffering.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                  {[
+                    { id: 'medium', label: '360p (Default)', hint: 'Fast, smooth & zero buffer' },
+                    { id: 'large', label: '480p SD', hint: 'Balanced mini clarity' },
+                    { id: 'hd720', label: '720p HD', hint: 'Sharper for large monitors' },
+                    { id: 'auto', label: 'Auto', hint: 'Adaptive network stream' }
+                  ].map((q) => {
+                    const isSelected = pipPreferredQuality === q.id
+                    return (
+                      <button
+                        key={q.id}
+                        type="button"
+                        onClick={() => handlePipQualityChange(q.id)}
                         className={`flex flex-col items-start p-2.5 rounded-xl border text-left transition-all ${
                           isSelected
                             ? 'border-primary bg-primary/10 text-primary shadow-sm'

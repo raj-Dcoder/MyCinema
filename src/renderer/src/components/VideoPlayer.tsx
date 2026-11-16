@@ -1749,7 +1749,8 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
         if (!isCancelled) setStartupProgressReady(true)
         return
       }
-      if (isTorrentStreamPath(currentVideo.file_path) || currentVideo.id < 0) {
+      const isOnlineTorrentStream = isTorrentStreamPath(currentVideo.file_path) || (currentVideo.id < 0 && !currentVideo.file_path?.includes(':') && !currentVideo.file_path?.startsWith('/'))
+      if (isOnlineTorrentStream) {
         // Online stream: restore source-agnostic position by TMDB identity.
         const streamIdent = getStreamResumeIdentity(currentVideo)
         if (!streamIdent || !isOnlineProgressEnabled()) {
@@ -1927,6 +1928,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
       }
 
       if (startupVideoEl.readyState >= 1) {
+        setHasVideoMetadata(true)
         metadataTrackLoader()
       } else {
         startupVideoEl.addEventListener('loadedmetadata', metadataTrackLoader, { once: true })
@@ -2656,7 +2658,8 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
   }, [isPiPActive, isPlaying])
 
   useEffect(() => {
-    if (isTorrentStreamPath(currentVideo.file_path) || currentVideo.id < 0) return
+    const isOnlineTorrentStream = isTorrentStreamPath(currentVideo.file_path) || (currentVideo.id < 0 && !currentVideo.file_path?.includes(':') && !currentVideo.file_path?.startsWith('/'))
+    if (isOnlineTorrentStream || currentVideo.id <= 0) return
 
     const interval = setInterval(() => {
       if (videoRef.current && !videoRef.current.paused) {
@@ -4658,7 +4661,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
     const targetTime = segment.endSec + INTRODB_SKIP_END_PADDING_SECONDS
     const isOutroAdvance = segment.type === 'outro' && hasNextEpisode
     if (isOutroAdvance) {
-      if (isTorrentStream || currentVideo.id < 0) {
+      if (isTorrentStream || (currentVideo.id < 0 && !currentVideo.file_path?.includes(':') && !currentVideo.file_path?.startsWith('/'))) {
         playNextEpisode()
         return
       }

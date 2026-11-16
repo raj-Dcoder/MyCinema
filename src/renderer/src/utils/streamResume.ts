@@ -296,6 +296,16 @@ export const formatSeasonEpisode = (season?: number | null, episode?: number | n
   return ''
 }
 
+export const formatEpisodeCode = (season?: number | null, episode?: number | null) => {
+  if (season != null && episode != null) {
+    const s = String(season).padStart(2, '0')
+    const e = String(episode).padStart(2, '0')
+    return `S${s}E${e}`
+  }
+  if (episode != null) return `E${String(episode).padStart(2, '0')}`
+  return 'S01E01'
+}
+
 export interface OnlineSeriesGroup {
   tmdb_id: number
   title: string

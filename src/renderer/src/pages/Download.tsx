@@ -1,10 +1,11 @@
 import React, { useState, useEffect, useRef } from 'react'
 import { createPortal } from 'react-dom'
-import { Search, Download as DownloadIcon, Film, Tv, X, Loader2, HardDrive, CheckCircle2, AlertCircle, Pause, Play, FolderOpen, Bookmark, BookmarkCheck, ArrowLeft, Languages, RotateCcw, Share2, Copy, MessageCircle, Send, MoreVertical, Trash, ListMinus, Star, Users, Zap } from 'lucide-react'
+import { Search, Download as DownloadIcon, Film, Tv, X, Loader2, HardDrive, CheckCircle2, AlertCircle, Pause, Play, FolderOpen, Bookmark, BookmarkCheck, ArrowLeft, Languages, RotateCcw, Share2, Copy, Check, MessageCircle, Send, MoreVertical, Trash, ListMinus, Star, Users, Zap } from 'lucide-react'
 
 import { Video } from '../types'
 import { DownloadOptionsGuide, ConcurrentDownloadsGuide } from '../components/FeatureGuides'
 import { getTorrentSourceHealthScore, getTorrentSourceSpeedLabel, isHevcSource } from '../utils/torrentSources'
+import { parseTorrentTitle } from '../utils/torrentTitleParser'
 import DownloadQueue from '../components/DownloadQueue'
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -175,7 +176,48 @@ const Download: React.FC<DownloadProps> = ({ onPlay, onShowDetail }) => {
   const [sourceSearchStatus, setSourceSearchStatus] = useState({ found: 0, completed: 0, total: 0, cached: false, done: false })
   const [downloads, setDownloads] = useState<ActiveDownload[]>([])
   const [allVideos, setAllVideos] = useState<Video[]>([])
-  const [downloadToRemove, setDownloadToRemove] = useState<string | null>(null)
+  const [downloadMenu, setDownloadMenu] = useState<{
+    id: string
+    rect: { top: number; bottom: number; left: number; right: number }
+  } | null>(null)
+  const [copiedMagnetId, setCopiedMagnetId] = useState<string | null>(null)
+
+  const handleOpenDownloadMenu = (id: string, rect?: { top: number; bottom: number; left: number; right: number }) => {
+    setDownloadMenu(prev => {
+      if (prev?.id === id) return null
+      let targetRect = rect
+      if (!targetRect) {
+        const btn = document.getElementById(`dl-btn-${id}`)
+        if (btn) {
+          const domRect = btn.getBoundingClientRect()
+          targetRect = {
+            top: domRect.top,
+            bottom: domRect.bottom,
+            left: domRect.left,
+            right: domRect.right
+          }
+        }
+      }
+      if (!targetRect) return null
+      return { id, rect: targetRect }
+    })
+  }
+
+  useEffect(() => {
+    if (!downloadMenu) return
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setDownloadMenu(null)
+    }
+    const handleScrollOrResize = () => setDownloadMenu(null)
+    window.addEventListener('keydown', handleKeyDown)
+    window.addEventListener('scroll', handleScrollOrResize, true)
+    window.addEventListener('resize', handleScrollOrResize)
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown)
+      window.removeEventListener('scroll', handleScrollOrResize, true)
+      window.removeEventListener('resize', handleScrollOrResize)
+    }
+  }, [downloadMenu])
   const [downloadToShare, setDownloadToShare] = useState<ActiveDownload | null>(null)
   const [shareFeedback, setShareFeedback] = useState<string | null>(null)
   const [loadingDetailId, setLoadingDetailId] = useState<string | null>(null)
@@ -350,16 +392,20 @@ const Download: React.FC<DownloadProps> = ({ onPlay, onShowDetail }) => {
       console.error('[Download] Legacy watchlist read failed:', err)
     }
 
-    // Refresh videos every 30 seconds to catch new scans
+    // Refresh videos on library changes and every 30 seconds to catch new scans
     const interval = setInterval(fetchVideos, 30000)
     const storageInterval = setInterval(refreshDownloadsStorage, 30000)
     const unsubDir = window.api.onDownloadDirChanged?.(() => {
       refreshDownloadsStorage()
     })
+    const unsubLib = window.api.onLibraryUpdated?.(() => {
+      fetchVideos()
+    })
     return () => {
       clearInterval(interval)
       clearInterval(storageInterval)
       unsubDir?.()
+      unsubLib?.()
     }
   }, [])
 
@@ -747,7 +793,7 @@ const Download: React.FC<DownloadProps> = ({ onPlay, onShowDetail }) => {
     // Optimistic UI update
     removedIdsRef.current.add(targetId)
     setDownloads(prev => prev.filter(d => d.id !== targetId))
-    setDownloadToRemove(null)
+    setDownloadMenu(null)
 
     try {
       const success = await window.api.removeDownload(targetId, deleteFile)
@@ -890,89 +936,304 @@ const Download: React.FC<DownloadProps> = ({ onPlay, onShowDetail }) => {
 
   return (
     <div className="relative">
-      {/* Compact Removal Tooltip/Menu */}
-      {downloadToRemove && (() => {
-        const dlItem = downloads.find(d => d.id === downloadToRemove);
-        const matchingVideo = (() => {
-          if (!dlItem) return null;
-          if (dlItem.tmdbId && videoMap.has(`tmdb-${dlItem.tmdbId}`)) {
-            return videoMap.get(`tmdb-${dlItem.tmdbId}`);
-          }
-          const cleanDlTitle = dlItem.title.replace(/\s*\([^)]*\)\s*$/, '').toLowerCase();
-          return videoMap.get(`title-${cleanDlTitle}`) || videoMap.get(`series-${cleanDlTitle}`);
-        })();
-        const isShareEligible = Boolean((dlItem?.tmdbId || matchingVideo?.tmdb_id) && dlItem?.magnet);
+      {/* Modern High-End Context Menu for Downloads */}
+      {downloadMenu && (() => {
+        const dlItem = downloads.find(d => d.id === downloadMenu.id)
+        if (!dlItem) return null
 
-        return (
+        const matchingVideo = (() => {
+          if (dlItem.tmdbId && videoMap.has(`tmdb-${dlItem.tmdbId}`)) {
+            return videoMap.get(`tmdb-${dlItem.tmdbId}`)
+          }
+          const parsed = parseTorrentTitle(dlItem.name || dlItem.title || '', dlItem.title)
+          const cleanDlTitle = (parsed.cleanTitle || dlItem.title || '').toLowerCase().trim()
+          if (videoMap.has(`title-${cleanDlTitle}`)) return videoMap.get(`title-${cleanDlTitle}`)
+          if (videoMap.has(`series-${cleanDlTitle}`)) return videoMap.get(`series-${cleanDlTitle}`)
+
+          for (const v of allVideos) {
+            if (dlItem.downloadPath && (v.file_path === dlItem.downloadPath || v.file_path.toLowerCase().startsWith(dlItem.downloadPath.toLowerCase()))) {
+              return v
+            }
+            const vTitle = (v.title || '').toLowerCase().trim()
+            if (vTitle && (vTitle === cleanDlTitle || cleanDlTitle.startsWith(vTitle) || vTitle.startsWith(cleanDlTitle))) {
+              return v
+            }
+          }
+          return undefined
+        })()
+
+        const isShareEligible = Boolean((dlItem?.tmdbId || matchingVideo?.tmdb_id) && dlItem?.magnet)
+        const isDone = dlItem.status === 'done' || dlItem.progress >= 100
+        const isDownloading = dlItem.status === 'downloading' || dlItem.status === 'connecting'
+        const isPaused = dlItem.status === 'paused' || dlItem.status === 'queued'
+        const isError = dlItem.status === 'error'
+
+        const menuWidth = 240
+        const estimatedHeight = 310
+        const spaceBelow = window.innerHeight - downloadMenu.rect.bottom
+        const placeAbove = spaceBelow < estimatedHeight && downloadMenu.rect.top > estimatedHeight
+
+        let left = downloadMenu.rect.right - menuWidth
+        if (left < 16) left = 16
+        if (left + menuWidth > window.innerWidth - 16) left = window.innerWidth - menuWidth - 16
+
+        const top = placeAbove ? undefined : Math.max(12, downloadMenu.rect.bottom + 6)
+        const bottom = placeAbove ? Math.max(12, window.innerHeight - downloadMenu.rect.top + 6) : undefined
+
+        const handleCopyMagnet = (e: React.MouseEvent) => {
+          e.stopPropagation()
+          if (!dlItem.magnet) return
+          navigator.clipboard.writeText(dlItem.magnet).then(() => {
+            setCopiedMagnetId(dlItem.id)
+            setTimeout(() => setCopiedMagnetId(null), 1800)
+          }).catch(console.error)
+        }
+
+        const handlePlayClick = async (e: React.MouseEvent) => {
+          e.stopPropagation()
+          setDownloadMenu(null)
+
+          // 1. Authoritative check via main process first (handles folders, library lookup, disk verification, ffprobe duration)
+          try {
+            const playable = await window.api.getPlayableVideoForDownload?.(dlItem.id)
+            if (playable && playable.file_path) {
+              if (playable.type === 'series' || playable.series_name) {
+                const seriesEpisodes = allVideos
+                  .filter(v => (v.tmdb_id && v.tmdb_id === playable.tmdb_id) || (v.series_name && v.series_name.toLowerCase() === playable.series_name?.toLowerCase()))
+                  .sort((a, b) => {
+                    const sDiff = (a.season || 1) - (b.season || 1)
+                    if (sDiff !== 0) return sDiff
+                    return (a.episode || 1) - (b.episode || 1)
+                  })
+                if (seriesEpisodes.length > 0) {
+                  onPlay?.(seriesEpisodes[0])
+                  return
+                }
+              }
+              onPlay?.(playable)
+              return
+            }
+          } catch (err) {
+            console.warn('[Download] getPlayableVideoForDownload failed:', err)
+          }
+
+          // 2. Fallback to matchingVideo if valid
+          if (matchingVideo && matchingVideo.file_path) {
+            if (matchingVideo.type === 'series' || matchingVideo.series_name) {
+              const seriesEpisodes = allVideos
+                .filter(v => (v.tmdb_id && v.tmdb_id === matchingVideo.tmdb_id) || (v.series_name && v.series_name.toLowerCase() === matchingVideo.series_name?.toLowerCase()))
+                .sort((a, b) => {
+                  const sDiff = (a.season || 1) - (b.season || 1)
+                  if (sDiff !== 0) return sDiff
+                  return (a.episode || 1) - (b.episode || 1)
+                })
+              if (seriesEpisodes.length > 0) {
+                onPlay?.(seriesEpisodes[0])
+                return
+              }
+            }
+            onPlay?.(matchingVideo)
+          }
+        }
+
+        return createPortal(
           <div 
-            className="fixed inset-0 z-[100]" 
-            onClick={() => setDownloadToRemove(null)}
+            className="fixed inset-0 z-[9999] select-none" 
+            onClick={() => setDownloadMenu(null)}
+            onContextMenu={(e) => { e.preventDefault(); setDownloadMenu(null); }}
           >
             <div 
-              className="absolute bg-surface/95 backdrop-blur-2xl border border-white/10 rounded-xl shadow-2xl overflow-hidden min-w-[180px] animate-in fade-in zoom-in duration-200"
-              style={{ 
-                top: window.innerHeight - 200 > (document.getElementById(`dl-btn-${downloadToRemove}`)?.getBoundingClientRect().bottom || 0) 
-                  ? (document.getElementById(`dl-btn-${downloadToRemove}`)?.getBoundingClientRect().bottom || 0) + 8 
-                  : (document.getElementById(`dl-btn-${downloadToRemove}`)?.getBoundingClientRect().top || 0) - 100,
-                left: Math.max(20, (document.getElementById(`dl-btn-${downloadToRemove}`)?.getBoundingClientRect().right || 0) - 180)
+              className="absolute w-[240px] rounded-2xl border border-white/10 bg-[#0c131f]/95 p-1.5 text-white shadow-2xl backdrop-blur-2xl ring-1 ring-black/60 animate-in fade-in zoom-in-95 duration-150 ease-out"
+              style={{
+                left: `${left}px`,
+                ...(top !== undefined ? { top: `${top}px` } : {}),
+                ...(bottom !== undefined ? { bottom: `${bottom}px` } : {})
               }}
               onClick={(e) => e.stopPropagation()}
             >
-              <div className="p-1.5 flex flex-col gap-1">
-                {isShareEligible && dlItem && (
-                  <>
-                    <button
-                      onClick={() => {
-                        setDownloadToShare({ ...dlItem, tmdbId: dlItem.tmdbId || matchingVideo?.tmdb_id })
-                        setShareFeedback(null)
-                        setDownloadToRemove(null)
-                      }}
-                      className="flex items-center gap-3 px-3 py-2.5 rounded-lg hover:bg-cyan-500/10 text-left transition-colors group"
-                    >
-                      <div className="w-8 h-8 rounded-lg bg-cyan-500/10 flex items-center justify-center text-cyan-500 group-hover:scale-110 transition-transform">
-                        <Share2 size={16} />
-                      </div>
-                      <div className="flex flex-col">
-                        <span className="text-xs font-bold text-cyan-400">Share source</span>
-                        <span className="text-[10px] text-cyan-400/60">Share download link</span>
-                      </div>
-                    </button>
-                    <div className="h-px bg-white/5 mx-2" />
-                  </>
+              {/* Header Info */}
+              <div className="px-3 py-2 border-b border-white/5 mb-1">
+                <p className="text-[11px] font-bold text-white/90 truncate leading-snug" title={dlItem.name || dlItem.title}>
+                  {dlItem.name || dlItem.title}
+                </p>
+                <div className="flex items-center gap-1.5 mt-0.5">
+                  <span className={`inline-block w-1.5 h-1.5 rounded-full ${
+                    isDone ? 'bg-emerald-400' :
+                    isDownloading ? 'bg-cyan-400 animate-pulse' :
+                    isPaused ? 'bg-amber-400' :
+                    isError ? 'bg-red-400' : 'bg-sky-400'
+                  }`} />
+                  <span className="text-[10px] font-medium uppercase tracking-wider text-white/50">
+                    {isDone ? 'Completed' :
+                     isDownloading ? `Downloading ${Math.round(dlItem.progress || 0)}%` :
+                     isPaused ? 'Paused' :
+                     isError ? 'Error' : 'Queued'}
+                  </span>
+                </div>
+              </div>
+
+              {/* Action Buttons */}
+              <div className="flex flex-col gap-0.5">
+                {/* Play action if completed */}
+                {isDone && (
+                  <button
+                    onClick={handlePlayClick}
+                    className="flex items-center gap-2.5 px-2.5 py-2 rounded-xl text-left hover:bg-emerald-500/15 text-white/90 hover:text-emerald-300 transition-colors group"
+                  >
+                    <div className="w-7 h-7 rounded-lg bg-emerald-500/15 flex items-center justify-center text-emerald-400 group-hover:scale-105 transition-transform">
+                      <Play size={13} fill="currentColor" />
+                    </div>
+                    <div className="flex flex-col min-w-0">
+                      <span className="text-xs font-semibold">Play Now</span>
+                      <span className="text-[9px] text-white/40">Watch in player</span>
+                    </div>
+                  </button>
                 )}
-                
 
+                {/* Pause / Resume action */}
+                {(isDownloading || isPaused) && (
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      setDownloadMenu(null)
+                      handlePauseResume(dlItem.id)
+                    }}
+                    className="flex items-center gap-2.5 px-2.5 py-2 rounded-xl text-left hover:bg-white/10 text-white/90 transition-colors group"
+                  >
+                    <div className="w-7 h-7 rounded-lg bg-white/10 flex items-center justify-center text-white/70 group-hover:scale-105 transition-transform">
+                      {isPaused ? <Play size={13} fill="currentColor" /> : <Pause size={13} />}
+                    </div>
+                    <div className="flex flex-col min-w-0">
+                      <span className="text-xs font-semibold">{isPaused ? 'Resume Download' : 'Pause Download'}</span>
+                      <span className="text-[9px] text-white/40">{isPaused ? 'Continue downloading' : 'Halt download temporarily'}</span>
+                    </div>
+                  </button>
+                )}
 
+                {/* Open Folder action */}
+                {dlItem.downloadPath && (
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      setDownloadMenu(null)
+                      handleOpenFolder(dlItem.downloadPath)
+                    }}
+                    className="flex items-center gap-2.5 px-2.5 py-2 rounded-xl text-left hover:bg-white/10 text-white/90 transition-colors group"
+                  >
+                    <div className="w-7 h-7 rounded-lg bg-white/10 flex items-center justify-center text-white/70 group-hover:scale-105 transition-transform">
+                      <FolderOpen size={13} />
+                    </div>
+                    <div className="flex flex-col min-w-0">
+                      <span className="text-xs font-semibold">Show in Folder</span>
+                      <span className="text-[9px] text-white/40">Open file location</span>
+                    </div>
+                  </button>
+                )}
+
+                {/* Retry action if error */}
+                {isError && (
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      setDownloadMenu(null)
+                      handleRetryDownload(dlItem.id)
+                    }}
+                    className="flex items-center gap-2.5 px-2.5 py-2 rounded-xl text-left hover:bg-red-500/15 text-red-300 transition-colors group"
+                  >
+                    <div className="w-7 h-7 rounded-lg bg-red-500/15 flex items-center justify-center text-red-400 group-hover:scale-105 transition-transform">
+                      <RotateCcw size={13} />
+                    </div>
+                    <div className="flex flex-col min-w-0">
+                      <span className="text-xs font-semibold">Retry Download</span>
+                      <span className="text-[9px] text-red-400/60">Try starting again</span>
+                    </div>
+                  </button>
+                )}
+
+                {/* Copy Magnet action */}
+                {dlItem.magnet && (
+                  <button
+                    onClick={handleCopyMagnet}
+                    className="flex items-center gap-2.5 px-2.5 py-2 rounded-xl text-left hover:bg-white/10 text-white/90 transition-colors group"
+                  >
+                    <div className={`w-7 h-7 rounded-lg flex items-center justify-center transition-transform ${
+                      copiedMagnetId === dlItem.id 
+                        ? 'bg-emerald-500/20 text-emerald-400' 
+                        : 'bg-white/10 text-white/70 group-hover:scale-105'
+                    }`}>
+                      {copiedMagnetId === dlItem.id ? <Check size={13} /> : <Copy size={13} />}
+                    </div>
+                    <div className="flex flex-col min-w-0">
+                      <span className="text-xs font-semibold">
+                        {copiedMagnetId === dlItem.id ? 'Copied to Clipboard!' : 'Copy Magnet Link'}
+                      </span>
+                      <span className="text-[9px] text-white/40">Copy torrent URI</span>
+                    </div>
+                  </button>
+                )}
+
+                {/* Share source action */}
+                {isShareEligible && (
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      setDownloadToShare({ ...dlItem, tmdbId: dlItem.tmdbId || matchingVideo?.tmdb_id })
+                      setShareFeedback(null)
+                      setDownloadMenu(null)
+                    }}
+                    className="flex items-center gap-2.5 px-2.5 py-2 rounded-xl text-left hover:bg-cyan-500/15 text-cyan-300 transition-colors group"
+                  >
+                    <div className="w-7 h-7 rounded-lg bg-cyan-500/15 flex items-center justify-center text-cyan-400 group-hover:scale-105 transition-transform">
+                      <Share2 size={13} />
+                    </div>
+                    <div className="flex flex-col min-w-0">
+                      <span className="text-xs font-semibold">Share Source</span>
+                      <span className="text-[9px] text-cyan-400/60">Share download link</span>
+                    </div>
+                  </button>
+                )}
+
+                <div className="h-px bg-white/5 my-1" />
+
+                {/* Remove from list action */}
                 <button
-                  onClick={() => handleRemoveDownload(downloadToRemove, false)}
-                  className="flex items-center gap-3 px-3 py-2.5 rounded-lg hover:bg-white/5 text-left transition-colors group"
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    handleRemoveDownload(dlItem.id, false)
+                    setDownloadMenu(null)
+                  }}
+                  className="flex items-center gap-2.5 px-2.5 py-2 rounded-xl text-left hover:bg-white/10 text-white/90 transition-colors group"
                 >
-                  <div className="w-8 h-8 rounded-lg bg-white/5 flex items-center justify-center text-muted group-hover:text-primary transition-colors">
-                    <ListMinus size={16} />
+                  <div className="w-7 h-7 rounded-lg bg-white/10 flex items-center justify-center text-white/70 group-hover:text-primary transition-colors">
+                    <ListMinus size={13} />
                   </div>
-                  <div className="flex flex-col">
-                    <span className="text-xs font-bold text-text">Remove from list</span>
-                    <span className="text-[10px] text-muted">Keep files on disk</span>
+                  <div className="flex flex-col min-w-0">
+                    <span className="text-xs font-semibold">Remove from List</span>
+                    <span className="text-[9px] text-white/40">Keep files on disk</span>
                   </div>
                 </button>
-                
-                <div className="h-px bg-white/5 mx-2" />
-                
+
+                {/* Delete from disk action */}
                 <button
-                  onClick={() => handleRemoveDownload(downloadToRemove, true)}
-                  className="flex items-center gap-3 px-3 py-2.5 rounded-lg hover:bg-red-500/10 text-left transition-colors group"
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    handleRemoveDownload(dlItem.id, true)
+                    setDownloadMenu(null)
+                  }}
+                  className="flex items-center gap-2.5 px-2.5 py-2 rounded-xl text-left hover:bg-red-500/15 text-red-400 transition-colors group"
                 >
-                  <div className="w-8 h-8 rounded-lg bg-red-500/10 flex items-center justify-center text-red-400">
-                    <Trash size={16} />
+                  <div className="w-7 h-7 rounded-lg bg-red-500/15 flex items-center justify-center text-red-400 group-hover:scale-105 transition-transform">
+                    <Trash size={13} />
                   </div>
-                  <div className="flex flex-col">
-                    <span className="text-xs font-bold text-red-400">Delete from disk</span>
-                    <span className="text-[10px] text-red-400/60">Delete permanently</span>
+                  <div className="flex flex-col min-w-0">
+                    <span className="text-xs font-semibold text-red-400">Delete from Disk</span>
+                    <span className="text-[9px] text-red-400/60">Delete permanently</span>
                   </div>
                 </button>
               </div>
             </div>
-          </div>
+          </div>,
+          document.body
         )
       })()}
 
@@ -1112,7 +1373,7 @@ const Download: React.FC<DownloadProps> = ({ onPlay, onShowDetail }) => {
             onRetry={handleRetryDownload}
             onPlay={onPlay}
             onShowDetail={onShowDetail}
-            onRequestRemove={(id) => setDownloadToRemove(id)}
+            onRequestRemove={handleOpenDownloadMenu}
             onOpenFolder={handleOpenFolder}
             refreshDownloadsStorage={refreshDownloadsStorage}
             loadingDetailId={loadingDetailId}

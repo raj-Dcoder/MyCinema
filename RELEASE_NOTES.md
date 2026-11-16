@@ -1,3 +1,32 @@
+# MyCinema v1.53.0
+
+Smart one-click streaming with health-scored source picking, next-episode smart targeting, rich contextual download management, and independent FocusTube PiP quality control.
+
+### Streaming & Playback Intelligence
+- **Smart Source Auto-Selection**: Clicking Play now automatically evaluates torrent health scores, seed-to-peer ratios, and codecs to choose the cleanest, fastest HD stream (prioritizing 1080p sweet spots and filtering out low-grade CAM rips).
+- **Intelligent Next-Episode Targeting**: Detail screen dynamically resolves your watch history to target the next unwatched episode on series (e.g. "Resume S01E03" or "Play S01E01") with live progress indicators.
+- **Directory Video Auto-Resolution**: Torrent and multi-file downloads saved in directories now resolve the main video file automatically across streaming protocols and media players.
+- **Auto-Enriched Media Metadata**: Partial or in-progress downloads opened in Detail view automatically enrich missing backdrops, overviews, ratings, and tags from TMDB.
+
+### Downloads & Queue Management
+- **Contextual Download Action Menu**: Upgraded the download management interface with a multi-action popup menu offering instant playback, details lookup, folder revelation, source link sharing, and safe list removal or permanent disk deletion.
+- **Concurrent Queue Synchronization**: Improved background queue coordination for multi-download operations with reliable paused and queued status retention.
+
+### FocusTube & Picture-in-Picture
+- **Independent PiP Video Quality**: Added an independent quality selector for Picture-in-Picture mode in FocusTube settings, allowing lightweight data-saver playback (360p) in PiP while maintaining high-definition playback in the main window.
+- **Sender-Aware Frame Messaging**: Hardened multi-window IPC routing so player commands and quality changes strictly target their respective window contexts without cross-window interference.
+
+### Discovery & Performance
+- **Instant Discovery Sync**: Added a dedicated "Sync Discovery" button with real-time spin and check animations in the Home header to manually refresh content rails on demand.
+- **Authentic Hindi Series Curation**: Refined upcoming series filters to authenticate air dates via direct episode verification and filter out non-Hindi regional titles for clutter-free discovery.
+- **Fluid Sidebar Animation**: Enhanced sidebar collapse and expand transitions with cubic-bezier timing and smooth download status pill indicators.
+
+### Security & Privacy
+- **Isolated Frame Script Execution**: Multi-window FocusTube player scripts strictly isolate execution contexts by sender WebContents, preventing cross-window state manipulation.
+- **Safe Media Protocol Boundaries**: Local file paths in custom media and audio protocols are strictly verified for directory containment and media file formats before streaming.
+
+***
+
 # MyCinema v1.52.0
 
 Native WebGL Dynamic Fluid Light ambient background, dedicated Atmospheric Studio settings switch with zero-lag playback pauses, velvety dark mode tuning, and in-app feature onboarding video.

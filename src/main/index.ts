@@ -954,6 +954,55 @@ function waitForTorrentFilePrefix(torrent: any, file: any, targetBytes: number, 
   })
 }
 
+function findLargestVideoInDir(dirPath: string): string | null {
+  try {
+    if (!fs.existsSync(dirPath)) return null
+    const stat = fs.statSync(dirPath)
+    if (stat.isFile() && isVideoFilePath(dirPath)) return dirPath
+    if (!stat.isDirectory()) return null
+
+    const entries = fs.readdirSync(dirPath, { withFileTypes: true })
+    const videoFiles: { path: string; size: number }[] = []
+    for (const entry of entries) {
+      const full = path.join(dirPath, entry.name)
+      if (entry.isDirectory()) {
+        const sub = findLargestVideoInDir(full)
+        if (sub) {
+          try {
+            const subStat = fs.statSync(sub)
+            videoFiles.push({ path: sub, size: subStat.size })
+          } catch {}
+        }
+      } else if (entry.isFile() && isVideoFilePath(entry.name)) {
+        try {
+          const fStat = fs.statSync(full)
+          videoFiles.push({ path: full, size: fStat.size })
+        } catch {}
+      }
+    }
+    if (videoFiles.length > 0) {
+      videoFiles.sort((a, b) => b.size - a.size)
+      return videoFiles[0].path
+    }
+  } catch (err) {
+    console.warn('[findLargestVideoInDir] Dir check error:', dirPath, err)
+  }
+  return null
+}
+
+function probeVideoDuration(filePath: string): Promise<number> {
+  return new Promise((resolve) => {
+    ffmpeg.ffprobe(filePath, (err, metadata) => {
+      if (err) {
+        resolve(0)
+        return
+      }
+      const dur = parseFloat(metadata.format?.duration as any)
+      resolve(Number.isFinite(dur) && dur > 0 ? dur : 0)
+    })
+  })
+}
+
 function getPlayableTorrentFile(torrent: any): any | null {
   if (!torrent || !Array.isArray(torrent.files)) return null
   const videoFiles = torrent.files.filter((file: any) => isVideoFilePath(file?.path || file?.name))
@@ -1105,7 +1154,18 @@ function registerMediaProtocol(): void {
         console.log(`[Protocol] Serving snap: ${normalizedPath}`)
       }
 
-      const stat = fs.statSync(normalizedPath)
+      let stat = fs.statSync(normalizedPath)
+      if (stat.isDirectory()) {
+        const resolvedVideo = findLargestVideoInDir(normalizedPath)
+        if (resolvedVideo && fs.existsSync(resolvedVideo)) {
+          normalizedPath = resolvedVideo
+          stat = fs.statSync(normalizedPath)
+        } else {
+          console.error(`[Protocol] Directory contains no video: ${normalizedPath}`)
+          return new Response('Directory contains no video', { status: 400 })
+        }
+      }
+
       const fileSize = stat.size
       const range = request.headers.get('range')
 
@@ -1120,7 +1180,8 @@ function registerMediaProtocol(): void {
             headers: {
               'Content-Range': `bytes */${fileSize}`,
               'Accept-Ranges': 'bytes',
-              'Cache-Control': 'no-cache'
+              'Cache-Control': 'no-cache',
+              'Access-Control-Allow-Origin': '*'
             }
           })
         }
@@ -1143,7 +1204,8 @@ function registerMediaProtocol(): void {
             'Accept-Ranges': 'bytes',
             'Content-Length': chunksize.toString(),
             'Content-Type': contentType,
-            'Cache-Control': 'no-cache'
+            'Cache-Control': 'no-cache',
+            'Access-Control-Allow-Origin': '*'
           }
         })
       } else {
@@ -1153,7 +1215,8 @@ function registerMediaProtocol(): void {
             'Content-Length': fileSize.toString(),
             'Accept-Ranges': 'bytes',
             'Content-Type': contentType,
-            'Cache-Control': 'no-cache'
+            'Cache-Control': 'no-cache',
+            'Access-Control-Allow-Origin': '*'
           }
         })
       }
@@ -1515,7 +1578,16 @@ function registerAudioProtocol(): void {
         if (!fs.existsSync(normalizedPath)) {
           return new Response('Not Found', { status: 404 })
         }
-        sourcePath = normalizedPath
+        let targetFile = normalizedPath
+        if (fs.statSync(targetFile).isDirectory()) {
+          const resolvedVideo = findLargestVideoInDir(targetFile)
+          if (resolvedVideo && fs.existsSync(resolvedVideo)) {
+            targetFile = resolvedVideo
+          } else {
+            return new Response('Directory contains no audio', { status: 400 })
+          }
+        }
+        sourcePath = targetFile
         // Both params are 0-based positions among AUDIO streams — map with
         // the audio selector so video/subtitle streams never shift the pick.
         mapArg = streamIndex != null && streamIndex !== '' ? `0:a:${streamIndex}` : `0:a:${trackIndex}`
@@ -2110,18 +2182,11 @@ app.whenReady().then(() => {
       item.cancel()
       console.log(`[DefaultSession Download] Intercepted "${fileName}", routing to MyCinema Downloads: ${downloadUrl}`)
 
-      // Show instant notification feedback
-      notifyDownloadAdded(fileName, webContents)
-
-      httpDownloader.startHttpDownload({
+      handleStartHttpDownload({
         url: downloadUrl,
         fileName,
-        totalBytes
-      }).then(() => {
-        BrowserWindow.getAllWindows().forEach(w => {
-          if (!w.isDestroyed()) w.webContents.send('downloads-changed')
-        })
-        notifyDownloadAdded(fileName, webContents)
+        totalBytes,
+        triggeringWc: webContents
       }).catch(err => {
         console.error('[DefaultSession Download] Failed to start HTTP download:', err)
       })
@@ -2899,23 +2964,11 @@ ipcMain.handle('open-web-popup', (event, url: string, title?: string, autoSearch
 
       console.log(`[Popup Download] Intercepted "${fileName}", routing to MyCinema Downloads tab: ${downloadUrl}`)
 
-      // Show immediate notification banner in all active popup windows and source webContents
-      notifyDownloadAdded(fileName, webContents)
-
-      httpDownloader.startHttpDownload({
+      handleStartHttpDownload({
         url: downloadUrl,
         fileName,
-        totalBytes
-      }).then(() => {
-        // Notify all windows that downloads list updated
-        BrowserWindow.getAllWindows().forEach(w => {
-          if (!w.isDestroyed()) {
-            w.webContents.send('downloads-changed')
-          }
-        })
-
-        // Re-confirm banner in case of any micro-navigation delay
-        notifyDownloadAdded(fileName, webContents)
+        totalBytes,
+        triggeringWc: webContents
       }).catch(err => {
         console.error('[Popup Download] Failed to start HTTP download:', err)
       })
@@ -7590,13 +7643,20 @@ function countRunningDownloads(): number {
   try {
     rows = db.getDownloads()
   } catch {
-    return activeTorrents.size + claimedDownloadSlots.size
+    const activeHttpCount = httpDownloader.getActiveHttpDownloadCount()
+    return activeTorrents.size + activeHttpCount + claimedDownloadSlots.size
   }
-  const running = rows.filter((d: any) => d.status === 'downloading' || d.status === 'connecting').length
+  const running = rows.filter((d: any) => {
+    const cached = downloadRecordsCache.get(d.id)
+    const status = cached?.status || d.status
+    return status === 'downloading' || status === 'connecting'
+  }).length
   // Claims whose start hasn't reached the DB yet still hold their slot.
   const starting = [...claimedDownloadSlots].filter((id) => {
     const row = rows.find((d: any) => d.id === id)
-    return !row || (row.status !== 'downloading' && row.status !== 'connecting')
+    const cached = downloadRecordsCache.get(id)
+    const status = cached?.status || row?.status
+    return !status || (status !== 'downloading' && status !== 'connecting')
   }).length
   return running + starting
 }
@@ -7607,7 +7667,11 @@ function countRunningDownloads(): number {
 function getQueuedDownloads(): any[] {
   try {
     return db.getDownloads()
-      .filter((d: any) => d.status === 'queued')
+      .filter((d: any) => {
+        const cached = downloadRecordsCache.get(d.id)
+        const status = cached?.status || d.status
+        return status === 'queued'
+      })
       .sort((a: any, b: any) => {
         const aOrder = Number(a.queueOrder)
         const bOrder = Number(b.queueOrder)
@@ -7634,20 +7698,30 @@ function broadcastQueuedState(id: string): void {
 
 // Start now if a slot is free, otherwise park as queued. The slot is claimed
 // synchronously so a burst of starts can't all pass the same check.
-async function startDownloadRespectingQueue(id: string, magnet: string, title: string, progress: number): Promise<'started' | 'queued'> {
+async function startDownloadRespectingQueue(id: string, magnetOrUrl: string, title: string, progress: number): Promise<'started' | 'queued'> {
   const max = getMaxConcurrentDownloads()
+  const isHttp = magnetOrUrl?.startsWith('http://') || magnetOrUrl?.startsWith('https://') || httpDownloader.isHttpDownload(id)
+
   if (max > 0 && countRunningDownloads() >= max) {
     const row = getDownloadRow(id)
     if (row) {
-      db.updateDownload({ ...row, status: 'queued', downloadSpeed: '0 B/s', timeRemaining: '—' })
+      const queuedRow = { ...row, status: 'queued', downloadSpeed: '0 B/s', timeRemaining: '—' }
+      db.updateDownload(queuedRow)
+      downloadRecordsCache.set(id, queuedRow)
     }
-    console.log(`[Torrent] Slot full (${countRunningDownloads()}/${max}) — "${title}" queued`)
+    console.log(`[${isHttp ? 'HttpDownloader' : 'Torrent'}] Slot full (${countRunningDownloads()}/${max}) — "${title}" queued`)
     broadcastQueuedState(id)
     return 'queued'
   }
   claimedDownloadSlots.add(id)
   try {
-    await startWebTorrent(id, magnet, title, progress || 0)
+    if (isHttp) {
+      console.log(`[HttpDownloader] Starting download within queue budget: "${title}" (${countRunningDownloads() + 1}/${max || '∞'})`)
+      await httpDownloader.resumeHttpDownload(id)
+    } else {
+      console.log(`[Torrent] Starting download within queue budget: "${title}" (${countRunningDownloads() + 1}/${max || '∞'})`)
+      await startWebTorrent(id, magnetOrUrl, title, progress || 0)
+    }
     return 'started'
   } finally {
     // The DB row now carries the running state, so the claim is redundant.
@@ -7665,22 +7739,32 @@ function enforceDownloadConcurrency(): void {
     const max = getMaxConcurrentDownloads()
     if (max <= 0) return
     const running = db.getDownloads()
-      .filter((d: any) => d.status === 'downloading' || d.status === 'connecting')
+      .filter((d: any) => {
+        const cached = downloadRecordsCache.get(d.id)
+        const status = cached?.status || d.status
+        return status === 'downloading' || status === 'connecting'
+      })
       .sort((a: any, b: any) => new Date(a.addedAt || 0).getTime() - new Date(b.addedAt || 0).getTime())
     if (running.length <= max) return
     for (const extra of running.slice(max)) {
-      const live = activeTorrents.get(extra.id)
-      if (live && !live.destroyed) {
-        try { live.destroy() } catch { /* ignore */ }
-        activeTorrents.delete(extra.id)
+      if (httpDownloader.isHttpDownload(extra.id)) {
+        httpDownloader.pauseHttpDownload(extra.id, 'queued')
+      } else {
+        const live = activeTorrents.get(extra.id)
+        if (live && !live.destroyed) {
+          try { live.destroy() } catch { /* ignore */ }
+          activeTorrents.delete(extra.id)
+        }
+        clearTorrentProgressInterval(extra.id)
       }
-      clearTorrentProgressInterval(extra.id)
-      db.updateDownload({ ...extra, status: 'queued', downloadSpeed: '0 B/s', timeRemaining: '—' })
+      const queuedRow = { ...extra, status: 'queued', downloadSpeed: '0 B/s', timeRemaining: '—' }
+      db.updateDownload(queuedRow)
+      downloadRecordsCache.set(extra.id, queuedRow)
       broadcastQueuedState(extra.id)
-      console.log(`[Torrent] Over limit (${running.length}/${max}) — "${extra.title}" requeued`)
+      console.log(`[Queue] Over limit (${running.length}/${max}) — "${extra.title}" requeued`)
     }
   } catch (err: any) {
-    console.warn('[Torrent] Concurrency enforce failed:', err?.message || err)
+    console.warn('[Queue] Concurrency enforce failed:', err?.message || err)
   }
 }
 
@@ -7701,8 +7785,14 @@ async function pumpDownloadQueue(): Promise<void> {
         try { db.updateDownload({ ...next, status: 'connecting' }) } catch { /* ignore */ }
         continue
       }
+      const liveHttp = httpDownloader.getActiveHttpDownload(next.id)
+      if (liveHttp && (liveHttp.status === 'downloading' || liveHttp.status === 'connecting')) {
+        try { db.updateDownload({ ...next, status: liveHttp.status }) } catch { /* ignore */ }
+        continue
+      }
+
       if (next.magnet?.startsWith('http://') || next.magnet?.startsWith('https://')) {
-        console.log(`[HttpDownloader] Starting queued download: "${next.title}"`)
+        console.log(`[HttpDownloader] Starting queued download: "${next.title}" (${countRunningDownloads() + 1}/${max || '∞'})`)
         claimedDownloadSlots.add(next.id)
         try {
           await httpDownloader.resumeHttpDownload(next.id)
@@ -7714,7 +7804,7 @@ async function pumpDownloadQueue(): Promise<void> {
         continue
       }
 
-      console.log(`[Torrent] Starting queued download: "${next.title}" (${countRunningDownloads()}/${max || '∞'})`)
+      console.log(`[Torrent] Starting queued download: "${next.title}" (${countRunningDownloads() + 1}/${max || '∞'})`)
       // Claim before the await so a concurrent start/pump can't double-start it.
       claimedDownloadSlots.add(next.id)
       try {
@@ -7911,6 +8001,65 @@ async function handleStartTorrentDownload(
   }
 }
 
+async function handleStartHttpDownload(params: {
+  url: string
+  fileName: string
+  totalBytes?: number
+  triggeringWc?: Electron.WebContents | null
+}): Promise<string | false> {
+  try {
+    const existingDownload = db.getDownloads().find((download: any) => (
+      download.magnet === params.url && download.status !== 'error'
+    ))
+    if (existingDownload) {
+      notifyDownloadAdded(existingDownload.name || existingDownload.title || params.fileName, params.triggeringWc)
+      return existingDownload.id
+    }
+
+    const id = crypto.randomUUID()
+    const { savePath, partPath } = httpDownloader.getDownloadDestination(params.fileName)
+    const title = params.fileName.replace(/\.[^/.]+$/, '').replace(/[._]/g, ' ')
+
+    let existingBytes = 0
+    if (fs.existsSync(partPath)) {
+      try {
+        existingBytes = fs.statSync(partPath).size
+      } catch {
+        existingBytes = 0
+      }
+    }
+
+    notifyDownloadAdded(params.fileName, params.triggeringWc)
+
+    db.addDownload({
+      id,
+      title,
+      name: params.fileName,
+      magnet: params.url,
+      progress: params.totalBytes && params.totalBytes > 0 ? (existingBytes / params.totalBytes) * 100 : 0,
+      downloadSpeed: '0 B/s',
+      timeRemaining: '—',
+      status: 'queued',
+      size: params.totalBytes ? formatBytes(params.totalBytes) : '—',
+      downloaded: formatBytes(existingBytes),
+      downloadPath: savePath
+    })
+
+    await startDownloadRespectingQueue(id, params.url, title, 0)
+
+    BrowserWindow.getAllWindows().forEach(w => {
+      if (!w.isDestroyed()) {
+        w.webContents.send('downloads-changed')
+      }
+    })
+
+    return id
+  } catch (err) {
+    console.error('[HttpDownloader] Start download error:', err)
+    return false
+  }
+}
+
 ipcMain.handle('start-torrent-download', async (_, magnetUrl: string, title?: string, tmdbId?: number, name?: string, media?: {
   mediaType?: 'movie' | 'series'
   season?: number
@@ -7923,7 +8072,7 @@ ipcMain.handle('start-torrent-download', async (_, magnetUrl: string, title?: st
 ipcMain.handle('cancel-torrent-download', async (_, id: string) => {
   try {
     if (httpDownloader.isHttpDownload(id)) {
-      const res = httpDownloader.pauseHttpDownload(id)
+      const res = httpDownloader.pauseHttpDownload(id, 'paused')
       void pumpDownloadQueue()
       return res
     }
@@ -7946,6 +8095,7 @@ ipcMain.handle('cancel-torrent-download', async (_, id: string) => {
     if (dlDbData) {
       dlDbData.status = 'paused'
       db.updateDownload(dlDbData)
+      downloadRecordsCache.set(id, dlDbData)
       // Broadcast it so UI updates immediately
       broadcastProgress(id, { 
         downloadSpeed: 0, 
@@ -7968,41 +8118,42 @@ ipcMain.handle('cancel-torrent-download', async (_, id: string) => {
 // ─── IPC: Pause / Resume Torrent ─────────────────────────────────────────────
 ipcMain.handle('pause-resume-torrent', async (_, id: string) => {
   try {
+    const existing = db.getDownloads().find((d: any) => d.id === id)
+    if (!existing) return false
+
+    // Dequeue: a queued item goes back to paused (it was waiting in line).
+    if (existing.status === 'queued') {
+      if (httpDownloader.isHttpDownload(id)) {
+        httpDownloader.pauseHttpDownload(id, 'paused')
+      }
+      const updated = { ...existing, status: 'paused', downloadSpeed: '0 B/s', timeRemaining: '—' }
+      db.updateDownload(updated)
+      downloadRecordsCache.set(id, updated)
+      broadcastToWindows('torrent-progress', updated)
+      return true
+    }
+
     if (httpDownloader.isHttpDownload(id)) {
-      const existing = db.getDownloads().find((d: any) => d.id === id)
-      if (existing?.status === 'paused' || existing?.status === 'error') {
-        const res = await httpDownloader.resumeHttpDownload(id)
+      if (existing.status === 'paused' || existing.status === 'error') {
+        const res = await startDownloadRespectingQueue(id, existing.magnet, existing.title, existing.progress || 0)
         void pumpDownloadQueue()
-        return res
+        return res === 'started' || res === 'queued'
       } else {
-        const res = httpDownloader.pauseHttpDownload(id)
+        const res = httpDownloader.pauseHttpDownload(id, 'paused')
         void pumpDownloadQueue()
         return res
       }
-    }
-
-    // Dequeue: a queued item goes back to paused (it never started).
-    const existing = db.getDownloads().find((d: any) => d.id === id)
-    if (existing && existing.status === 'queued') {
-      const updated = { ...existing, status: 'paused', downloadSpeed: '0 B/s', timeRemaining: '—' }
-      db.updateDownload(updated)
-      broadcastToWindows('torrent-progress', updated)
-      return true
     }
 
     const torrent = activeTorrents.get(id)
     
     // Resume Logic
     if (!torrent || torrent.destroyed) {
-      const dbDl = db.getDownloads().find((d: any) => d.id === id)
-      if (dbDl) {
-        pausedTorrentIds.delete(id)
-        console.log(`[Torrent] Resuming "${dbDl.title}" from ${dbDl.progress}%`)
-        // Queues when slots are full instead of forcing an extra download.
-        await startDownloadRespectingQueue(id, dbDl.magnet, dbDl.title, dbDl.progress || 0)
-        return true
-      }
-      return false
+      pausedTorrentIds.delete(id)
+      console.log(`[Torrent] Resuming "${existing.title}" from ${existing.progress}%`)
+      // Queues when slots are full instead of forcing an extra download.
+      await startDownloadRespectingQueue(id, existing.magnet, existing.title, existing.progress || 0)
+      return true
     }
     
     // Pause Logic (Stop & Destroy pattern for reliability)
@@ -8018,19 +8169,17 @@ ipcMain.handle('pause-resume-torrent', async (_, id: string) => {
     torrent.destroy()
     activeTorrents.delete(id)
     
-    const dlDbData = db.getDownloads().find((d: any) => d.id === id)
-    if (dlDbData) {
-      dlDbData.status = 'paused'
-      db.updateDownload(dlDbData)
-      broadcastProgress(id, { 
-        downloadSpeed: 0, 
-        timeRemaining: 0, 
-        length: finalLength || 0, 
-        downloaded: finalDownloaded || 0, 
-        progress: finalProgress, 
-        name: dlDbData.name || getMagnetDisplayName(dlDbData.magnet) || dlDbData.title
-      } as any, 'paused')
-    }
+    existing.status = 'paused'
+    db.updateDownload(existing)
+    downloadRecordsCache.set(id, existing)
+    broadcastProgress(id, { 
+      downloadSpeed: 0, 
+      timeRemaining: 0, 
+      length: finalLength || 0, 
+      downloaded: finalDownloaded || 0, 
+      progress: finalProgress, 
+      name: existing.name || getMagnetDisplayName(existing.magnet) || existing.title
+    } as any, 'paused')
 
     // Pausing freed a slot — start the next queued download.
     void pumpDownloadQueue()
@@ -8045,14 +8194,37 @@ ipcMain.handle('pause-resume-torrent', async (_, id: string) => {
 // ─── IPC: Retry Failed Torrent ────────────────────────────────────────────────
 ipcMain.handle('retry-torrent-download', async (_, id: string) => {
   try {
-    if (httpDownloader.isHttpDownload(id)) {
-      return await httpDownloader.resumeHttpDownload(id)
-    }
-
-    pausedTorrentIds.delete(id)
     const dbDl = db.getDownloads().find((d: any) => d.id === id)
     if (!dbDl) return false
 
+    if (httpDownloader.isHttpDownload(id)) {
+      downloadRecordsCache.delete(id)
+      const resetDl = {
+        ...dbDl,
+        progress: 0,
+        downloaded: '0 B',
+        downloadSpeed: '0 B/s',
+        timeRemaining: '—',
+        status: 'queued',
+        errorMessage: null
+      }
+      db.updateDownload(resetDl)
+      downloadRecordsCache.set(id, resetDl)
+
+      broadcastProgress(id, {
+        downloadSpeed: 0,
+        timeRemaining: 0,
+        length: 0,
+        downloaded: 0,
+        progress: 0,
+        name: dbDl.name || dbDl.title
+      } as any, 'queued')
+
+      await startDownloadRespectingQueue(id, dbDl.magnet, dbDl.title, 0)
+      return true
+    }
+
+    pausedTorrentIds.delete(id)
     const existingTorrent = activeTorrents.get(id)
     if (existingTorrent && !existingTorrent.destroyed) {
       clearTorrentProgressInterval(id)
@@ -8146,6 +8318,191 @@ ipcMain.handle('get-active-downloads', async () => {
     }
     return { ...record, fileExists }
   }).filter(Boolean)
+})
+
+// ─── IPC: Get Playable Video for Completed Download ───────────────────────────
+ipcMain.handle('get-playable-video-for-download', async (_, downloadId: string) => {
+  try {
+    const downloads = db.getDownloads() as any[]
+    const dl = downloads.find((d: any) => d.id === downloadId)
+    if (!dl) return null
+
+    const downloadRoot = getDownloadPath()
+    const allVideos = (db.getVideos() as any[]) || []
+
+    // 1. Check if video already exists in SQLite library:
+    if (dl.tmdbId) {
+      const byTmdb = allVideos.find(v => Number(v.tmdb_id) === Number(dl.tmdbId))
+      if (byTmdb && byTmdb.file_path && fs.existsSync(byTmdb.file_path) && !fs.statSync(byTmdb.file_path).isDirectory()) {
+        return byTmdb
+      }
+    }
+
+    if (dl.downloadPath) {
+      const byPath = allVideos.find(v => 
+        (v.file_path === dl.downloadPath || isPathInsideRoot(v.file_path, dl.downloadPath)) &&
+        fs.existsSync(v.file_path) &&
+        !fs.statSync(v.file_path).isDirectory()
+      )
+      if (byPath) {
+        return byPath
+      }
+    }
+
+    // 2. Search on disk for playable video file
+    const candidatePaths: string[] = []
+    if (dl.downloadPath) candidatePaths.push(dl.downloadPath)
+    if (dl.name) {
+      candidatePaths.push(path.join(downloadRoot, dl.name))
+      candidatePaths.push(path.join(downloadRoot, dl.id, dl.name))
+    }
+    if (dl.id) {
+      candidatePaths.push(path.join(downloadRoot, dl.id))
+    }
+
+    let foundVideoFile: string | null = null
+    for (const cand of candidatePaths) {
+      foundVideoFile = findLargestVideoInDir(cand)
+      if (foundVideoFile) break
+    }
+
+    if (!foundVideoFile) return null
+
+    // 3. If foundVideoFile matches any existing row in allVideos, return that library video!
+    const normFound = path.resolve(foundVideoFile).toLowerCase()
+    const byExactPath = allVideos.find(v => path.resolve(v.file_path).toLowerCase() === normFound)
+    if (byExactPath) {
+      return byExactPath
+    }
+
+    const foundBase = path.basename(foundVideoFile).toLowerCase()
+    const byBaseName = allVideos.find(v => path.basename(v.file_path).toLowerCase() === foundBase)
+    if (byBaseName) {
+      return byBaseName
+    }
+
+    // 4. Probe duration using ffprobe so the video player has the real duration
+    const probedDuration = await probeVideoDuration(foundVideoFile)
+
+    // Check if TMDB metadata is available:
+    let tmdbMeta: any = null
+    if (dl.tmdbId) {
+      tmdbMeta = await fetchSharedMediaByTmdbId(dl.mediaType === 'series' ? 'series' : 'movie', dl.tmdbId)
+    }
+
+    const cleanTitle = dl.name ? dl.name.replace(/\.[^/.]+$/, '').replace(/[._]/g, ' ') : dl.title
+
+    return {
+      id: Math.abs(Date.now()),
+      title: tmdbMeta?.title || cleanTitle || 'Downloaded Video',
+      file_path: foundVideoFile,
+      type: dl.mediaType || tmdbMeta?.type || 'movie',
+      category: dl.mediaType === 'series' ? 'Series' : 'Movies',
+      tmdb_id: dl.tmdbId || tmdbMeta?.tmdb_id,
+      poster_path: tmdbMeta?.poster_path,
+      backdrop_path: tmdbMeta?.backdrop_path,
+      overview: tmdbMeta?.overview,
+      genres: tmdbMeta?.genres,
+      vote_average: tmdbMeta?.vote_average,
+      release_year: tmdbMeta?.release_year,
+      duration: probedDuration,
+      is_favorite: false,
+      is_watchlist: false,
+      isExternal: true,
+      updated_at: new Date().toISOString()
+    }
+  } catch (err) {
+    console.error('[get-playable-video-for-download] Error:', err)
+    return null
+  }
+})
+
+// ─── IPC: Get Detail Media for Download (with TMDB enrichment) ────────────────
+ipcMain.handle('get-detail-media-for-download', async (_, downloadId: string) => {
+  try {
+    const downloads = db.getDownloads() as any[]
+    const dl = downloads.find((d: any) => d.id === downloadId)
+    if (!dl) return null
+
+    const allVideos = (db.getVideos() as any[]) || []
+
+    // 1. If library has full video with poster/overview:
+    if (dl.tmdbId) {
+      const match = allVideos.find(v => Number(v.tmdb_id) === Number(dl.tmdbId))
+      if (match && (match.overview || match.poster_path)) {
+        return match
+      }
+    }
+
+    // 2. If download has tmdbId, fetch shared media:
+    if (dl.tmdbId) {
+      const shared = await fetchSharedMediaByTmdbId(dl.mediaType === 'series' ? 'series' : 'movie', dl.tmdbId)
+      if (shared) {
+        if (dl.downloadPath) {
+          let resolved = dl.downloadPath
+          if (fs.existsSync(resolved) && fs.statSync(resolved).isDirectory()) {
+            resolved = findLargestVideoInDir(resolved) || resolved
+          }
+          shared.file_path = resolved
+        }
+        return shared
+      }
+    }
+
+    // 3. Search TMDB by clean title
+    const rawTitle = dl.name || dl.title || ''
+    const cleanTitle = rawTitle
+      .replace(/\.[^/.]+$/, '')
+      .replace(/[._]/g, ' ')
+      .replace(/\b(1080p|720p|2160p|4k|bluray|web-dl|web-rip|webrip|hdrip|x264|x265|hevc|aac|dvdrip|brrip)\b/gi, '')
+      .replace(/\b(s\d{1,2}|e\d{1,2}|season\s*\d+|episode\s*\d+)\b/gi, '')
+      .replace(/\s+/g, ' ')
+      .trim()
+
+    const yearMatch = rawTitle.match(/\b(19\d{2}|20[0-2]\d)\b/)
+    const year = yearMatch ? yearMatch[1] : undefined
+    const isTv = /\b(s\d{1,2}|e\d{1,2}|season|episode)\b/i.test(rawTitle) || dl.mediaType === 'series'
+
+    if (cleanTitle && TMDB_API_KEY) {
+      const url = `https://api.themoviedb.org/3/search/multi?api_key=${TMDB_API_KEY}&query=${encodeURIComponent(cleanTitle)}&include_adult=false&page=1`
+      const data: any = await nodeHttpGet(url)
+      const results = (data?.results || []).filter((r: any) => r.media_type === 'movie' || r.media_type === 'tv')
+      if (results.length > 0) {
+        let best = results.find((r: any) => {
+          if (year) {
+            const rel = r.release_date || r.first_air_date || ''
+            if (rel.startsWith(year)) return true
+          }
+          return false
+        })
+        if (!best) {
+          best = results.find((r: any) => isTv ? r.media_type === 'tv' : r.media_type === 'movie') || results[0]
+        }
+
+        const resolvedType = best.media_type === 'tv' ? 'series' : 'movie'
+        const shared = await fetchSharedMediaByTmdbId(resolvedType, best.id)
+        if (shared) {
+          if (dl.downloadPath) {
+            let resolved = dl.downloadPath
+            if (fs.existsSync(resolved) && fs.statSync(resolved).isDirectory()) {
+              resolved = findLargestVideoInDir(resolved) || resolved
+            }
+            shared.file_path = resolved
+          }
+          try {
+            db.updateDownload({ ...dl, tmdbId: best.id, mediaType: resolvedType })
+            downloadRecordsCache.set(dl.id, { ...dl, tmdbId: best.id, mediaType: resolvedType })
+          } catch {}
+          return shared
+        }
+      }
+    }
+
+    return null
+  } catch (err) {
+    console.error('[get-detail-media-for-download] Error:', err)
+    return null
+  }
 })
 
 ipcMain.handle('prepare-torrent-stream', async (_, id: string) => {
@@ -9380,10 +9737,19 @@ ipcMain.handle('ft-get-comments', async (_e, input: { videoId: string; sortBy?: 
   }
 })
 
-function getYouTubeEmbedFrames(onlyMainWindow = false): Electron.WebFrameMain[] {
+function getYouTubeEmbedFrames(callerEvent?: Electron.IpcMainInvokeEvent | null, onlyMainWindow = false): Electron.WebFrameMain[] {
   const result: Electron.WebFrameMain[] = []
-  const mainWin = getMainWindow()
-  const wins = onlyMainWindow && mainWin ? [mainWin] : BrowserWindow.getAllWindows()
+  let wins: BrowserWindow[] = []
+  if (callerEvent?.sender) {
+    const callerWin = BrowserWindow.fromWebContents(callerEvent.sender)
+    if (callerWin && !callerWin.isDestroyed()) {
+      wins = [callerWin]
+    }
+  }
+  if (!wins.length) {
+    const mainWin = getMainWindow()
+    wins = onlyMainWindow && mainWin ? [mainWin] : BrowserWindow.getAllWindows()
+  }
   for (const win of wins) {
     if (win.isDestroyed()) continue
     const collectFrames = (parent: Electron.WebFrameMain) => {
@@ -9403,9 +9769,9 @@ function getYouTubeEmbedFrames(onlyMainWindow = false): Electron.WebFrameMain[] 
   return result
 }
 
-ipcMain.handle('ft-set-frame-quality', async (_e, quality: string) => {
+ipcMain.handle('ft-set-frame-quality', async (e, quality: string) => {
   try {
-    const frames = getYouTubeEmbedFrames()
+    const frames = getYouTubeEmbedFrames(e)
     let applied = false
     const script = `
       (() => {
@@ -9456,9 +9822,9 @@ ipcMain.handle('ft-set-frame-quality', async (_e, quality: string) => {
   }
 })
 
-ipcMain.handle('ft-get-frame-time', async () => {
+ipcMain.handle('ft-get-frame-time', async (e) => {
   try {
-    const frames = getYouTubeEmbedFrames(true)
+    const frames = getYouTubeEmbedFrames(e, true)
     for (const frame of frames) {
       try {
         const res = await frame.executeJavaScript(`
@@ -9504,9 +9870,9 @@ ipcMain.handle('ft-get-frame-time', async () => {
   }
 })
 
-ipcMain.handle('ft-get-frame-quality', async () => {
+ipcMain.handle('ft-get-frame-quality', async (e) => {
   try {
-    const frames = getYouTubeEmbedFrames()
+    const frames = getYouTubeEmbedFrames(e)
     for (const frame of frames) {
       try {
         const res = await frame.executeJavaScript(`
@@ -9536,12 +9902,12 @@ ipcMain.handle('ft-get-frame-quality', async () => {
   }
 })
 
-ipcMain.handle('ft-seek-frame', async (_e, input: { seconds: number; play?: boolean } | number) => {
+ipcMain.handle('ft-seek-frame', async (e, input: { seconds: number; play?: boolean } | number) => {
   const seconds = typeof input === 'number' ? input : Number(input?.seconds || 0)
   const shouldPlay = typeof input === 'object' && input !== null ? input.play !== false : true
   if (!Number.isFinite(seconds) || seconds < 0) return { ok: false, error: 'Invalid seconds' }
   try {
-    const frames = getYouTubeEmbedFrames()
+    const frames = getYouTubeEmbedFrames(e)
     let applied = false
     const script = `
       (() => {

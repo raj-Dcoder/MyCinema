@@ -12,7 +12,7 @@ import {
   Zap,
 } from 'lucide-react'
 import type { FtVideo } from '../../types'
-import { embedUrl } from '../../utils/focusTube'
+import { embedUrl, PIP_QUALITY_PREF_KEY, DEFAULT_PIP_QUALITY } from '../../utils/focusTube'
 import { formatChapterTime, type FtSponsorSegment, sponsorLabel } from '../../utils/focusCinema'
 
 const YT_ORIGIN = 'https://www.youtube.com'
@@ -35,6 +35,7 @@ export interface FocusTubePipPlayerProps {
     queue?: FtVideo[]
     hasNext?: boolean
     nextTitle?: string | null
+    pipQuality?: string
   }
 }
 
@@ -47,6 +48,9 @@ export const FocusTubePipPlayer: React.FC<FocusTubePipPlayerProps> = ({ initialP
   const [volume, setVolume] = useState<number>(initialPayload?.volume ?? 100)
   const [muted, setMuted] = useState<boolean>(initialPayload?.muted ?? false)
   const [speed, setSpeed] = useState<number>(initialPayload?.playbackRate ?? 1)
+  const [pipQuality, setPipQuality] = useState<string>(() => {
+    return initialPayload?.pipQuality || (typeof localStorage !== 'undefined' ? localStorage.getItem(PIP_QUALITY_PREF_KEY) : null) || DEFAULT_PIP_QUALITY
+  })
   const [showControls, setShowControls] = useState<boolean>(true)
   const [scrubTime, setScrubTime] = useState<number | null>(null)
   const [sponsorSegments, setSponsorSegments] = useState<FtSponsorSegment[]>([])
@@ -60,6 +64,9 @@ export const FocusTubePipPlayer: React.FC<FocusTubePipPlayerProps> = ({ initialP
   const idRef = useRef<number>(1)
   const bridgeUpRef = useRef<boolean>(false)
   const hideControlsTimerRef = useRef<number | null>(null)
+  const stallTimestampsRef = useRef<number[]>([])
+  const bufferCushionTimerRef = useRef<number>(0)
+  const isBufferCushioningRef = useRef<boolean>(false)
   const currentTimeRef = useRef<number>(initialPayload?.currentTime || 0)
   currentTimeRef.current = currentTime
   const playerStateRef = useRef<number | null>(null)
@@ -89,6 +96,9 @@ export const FocusTubePipPlayer: React.FC<FocusTubePipPlayerProps> = ({ initialP
           setVolume(payload.volume ?? 100)
           setMuted(payload.muted ?? false)
           setSpeed(payload.playbackRate ?? 1)
+          if (payload.pipQuality) {
+            setPipQuality(payload.pipQuality)
+          }
           setHasNext(!!payload.hasNext)
           setNextTitle(payload.nextTitle || null)
           setQueue(payload.queue || [])
@@ -105,6 +115,9 @@ export const FocusTubePipPlayer: React.FC<FocusTubePipPlayerProps> = ({ initialP
           setVolume(payload.volume ?? 100)
           setMuted(payload.muted ?? false)
           setSpeed(payload.playbackRate ?? 1)
+          if (payload.pipQuality) {
+            setPipQuality(payload.pipQuality)
+          }
           setHasNext(!!payload.hasNext)
           setNextTitle(payload.nextTitle || null)
           setQueue(payload.queue || [])
@@ -176,6 +189,9 @@ export const FocusTubePipPlayer: React.FC<FocusTubePipPlayerProps> = ({ initialP
       if (hideControlsTimerRef.current !== null) {
         window.clearTimeout(hideControlsTimerRef.current)
       }
+      if (bufferCushionTimerRef.current) {
+        window.clearTimeout(bufferCushionTimerRef.current)
+      }
     }
   }, [])
 
@@ -190,8 +206,9 @@ export const FocusTubePipPlayer: React.FC<FocusTubePipPlayerProps> = ({ initialP
           post('getDuration')
         }
 
-        // Periodic sync to main process & SQLite DB
-        if (videoRef.current && currentTimeRef.current > 0) {
+        // Periodic sync to main process & SQLite DB throttled to once every 5 seconds (10 ticks)
+        // during active playback to eliminate main-thread disk blocking and IPC re-render floods.
+        if (videoRef.current && currentTimeRef.current > 0 && ticks % 10 === 0) {
           window.api?.ftSyncPipState?.({
             videoId: videoRef.current.videoId,
             currentTime: currentTimeRef.current,
@@ -225,6 +242,10 @@ export const FocusTubePipPlayer: React.FC<FocusTubePipPlayerProps> = ({ initialP
         post('setVolume', [volume])
         post(muted ? 'mute' : 'unMute', [])
         if (speed !== 1) post('setPlaybackRate', [speed])
+        if (pipQuality && pipQuality !== 'auto') {
+          post('setPlaybackQuality', [pipQuality])
+          post('setPlaybackQualityRange', ['auto', pipQuality])
+        }
         post('getDuration')
         post('playVideo')
         return
@@ -234,10 +255,34 @@ export const FocusTubePipPlayer: React.FC<FocusTubePipPlayerProps> = ({ initialP
         const state = Number(data.info)
         setPlayerState(state)
         playerStateRef.current = state
-        if (state === STATE_PLAYING) {
+        if (state === STATE_BUFFERING) {
+          const now = Date.now()
+          stallTimestampsRef.current = stallTimestampsRef.current.filter((t) => now - t < 15000)
+          stallTimestampsRef.current.push(now)
+
+          // Intelligent buffer cushion in PiP:
+          // When 2+ stalls occur in 15 seconds, pause briefly (1.4s) so
+          // YouTube's DASH loader builds a healthy cushion before resuming.
+          if (stallTimestampsRef.current.length >= 2 && !isBufferCushioningRef.current) {
+            isBufferCushioningRef.current = true
+            window.clearTimeout(bufferCushionTimerRef.current)
+            post('pauseVideo')
+            bufferCushionTimerRef.current = window.setTimeout(() => {
+              isBufferCushioningRef.current = false
+              post('playVideo')
+              if (speed !== 1) post('setPlaybackRate', [speed])
+            }, 1400)
+          }
+        } else if (state === STATE_PLAYING) {
           seekLockRef.current = null
           pokeControls()
-          if (speed !== 1) post('setPlaybackRate', [speed])
+          if (!isBufferCushioningRef.current && speed !== 1) {
+            post('setPlaybackRate', [speed])
+          }
+          if (pipQuality && pipQuality !== 'auto') {
+            post('setPlaybackQuality', [pipQuality])
+            post('setPlaybackQualityRange', ['auto', pipQuality])
+          }
         } else {
           setShowControls(true)
         }
@@ -269,7 +314,6 @@ export const FocusTubePipPlayer: React.FC<FocusTubePipPlayerProps> = ({ initialP
             if (hit) {
               seekLockRef.current = { target: hit.end, until: Date.now() + 1600 }
               post('seekTo', [hit.end, true])
-              window.api?.ftSeekFrame?.(hit.end, true).catch(() => {})
               setSkipToast({ text: `Skipped ${sponsorLabel(hit.category)}` })
               setTimeout(() => setSkipToast(null), 2500)
             }
@@ -287,7 +331,7 @@ export const FocusTubePipPlayer: React.FC<FocusTubePipPlayerProps> = ({ initialP
     return () => {
       window.removeEventListener('message', onMessage)
     }
-  }, [video, sendHandshake, post, sponsorSegments, volume, muted, speed, pokeControls])
+  }, [video, sendHandshake, post, sponsorSegments, volume, muted, speed, pipQuality, pokeControls])
 
   const togglePlay = useCallback(() => {
     if (playerState === STATE_PLAYING) {
@@ -308,7 +352,6 @@ export const FocusTubePipPlayer: React.FC<FocusTubePipPlayerProps> = ({ initialP
     if (shouldPlay) {
       post('playVideo')
     }
-    window.api?.ftSeekFrame?.(target, shouldPlay).catch(() => {})
     pokeControls()
   }, [duration, post, pokeControls, playerState])
 
@@ -442,8 +485,8 @@ export const FocusTubePipPlayer: React.FC<FocusTubePipPlayerProps> = ({ initialP
 
   const embedSrc = useMemo(() => {
     if (!video) return ''
-    return embedUrl(video.videoId, resumeAt)
-  }, [video, resumeAt])
+    return embedUrl(video.videoId, resumeAt, pipQuality)
+  }, [video, resumeAt, pipQuality])
 
   if (!video) {
     return (

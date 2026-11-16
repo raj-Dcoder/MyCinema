@@ -6,7 +6,7 @@ import HorizontalScrollRow, { type HorizontalScrollRowHandle } from '../componen
 import { groupSeriesCards } from '../utils/seriesCards'
 import { groupMovieCards } from '../utils/mediaVersions'
 import { streamRowToVideo, resumeOnlineStream, isOnlineProgressEnabled, isNewEpisodeNotifyEnabled, groupOnlineStreamRows, resolveOnlineNextEpisode, buildOnlineSeriesCard, formatSeasonEpisode, getOnlineResumeKey, safeGetStreamHistory, safeGetFollowedSeries, safeMarkFollowedSeen, safeCheckFollowedUpdates, shouldRunFollowCheck, stampFollowCheck, safeGetFollowedMovies, safeUnfollowMovie, safeMarkFollowedMovieSeen, safeCheckFollowedMovieUpdates, FOLLOW_TOAST_EVENT } from '../utils/streamResume'
-import { Search as SearchIcon, Bookmark, ChevronLeft, ChevronRight, Play, X, Loader2, Star, Film, Tv, HardDrive, Cloud, CheckCircle2, Bell, BellRing, Sparkles, RotateCcw } from 'lucide-react'
+import { Search as SearchIcon, Bookmark, ChevronLeft, ChevronRight, Play, X, Loader2, Star, Film, Tv, HardDrive, Cloud, CheckCircle2, Bell, BellRing, Sparkles, RefreshCw } from 'lucide-react'
 
 interface HomeProps {
   onPlay: (video: Video) => void
@@ -470,6 +470,31 @@ const isIndianContent = (video: Video): boolean => {
   return ['hi', 'te', 'ta', 'ml', 'kn', 'pa', 'bn', 'mr', 'gu', 'or', 'as', 'ur'].includes(lang)
 }
 
+const parseDateMs = (dateStr?: string | null): number => {
+  if (!dateStr) return 0
+  const match = String(dateStr).trim().match(/^(\d{4})-(\d{2})-(\d{2})/)
+  if (match) {
+    const d = new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]))
+    return isNaN(d.getTime()) ? 0 : d.getTime()
+  }
+  const t = new Date(dateStr).getTime()
+  return isNaN(t) ? 0 : t
+}
+
+const sortRecentAntichronological = (a: Video, b: Video) => {
+  const timeA = parseDateMs(a.release_date) || -Infinity
+  const timeB = parseDateMs(b.release_date) || -Infinity
+  if (timeB !== timeA) return timeB - timeA
+  return (b.vote_average || 0) - (a.vote_average || 0)
+}
+
+const sortUpcomingChronological = (a: Video, b: Video) => {
+  const timeA = parseDateMs(a.release_date) || Infinity
+  const timeB = parseDateMs(b.release_date) || Infinity
+  if (timeA !== timeB) return timeA - timeB
+  return (b.vote_average || 0) - (a.vote_average || 0)
+}
+
 
 const Home: React.FC<HomeProps> = ({ onPlay, onShowDetail, onNavigate, refreshKey, isActive = true }) => {
   const initialSnapshotRef = useRef<HomeSnapshot | null>(readHomeSnapshot())
@@ -499,45 +524,91 @@ const Home: React.FC<HomeProps> = ({ onPlay, onShowDetail, onNavigate, refreshKe
   const [upcomingMovieFilter, setUpcomingMovieFilter] = useState<'all' | 'indian' | 'international'>('all')
   const [upcomingSeriesFilter, setUpcomingSeriesFilter] = useState<'all' | 'indian' | 'international'>('all')
   const [isRefreshingDiscovery, setIsRefreshingDiscovery] = useState(false)
+  const [refreshSuccess, setRefreshSuccess] = useState(false)
+
+  const displayedTrendingMovies = useMemo(() => {
+    const todayStr = new Date().toISOString().substring(0, 10)
+    return trendingMovies.filter(v => {
+      const releaseDate = v.release_date ? String(v.release_date).trim().substring(0, 10) : ''
+      return Boolean(releaseDate && releaseDate <= todayStr)
+    })
+  }, [trendingMovies])
+
+  const displayedTrendingSeries = useMemo(() => {
+    const todayStr = new Date().toISOString().substring(0, 10)
+    return trendingSeries.filter(v => {
+      const releaseDate = v.release_date ? String(v.release_date).trim().substring(0, 10) : ''
+      return Boolean(releaseDate && releaseDate <= todayStr)
+    })
+  }, [trendingSeries])
 
   const displayedRecentMovies = useMemo(() => {
+    const todayStr = new Date().toISOString().substring(0, 10)
+    let list = recentlyReleasedMovies.filter(v => {
+      const releaseDate = v.release_date ? String(v.release_date).trim().substring(0, 10) : ''
+      return Boolean(releaseDate && releaseDate <= todayStr)
+    })
     if (recentMovieFilter === 'indian') {
-      return recentlyReleasedMovies.filter(isIndianContent)
+      list = list.filter(isIndianContent)
+    } else if (recentMovieFilter === 'international') {
+      list = list.filter(v => !isIndianContent(v))
     }
-    if (recentMovieFilter === 'international') {
-      return recentlyReleasedMovies.filter(v => !isIndianContent(v))
-    }
-    return recentlyReleasedMovies
+    return [...list].sort(sortRecentAntichronological)
   }, [recentlyReleasedMovies, recentMovieFilter])
 
   const displayedRecentSeries = useMemo(() => {
+    const todayStr = new Date().toISOString().substring(0, 10)
+    let list = recentlyReleasedSeries.filter(v => {
+      const releaseDate = v.release_date ? String(v.release_date).trim().substring(0, 10) : ''
+      return Boolean(releaseDate && releaseDate <= todayStr)
+    })
     if (recentSeriesFilter === 'indian') {
-      return recentlyReleasedSeries.filter(isIndianContent)
+      list = list.filter(isIndianContent)
+    } else if (recentSeriesFilter === 'international') {
+      list = list.filter(v => !isIndianContent(v))
     }
-    if (recentSeriesFilter === 'international') {
-      return recentlyReleasedSeries.filter(v => !isIndianContent(v))
-    }
-    return recentlyReleasedSeries
+    return [...list].sort(sortRecentAntichronological)
   }, [recentlyReleasedSeries, recentSeriesFilter])
 
   const displayedUpcomingMovies = useMemo(() => {
+    const todayStr = new Date().toISOString().substring(0, 10)
+    let list = upcomingMovies.filter(v => {
+      const releaseDate = v.release_date ? String(v.release_date).trim().substring(0, 10) : ''
+      return Boolean(releaseDate && releaseDate >= todayStr)
+    })
     if (upcomingMovieFilter === 'indian') {
-      return upcomingMovies.filter(isIndianContent)
+      list = list.filter(isIndianContent)
+    } else if (upcomingMovieFilter === 'international') {
+      list = list.filter(v => !isIndianContent(v))
     }
-    if (upcomingMovieFilter === 'international') {
-      return upcomingMovies.filter(v => !isIndianContent(v))
-    }
-    return upcomingMovies
+    return [...list].sort(sortUpcomingChronological)
   }, [upcomingMovies, upcomingMovieFilter])
 
   const displayedUpcomingSeries = useMemo(() => {
+    const todayStr = new Date().toISOString().substring(0, 10)
+    let list = upcomingSeries.filter(v => {
+      const releaseDate = v.release_date ? String(v.release_date).trim().substring(0, 10) : ''
+      return Boolean(releaseDate && releaseDate >= todayStr)
+    })
+
+    // Strictly filter out any non-Hindi Indian regional series from upcoming series
+    list = list.filter(v => {
+      if (isIndianContent(v)) {
+        const lang = (v.original_language || '').toLowerCase().trim()
+        return lang === 'hi' || (Boolean(v.is_indian) && (lang === 'hi' || !lang))
+      }
+      return true
+    })
+
     if (upcomingSeriesFilter === 'indian') {
-      return upcomingSeries.filter(isIndianContent)
+      list = list.filter(v => {
+        const lang = (v.original_language || '').toLowerCase().trim()
+        return isIndianContent(v) && (lang === 'hi' || (Boolean(v.is_indian) && (lang === 'hi' || !lang)))
+      })
+    } else if (upcomingSeriesFilter === 'international') {
+      list = list.filter(v => !isIndianContent(v))
     }
-    if (upcomingSeriesFilter === 'international') {
-      return upcomingSeries.filter(v => !isIndianContent(v))
-    }
-    return upcomingSeries
+    return [...list].sort(sortUpcomingChronological)
   }, [upcomingSeries, upcomingSeriesFilter])
   const [allLibraryVideos, setAllLibraryVideos] = useState<Video[]>([])
   const [localDataLoaded, setLocalDataLoaded] = useState(() => Boolean(initialSnapshotRef.current))
@@ -770,7 +841,7 @@ const Home: React.FC<HomeProps> = ({ onPlay, onShowDetail, onNavigate, refreshKe
   }, [])
 
   const fetchDiscoveryData = useCallback(async (force = false) => {
-    const DISCOVERY_CACHE_TTL_MS = 60 * 60 * 1000 // 60 minutes
+    const DISCOVERY_CACHE_TTL_MS = 12 * 60 * 60 * 1000 // 12 hours (optimal 12-24h refresh window)
     const isCacheFresh = (Date.now() - lastDiscoveryFetchTimeRef.current) < DISCOVERY_CACHE_TTL_MS
     const hasFullDiscoveryData = trendingMovies.length > 0 && recentlyReleasedMovies.length > 0 && upcomingMovies.length > 0
     if (!force && isCacheFresh && hasFullDiscoveryData) {
@@ -859,13 +930,18 @@ const Home: React.FC<HomeProps> = ({ onPlay, onShowDetail, onNavigate, refreshKe
   const handleRefreshDiscovery = useCallback(async () => {
     if (isRefreshingDiscovery) return
     setIsRefreshingDiscovery(true)
+    setRefreshSuccess(false)
     try {
       await fetchDiscoveryData(true)
       await refreshLocalHomeData()
+      setRefreshSuccess(true)
     } finally {
       setTimeout(() => {
         setIsRefreshingDiscovery(false)
       }, 600)
+      setTimeout(() => {
+        setRefreshSuccess(false)
+      }, 2200)
     }
   }, [isRefreshingDiscovery, fetchDiscoveryData, refreshLocalHomeData])
 
@@ -1407,7 +1483,7 @@ const Home: React.FC<HomeProps> = ({ onPlay, onShowDetail, onNavigate, refreshKe
       {(showHero || showLocalEmptyState || !localDataLoaded) && (
         <section className="-mt-2 mb-10">
           {/* Desktop App Header Above Floating Cinema Card */}
-          <div className="mx-auto mb-4 flex max-w-[1600px] items-center justify-between px-6 md:px-10 lg:px-14">
+          <div className="relative z-40 mx-auto mb-4 flex max-w-[1600px] items-center justify-between px-6 md:px-10 lg:px-14">
             <div>
               <p className="hero-greeting-eyebrow text-[11px] sm:text-xs font-black uppercase tracking-[0.22em] text-primary">
                 {getTimeGreeting()}, {userName}
@@ -1417,12 +1493,61 @@ const Home: React.FC<HomeProps> = ({ onPlay, onShowDetail, onNavigate, refreshKe
               </h2>
             </div>
 
-            <div className="relative flex items-center gap-3" ref={searchBoxRef}>
+            <div className="relative z-40 flex items-center gap-2.5">
+              {/* Unified Ambient-Adaptive Sync / Refresh Button (Option A) */}
               <div
-                className={`relative transition-all duration-300 ease-out ${
-                  isSearchOpen ? 'w-[min(420px,calc(100vw-4rem))]' : 'w-12'
+                className={`relative group transition-all duration-300 ease-out ${
+                  isSearchOpen ? 'translate-x-0' : 'translate-x-[58px]'
                 }`}
               >
+                <button
+                  type="button"
+                  onClick={handleRefreshDiscovery}
+                  disabled={isRefreshingDiscovery}
+                  aria-label="Refresh discovery content"
+                  className={`hero-sync-btn flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl border backdrop-blur-xl transition-all duration-300 ${
+                    refreshSuccess
+                      ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-400 shadow-[0_0_20px_rgba(16,185,129,0.25)]'
+                      : isRefreshingDiscovery
+                        ? 'border-primary/40 bg-primary/10 text-primary shadow-[0_0_15px_rgba(229,9,20,0.2)]'
+                        : 'border-white/10 bg-black/35 text-white/70 hover:border-white/20 hover:bg-black/50 hover:text-white hover:scale-105 active:scale-95'
+                  }`}
+                >
+                  {refreshSuccess ? (
+                    <CheckCircle2 size={21} strokeWidth={2.4} className="animate-in zoom-in-75 duration-200" />
+                  ) : (
+                    <RefreshCw
+                      size={20}
+                      strokeWidth={2.2}
+                      className={`transition-all duration-500 ease-out ${
+                        isRefreshingDiscovery ? 'animate-spin' : 'group-hover:rotate-180'
+                      }`}
+                    />
+                  )}
+                </button>
+
+                {/* Ambient-friendly Floating Tooltip */}
+                <div className="pointer-events-none absolute right-0 top-full mt-2 z-50 whitespace-nowrap rounded-xl border border-white/15 bg-[#070a0f]/95 px-3 py-1.5 text-[11px] font-bold text-white opacity-0 shadow-[0_12px_30px_rgba(0,0,0,0.85)] backdrop-blur-xl transition-opacity duration-200 group-hover:opacity-100">
+                  {refreshSuccess
+                    ? 'Discovery up to date!'
+                    : isRefreshingDiscovery
+                      ? 'Refreshing discovery...'
+                      : 'Sync Discovery (F5)'}
+                </div>
+              </div>
+
+              {/* Search Box */}
+              <div
+                className={`relative flex items-center transition-all duration-300 ease-out ${
+                  isSearchOpen ? 'translate-x-0' : '-translate-x-[58px]'
+                }`}
+                ref={searchBoxRef}
+              >
+                <div
+                  className={`relative transition-all duration-300 ease-out ${
+                    isSearchOpen ? 'w-[min(420px,calc(100vw-8rem))]' : 'w-12'
+                  }`}
+                >
                 <div
                   className={`hero-search-pill flex h-12 items-center overflow-hidden rounded-2xl border backdrop-blur-xl transition-all duration-300 ${
                     isSearchOpen
@@ -1519,6 +1644,7 @@ const Home: React.FC<HomeProps> = ({ onPlay, onShowDetail, onNavigate, refreshKe
               </div>
             </div>
           </div>
+        </div>
 
           {/* Apple TV+ Floating Cinema Card */}
           <div className="mx-auto max-w-[1600px] px-4 sm:px-6 md:px-10 lg:px-14">
@@ -1637,7 +1763,7 @@ const Home: React.FC<HomeProps> = ({ onPlay, onShowDetail, onNavigate, refreshKe
       <section className="mx-auto mt-7 max-w-[1600px] px-8">
         <SectionHeader title="Global Trending Movies" />
         <HorizontalScrollRow ref={globalMoviesRef} contentClassName="gap-5">
-          {trendingMovies.map(video => (
+          {displayedTrendingMovies.map(video => (
             <div
               key={video.tmdb_id || video.id}
               className={POSTER_RAIL_CARD_CLASS}
@@ -1645,7 +1771,7 @@ const Home: React.FC<HomeProps> = ({ onPlay, onShowDetail, onNavigate, refreshKe
               <VideoCard video={video} onPlay={handlePlayFromHome} onShowDetail={handleShowDetailFromHome} />
             </div>
           ))}
-          {trendingMovies.length === 0 && Array.from({ length: TRENDING_RAIL_LIMIT }, (_, i) => i + 1).map(i => (
+          {displayedTrendingMovies.length === 0 && trendingMovies.length === 0 && Array.from({ length: TRENDING_RAIL_LIMIT }, (_, i) => i + 1).map(i => (
             <div key={i} className={POSTER_RAIL_CARD_CLASS}>
               <VideoCardSkeleton />
             </div>
@@ -1657,7 +1783,7 @@ const Home: React.FC<HomeProps> = ({ onPlay, onShowDetail, onNavigate, refreshKe
       <section className="mx-auto mt-7 max-w-[1600px] px-8">
         <SectionHeader title="Global Trending Series" />
         <HorizontalScrollRow ref={globalSeriesRef} contentClassName="gap-5">
-          {trendingSeries.map(video => (
+          {displayedTrendingSeries.map(video => (
             <div
               key={video.tmdb_id || video.id}
               className={POSTER_RAIL_CARD_CLASS}
@@ -1665,7 +1791,7 @@ const Home: React.FC<HomeProps> = ({ onPlay, onShowDetail, onNavigate, refreshKe
               <VideoCard video={video} onPlay={handlePlayFromHome} onShowDetail={handleShowDetailFromHome} />
             </div>
           ))}
-          {trendingSeries.length === 0 && Array.from({ length: TRENDING_RAIL_LIMIT }, (_, i) => i + 1).map(i => (
+          {displayedTrendingSeries.length === 0 && trendingSeries.length === 0 && Array.from({ length: TRENDING_RAIL_LIMIT }, (_, i) => i + 1).map(i => (
             <div key={i} className={POSTER_RAIL_CARD_CLASS}>
               <VideoCardSkeleton />
             </div>

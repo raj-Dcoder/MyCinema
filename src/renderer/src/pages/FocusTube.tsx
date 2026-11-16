@@ -5,11 +5,15 @@ import {
   Calendar,
   Check,
   CheckCheck,
+  ChevronDown,
   ChevronLeft,
   ChevronRight,
   Clock,
+  Eye,
+  EyeOff,
   Flame,
   Layers,
+  LayoutGrid,
   Pencil,
   Play,
   Plus,
@@ -21,6 +25,8 @@ import {
   Trash2,
   Users,
   X,
+  Zap,
+  ZapOff,
 } from 'lucide-react'
 import type { FtCategory, FtChannel, FtVideo } from '../types'
 import QuickSubscribeModal from '../components/focus/QuickSubscribeModal'
@@ -137,6 +143,41 @@ const FocusTube: React.FC<FocusTubeProps> = ({ activeTab = 'focustube' }) => {
   const searchInputRef = useRef<HTMLInputElement>(null)
   const [canScrollLeft, setCanScrollLeft] = useState(false)
   const [canScrollRight, setCanScrollRight] = useState(false)
+  const [sortMenuOpen, setSortMenuOpen] = useState(false)
+  const sortDropdownRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (!sortMenuOpen) return
+    const handlePointerDown = (e: MouseEvent) => {
+      if (sortDropdownRef.current && !sortDropdownRef.current.contains(e.target as Node)) {
+        setSortMenuOpen(false)
+      }
+    }
+    window.addEventListener('pointerdown', handlePointerDown)
+    return () => window.removeEventListener('pointerdown', handlePointerDown)
+  }, [sortMenuOpen])
+
+  const carouselMaskStyle = useMemo(() => {
+    if (canScrollLeft && canScrollRight) {
+      return {
+        maskImage: 'linear-gradient(to right, transparent 0px, black 36px, black calc(100% - 36px), transparent 100%)',
+        WebkitMaskImage: 'linear-gradient(to right, transparent 0px, black 36px, black calc(100% - 36px), transparent 100%)',
+      }
+    }
+    if (canScrollLeft) {
+      return {
+        maskImage: 'linear-gradient(to right, transparent 0px, black 36px, black 100%)',
+        WebkitMaskImage: 'linear-gradient(to right, transparent 0px, black 36px, black 100%)',
+      }
+    }
+    if (canScrollRight) {
+      return {
+        maskImage: 'linear-gradient(to right, black 0px, black calc(100% - 36px), transparent 100%)',
+        WebkitMaskImage: 'linear-gradient(to right, black 0px, black calc(100% - 36px), transparent 100%)',
+      }
+    }
+    return {}
+  }, [canScrollLeft, canScrollRight])
 
   const checkCarouselScroll = useCallback(() => {
     const el = carouselRef.current
@@ -914,22 +955,19 @@ const FocusTube: React.FC<FocusTubeProps> = ({ activeTab = 'focustube' }) => {
           )}
         </div>
       ) : (
-      <div className="flex flex-col gap-3 py-1 lg:flex-row lg:items-center lg:justify-between">
+      <div className="flex items-center justify-between gap-3 py-1">
         {/* Left / Center: Category Carousel with chevrons and overflow */}
         <div data-tour="focustube-categories" className="relative flex min-w-0 flex-1 items-center">
-          {/* Scroll Left Button & Gradient Fade */}
+          {/* Scroll Left Button */}
           {canScrollLeft && (
-            <>
-              <div className="ft-carousel-fade ft-carousel-fade--left pointer-events-none absolute left-0 top-0 bottom-0 z-10 w-12 bg-gradient-to-r from-[#0c0d14] via-[#0c0d14]/80 to-transparent" />
-              <button
-                type="button"
-                onClick={() => scrollCarousel('left')}
-                aria-label="Scroll categories left"
-                className="absolute left-0 z-20 flex h-7 w-7 items-center justify-center rounded-full border border-white/15 bg-[#14161f]/95 text-white shadow-xl backdrop-blur transition-all hover:scale-105 hover:bg-white/20 active:scale-95"
-              >
-                <ChevronLeft size={15} />
-              </button>
-            </>
+            <button
+              type="button"
+              onClick={() => scrollCarousel('left')}
+              aria-label="Scroll categories left"
+              className="ft-carousel-btn left-0"
+            >
+              <ChevronLeft size={15} />
+            </button>
           )}
 
           {/* Carousel Scroll Container */}
@@ -940,22 +978,26 @@ const FocusTube: React.FC<FocusTubeProps> = ({ activeTab = 'focustube' }) => {
             className={`flex items-center gap-2 overflow-x-auto no-scrollbar scroll-smooth py-1.5 ${
               canScrollLeft ? 'pl-8' : ''
             } ${canScrollRight ? 'pr-8' : ''}`}
-            style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}
+            style={{
+              ...carouselMaskStyle,
+              scrollbarWidth: 'none',
+              msOverflowStyle: 'none',
+            }}
           >
-            {/* "All" category pill with notification dot */}
+            {/* "All" category pill with icon */}
             <div className="relative shrink-0">
               <button
                 type="button"
                 onClick={() => void selectCategory(null)}
-                className={`ft-category-pill inline-flex shrink-0 items-center rounded-xl px-4 py-1.5 text-xs font-bold transition-all ${
+                className={`ft-category-pill inline-flex shrink-0 items-center gap-1.5 rounded-xl px-3.5 py-1.5 text-xs font-semibold transition-all ${
                   activeCategoryId === null
                     ? 'bg-primary text-white shadow-[0_0_15px_rgba(var(--c-accent),0.45)]'
                     : 'border border-white/10 bg-white/5 text-white/70 hover:border-white/20 hover:bg-white/10 hover:text-white'
                 }`}
               >
-                All
+                <LayoutGrid size={13} className={activeCategoryId === null ? 'text-white' : 'text-white/60'} />
+                <span>All</span>
               </button>
-
             </div>
 
             {/* Category pills */}
@@ -1111,115 +1153,129 @@ const FocusTube: React.FC<FocusTubeProps> = ({ activeTab = 'focustube' }) => {
             )}
           </div>
 
-          {/* Scroll Right Button & Gradient Fade */}
+          {/* Scroll Right Button */}
           {canScrollRight && (
-            <>
-              <div className="ft-carousel-fade ft-carousel-fade--right pointer-events-none absolute right-0 top-0 bottom-0 z-10 w-12 bg-gradient-to-l from-[#0c0d14] via-[#0c0d14]/80 to-transparent" />
-              <button
-                type="button"
-                onClick={() => scrollCarousel('right')}
-                aria-label="Scroll categories right"
-                className="absolute right-0 z-20 flex h-7 w-7 items-center justify-center rounded-full border border-white/15 bg-[#14161f]/95 text-white shadow-xl backdrop-blur transition-all hover:scale-105 hover:bg-white/20 active:scale-95"
-              >
-                <ChevronRight size={15} />
-              </button>
-            </>
+            <button
+              type="button"
+              onClick={() => scrollCarousel('right')}
+              aria-label="Scroll categories right"
+              className="ft-carousel-btn right-0"
+            >
+              <ChevronRight size={15} />
+            </button>
           )}
         </div>
 
-        {/* Right side: Modern Controls (Sort Order, Hide Shorts, Hide Watched, Mark all seen) */}
-        <div data-tour="focustube-feed" className="flex shrink-0 items-center gap-3 self-end pt-1 sm:pt-0">
-          {/* Upload Date Sort Order Pill */}
-          <div className="flex items-center gap-0.5 rounded-xl border border-white/10 bg-white/5 p-0.5" title="Sort videos by upload date">
+        {/* Right side: Modern Unified Compact Toolbar Controls (Option A) */}
+        <div data-tour="focustube-feed" className="flex shrink-0 items-center gap-2">
+          {/* 1. Sort Order Chip with Popover Dropdown */}
+          <div className="relative" ref={sortDropdownRef}>
             <button
               type="button"
-              onClick={() => handleSortChange('newest')}
-              title="Newest uploads first (latest)"
-              className={`flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-[11px] font-bold transition-all ${
-                sortOrder === 'newest'
-                  ? 'bg-primary text-white shadow-sm shadow-primary/40'
-                  : 'text-white/50 hover:bg-white/5 hover:text-white'
-              }`}
+              onClick={() => setSortMenuOpen((prev) => !prev)}
+              title={`Sorted by ${sortOrder === 'newest' ? 'Newest' : 'Oldest'} uploads (click to change)`}
+              className="inline-flex items-center gap-1.5 rounded-xl border border-white/10 bg-white/5 px-2.5 py-1.5 text-xs font-semibold text-white/80 transition-all hover:border-white/20 hover:bg-white/10 hover:text-white"
             >
-              <ArrowDownWideNarrow size={13} />
-              <span>Newest</span>
+              {sortOrder === 'newest' ? (
+                <ArrowDownWideNarrow size={13} className="text-white/70" />
+              ) : (
+                <ArrowUpNarrowWide size={13} className="text-white/70" />
+              )}
+              <span>{sortOrder === 'newest' ? 'Newest' : 'Oldest'}</span>
+              <ChevronDown size={11} className={`text-white/50 transition-transform ${sortMenuOpen ? 'rotate-180' : ''}`} />
             </button>
-            <button
-              type="button"
-              onClick={() => handleSortChange('oldest')}
-              title="Oldest uploads first (chronological order)"
-              className={`flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-[11px] font-bold transition-all ${
-                sortOrder === 'oldest'
-                  ? 'bg-primary text-white shadow-sm shadow-primary/40'
-                  : 'text-white/50 hover:bg-white/5 hover:text-white'
-              }`}
-            >
-              <ArrowUpNarrowWide size={13} />
-              <span>Oldest</span>
-            </button>
+
+            {sortMenuOpen && (
+              <div className="absolute right-0 top-full mt-1.5 z-40 w-36 overflow-hidden rounded-xl border border-white/10 bg-[#0d0f17]/95 p-1 shadow-2xl backdrop-blur-xl animate-in fade-in zoom-in-95 duration-100">
+                <button
+                  type="button"
+                  onClick={() => {
+                    handleSortChange('newest')
+                    setSortMenuOpen(false)
+                  }}
+                  className={`flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-xs font-semibold transition-colors ${
+                    sortOrder === 'newest'
+                      ? 'bg-primary/20 text-white font-bold'
+                      : 'text-white/70 hover:bg-white/10 hover:text-white'
+                  }`}
+                >
+                  <ArrowDownWideNarrow size={12} />
+                  <span>Newest First</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    handleSortChange('oldest')
+                    setSortMenuOpen(false)
+                  }}
+                  className={`flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-xs font-semibold transition-colors ${
+                    sortOrder === 'oldest'
+                      ? 'bg-primary/20 text-white font-bold'
+                      : 'text-white/70 hover:bg-white/10 hover:text-white'
+                  }`}
+                >
+                  <ArrowUpNarrowWide size={12} />
+                  <span>Oldest First</span>
+                </button>
+              </div>
+            )}
           </div>
 
-          <div className="h-4 w-px bg-white/10" />
+          {/* 2. Hide Shorts Compact Chip */}
+          <button
+            type="button"
+            role="switch"
+            aria-checked={hideShorts}
+            onClick={toggleShorts}
+            title={hideShorts ? 'Shorts are hidden (click to show)' : 'Shorts are visible (click to hide)'}
+            className={`inline-flex items-center gap-1.5 rounded-xl px-2.5 py-1.5 text-xs font-semibold transition-all ${
+              hideShorts
+                ? 'border border-primary/60 bg-primary/20 text-white shadow-[0_0_12px_rgba(var(--c-accent),0.35)]'
+                : 'border border-white/10 bg-white/5 text-white/60 hover:border-white/20 hover:bg-white/10 hover:text-white'
+            }`}
+          >
+            {hideShorts ? (
+              <ZapOff size={13} className="text-primary" />
+            ) : (
+              <Zap size={13} className="text-white/60" />
+            )}
+            <span>Shorts</span>
+          </button>
 
-          {/* Hide Shorts Switch */}
-          <div className="flex items-center gap-2">
-            <span className="text-[11px] font-bold text-white/60">Hide Shorts</span>
-            <button
-              type="button"
-              role="switch"
-              aria-checked={hideShorts}
-              onClick={toggleShorts}
-              title={hideShorts ? 'Shorts are hidden (click to show)' : 'Shorts are visible (click to hide)'}
-              className={`relative h-5 w-9 shrink-0 rounded-full transition-colors ${
-                hideShorts ? 'bg-primary shadow-[0_0_10px_rgba(var(--c-accent),0.4)]' : 'bg-white/20'
-              }`}
-            >
-              <span
-                className={`absolute top-0.5 h-4 w-4 rounded-full bg-white shadow transition-all ${
-                  hideShorts ? 'left-[18px]' : 'left-0.5'
-                }`}
-              />
-            </button>
-          </div>
+          {/* 3. Hide Watched Compact Chip */}
+          <button
+            type="button"
+            role="switch"
+            aria-checked={!includeSeen}
+            onClick={() => {
+              const next = !includeSeen
+              setIncludeSeen(next)
+              void loadFeed(activeCategoryId, { includeSeen: next })
+            }}
+            title={!includeSeen ? 'Watched videos are hidden (click to show)' : 'Watched videos are included (click to hide)'}
+            className={`inline-flex items-center gap-1.5 rounded-xl px-2.5 py-1.5 text-xs font-semibold transition-all ${
+              !includeSeen
+                ? 'border border-primary/60 bg-primary/20 text-white shadow-[0_0_12px_rgba(var(--c-accent),0.35)]'
+                : 'border border-white/10 bg-white/5 text-white/60 hover:border-white/20 hover:bg-white/10 hover:text-white'
+            }`}
+          >
+            {!includeSeen ? (
+              <EyeOff size={13} className="text-primary" />
+            ) : (
+              <Eye size={13} className="text-white/60" />
+            )}
+            <span>Watched</span>
+          </button>
 
-          <div className="h-4 w-px bg-white/10" />
-
-          {/* Hide Watched Switch */}
-          <div className="flex items-center gap-2">
-            <span className="text-[11px] font-bold text-white/60">Hide Watched</span>
-            <button
-              type="button"
-              role="switch"
-              aria-checked={!includeSeen}
-              onClick={() => {
-                const next = !includeSeen
-                setIncludeSeen(next)
-                void loadFeed(activeCategoryId, { includeSeen: next })
-              }}
-              title={!includeSeen ? 'Watched videos are hidden (click to show)' : 'Watched videos are included (click to hide)'}
-              className={`relative h-5 w-9 shrink-0 rounded-full transition-colors ${
-                !includeSeen ? 'bg-primary shadow-[0_0_10px_rgba(var(--c-accent),0.4)]' : 'bg-white/20'
-              }`}
-            >
-              <span
-                className={`absolute top-0.5 h-4 w-4 rounded-full bg-white shadow transition-all ${
-                  !includeSeen ? 'left-[18px]' : 'left-0.5'
-                }`}
-              />
-            </button>
-          </div>
-
-          <div className="h-4 w-px bg-white/10" />
-
-          {/* Mark All Seen Button */}
+          {/* 4. Mark All Seen Minimalist Icon Button */}
           <button
             type="button"
             onClick={() => void handleMarkAllSeen()}
             title="Mark all videos in this category as seen"
-            className="inline-flex items-center gap-1.5 rounded-xl border border-white/10 bg-white/5 px-2.5 py-1 text-[11px] font-bold text-white/70 transition-colors hover:border-white/20 hover:bg-white/10 hover:text-white"
+            className="inline-flex h-8 w-8 items-center justify-center rounded-xl border border-white/10 bg-white/5 text-white/70 transition-all hover:border-white/20 hover:bg-white/10 hover:text-white"
+            aria-label="Mark all as seen"
           >
-            <CheckCheck size={13} />
-            <span className="hidden sm:inline">Mark All Seen</span>
+            <CheckCheck size={14} />
           </button>
         </div>
       </div>

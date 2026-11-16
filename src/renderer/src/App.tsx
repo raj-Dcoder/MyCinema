@@ -567,7 +567,7 @@ const App: React.FC = () => {
     ? dlActiveDownloads.reduce((s, d) => s + Math.max(0, Math.min(100, Number(d.progress || 0))), 0) / dlActiveCount
     : 0
   // Top download for speed label
-  const dlTopDownload = dlActiveDownloads[0]
+  const dlTopDownload = dlActiveDownloads[0] || activeDownloads.find(d => d.status === 'queued')
 
   const navItems = [
     { id: 'home' as const,     label: 'Home',         icon: <HomeIcon size={20} /> },
@@ -795,7 +795,7 @@ const App: React.FC = () => {
       />
 
       {/* Sidebar */}
-      <div className={`group/sidebar relative bg-white/[0.02] backdrop-blur-2xl flex flex-col border-r border-white/5 transition-[width] duration-300 ease-in-out z-[85] ${isSidebarExpanded ? 'w-64' : 'w-20'}`}>
+      <div className={`group/sidebar relative flex flex-col border-r border-white/5 transition-[width] duration-300 [transition-timing-function:cubic-bezier(0.25,1,0.5,1)] z-[85] will-change-[width] ${isSidebarExpanded ? 'w-64' : 'w-20'}`}>
         
         {/* Toggle Button */}
         <button
@@ -806,7 +806,7 @@ const App: React.FC = () => {
           {isSidebarExpanded ? <ChevronLeft size={16} strokeWidth={2.5} /> : <ChevronRight size={16} strokeWidth={2.5} />}
         </button>
 
-        <div className="relative flex h-24 items-center px-4 w-full overflow-hidden">
+        <div className="flex h-24 items-center px-4 w-full overflow-hidden">
           <div className="w-12 h-full flex items-center justify-center flex-shrink-0">
             <img 
               src={appLogo} 
@@ -814,21 +814,18 @@ const App: React.FC = () => {
               className="h-11 w-11 rounded-full object-cover shadow-lg shadow-blue-500/10"
             />
           </div>
-          <div className={`absolute left-16 whitespace-nowrap transition-all duration-300 ${isSidebarExpanded ? 'opacity-100 translate-x-0' : 'opacity-0 -translate-x-2 pointer-events-none'}`}>
+          <div className={`w-[176px] flex-shrink-0 pl-3 overflow-hidden whitespace-nowrap transition-opacity duration-200 ${isSidebarExpanded ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}>
             <span className="text-xl font-black tracking-tight text-white">MyCinema</span>
           </div>
         </div>
         
-        <div className="flex-1 overflow-y-auto scrollbar-hide px-4 space-y-8">
+        <div className="flex-1 overflow-y-auto overflow-x-hidden scrollbar-hide px-4 space-y-8">
           {/* Main Nav */}
           <nav className="space-y-1">
             {navItems.map(item => {
               const isDownloadTab = item.id === 'download'
               const showDlIndicator = isDownloadTab && dlTotalActive > 0
               const isCollectionStart = item.id === 'collections'
-              // SVG ring constants
-              const ringR = 13
-              const ringC = 2 * Math.PI * ringR
 
               return (
                 <React.Fragment key={item.id}>
@@ -836,110 +833,130 @@ const App: React.FC = () => {
                   <button
                     data-tour={item.id === 'focustube' ? 'sidebar-focustube' : undefined}
                     onClick={() => navigateToTab(item.id)}
-                    className={`relative flex items-center rounded-xl border border-transparent outline-none focus:outline-none focus-visible:outline-none transition-[background-color,border-color,color,box-shadow,width] duration-150 ease-out group ${
-                      isSidebarExpanded
-                        ? `w-full ${showDlIndicator ? 'h-auto py-2' : 'h-12'}`
-                        : 'w-12 h-12 mx-auto justify-center'
-                    } ${
+                    title={!isSidebarExpanded ? (showDlIndicator ? `${item.label} (${Math.round(dlAvgProgress)}% · ${dlTotalActive} active)` : item.label) : undefined}
+                    className={`relative flex items-center rounded-xl border outline-none focus:outline-none transition-all duration-150 ease-out group w-full h-12 overflow-hidden ${
                       activeTab === item.id
-                        ? 'nav-item-active font-bold'
-                        : 'text-white/45 hover:bg-white/5 hover:text-white'
+                        ? 'nav-item-active font-bold border-transparent'
+                        : showDlIndicator
+                          ? 'border-primary/25 bg-primary/[0.04] hover:border-primary/40 hover:bg-primary/[0.08] text-white/80 hover:text-white shadow-[0_0_12px_rgba(var(--c-accent),0.08)]'
+                          : 'h-12 text-white/45 hover:bg-white/5 hover:text-white border-transparent'
                     }`}
                   >
-                    <div className={`flex flex-col items-center justify-center text-current relative ${
-                      isSidebarExpanded ? 'w-12 h-12 flex-shrink-0' : 'w-full h-full'
-                    }`}>
-                      {/* Progress ring around icon when downloads are active */}
-                      {showDlIndicator ? (
-                        <span className="relative flex items-center justify-center" style={{ width: 30, height: 30 }}>
-                          {/* Background track */}
-                          <svg
-                            width="30" height="30"
-                            className="absolute inset-0 -rotate-90"
-                            viewBox="0 0 30 30"
-                            style={{ overflow: 'visible' }}
-                          >
-                            <circle cx="15" cy="15" r={ringR} fill="none" stroke="rgba(255,255,255,0.08)" strokeWidth="2" />
-                            <circle
-                              cx="15" cy="15" r={ringR}
-                              fill="none"
-                              stroke={activeTab === item.id ? 'var(--color-primary, #e50914)' : 'rgba(34,211,238,0.7)'}
-                              strokeWidth="2"
-                              strokeLinecap="round"
-                              strokeDasharray={ringC}
-                              strokeDashoffset={ringC * (1 - dlAvgProgress / 100)}
-                              className="transition-all duration-500"
-                            />
-                          </svg>
-                          <span className="relative z-10 flex items-center justify-center" style={{ width: 20, height: 20 }}>
-                            {item.icon}
-                          </span>
-                          {/* Count badge */}
-                          <span
-                            className="absolute -top-1.5 -right-1.5 flex h-[14px] min-w-[14px] items-center justify-center rounded-full bg-cyan-400 px-[3px] text-[8px] font-black text-black leading-none shadow-[0_0_6px_rgba(34,211,238,0.6)]"
-                          >
-                            {dlTotalActive}
-                          </span>
+                    {/* Left Icon: Fixed 48x48px (w-12 h-12) */}
+                    <div className="w-12 h-12 flex items-center justify-center text-current relative flex-shrink-0">
+                      {/* Collapsed Ambient Circular Progress Ring (Matches Image 2 with App's Ambient Accent Color) */}
+                      {showDlIndicator && (
+                        <svg
+                          className={`absolute inset-0 -rotate-90 pointer-events-none transition-opacity duration-200 ${
+                            !isSidebarExpanded ? 'opacity-100' : 'opacity-0'
+                          }`}
+                          width="48"
+                          height="48"
+                          viewBox="0 0 48 48"
+                        >
+                          <circle
+                            cx="24"
+                            cy="24"
+                            r="17"
+                            fill="none"
+                            stroke="rgba(255, 255, 255, 0.08)"
+                            strokeWidth="2.5"
+                          />
+                          <circle
+                            cx="24"
+                            cy="24"
+                            r="17"
+                            fill="none"
+                            stroke="rgb(var(--c-accent, 229 9 20))"
+                            strokeWidth="2.5"
+                            strokeLinecap="round"
+                            strokeDasharray={106.81}
+                            strokeDashoffset={106.81 * (1 - Math.max(0, Math.min(100, dlAvgProgress)) / 100)}
+                            className="transition-all duration-300"
+                            style={{
+                              filter: 'drop-shadow(0 0 4px rgba(var(--c-accent, 229 9 20), 0.6))'
+                            }}
+                          />
+                        </svg>
+                      )}
+
+                      <span className={`flex items-center justify-center leading-none relative z-10 ${showDlIndicator && activeTab !== item.id ? 'text-primary' : ''}`}>
+                        {item.icon}
+                      </span>
+
+                      {/* Active Download Count Badge (Minimalist ambient badge at top-right corner) */}
+                      {showDlIndicator && (
+                        <span className="absolute top-1.5 right-1.5 z-20 flex h-3.5 min-w-3.5 items-center justify-center rounded-full bg-primary px-1 text-[8px] font-black text-white leading-none shadow-[0_0_6px_rgba(var(--c-accent),0.6)] ring-1.5 ring-[#0a0f1d]">
+                          {dlTotalActive}
                         </span>
+                      )}
+
+                      {'badge' in item && (item as { badge?: string }).badge && (
+                        <span
+                          title={`${item.label} is in beta`}
+                          className={`absolute bottom-1 left-1/2 -translate-x-1/2 inline-flex items-center justify-center rounded border border-amber-300/25 bg-amber-400/15 px-[3px] py-px text-[6px] font-bold uppercase leading-none tracking-[0.08em] text-amber-200/90 transition-opacity duration-200 ${
+                            !isSidebarExpanded ? 'opacity-100' : 'opacity-0 pointer-events-none'
+                          }`}
+                        >
+                          {(item as { badge?: string }).badge}
+                        </span>
+                      )}
+                    </div>
+
+                    {/* Right Expanded Content: Width 176px with smooth fade transition */}
+                    <div className={`w-[176px] flex-shrink-0 pr-3 overflow-hidden whitespace-nowrap transition-opacity duration-200 ${
+                      isSidebarExpanded ? 'opacity-100' : 'opacity-0 pointer-events-none'
+                    }`}>
+                      {showDlIndicator ? (
+                        <div className="flex items-center w-full">
+                          {/* Static Left Info: Downloads + Active count (Never shifts or wobbles) */}
+                          <div className="min-w-0 flex-1 pr-1.5 select-none">
+                            <span className="text-sm font-bold text-white tracking-tight truncate block leading-tight">
+                              Downloads
+                            </span>
+                            <span className="text-[10px] font-medium text-white/45 truncate block leading-tight mt-0.5 tabular-nums">
+                              {dlActiveCount} active{dlQueuedCount > 0 ? ` · ${dlQueuedCount} queued` : ''}
+                            </span>
+                          </div>
+
+                          {/* Fixed-Width Right Telemetry: Speed on top, Percentage on bottom (Strict fixed 62px width & tabular numbers) */}
+                          <div className="w-[62px] shrink-0 flex flex-col items-end text-right leading-tight select-none">
+                            <span className="text-[10.5px] font-bold text-white/90 tracking-tight truncate block w-full tabular-nums">
+                              {dlTopDownload?.downloadSpeed && dlTopDownload.downloadSpeed !== '0 B/s'
+                                ? dlTopDownload.downloadSpeed
+                                : (dlTopDownload?.status === 'connecting' ? 'Starting' : (dlTopDownload?.status === 'queued' ? 'Queued' : '0 B/s'))}
+                            </span>
+                            <span className="text-[10.5px] font-extrabold text-primary tracking-tight truncate block w-full tabular-nums mt-0.5 drop-shadow-[0_0_6px_rgba(var(--c-accent),0.5)]">
+                              {Math.round(dlAvgProgress)}%
+                            </span>
+                          </div>
+                        </div>
                       ) : (
-                        <>
-                          <span className="flex items-center justify-center leading-none">{item.icon}</span>
-                          {'badge' in item && (item as { badge?: string }).badge && !isSidebarExpanded && (
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-sm font-bold whitespace-nowrap">{item.label}</span>
+                          {'badge' in item && (item as { badge?: string }).badge && (
                             <span
-                              title={`${item.label} is in beta`}
-                              className="mt-[3px] inline-flex items-center justify-center rounded border border-amber-300/25 bg-amber-400/15 px-[3px] py-px text-[6px] font-bold uppercase leading-none tracking-[0.08em] text-amber-200/90"
+                              title={`${item.label} is in beta — some things may still change`}
+                              className="inline-flex items-center rounded border border-amber-300/20 bg-amber-400/10 px-1 py-[1px] text-[8px] font-bold uppercase leading-none tracking-[0.08em] text-amber-200/90 shrink-0"
                             >
                               {(item as { badge?: string }).badge}
                             </span>
                           )}
-                        </>
-                      )}
-                    </div>
-                    <div className={`absolute left-12 right-3 transition-all duration-300 ${
-                      isSidebarExpanded ? 'opacity-100 translate-x-0' : 'opacity-0 -translate-x-2 pointer-events-none'
-                    }`}>
-                      <div className="flex items-center gap-1.5">
-                        <span className="whitespace-nowrap text-sm font-bold">{item.label}</span>
-                        {'badge' in item && (item as { badge?: string }).badge && (
-                          <span
-                            title={`${item.label} is in beta — some things may still change`}
-                            className="inline-flex items-center rounded border border-amber-300/20 bg-amber-400/10 px-1 py-[1px] text-[8px] font-bold uppercase leading-none tracking-[0.08em] text-amber-200/90"
-                          >
-                            {(item as { badge?: string }).badge}
-                          </span>
-                        )}
-                        {/* Inline download status when sidebar is expanded */}
-                        {showDlIndicator && (
-                          <span className="ml-auto flex items-center gap-1 shrink-0">
-                            <span className="h-1.5 w-1.5 rounded-full bg-cyan-400 animate-pulse" />
-                            <span className="text-[10px] font-bold text-cyan-400">
-                              {dlActiveCount > 0 ? `${Math.round(dlAvgProgress)}%` : `${dlQueuedCount} queued`}
-                            </span>
-                          </span>
-                        )}
-                      </div>
-                      {/* Progress bar — only when downloads active */}
-                      {showDlIndicator && (
-                        <div className="mt-1.5 space-y-1">
-                          <div className="h-[3px] w-full overflow-hidden rounded-full bg-white/8">
-                            <div
-                              className="h-full rounded-full transition-all duration-500 bg-gradient-to-r from-cyan-400 to-primary"
-                              style={{ width: `${dlAvgProgress}%` }}
-                            />
-                          </div>
-                          {dlTopDownload?.downloadSpeed && dlTopDownload.downloadSpeed !== '0 B/s' && (
-                            <p className="text-[9px] font-semibold text-white/35 leading-none">
-                              {dlTopDownload.downloadSpeed}{dlActiveCount > 1 ? ` · ${dlActiveCount} active` : ''}{dlQueuedCount > 0 ? ` · ${dlQueuedCount} queued` : ''}
-                            </p>
-                          )}
-                          {(dlTopDownload?.downloadSpeed === '0 B/s' || !dlTopDownload?.downloadSpeed) && (
-                            <p className="text-[9px] font-semibold text-white/35 leading-none">
-                              {dlActiveCount > 0 ? `${dlActiveCount} downloading` : ''}{dlQueuedCount > 0 ? `${dlActiveCount > 0 ? ' · ' : ''}${dlQueuedCount} queued` : ''}
-                            </p>
-                          )}
                         </div>
                       )}
                     </div>
+
+                    {/* Slim Ambient Bottom Progress Bar (Active in expanded mode) */}
+                    {showDlIndicator && (
+                      <div className={`absolute bottom-0 left-0 right-0 h-[2.5px] bg-white/10 overflow-hidden pointer-events-none transition-opacity duration-200 ${
+                        isSidebarExpanded ? 'opacity-100' : 'opacity-0'
+                      }`}>
+                        <div
+                          className="h-full bg-primary shadow-[0_0_8px_rgba(var(--c-accent),0.7)] transition-all duration-300"
+                          style={{ width: `${Math.max(2, Math.min(100, dlAvgProgress))}%` }}
+                        />
+                      </div>
+                    )}
                   </button>
                 </React.Fragment>
               )
@@ -1068,52 +1085,44 @@ const App: React.FC = () => {
 
         {/* User Profile */}
         {/* Updates Tab - Positioned directly above Profile / Settings */}
-        <div className="px-4 pb-2 mt-auto flex justify-center">
+        <div className="px-4 pb-2 mt-auto">
           <button
             onClick={() => navigateToTab('updates')}
-            className={`relative flex items-center rounded-xl border border-transparent outline-none focus:outline-none focus-visible:outline-none transition-[background-color,border-color,color,box-shadow,width] duration-150 ease-out group ${
-              isSidebarExpanded ? 'w-full h-12' : 'w-12 h-12 mx-auto justify-center'
-            } ${
+            className={`relative w-full h-12 flex items-center rounded-xl border border-transparent outline-none focus:outline-none focus-visible:outline-none transition-[background-color,border-color,color,box-shadow] duration-150 ease-out group overflow-hidden ${
               activeTab === 'updates'
                 ? 'nav-item-active font-bold'
                 : 'text-white/45 hover:bg-white/5 hover:text-white'
             }`}
-            title="Updates & Changelog"
+            title={!isSidebarExpanded ? 'Updates & Changelog' : undefined}
           >
-            <div className={`flex items-center justify-center text-current ${
-              isSidebarExpanded ? 'w-12 h-12 flex-shrink-0' : 'w-full h-full'
-            }`}>
+            <div className="w-12 h-12 flex items-center justify-center text-current flex-shrink-0">
               <Megaphone size={19} strokeWidth={2.2} />
             </div>
-            <div className={`absolute left-12 right-2 flex items-center justify-between whitespace-nowrap transition-all duration-300 ${
-              isSidebarExpanded ? 'opacity-100 translate-x-0' : 'opacity-0 -translate-x-2 pointer-events-none'
+            <div className={`w-[176px] flex-shrink-0 flex items-center justify-between whitespace-nowrap overflow-hidden transition-opacity duration-200 ${
+              isSidebarExpanded ? 'opacity-100 pr-3' : 'opacity-0 pr-0 pointer-events-none'
             }`}>
-              <span className="text-sm font-bold">Updates</span>
-              <span className="rounded border border-primary/30 bg-primary/10 px-1.5 py-0.5 text-[9px] font-black uppercase text-primary">
+              <span className="text-sm font-bold truncate">Updates</span>
+              <span className="rounded border border-primary/30 bg-primary/10 px-1.5 py-0.5 text-[9px] font-black uppercase text-primary shrink-0 ml-1.5">
                 v{LATEST_RELEASE.version}
               </span>
             </div>
           </button>
         </div>
 
-        <div className="p-4 pt-0 flex justify-center">
+        <div className="p-4 pt-0">
           <button
             onClick={() => navigateToTab('settings')}
-            className={`relative flex items-center border transition-[background-color,border-color,box-shadow,transform,width] duration-150 ease-out outline-none focus:outline-none focus-visible:outline-none group ${
-              isSidebarExpanded ? 'w-full h-[52px] rounded-2xl' : 'w-12 h-12 justify-center rounded-xl'
-            } ${
+            className={`relative w-full h-12 flex items-center rounded-xl border transition-[background-color,border-color,box-shadow,transform] duration-150 ease-out outline-none focus:outline-none focus-visible:outline-none group overflow-hidden ${
               activeTab === 'settings'
                 ? 'profile-card-active'
                 : 'bg-white/[0.04] border-white/10 hover:bg-white/[0.08] hover:border-white/20'
             }`}
-            title="Settings & Profile"
+            title={!isSidebarExpanded ? `Settings & Profile (${userName})` : undefined}
           >
             {/* Avatar */}
-            <div className={`flex items-center justify-center flex-shrink-0 pointer-events-none ${isSidebarExpanded ? 'absolute left-1.5 w-9 h-9' : 'w-full h-full'}`}>
+            <div className="w-12 h-12 flex items-center justify-center flex-shrink-0 pointer-events-none">
               <div 
-                className={`relative rounded-xl ${profileImage && !profileImageFailed ? 'bg-transparent' : 'bg-red-600'} flex items-center justify-center text-white font-black text-sm shadow-md italic transition-transform overflow-hidden ${
-                  isSidebarExpanded ? 'w-9 h-9' : 'w-8 h-8'
-                } ${
+                className={`relative w-8 h-8 rounded-xl ${profileImage && !profileImageFailed ? 'bg-transparent' : 'bg-red-600'} flex items-center justify-center text-white font-black text-sm shadow-md italic transition-transform overflow-hidden ${
                   activeTab === 'settings' ? 'ring-2 ring-white/30' : ''
                 }`}
               >
@@ -1131,10 +1140,10 @@ const App: React.FC = () => {
             </div>
 
             {/* Expanded Content */}
-            <div className={`absolute left-14 right-3 flex items-center justify-between transition-all duration-300 pointer-events-none ${
-              isSidebarExpanded ? 'opacity-100 translate-x-0' : 'opacity-0 -translate-x-2'
+            <div className={`w-[176px] flex-shrink-0 flex items-center justify-between overflow-hidden whitespace-nowrap transition-opacity duration-200 ${
+              isSidebarExpanded ? 'opacity-100 pr-2' : 'opacity-0 pr-0 pointer-events-none'
             }`}>
-              <div className="flex-1 min-w-0">
+              <div className="flex-1 min-w-0 pr-2">
                 <h4 className="text-sm font-bold text-white truncate italic">{userName}</h4>
               </div>
               <div className={`p-1.5 rounded-lg transition-colors flex-shrink-0 ${
@@ -1151,7 +1160,7 @@ const App: React.FC = () => {
       {/* NOTE: only the active page is mounted. Home used to stay mounted with
           opacity-0 (HeroCarousel timers, decoded images, scroll listeners all
           kept running behind Collections/Movies/etc. and caused scroll jank). */}
-      <main className="relative flex-1 overflow-hidden">
+      <main className="relative flex-1 overflow-hidden [contain:content]">
         {/* The non-home container stays mounted (hidden) when Home is active.
             Home used to own the other branch of this ternary, so visiting it
             unmounted everything — including FocusTube's keep-alive wrapper —
@@ -1174,7 +1183,7 @@ const App: React.FC = () => {
               {activeTab === 'series'  && <Series onPlay={handlePlayVideo} onShowDetail={setSelectedVideo} />}
               {activeTab === 'collections' && <Collections onPlay={handlePlayVideo} onShowDetail={setSelectedVideo} focusCollectionId={sharedCollectionFocus?.id ?? null} focusNonce={sharedCollectionFocus?.nonce ?? 0} />}
               {activeTab === 'watchlist' && <Watchlist onPlay={handlePlayVideo} onShowDetail={setSelectedVideo} refreshKey={watchlistRefreshKey} />}
-              {activeTab === 'download' && <Download onShowDetail={setSelectedVideo} />}
+              {activeTab === 'download' && <Download onPlay={handlePlayVideo} onShowDetail={setSelectedVideo} />}
               {activeTab === 'updates' && <Updates />}
               {activeTab === 'settings' && <SettingsPage />}
             </div>

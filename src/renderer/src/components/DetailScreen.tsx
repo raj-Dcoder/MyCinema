@@ -8,8 +8,8 @@ import { Video, WatchlistIntent, TmdbFranchise, TmdbFranchisePart, TmdbProvider 
 import { useTheme } from '../theme/ThemeContext'
 import { getWatchlistIntent, normalizeWatchlistIntent, WATCHLIST_INTENT_META } from '../utils/watchlistIntent'
 import { ShareHintGuide, DeleteHintGuide, FollowGuide } from './FeatureGuides'
-import { getTorrentSourceHealthScore, getTorrentSourceSpeedLabel, isHevcSource } from '../utils/torrentSources'
-import { isOnlineProgressEnabled, isNewEpisodeNotifyEnabled, formatResumeTime, formatSeasonEpisode, getTorrentFileQueryIndex, safeGetStreamHistory, safeGetStreamProgress, safeDeleteStreamProgress, safeFollowSeries, safeUnfollowSeries, safeGetFollowedSeries, safeCheckSeriesUpdates, safeMarkFollowedSeen, safeFollowMovie, safeUnfollowMovie, safeGetFollowedMovies, safeMarkFollowedMovieSeen } from '../utils/streamResume'
+import { getTorrentSourceHealthScore, getTorrentSourceSpeedLabel, isHevcSource, pickBestStreamingSource } from '../utils/torrentSources'
+import { isOnlineProgressEnabled, isNewEpisodeNotifyEnabled, formatResumeTime, formatSeasonEpisode, formatEpisodeCode, resolveOnlineNextEpisode, getTorrentFileQueryIndex, safeGetStreamHistory, safeGetStreamProgress, safeDeleteStreamProgress, safeFollowSeries, safeUnfollowSeries, safeGetFollowedSeries, safeCheckSeriesUpdates, safeMarkFollowedSeen, safeFollowMovie, safeUnfollowMovie, safeGetFollowedMovies, safeMarkFollowedMovieSeen } from '../utils/streamResume'
 import { getMediaUnitIdentity, getVersionLabel, groupMediaVersions, pickPreferredVersion } from '../utils/mediaVersions'
 import { getStreamingDeepLink } from '../utils/streamingLinks'
 
@@ -326,6 +326,47 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
     }
   }, [video.id, video.tmdb_id, video.is_watchlist])
 
+  // Auto-enrich metadata if opened with a partial/downloading video
+  const [, setEnrichCount] = useState(0)
+  useEffect(() => {
+    if (video.overview && video.poster_path && video.backdrop_path) return
+    let cancelled = false
+
+    const enrichVideoMetadata = async () => {
+      try {
+        let meta: any = null
+        if (video.tmdb_id) {
+          meta = await window.api.getSharedMediaByTmdbId(video.type === 'series' ? 'series' : 'movie', video.tmdb_id)
+        } else if (video.title) {
+          const results = await window.api.searchTMDB(video.title)
+          if (Array.isArray(results) && results.length > 0) {
+            const first = results[0]
+            const type = first.media_type === 'tv' ? 'series' : 'movie'
+            meta = await window.api.getSharedMediaByTmdbId(type, first.id)
+          }
+        }
+        if (!cancelled && meta) {
+          if (!video.overview && meta.overview) video.overview = meta.overview
+          if (!video.poster_path && meta.poster_path) video.poster_path = meta.poster_path
+          if (!video.backdrop_path && meta.backdrop_path) video.backdrop_path = meta.backdrop_path
+          if (!video.genres && meta.genres) video.genres = meta.genres
+          if (!video.vote_average && meta.vote_average) video.vote_average = meta.vote_average
+          if (!video.release_year && meta.release_year) video.release_year = meta.release_year
+          if (!video.tmdb_id && meta.tmdb_id) video.tmdb_id = meta.tmdb_id
+          if (!video.tagline && meta.tagline) video.tagline = meta.tagline
+          setEnrichCount(c => c + 1)
+        }
+      } catch (err) {
+        console.warn('[DetailScreen] Auto-enrich failed:', err)
+      }
+    }
+
+    void enrichVideoMetadata()
+    return () => {
+      cancelled = true
+    }
+  }, [video.id, video.tmdb_id, video.title])
+
   useEffect(() => {
     let cancelled = false
     setFranchise(null)
@@ -587,15 +628,46 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
   // #2: per-episode online map for the series episode list.
   const [streamResume, setStreamResume] = useState<{ position: number; duration: number } | null>(null)
   const [onlineEpisodeMap, setOnlineEpisodeMap] = useState<Map<string, { position: number; duration: number; completed: boolean }>>(new Map())
+  const [seriesTargetEpisode, setSeriesTargetEpisode] = useState<{
+    season: number
+    episode: number
+    isResume: boolean
+    position?: number
+    duration?: number
+    sourceMagnet?: string
+    fileIndex?: number
+  } | null>(null)
+
   useEffect(() => {
     let cancelled = false
     setOnlineEpisodeMap(new Map())
+    setSeriesTargetEpisode(null)
     if (video.type !== 'series' || !video.tmdb_id || !isOnlineProgressEnabled()) return
-    safeGetStreamHistory(100).then(rows => {
+
+    // If video itself has specific season & episode
+    if (video.season != null && video.episode != null) {
+      safeGetStreamProgress(video.tmdb_id, 'series', video.season, video.episode).then(row => {
+        if (cancelled) return
+        const hasResume = Boolean(row && !row.completed && (Number(row.position) || 0) >= 10)
+        setSeriesTargetEpisode({
+          season: video.season!,
+          episode: video.episode!,
+          isResume: hasResume,
+          position: hasResume ? Number(row?.position) : undefined,
+          duration: hasResume ? Number(row?.duration) : undefined,
+          sourceMagnet: row?.source_magnet || undefined,
+          fileIndex: Number.isFinite(Number(row?.file_index)) ? Number(row?.file_index) : undefined
+        })
+      }).catch(() => {})
+    }
+
+    safeGetStreamHistory(100).then(async rows => {
       if (cancelled) return
       const map = new Map<string, { position: number; duration: number; completed: boolean }>()
+      const seriesRows: any[] = []
       for (const row of rows || []) {
         if (Number(row.tmdb_id) !== video.tmdb_id || row.media_type !== 'series') continue
+        seriesRows.push(row)
         map.set(`${Number(row.season || 0)}:${Number(row.episode || 0)}`, {
           position: Number(row.position) || 0,
           duration: Number(row.duration) || 0,
@@ -603,10 +675,88 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
         })
       }
       setOnlineEpisodeMap(map)
-    }).catch(() => {})
+
+      // Only determine target episode from history if video doesn't already specify season & episode
+      if (video.season == null || video.episode == null) {
+        if (seriesRows.length === 0) {
+          setSeriesTargetEpisode({ season: 1, episode: 1, isResume: false })
+          return
+        }
+
+        // 1. Is there an in-progress row?
+        const activeRow = seriesRows
+          .filter(r => !r.completed && (Number(r.position) || 0) >= 10)
+          .sort((a, b) => new Date(b.updated_at || 0).getTime() - new Date(a.updated_at || 0).getTime())[0]
+
+        if (activeRow) {
+          setSeriesTargetEpisode({
+            season: Number(activeRow.season) || 1,
+            episode: Number(activeRow.episode) || 1,
+            isResume: true,
+            position: Number(activeRow.position) || 0,
+            duration: Number(activeRow.duration) || 0,
+            sourceMagnet: activeRow.source_magnet || undefined,
+            fileIndex: Number.isFinite(Number(activeRow.file_index)) ? Number(activeRow.file_index) : undefined
+          })
+          return
+        }
+
+        // 2. All watched episodes were completed -> find next episode
+        const sorted = [...seriesRows].sort(
+          (a, b) => Number(a.season || 0) - Number(b.season || 0) || Number(a.episode || 0) - Number(b.episode || 0)
+        )
+        const top = sorted[sorted.length - 1]
+        const maxSeason = Number(top?.season || 1)
+        const maxEpisode = Number(top?.episode || 1)
+
+        try {
+          const next = await resolveOnlineNextEpisode(video.tmdb_id!, maxSeason, maxEpisode)
+          if (!cancelled) {
+            if (next) {
+              setSeriesTargetEpisode({
+                season: next.season,
+                episode: next.episode,
+                isResume: false
+              })
+            } else {
+              setSeriesTargetEpisode({
+                season: maxSeason,
+                episode: maxEpisode,
+                isResume: false
+              })
+            }
+          }
+        } catch {
+          if (!cancelled) {
+            setSeriesTargetEpisode({
+              season: maxSeason,
+              episode: maxEpisode + 1,
+              isResume: false
+            })
+          }
+        }
+      }
+    }).catch(() => {
+      if (!cancelled && (video.season == null || video.episode == null)) {
+        setSeriesTargetEpisode({ season: 1, episode: 1, isResume: false })
+      }
+    })
     return () => { cancelled = true }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [video.tmdb_id, video.type])
+  }, [video.tmdb_id, video.type, video.season, video.episode])
+
+  const primaryOnlineActionLabel = React.useMemo(() => {
+    if (video.type === 'series') {
+      const season = seriesTargetEpisode?.season ?? video.season ?? 1
+      const episode = seriesTargetEpisode?.episode ?? video.episode ?? 1
+      const code = formatEpisodeCode(season, episode)
+      if (seriesTargetEpisode?.isResume || streamResume) {
+        return `Resume ${code} Online`
+      }
+      return `Play ${code} Online`
+    }
+    return streamResume ? 'Resume Online' : 'Play Online'
+  }, [video.type, video.season, video.episode, seriesTargetEpisode, streamResume])
   const primaryStreamIdentity = video.tmdb_id && (video.type === 'movie' || video.type === 'series') && (video.type === 'movie' || video.season != null || video.episode != null)
     ? {
         tmdb_id: video.tmdb_id,
@@ -646,16 +796,20 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
   const [startingSourceMagnet, setStartingSourceMagnet] = useState<string | null>(null)
   const [startedSourceMagnet, setStartedSourceMagnet] = useState<string | null>(null)
   const [startingStreamMagnet, setStartingStreamMagnet] = useState<string | null>(null)
+  const [startingAutoPlay, setStartingAutoPlay] = useState(false)
+  const [autoPlayStatus, setAutoPlayStatus] = useState<string | null>(null)
   const [torrentStreamError, setTorrentStreamError] = useState<string | null>(null)
   const [activeDownloads, setActiveDownloads] = useState<ActiveDownload[]>([])
   const [sourceSearchStatus, setSourceSearchStatus] = useState({ found: 0, completed: 0, total: 0, cached: false, done: false })
   const sourceSearchRequestRef = useRef<string | null>(null)
+  const activeSearchPromiseRef = useRef<Promise<any[]> | null>(null)
   const cancelActiveSourceSearch = (markDone = true) => {
     const requestId = sourceSearchRequestRef.current
     if (requestId) {
       void window.api.cancelTorrentSourceSearch(requestId).catch(() => {})
       sourceSearchRequestRef.current = null
     }
+    activeSearchPromiseRef.current = null
     setSearching(false)
     if (markDone) {
       setSourceSearchStatus(prev => ({ ...prev, done: true }))
@@ -973,9 +1127,14 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
   const filedCollectionCount = collections.filter(c => c.matches.length > 0).length
 
   const handleSearchSources = async (forceRefresh: boolean = false): Promise<any[]> => {
-    if (!isTmdbBacked || !video.tmdb_id || (searching && !forceRefresh)) return []
+    if (!isTmdbBacked || !video.tmdb_id) return []
     const hasOnlySharedSource = Boolean(initialSharedSource?.magnet) && sources.length === 1 && sources[0]?.magnet === initialSharedSource.magnet
     if (!forceRefresh && hasSearched && sources.length > 0 && !hasOnlySharedSource) return sources
+
+    // If a search is already active in background and not forcing refresh, attach to ongoing promise!
+    if (!forceRefresh && activeSearchPromiseRef.current) {
+      return activeSearchPromiseRef.current
+    }
 
     if (sourceSearchRequestRef.current) {
       cancelActiveSourceSearch(false)
@@ -985,43 +1144,50 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
     setSourceSearchStatus(prev => ({ ...prev, completed: 0, total: 0, cached: false, done: false }))
     const requestId = `${video.tmdb_id}-${Date.now()}-${Math.random().toString(36).slice(2)}`
     sourceSearchRequestRef.current = requestId
-    try {
-      const results = await window.api.searchTorrentSources(
-        displayTitle,
-        video.release_year?.toString() || '', 
-        video.type === 'series' ? 'tv' : 'movie', 
-        video.tmdb_id!,
-        requestId
-      )
-      if (sourceSearchRequestRef.current === requestId) {
-        setSources(prev => {
-          if (!initialSharedSource?.magnet) return results
-          const sharedSource = prev.find(source => source.magnet === initialSharedSource.magnet) || {
-            ...initialSharedSource,
-            seeds: initialSharedSource.seeds || 0,
-            peers: initialSharedSource.peers || 0,
-            type: 'shared'
-          }
-          const matchedSource = results.find(source => source.magnet === initialSharedSource.magnet)
-          const mergedSharedSource = matchedSource ? { ...sharedSource, ...matchedSource } : sharedSource
-          const others = results.filter(source => source.magnet !== initialSharedSource.magnet)
-          return [mergedSharedSource, ...others]
-        })
-        setSourceSearchStatus(prev => ({ ...prev, found: results.length + (initialSharedSource?.magnet ? 1 : 0), done: true }))
+
+    const searchPromise = (async () => {
+      try {
+        const results = await window.api.searchTorrentSources(
+          displayTitle,
+          video.release_year?.toString() || '', 
+          video.type === 'series' ? 'tv' : 'movie', 
+          video.tmdb_id!,
+          requestId
+        )
+        if (sourceSearchRequestRef.current === requestId) {
+          setSources(prev => {
+            if (!initialSharedSource?.magnet) return results
+            const sharedSource = prev.find(source => source.magnet === initialSharedSource.magnet) || {
+              ...initialSharedSource,
+              seeds: initialSharedSource.seeds || 0,
+              peers: initialSharedSource.peers || 0,
+              type: 'shared'
+            }
+            const matchedSource = results.find(source => source.magnet === initialSharedSource.magnet)
+            const mergedSharedSource = matchedSource ? { ...sharedSource, ...matchedSource } : sharedSource
+            const others = results.filter(source => source.magnet !== initialSharedSource.magnet)
+            return [mergedSharedSource, ...others]
+          })
+          setSourceSearchStatus(prev => ({ ...prev, found: results.length + (initialSharedSource?.magnet ? 1 : 0), done: true }))
+        }
+        return results || []
+      } catch (err) {
+        console.error('Failed to search sources:', err)
+        if (sourceSearchRequestRef.current === requestId) {
+          setSourceSearchStatus(prev => ({ ...prev, done: true }))
+        }
+        return []
+      } finally {
+        if (sourceSearchRequestRef.current === requestId) {
+          setSearching(false)
+          sourceSearchRequestRef.current = null
+          activeSearchPromiseRef.current = null
+        }
       }
-      return results || []
-    } catch (err) {
-      console.error('Failed to search sources:', err)
-      if (sourceSearchRequestRef.current === requestId) {
-        setSourceSearchStatus(prev => ({ ...prev, done: true }))
-      }
-      return []
-    } finally {
-      if (sourceSearchRequestRef.current === requestId) {
-        setSearching(false)
-        sourceSearchRequestRef.current = null
-      }
-    }
+    })()
+
+    activeSearchPromiseRef.current = searchPromise
+    return searchPromise
   }
 
   const handleOpenDownloadOptions = async () => {
@@ -1259,7 +1425,7 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
     }
   }
 
-  const handlePlaySource = async (source: any) => {
+  const handlePlaySource = async (source: any): Promise<boolean> => {
     // NOTE: startTempStream reuses an active persistent download by infoHash
     // on the backend, so there is no separate play-while-downloading path.
     setTorrentStreamError(null)
@@ -1273,7 +1439,7 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
       const result = await window.api.startTempStream(source.magnet, displayTitle, episodeHint)
       if (!result?.url) {
         setTorrentStreamError(getTorrentStreamErrorMessage(result?.error))
-        return
+        return false
       }
 
       // Attach any saved online position so the player resumes instantly
@@ -1316,10 +1482,106 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
         resumeFrom,
         sourceRefreshed: false
       })
+      return true
     } catch (err: any) {
       setTorrentStreamError(getTorrentStreamErrorMessage(err?.message))
+      return false
     } finally {
       setStartingStreamMagnet(null)
+    }
+  }
+
+  const handlePlayOnline = async () => {
+    if (startingAutoPlay || startingStreamMagnet) return
+    setStartingAutoPlay(true)
+    setAutoPlayStatus('Finding best source...')
+    setTorrentStreamError(null)
+
+    const isSeries = video.type === 'series'
+    const targetSeason = isSeries ? (seriesTargetEpisode?.season ?? video.season ?? 1) : null
+    const targetEpisode = isSeries ? (seriesTargetEpisode?.episode ?? video.episode ?? 1) : null
+
+    try {
+      // 1. Check if we already have saved stream progress for this exact title/episode with a source magnet
+      let candidateSource: any = null
+      if (isSeries && seriesTargetEpisode?.sourceMagnet) {
+        candidateSource = {
+          magnet: seriesTargetEpisode.sourceMagnet,
+          title: displayTitle,
+          parsedSeason: targetSeason,
+          parsedEpisode: targetEpisode,
+          fileIndex: seriesTargetEpisode.fileIndex
+        }
+      } else if (!isSeries && primaryStreamIdentity && isOnlineProgressEnabled()) {
+        try {
+          const row = await safeGetStreamProgress(
+            primaryStreamIdentity.tmdb_id,
+            primaryStreamIdentity.media_type,
+            primaryStreamIdentity.season,
+            primaryStreamIdentity.episode
+          )
+          if (row?.source_magnet) {
+            candidateSource = {
+              magnet: row.source_magnet,
+              title: displayTitle,
+              parsedSeason: row.season ?? video.season,
+              parsedEpisode: row.episode ?? video.episode,
+              fileIndex: row.file_index != null ? Number(row.file_index) : undefined
+            }
+          }
+        } catch { /* best effort */ }
+      }
+
+      // If cached candidate was found, try playing it first
+      if (candidateSource?.magnet) {
+        setAutoPlayStatus('Connecting cached stream...')
+        const started = await handlePlaySource(candidateSource)
+        if (started) {
+          return
+        }
+        candidateSource = null
+      }
+
+      // 2. Resolve available sources (either already in memory from background pre-fetch, or await in-flight)
+      let availableSources = sources
+      if (!availableSources || availableSources.length === 0) {
+        setAutoPlayStatus(activeSearchPromiseRef.current ? 'Finalizing source search...' : 'Finding best source...')
+        const fetched = await handleSearchSources(false)
+        availableSources = fetched && fetched.length > 0 ? fetched : sources
+      }
+
+      if (availableSources && availableSources.length > 0) {
+        setAutoPlayStatus('Selecting best magnet...')
+        candidateSource = pickBestStreamingSource(availableSources, {
+          isMovie: !isSeries,
+          season: targetSeason,
+          episode: targetEpisode
+        })
+      }
+
+      // 3. Play the best source
+      if (candidateSource && candidateSource.magnet) {
+        setAutoPlayStatus('Starting stream...')
+        const sourceWithEpisode = {
+          ...candidateSource,
+          parsedSeason: targetSeason ?? candidateSource.parsedSeason,
+          parsedEpisode: targetEpisode ?? candidateSource.parsedEpisode
+        }
+        const started = await handlePlaySource(sourceWithEpisode)
+        if (!started) {
+          await handleOpenDownloadOptions()
+        }
+      } else {
+        setTorrentStreamError('No healthy stream found automatically. Please choose from available sources.')
+        await handleOpenDownloadOptions()
+      }
+    } catch (err: any) {
+      console.error('[DetailScreen] handlePlayOnline failed:', err)
+      setTorrentStreamError(getTorrentStreamErrorMessage(err?.message))
+      await handleOpenDownloadOptions()
+    } finally {
+      setStartingAutoPlay(false)
+      setAutoPlayStatus(null)
     }
   }
 
@@ -1623,6 +1885,16 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
         }, 650)
       : 0
 
+    // Warm pre-fetch torrent sources in background for online TMDB-backed titles
+    // 250ms buffer ensures entrance animations & backdrop render smoothly first without UI freeze
+    const warmSearchTimer = (!isLocalMedia && isTmdbBacked && video.tmdb_id && !initialSharedSource?.magnet)
+      ? window.setTimeout(() => {
+          if (!cancelled) {
+            void handleSearchSources(false)
+          }
+        }, 250)
+      : 0
+
     if (isLocalMedia && video.type === 'series' && video.series_name) {
       setLoading(true)
       window.api.getSeriesInfo(video.series_name).then(data => {
@@ -1682,6 +1954,7 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
 
     return () => {
       cancelled = true
+      if (warmSearchTimer) window.clearTimeout(warmSearchTimer)
       cancelActiveSourceSearch(true)
       if (trailerTimer) window.clearTimeout(trailerTimer)
     }
@@ -2108,7 +2381,7 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
     <div
       style={{ left: 'var(--sidebar-width, 5rem)' }}
       data-detail-shade={isAmbientShadeActive ? 'ambient' : 'black'}
-      className={`fixed right-0 top-0 bottom-0 z-50 animate-in fade-in duration-300 transition-[left] duration-300 ease-in-out detail-screen-root ${
+      className={`fixed right-0 top-0 bottom-0 z-50 animate-in fade-in duration-300 transition-[left] duration-300 ease-out will-change-[left] detail-screen-root ${
         isAmbientShadeActive ? 'detail-ambient-active' : 'detail-ambient-disabled'
       }`}
     >
@@ -2122,7 +2395,7 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
         </button>
 
         {/* Full Screen Background */}
-        <div className="absolute inset-0 z-0 bg-[#080d16] pointer-events-none detail-screen-bg">
+        <div className="absolute inset-y-0 right-0 -left-[24rem] z-0 bg-[#080d16] pointer-events-none detail-screen-bg">
           {backdropUrl ? (
             <img 
               src={backdropUrl} 
@@ -2440,6 +2713,27 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
                 </button>
               )}
 
+              {/* Primary "Play Online" Button for TMDB-backed online titles (Both Movies & Series!) */}
+              {!isLocalMedia && isTmdbBacked && video.tmdb_id && (
+                <button
+                  onClick={handlePlayOnline}
+                  disabled={startingAutoPlay || startingStreamMagnet !== null}
+                  className="flex min-h-16 items-center justify-center gap-3 bg-red-600 hover:bg-red-500 text-white px-8 rounded-xl font-black text-xs tracking-[0.12em] transition-all shadow-[0_12px_30px_rgba(220,38,38,0.35)] hover:-translate-y-0.5 active:scale-95 group uppercase disabled:opacity-75 disabled:cursor-wait"
+                >
+                  {startingAutoPlay ? (
+                    <>
+                      <Loader2 size={20} className="animate-spin text-white" />
+                      <span>{autoPlayStatus || 'Finding Best Source...'}</span>
+                    </>
+                  ) : (
+                    <>
+                      <Play fill="white" size={20} className="group-hover:scale-110 transition-transform" />
+                      <span>{primaryOnlineActionLabel}</span>
+                    </>
+                  )}
+                </button>
+              )}
+
               {isDownloadActive && (
                 <div className="flex min-h-16 items-center justify-center gap-3 rounded-xl border border-white/10 bg-white/[0.055] px-7 text-xs font-black uppercase tracking-[0.12em] text-white/70">
                   <Download size={19} className="shrink-0 opacity-70" />
@@ -2449,19 +2743,22 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
                 </div>
               )}
 
+              {/* Secondary Button: "Choose Source" or "Episodes & Sources" - ALWAYS Clean Secondary Glass/Border Style, NEVER Ambient */}
               {isTmdbBacked && video.tmdb_id && (
                 <button
                   onClick={handleOpenDownloadOptions}
-                  disabled={searching && sources.length === 0}
-                  className={`detail-sources-btn flex min-h-16 items-center justify-center gap-3 rounded-xl px-7 text-xs font-black uppercase tracking-[0.12em] transition-all hover:-translate-y-0.5 active:scale-95 disabled:cursor-wait disabled:opacity-55 ${
-                    isLocalMedia || isDownloadActive
-                      ? 'border border-white/10 bg-white/[0.055] text-white/70 hover:bg-white/[0.09] hover:text-white'
-                      : 'bg-primary text-white shadow-[0_10px_30px_rgba(229,9,20,0.34)] hover:bg-primary/80'
-                  }`}
+                  className="detail-sources-btn flex min-h-16 items-center justify-center gap-3 rounded-xl px-7 text-xs font-black uppercase tracking-[0.12em] transition-all hover:-translate-y-0.5 active:scale-95 border border-white/10 bg-white/[0.055] text-white/70 hover:bg-white/[0.09] hover:text-white"
                 >
-                  {searching && sources.length === 0 ? <Loader2 size={19} className="animate-spin" /> : <Download size={19} />}
+                  <Layers size={19} />
                   {sourceActionLabel}
                 </button>
+              )}
+
+              {torrentStreamError && !showDownloadOptions && (
+                <div className="flex basis-full items-center gap-2 rounded-xl border border-red-500/20 bg-red-500/10 px-4 py-2.5 text-xs text-red-200">
+                  <AlertTriangle size={15} className="shrink-0 text-red-400" />
+                  <span>{torrentStreamError}</span>
+                </div>
               )}
 
               {streamResume && !isLocalMedia && (
@@ -2473,10 +2770,11 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
                   </p>
                   <div className="ml-auto flex items-center gap-2">
                     <button
-                      onClick={handleOpenDownloadOptions}
-                      className="rounded-lg bg-sky-500 px-3 py-1.5 text-[10px] font-black uppercase tracking-widest text-white transition-all hover:bg-sky-400 active:scale-95"
+                      onClick={handlePlayOnline}
+                      disabled={startingAutoPlay}
+                      className="rounded-lg bg-sky-500 px-3 py-1.5 text-[10px] font-black uppercase tracking-widest text-white transition-all hover:bg-sky-400 active:scale-95 disabled:opacity-60"
                     >
-                      Resume
+                      {startingAutoPlay ? 'Connecting...' : 'Resume'}
                     </button>
                     <button
                       onClick={async () => {

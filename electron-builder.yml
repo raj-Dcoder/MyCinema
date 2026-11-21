@@ -43,3 +43,4 @@ publish:
   owner: raj-Dcoder
   repo: MyCinema
   releaseType: release
+  timeout: 600000

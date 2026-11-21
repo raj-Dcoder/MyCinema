@@ -144,6 +144,7 @@ interface Api {
   retryTorrentDownload: (id: string) => Promise<boolean>
   getMaxConcurrentDownloads: () => Promise<number>
   setMaxConcurrentDownloads: (value: number) => Promise<number>
+  setTaskbarProgress?: (progress: number, mode?: 'normal' | 'paused' | 'error' | 'indeterminate' | 'none') => Promise<void>
   getActiveDownloads: () => Promise<any[]>
   getPlayableVideoForDownload?: (downloadId: string) => Promise<any | null>
   getDetailMediaForDownload?: (downloadId: string) => Promise<any | null>
@@ -158,6 +159,19 @@ interface Api {
   openFolder: (filePath: string) => Promise<boolean>
   getMediaInfo: (filePath: string) => Promise<any>
   getSeekPreviewThumbnail: (filePath: string, time: number) => Promise<string | null>
+  updateVideoTitle: (id: number, newTitle: string) => Promise<{ success: boolean; title?: string; error?: string }>
+  getLocalVideoStats: (videoIdsOrPaths: Array<number | string>) => Promise<Record<string, {
+    exists: boolean
+    path?: string
+    size?: number
+    sizeFormatted?: string
+    mtime?: number
+    birthtime?: number
+    extension?: string
+    folderName?: string
+    fileName?: string
+  }>>
+  regenerateVideoThumbnail: (videoId: number, timestamp?: number) => Promise<{ success: boolean; posterPath?: string; error?: string }>
   openDownloadsFolder: () => Promise<void>
   getDownloadsStorage: () => Promise<{
     path: string
@@ -267,6 +281,13 @@ interface Api {
   ftDeleteChannel: (channelId: string) => Promise<boolean>
   ftSetChannelCategories: (channelId: string, categoryIds: number[]) => Promise<boolean>
   ftSetChannelHideShorts: (channelId: string, hideShorts: boolean) => Promise<boolean>
+  ftListPlaylists: (categoryId?: number | null) => Promise<import('./types').FtPlaylist[]>
+  ftUpsertPlaylist: (input: { playlistId: string; title: string; channelId?: string | null; channelTitle?: string | null; thumbnailUrl?: string | null; url?: string | null }) => Promise<import('./types').FtPlaylist>
+  ftDeletePlaylist: (playlistId: string) => Promise<boolean>
+  ftSetPlaylistCategories: (playlistId: string, categoryIds: number[]) => Promise<boolean>
+  ftResolvePlaylist: (query: string) => Promise<{ playlistId: string; title: string; channelId: string | null; channelTitle: string | null; thumbnailUrl: string | null; videoCount?: number } | { error: string }>
+  ftAddPlaylist: (query: string, categoryIds: number[]) => Promise<import('./types').FtPlaylist | { error: string }>
+  ftRefreshPlaylist: (playlistId: string) => Promise<{ playlistId: string; ok: boolean; added: number; error?: string }>
   ftGetFeed: (options?: import('./types').FtFeedOptions) => Promise<import('./types').FtVideo[]>
   ftGetVideo: (videoId: string) => Promise<import('./types').FtVideo | null>
   ftSetVideoSeen: (videoId: string, seen: boolean) => Promise<boolean>

@@ -56,6 +56,87 @@ export function normalizeUpdate(item: UpdateInput, defaultCategory = 'General'):
 
 export const APP_UPDATES: AppRelease[] = [
   {
+    "version": "v2.0.0",
+    "summary": "Complete local Videos library overhaul with folder browsing and continuous playback queues, full YouTube Playlist support in FocusTube, Windows taskbar download progress, rate-limited high-concurrency TMDB discovery, and zero-FOUC theme initialization.",
+    "updates": [
+      {
+        "title": "Folder Grouping & Multiple View Modes",
+        "description": "Organize your local video collection by folder directory or switch seamlessly between sleek Grid and compact List layouts.",
+        "category": "Local Videos & Library Management"
+      },
+      {
+        "title": "Continuous Queue Playback",
+        "description": "Play individual videos or whole folders sequentially with an in-player Queue sidebar and smooth cross-fade auto-advancing to the next clip.",
+        "category": "Local Videos & Library Management"
+      },
+      {
+        "title": "Batch Video Operations",
+        "description": "Select multiple videos at once to perform bulk actions, including batch watch status toggles and disk deletion.",
+        "category": "Local Videos & Library Management"
+      },
+      {
+        "title": "Metadata Inspector & Custom Thumbnails",
+        "description": "Inspect comprehensive file details (resolution badges, file size, bitrate, codecs, exact paths), edit video titles inline, or extract fresh video thumbnail frames on demand.",
+        "category": "Local Videos & Library Management"
+      },
+      {
+        "title": "YouTube Playlist Support",
+        "description": "Subscribe directly to YouTube playlists by link or ID with automatic InnerTube fallback fetching, category tagging, and dedicated management in Channel Manager.",
+        "category": "FocusTube & Playlist Subscriptions"
+      },
+      {
+        "title": "Custom Branded Icon",
+        "description": "Replaced generic icons with a custom futuristic vector wireframe icon featuring a glowing laser focus indicator.",
+        "category": "FocusTube & Playlist Subscriptions"
+      },
+      {
+        "title": "Live Categorized Playlist Counts",
+        "description": "Track your subscribed playlists and video counts dynamically across customized topic categories.",
+        "category": "FocusTube & Playlist Subscriptions"
+      },
+      {
+        "title": "Natural Episode Sorting",
+        "description": "Multi-episode torrents and season packs now sort naturally with alphanumeric ordering (S01E01, S01E02... S01E10), eliminating index misalignments.",
+        "category": "Playback & Stream Intelligence"
+      },
+      {
+        "title": "Interactive In-Player Queue Drawer",
+        "description": "Browse and jump to any upcoming episode or local video clip directly from the player's side panel.",
+        "category": "Playback & Stream Intelligence"
+      },
+      {
+        "title": "Windows Taskbar Download Progress",
+        "description": "Monitor active media downloads and app updates directly from the Windows taskbar with color-coded states (green for downloading, yellow for paused, red for error).",
+        "category": "System & Discovery Performance"
+      },
+      {
+        "title": "High-Concurrency TMDB Rate Limiter",
+        "description": "Implemented an in-flight request queue and deduplication engine for TMDB API calls, preventing 429 rate-limiting during heavy discovery refreshes.",
+        "category": "System & Discovery Performance"
+      },
+      {
+        "title": "Zero-FOUC Instant Theme Hydration",
+        "description": "Theme colors and ambient variables apply synchronously to the DOM before the first paint, completely eliminating white flashes on startup.",
+        "category": "System & Discovery Performance"
+      },
+      {
+        "title": "Classic Cinema Detail Screen",
+        "description": "The detail screen now stays locked in deep classic black (#080d16) across both light and dark themes for cinematic focus.",
+        "category": "System & Discovery Performance"
+      },
+      {
+        "title": "Strict Media Frame Extraction Safeguards",
+        "description": "Video thumbnail regeneration and file metadata inspection validate file path containment to prevent arbitrary file execution.",
+        "category": "Security & Privacy"
+      },
+      {
+        "title": "Safe InnerTube RSS Parsing",
+        "description": "Playlist feed resolution uses sandboxed XML parsing and sanitizes remote channel data before writing to local SQLite storage.",
+        "category": "Security & Privacy"
+      }
+    ]
+  },
+  {
     "version": "v1.53.0",
     "summary": "Smart one-click streaming with health-scored source picking, next-episode smart targeting, rich contextual download management, and independent FocusTube PiP quality control.",
     "updates": [

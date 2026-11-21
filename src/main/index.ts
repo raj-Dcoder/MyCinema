@@ -9,7 +9,7 @@ import * as focusTubeYouTubeImport from './focusTubeYouTubeImport'
 import * as sponsorBlock from './sponsorBlock'
 import * as downloadSites from './downloadSites'
 import { POPUP_PARTITION, POPUP_COSMETIC_CSS, isBlockedAdUrl, registerPopupAdblock } from './popupAdblock'
-import { scanFolder, getEmbeddedSubtitles, getEmbeddedAudio } from './scanner'
+import { scanFolder, getEmbeddedSubtitles, getEmbeddedAudio, extractOfflineThumbnail } from './scanner'
 import * as tmdb from './tmdb'
 import * as httpDownloader from './httpDownloader'
 import fs from 'fs'
@@ -3525,6 +3525,26 @@ ipcMain.handle('set-max-concurrent-downloads', (_, value: number) => {
   return settings.maxConcurrentDownloads
 })
 
+ipcMain.handle('set-taskbar-progress', (event, progress: number, mode?: 'normal' | 'paused' | 'error' | 'indeterminate' | 'none') => {
+  try {
+    const win = BrowserWindow.fromWebContents(event.sender) || BrowserWindow.getAllWindows()[0]
+    if (win && !win.isDestroyed()) {
+      const cleanProgress = typeof progress === 'number' ? progress : -1
+      if (cleanProgress < 0) {
+        win.setProgressBar(-1)
+      } else if (mode === 'indeterminate') {
+        win.setProgressBar(2, { mode: 'indeterminate' })
+      } else if (mode) {
+        win.setProgressBar(Math.max(0, Math.min(1, cleanProgress)), { mode })
+      } else {
+        win.setProgressBar(Math.max(0, Math.min(1, cleanProgress)))
+      }
+    }
+  } catch (err) {
+    console.error('[TaskbarProgress] Failed to set taskbar progress:', err)
+  }
+})
+
 ipcMain.handle('get-download-dir', () => {
   const defaultPath = path.join(app.getPath('downloads'), 'MyCinema')
   const currentPath = getDownloadPath()
@@ -4875,6 +4895,113 @@ ipcMain.handle('get-media-info', (_event, filePath: string): Promise<any> => {
       })
     })
   })
+})
+
+// ─── Local Video Management Utilities (Videos Tab Upgrade) ─────────────────────
+ipcMain.handle('update-video-title', async (_event, id: number, newTitle: string) => {
+  if (!id || typeof newTitle !== 'string' || !newTitle.trim()) {
+    return { success: false, error: 'Invalid ID or title' }
+  }
+  try {
+    const cleanTitle = newTitle.trim()
+    db.updateVideoTitle(id, cleanTitle)
+    BrowserWindow.getAllWindows().forEach(w => {
+      try {
+        if (!w.isDestroyed() && !w.webContents.isDestroyed()) {
+          w.webContents.send('library-updated')
+        }
+      } catch {}
+    })
+    return { success: true, title: cleanTitle }
+  } catch (err: any) {
+    console.error('[IPC] Failed to update video title:', err)
+    return { success: false, error: err.message }
+  }
+})
+
+ipcMain.handle('get-local-video-stats', async (_event, videoIdsOrPaths: Array<number | string>) => {
+  const results: Record<string, any> = {}
+  if (!Array.isArray(videoIdsOrPaths)) return results
+
+  const formatBytes = (bytes: number) => {
+    if (bytes >= 1e9) return `${(bytes / 1e9).toFixed(2)} GB`
+    if (bytes >= 1e6) return `${(bytes / 1e6).toFixed(1)} MB`
+    if (bytes >= 1e3) return `${(bytes / 1e3).toFixed(0)} KB`
+    return `${bytes} B`
+  }
+
+  for (const item of videoIdsOrPaths) {
+    try {
+      let filePath = ''
+      let videoId: number | null = null
+
+      if (typeof item === 'number') {
+        videoId = item
+        const v = db.getVideoById(item)
+        if (v?.file_path) filePath = v.file_path
+      } else if (typeof item === 'string') {
+        filePath = item
+      }
+
+      if (!filePath || !fs.existsSync(filePath)) {
+        results[String(item)] = { exists: false }
+        continue
+      }
+
+      const stat = fs.statSync(filePath)
+      const ext = path.extname(filePath).replace('.', '').toUpperCase()
+      const dir = path.dirname(filePath)
+      const folderName = path.basename(dir)
+      const fileName = path.basename(filePath)
+
+      // Auto-backfill DB if size or mtime missing
+      if (videoId && stat.size > 0) {
+        try {
+          db.updateVideoFileSizeAndMtime(videoId, stat.size, Math.round(stat.mtimeMs))
+        } catch {}
+      }
+
+      results[String(item)] = {
+        exists: true,
+        path: filePath,
+        size: stat.size,
+        sizeFormatted: formatBytes(stat.size),
+        mtime: Math.round(stat.mtimeMs),
+        birthtime: Math.round(stat.birthtimeMs),
+        extension: ext,
+        folderName: folderName,
+        fileName: fileName
+      }
+    } catch {
+      results[String(item)] = { exists: false }
+    }
+  }
+  return results
+})
+
+ipcMain.handle('regenerate-video-thumbnail', async (_event, videoId: number, timestamp?: number) => {
+  try {
+    const video = db.getVideoById(videoId)
+    if (!video || !video.file_path || !fs.existsSync(video.file_path)) {
+      return { success: false, error: 'Video file not found' }
+    }
+    const newPoster = await extractOfflineThumbnail(video.file_path, video.id, video.duration || 0, timestamp)
+    if (newPoster) {
+      db.updateVideoPosterPath(videoId, newPoster)
+      BrowserWindow.getAllWindows().forEach(w => {
+        try {
+          if (!w.isDestroyed() && !w.webContents.isDestroyed()) {
+            w.webContents.send('library-updated')
+          }
+        } catch {}
+      })
+      return { success: true, posterPath: newPoster }
+    }
+    return { success: false, error: 'Failed to extract frame' }
+  } catch (err: any) {
+    console.error('[IPC] regenerate-video-thumbnail error:', err)
+    return { success: false, error: err.message }
+  }
 })
 
 ipcMain.handle('get-seek-preview-thumbnail', async (_event, filePath: string, time: number): Promise<string | null> => {
@@ -8704,6 +8831,19 @@ ipcMain.handle('get-temp-stream-episodes', async (_, streamId: string) => {
       isSeasonPack: Boolean(meta.isSeasonPack)
     })
   })
+  episodes.sort((a, b) => {
+    const sa = a.season ?? 1
+    const sb = b.season ?? 1
+    if (sa !== sb) return sa - sb
+    if (a.episode != null && b.episode != null && a.episode !== b.episode) {
+      return a.episode - b.episode
+    }
+    if (a.episode != null && b.episode == null) return -1
+    if (a.episode == null && b.episode != null) return 1
+    const comp = (a.fileName || '').localeCompare(b.fileName || '', undefined, { numeric: true, sensitivity: 'base' })
+    if (comp !== 0) return comp
+    return a.index - b.index
+  })
   return { episodes }
 })
 
@@ -9383,6 +9523,56 @@ ipcMain.handle('ft-set-channel-categories', (_e, { channelId, categoryIds }: { c
 
 ipcMain.handle('ft-set-channel-hide-shorts', (_e, { channelId, hideShorts }: { channelId: string; hideShorts: boolean }) =>
   ftGuard('setChannelHideShorts', () => focusTube.setChannelHideShorts(channelId, hideShorts)))
+
+ipcMain.handle('ft-list-playlists', (_e, categoryId?: number | null) =>
+  ftGuard('listPlaylists', () => focusTube.listPlaylists(categoryId ?? null)))
+
+ipcMain.handle('ft-upsert-playlist', (_e, input: { playlistId: string; title: string; channelId?: string | null; channelTitle?: string | null; thumbnailUrl?: string | null; url?: string | null }) =>
+  ftGuard('upsertPlaylist', () => focusTube.upsertPlaylist(input)))
+
+ipcMain.handle('ft-delete-playlist', (_e, playlistId: string) =>
+  ftGuard('deletePlaylist', () => focusTube.deletePlaylist(playlistId)))
+
+ipcMain.handle('ft-set-playlist-categories', (_e, { playlistId, categoryIds }: { playlistId: string; categoryIds: number[] }) =>
+  ftGuard('setPlaylistCategories', () => focusTube.setPlaylistCategories(playlistId, categoryIds)))
+
+ipcMain.handle('ft-resolve-playlist', async (_e, query: string) => {
+  try {
+    return await focusTubeFeed.resolvePlaylist(query)
+  } catch (err: any) {
+    console.error('[FocusTube] Resolve playlist failed:', err?.message)
+    return { error: err?.message || 'Could not resolve that playlist' }
+  }
+})
+
+ipcMain.handle('ft-add-playlist', async (_e, input: { query: string; categoryIds: number[] }) => {
+  try {
+    const resolved = await focusTubeFeed.resolvePlaylist(input.query)
+    const playlist = focusTube.upsertPlaylist(resolved)
+    if (Array.isArray(input.categoryIds) && input.categoryIds.length) {
+      focusTube.setPlaylistCategories(playlist.playlistId, input.categoryIds)
+    }
+    const refreshed = await focusTubeFeed.refreshPlaylistFeed(playlist.playlistId)
+    broadcastFeedUpdated({ added: refreshed.added, channelIds: [] })
+    return focusTube.getPlaylist(playlist.playlistId)
+  } catch (err: any) {
+    console.error('[FocusTube] Add playlist failed:', err?.message)
+    return { error: err?.message || 'Could not add that playlist' }
+  }
+})
+
+ipcMain.handle('ft-refresh-playlist', async (_e, playlistId: string) => {
+  try {
+    const refreshed = await focusTubeFeed.refreshPlaylistFeed(playlistId)
+    if (refreshed.added > 0) {
+      broadcastFeedUpdated({ added: refreshed.added, channelIds: [] })
+    }
+    return refreshed
+  } catch (err: any) {
+    console.error('[FocusTube] Refresh playlist failed:', err?.message)
+    return { playlistId, ok: false, added: 0, error: err?.message }
+  }
+})
 
 ipcMain.handle('ft-get-feed', (_e, options?: Partial<{
   categoryId: number | null

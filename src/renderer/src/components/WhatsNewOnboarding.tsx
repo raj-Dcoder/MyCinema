@@ -109,38 +109,38 @@ const UPDATE_ICONS: Record<UpdateIconKey, { icon: React.ReactNode; tile: string 
 }
 
 export const LATEST_RELEASE: ReleaseNotes = {
-  version: '1.53.0',
-  title: 'Smarter streaming and richer download control.',
-  highlight: 'Smarter streaming',
+  version: '2.0.0',
+  title: 'Next-level local library and playlist power.',
+  highlight: 'playlist power.',
   description:
-    'Experience instant playback with automatic best-source selection, next-episode smart targeting, and a powerful new downloads menu.',
+    'Experience an upgraded Videos library with folder browsing and continuous playback, YouTube playlist subscriptions, and Windows taskbar progress.',
   tourId: null,
   video: null,
   updates: [
     {
+      icon: 'layers',
+      title: 'Folder views & layouts',
+      description: 'Group local clips by folder or switch between grid and list views in the Videos tab.',
+    },
+    {
       icon: 'play',
-      title: 'Smart streaming selection',
-      description: 'Automatically picks the cleanest and fastest HD source when playing.',
+      title: 'Continuous queue playback',
+      description: 'Queue local video files with auto-advancing playback and an in-player sidebar.',
     },
     {
       icon: 'sparkles',
-      title: 'Next-episode smart targeting',
-      description: 'Action button tracks and cues up your next unwatched series episode.',
+      title: 'YouTube playlist subscriptions',
+      description: 'Follow and organize entire YouTube playlists inside FocusTube categories.',
     },
     {
       icon: 'download',
-      title: 'Enhanced download menu',
-      description: 'Quickly play, inspect details, open folder, share links, or delete.',
+      title: 'Taskbar download progress',
+      description: 'Track download speed and progress directly on your Windows taskbar icon.',
     },
     {
-      icon: 'layers',
-      title: 'FocusTube PiP quality',
-      description: 'Set custom video resolution independently for Picture-in-Picture mode.',
-    },
-    {
-      icon: 'sparkles',
-      title: 'Quick discovery sync',
-      description: 'One-click refresh in the header to instantly reload movies and series.',
+      icon: 'fix',
+      title: 'Batch tools & video details',
+      description: 'Select multiple videos for bulk actions, rename titles, and inspect file stats.',
     },
   ],
 }

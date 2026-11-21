@@ -153,7 +153,7 @@ const Movies: React.FC<MoviesProps> = ({ onPlay, onShowDetail }) => {
               {showSortMenu && (
                 <>
                   <div className="fixed inset-0 z-[60]" onClick={() => setShowSortMenu(false)} />
-                  <div className="absolute right-0 z-[70] mt-2 w-52 overflow-hidden rounded-xl border border-white/10 bg-[#0b1018]/98 p-1 shadow-2xl backdrop-blur-xl">
+                  <div className="absolute right-0 z-[70] mt-2 w-52 overflow-hidden rounded-xl border border-white/10 bg-[#0b1018] p-1 shadow-2xl backdrop-blur-xl">
                     {[
                       { id: 'newest', label: 'Recently Added' },
                       { id: 'name', label: 'Name (A-Z)' },

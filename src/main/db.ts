@@ -134,6 +134,12 @@ export function initDb() {
   if (!columnNames.includes('is_preferred')) {
     db.exec("ALTER TABLE videos ADD COLUMN is_preferred BOOLEAN DEFAULT 0")
   }
+  if (!columnNames.includes('file_size')) {
+    db.exec("ALTER TABLE videos ADD COLUMN file_size INTEGER DEFAULT 0")
+  }
+  if (!columnNames.includes('file_mtime')) {
+    db.exec("ALTER TABLE videos ADD COLUMN file_mtime INTEGER DEFAULT 0")
+  }
 
   const watchlistColumns = db.prepare("PRAGMA table_info(watchlist)").all()
   const watchlistColumnNames = watchlistColumns.map((c: any) => c.name)
@@ -296,14 +302,16 @@ export function initDb() {
 export function addVideo(video: any) {
   const stmt = db.prepare(`
     INSERT INTO videos (
-      title, file_path, type, series_name, season, episode, duration, poster_path, vote_average, release_year, tmdb_id
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      title, file_path, type, series_name, season, episode, duration, poster_path, vote_average, release_year, tmdb_id, file_size, file_mtime
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(file_path) DO UPDATE SET
       title = excluded.title,
       type = excluded.type,
       series_name = excluded.series_name,
       season = excluded.season,
       episode = excluded.episode,
+      file_size = CASE WHEN excluded.file_size > 0 THEN excluded.file_size ELSE videos.file_size END,
+      file_mtime = CASE WHEN excluded.file_mtime > 0 THEN excluded.file_mtime ELSE videos.file_mtime END,
       duration = CASE
         WHEN videos.duration = 0 OR videos.duration IS NULL THEN excluded.duration
         ELSE videos.duration
@@ -326,9 +334,30 @@ export function addVideo(video: any) {
     video.poster_path || null,
     video.vote_average || null,
     video.release_year || null,
-    video.tmdb_id || null
+    video.tmdb_id || null,
+    video.file_size || 0,
+    video.file_mtime || 0
   ) as { id: number } | undefined
   return row || { id: 0 }
+}
+
+export function getVideoById(id: number) {
+  return db.prepare('SELECT * FROM videos WHERE id = ?').get(id) as any
+}
+
+export function updateVideoTitle(id: number, title: string) {
+  const stmt = db.prepare('UPDATE videos SET title = ? WHERE id = ?')
+  return stmt.run(title.trim(), id)
+}
+
+export function updateVideoFileSizeAndMtime(id: number, fileSize: number, fileMtime: number) {
+  const stmt = db.prepare('UPDATE videos SET file_size = ?, file_mtime = ? WHERE id = ?')
+  return stmt.run(fileSize, fileMtime, id)
+}
+
+export function updateVideoPosterPath(id: number, posterPath: string) {
+  const stmt = db.prepare('UPDATE videos SET poster_path = ? WHERE id = ?')
+  return stmt.run(posterPath, id)
 }
 
 export function getVideos() {

@@ -35,8 +35,10 @@ import * as focusTube from './focusTube'
 const BROWSER_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36'
 
 const FEED_URL = 'https://www.youtube.com/feeds/videos.xml?channel_id='
+const PLAYLIST_FEED_URL = 'https://www.youtube.com/feeds/videos.xml?playlist_id='
 const CHANNEL_ID_PATTERN = /^UC[\w-]{22}$/
 const BARE_ID_PATTERN = /^[\w-]{22}$/
+export const PLAYLIST_ID_PATTERN = /^(PL|UU|FL|RD|OLAK5uy_)[\w-]{10,}$/
 
 // YouTube refreshes channel feeds roughly every 15 minutes; polling faster is
 // both wasteful and a good way to get rate-limited.
@@ -257,6 +259,538 @@ export async function fetchChannelShorts(channelId: string): Promise<string[]> {
     ids.add(match[1])
   }
   return [...ids]
+}
+
+// ─── Playlist parsing & fetching ──────────────────────────────────────────────
+
+export function extractPlaylistId(input: string): string | null {
+  const trimmed = String(input || '').trim()
+  if (!trimmed) return null
+  if (PLAYLIST_ID_PATTERN.test(trimmed)) return trimmed
+  try {
+    const withProtocol = /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`
+    const url = new URL(withProtocol)
+    const list = url.searchParams.get('list')
+    if (list && PLAYLIST_ID_PATTERN.test(list)) return list
+  } catch {}
+  const match = trimmed.match(/[?&]list=([A-Za-z0-9_-]+)/)
+  if (match && PLAYLIST_ID_PATTERN.test(match[1])) return match[1]
+  return null
+}
+
+export function sanitizeChannelTitle(title: string | null | undefined): string | null {
+  if (!title || typeof title !== 'string') return null
+  const cleaned = title.trim()
+  if (!cleaned) return null
+  if (cleaned.toLowerCase() === 'youtube creator') return null
+  if (/\b\d+[\d,.]*\s*[kmb]?\s*views?\b/i.test(cleaned) || /^\d+[\d,.]*\s*views?$/i.test(cleaned) || cleaned.toLowerCase() === 'views') return null
+  if (/\b(ago|yesterday|today|streamed)\b/i.test(cleaned)) return null
+  return cleaned
+}
+
+/**
+ * Normalizes and chronologically organizes playlist entries.
+ * Prevents videos without an explicit upload timestamp from defaulting to Date.now() (which
+ * pushes all playlist items to the top of the user's feed above regular channel videos).
+ */
+export function resolvePlaylistTimestamps(entries: focusTube.FtFeedEntry[], playlistPublishedAt?: string | null): void {
+  if (!entries || entries.length === 0) return
+
+  const now = Date.now()
+  const isValidPastDate = (iso: string | null | undefined): boolean => {
+    if (!iso) return false
+    const ms = Date.parse(iso)
+    return Number.isFinite(ms) && ms > 0
+  }
+
+  const knownIndices: number[] = []
+  for (let i = 0; i < entries.length; i++) {
+    if (isValidPastDate(entries[i].publishedAt)) {
+      knownIndices.push(i)
+    }
+  }
+
+  if (knownIndices.length === 0) {
+    const baseMs = playlistPublishedAt && isValidPastDate(playlistPublishedAt)
+      ? Date.parse(playlistPublishedAt)
+      : now - (30 * 86400 * 1000)
+    for (let i = 0; i < entries.length; i++) {
+      entries[i].publishedAt = new Date(baseMs + (i * 60_000)).toISOString()
+    }
+    return
+  }
+
+  const firstIdx = knownIndices[0]
+  const lastIdx = knownIndices[knownIndices.length - 1]
+  const firstMs = Date.parse(entries[firstIdx].publishedAt)
+  const lastMs = Date.parse(entries[lastIdx].publishedAt)
+  const isAscending = firstIdx !== lastIdx ? firstMs <= lastMs : true
+
+  let avgStep = 86400_000 // 1 day default
+  if (knownIndices.length > 1) {
+    avgStep = Math.max(60_000, Math.round(Math.abs(lastMs - firstMs) / (lastIdx - firstIdx)))
+  }
+
+  for (let i = firstIdx - 1; i >= 0; i--) {
+    const step = (firstIdx - i) * (isAscending ? -avgStep : avgStep)
+    entries[i].publishedAt = new Date(firstMs + step).toISOString()
+  }
+
+  for (let k = 0; k < knownIndices.length - 1; k++) {
+    const startIdx = knownIndices[k]
+    const endIdx = knownIndices[k + 1]
+    const diff = endIdx - startIdx
+    if (diff > 1) {
+      const startMs = Date.parse(entries[startIdx].publishedAt)
+      const endMs = Date.parse(entries[endIdx].publishedAt)
+      for (let i = startIdx + 1; i < endIdx; i++) {
+        const factor = (i - startIdx) / diff
+        entries[i].publishedAt = new Date(Math.round(startMs + factor * (endMs - startMs))).toISOString()
+      }
+    }
+  }
+
+  for (let i = lastIdx + 1; i < entries.length; i++) {
+    const step = (i - lastIdx) * (isAscending ? avgStep : -avgStep)
+    const extrapolatedMs = Math.min(lastMs + step, now - 60_000)
+    entries[i].publishedAt = new Date(extrapolatedMs).toISOString()
+  }
+
+  for (let i = 1; i < entries.length; i++) {
+    const prevMs = Date.parse(entries[i - 1].publishedAt)
+    let currMs = Date.parse(entries[i].publishedAt)
+    if (isAscending) {
+      if (currMs <= prevMs) {
+        currMs = prevMs + 60_000
+        entries[i].publishedAt = new Date(currMs).toISOString()
+      }
+    } else {
+      if (currMs >= prevMs) {
+        currMs = prevMs - 60_000
+        entries[i].publishedAt = new Date(currMs).toISOString()
+      }
+    }
+  }
+}
+
+export interface ParsedPlaylistFeed {
+  playlistId: string
+  title: string | null
+  channelId: string | null
+  channelTitle: string | null
+  thumbnailUrl: string | null
+  publishedAt?: string | null
+  entries: focusTube.FtFeedEntry[]
+}
+
+export function parsePlaylistFeed(xml: string, fallbackPlaylistId: string): ParsedPlaylistFeed {
+  let parsed: any
+  try {
+    parsed = parser.parse(xml)
+  } catch {
+    return { playlistId: fallbackPlaylistId, title: null, channelId: null, channelTitle: null, thumbnailUrl: null, entries: [] }
+  }
+
+  const feed = parsed?.feed
+  if (!feed) return { playlistId: fallbackPlaylistId, title: null, channelId: null, channelTitle: null, thumbnailUrl: null, entries: [] }
+
+  const playlistId = textOf(feed['yt:playlistId']) || fallbackPlaylistId
+  const channelId = normalizeChannelId(textOf(feed['yt:channelId']), '') || null
+  const feedTitle = decodeNumericEntities(textOf(feed.title) || '') || null
+  const feedChannelTitle = sanitizeChannelTitle(decodeNumericEntities(textOf(feed.author?.name) || '')) || null
+  const feedPublished = textOf(feed.published) || textOf(feed.updated) || null
+
+  const entries: focusTube.FtFeedEntry[] = []
+  let firstThumbnail: string | null = null
+
+  for (const entry of asArray<any>(feed.entry)) {
+    const videoId = textOf(entry['yt:videoId'])
+    if (!videoId) continue
+
+    const group = entry['media:group'] || {}
+    const community = group['media:community'] || {}
+    const statistics = asArray<any>(community['media:statistics'])[0] || {}
+    const thumb = textOf(group['media:thumbnail']?.['@_url']) || null
+    if (!firstThumbnail && thumb) firstThumbnail = thumb
+
+    const entryChannelId = normalizeChannelId(textOf(entry['yt:channelId']), channelId || 'UCunknown')
+    const entryAuthorName = sanitizeChannelTitle(decodeNumericEntities(textOf(entry.author?.name) || ''))
+    const entryChannelTitle = entryAuthorName || feedChannelTitle || null
+
+    entries.push({
+      videoId,
+      channelId: entryChannelId,
+      channelTitle: entryChannelTitle,
+      title: decodeNumericEntities(textOf(entry.title) || textOf(group['media:title']) || 'Untitled'),
+      publishedAt: textOf(entry.published) || textOf(entry.updated) || feedPublished || '',
+      views: toInt(statistics['@_views']),
+      description: decodeNumericEntities(textOf(group['media:description']) || '') || null,
+    })
+  }
+
+  resolvePlaylistTimestamps(entries, feedPublished)
+
+  return {
+    playlistId,
+    title: feedTitle,
+    channelId,
+    channelTitle: feedChannelTitle,
+    thumbnailUrl: firstThumbnail,
+    publishedAt: feedPublished,
+    entries,
+  }
+}
+
+export async function fetchPlaylistFeed(playlistId: string, opts?: FetchOptions): Promise<ParsedPlaylistFeed> {
+  const args = resolveFetchArgs(opts)
+  const { text } = await fetchText(PLAYLIST_FEED_URL + encodeURIComponent(playlistId), args.timeoutMs, args.attempts)
+  return parsePlaylistFeed(text, playlistId)
+}
+
+export async function fetchPlaylistInnerTube(playlistId: string): Promise<ParsedPlaylistFeed | null> {
+  const browseId = playlistId.startsWith('VL') ? playlistId : `VL${playlistId}`
+  try {
+    const response = await httpGet('https://www.youtube.com/youtubei/v1/browse?prettyPrint=false', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'User-Agent': BROWSER_UA,
+        'X-YouTube-Client-Name': '1',
+        'X-YouTube-Client-Version': '2.20240410.01.00',
+        'Accept-Language': 'en-US,en;q=0.9',
+      },
+      body: JSON.stringify({
+        context: {
+          client: {
+            clientName: 'WEB',
+            clientVersion: '2.20240410.01.00',
+            hl: 'en',
+            gl: 'US',
+          },
+        },
+        browseId,
+      }),
+    } as any)
+
+    if (!response.ok) return null
+    const json = (await response.json()) as any
+    if (!json || typeof json !== 'object') return null
+
+    const title =
+      json.header?.pageHeaderRenderer?.pageTitle ||
+      json.header?.playlistHeaderRenderer?.title?.simpleText ||
+      json.metadata?.playlistMetadataRenderer?.title ||
+      null
+
+    let channelTitle: string | null = null
+    let channelId: string | null = null
+    let channelAvatarUrl: string | null = null
+    const headerStr = JSON.stringify(json.header || {})
+    const chMatch = headerStr.match(/"browseId":"(UC[A-Za-z0-9_-]{22})"/)
+    if (chMatch) channelId = chMatch[1]
+
+    // Also attempt to get header channel title
+    const headerTitle =
+      json.header?.playlistHeaderRenderer?.ownerText?.runs?.[0]?.text ||
+      json.header?.pageHeaderRenderer?.metadata?.contentMetadataViewModel?.metadataRows?.[0]?.metadataParts?.[0]?.text?.content ||
+      null
+    const sanitizedHeaderTitle = sanitizeChannelTitle(headerTitle)
+    if (sanitizedHeaderTitle) channelTitle = sanitizedHeaderTitle
+
+    const entries: focusTube.FtFeedEntry[] = []
+    const seenVideos = new Set<string>()
+
+    function walk(node: any) {
+      if (!node || typeof node !== 'object') return
+      if (node.lockupViewModel && node.lockupViewModel.contentType === 'LOCKUP_CONTENT_TYPE_VIDEO') {
+        const vm = node.lockupViewModel
+        const videoId = vm.contentId
+        if (videoId && !seenVideos.has(videoId)) {
+          seenVideos.add(videoId)
+          const meta = vm.metadata?.lockupMetadataViewModel
+          const videoTitle = meta?.title?.content || 'Untitled'
+          const rows = meta?.metadata?.contentMetadataViewModel?.metadataRows || []
+
+          const avatarVm = meta?.image?.decoratedAvatarViewModel
+          const cAvatar = avatarVm?.avatar?.avatarViewModel?.image?.sources?.[0]?.url || null
+          const cId =
+            avatarVm?.rendererContext?.commandContext?.onTap?.innertubeCommand?.browseEndpoint?.browseId ||
+            meta?.rendererContext?.commandContext?.onTap?.innertubeCommand?.browseEndpoint?.browseId ||
+            channelId ||
+            'UCunknown'
+
+          // Extract channel title from avatar accessibility label (e.g. "Go to channel Coder Army")
+          let extractedChannelTitle: string | null = null
+          if (typeof avatarVm?.a11yLabel === 'string') {
+            const match = avatarVm.a11yLabel.match(/^(?:Go to channel|Visit channel)\s+(.+)$/i)
+            if (match) extractedChannelTitle = sanitizeChannelTitle(match[1])
+          }
+
+          let views: number | null = null
+          let publishedAt: string | null = null
+
+          // Inspect ALL metadata rows and parts
+          for (const row of rows) {
+            for (const part of row?.metadataParts || []) {
+              const txt = part?.text?.content
+              if (typeof txt !== 'string' || !txt.trim()) continue
+              const trimmed = txt.trim()
+              const lower = trimmed.toLowerCase()
+
+              const browseEndpoint = part?.text?.commandRuns?.[0]?.onTap?.innertubeCommand?.browseEndpoint
+              if (browseEndpoint?.browseId && !extractedChannelTitle && !lower.includes('view') && !lower.includes('ago')) {
+                const sanitized = sanitizeChannelTitle(trimmed)
+                if (sanitized) {
+                  extractedChannelTitle = sanitized
+                  continue
+                }
+              }
+
+              if (lower.includes('view')) {
+                views = parseViewsText(lower)
+              } else if (lower.includes('ago') || lower.includes('streamed') || lower.includes('yesterday') || lower.includes('today')) {
+                publishedAt = parseRelativeTimeToIso(lower.replace('streamed', '').trim())
+              } else if (!extractedChannelTitle && !/^[\s•·|–—-]+$/.test(trimmed) && !lower.includes('subscribed') && !/^\d+:\d+$/.test(trimmed)) {
+                const sanitized = sanitizeChannelTitle(trimmed)
+                if (sanitized) extractedChannelTitle = sanitized
+              }
+            }
+          }
+
+          const cTitle = sanitizeChannelTitle(extractedChannelTitle) || sanitizeChannelTitle(channelTitle) || null
+
+          if (!channelTitle && cTitle) channelTitle = cTitle
+          if (!channelId && cId && cId !== 'UCunknown') channelId = cId
+          if (!channelAvatarUrl && cAvatar) channelAvatarUrl = cAvatar
+
+          entries.push({
+            videoId,
+            channelId: cId,
+            channelTitle: cTitle,
+            channelAvatarUrl: cAvatar,
+            title: videoTitle,
+            publishedAt: publishedAt || '',
+            views,
+            description: null,
+          })
+        }
+      }
+      if (node.playlistVideoRenderer) {
+        const pvr = node.playlistVideoRenderer
+        const videoId = pvr.videoId
+        if (videoId && !seenVideos.has(videoId)) {
+          seenVideos.add(videoId)
+          const videoTitle = pvr.title?.runs?.[0]?.text || pvr.title?.simpleText || 'Untitled'
+          const cId = pvr.shortBylineText?.runs?.[0]?.navigationEndpoint?.browseEndpoint?.browseId || channelId || 'UCunknown'
+          const rawCTitle = pvr.shortBylineText?.runs?.[0]?.text || null
+          const cTitle = sanitizeChannelTitle(rawCTitle) || sanitizeChannelTitle(channelTitle) || null
+          const cAvatar = pvr.channelThumbnailSupportedRenderers?.channelThumbnailWithLinkRenderer?.thumbnail?.thumbnails?.[0]?.url || null
+
+          if (!channelTitle && cTitle) channelTitle = cTitle
+          if (!channelId && cId && cId !== 'UCunknown') channelId = cId
+          if (!channelAvatarUrl && cAvatar) channelAvatarUrl = cAvatar
+
+          let views: number | null = null
+          if (pvr.videoInfo?.runs) {
+            for (const r of pvr.videoInfo.runs) {
+              const txt = r.text?.toLowerCase() || ''
+              if (txt.includes('view')) views = parseViewsText(txt)
+            }
+          }
+
+          let publishedAt: string | null = null
+          const timeText = pvr.publishedTimeText?.simpleText || pvr.publishedTimeText?.runs?.[0]?.text
+          if (timeText) {
+            publishedAt = parseRelativeTimeToIso(timeText)
+          }
+
+          entries.push({
+            videoId,
+            channelId: cId,
+            channelTitle: cTitle,
+            channelAvatarUrl: cAvatar,
+            title: videoTitle,
+            publishedAt: publishedAt || '',
+            views,
+            description: null,
+          })
+        }
+      }
+      if (Array.isArray(node)) {
+        for (const item of node) walk(item)
+      } else {
+        for (const k of Object.keys(node)) walk(node[k])
+      }
+    }
+
+    walk(json)
+    if (!entries.length) return null
+
+    resolvePlaylistTimestamps(entries)
+
+    // Ensure all entries have valid channel metadata
+    for (const e of entries) {
+      if (!sanitizeChannelTitle(e.channelTitle) && channelTitle) {
+        e.channelTitle = channelTitle
+      }
+    }
+
+    return {
+      playlistId,
+      title,
+      channelId,
+      channelTitle,
+      thumbnailUrl: channelAvatarUrl,
+      entries,
+    }
+  } catch {
+    return null
+  }
+}
+
+export async function resolvePlaylist(input: string): Promise<{
+  playlistId: string
+  title: string
+  channelId: string | null
+  channelTitle: string | null
+  thumbnailUrl: string | null
+  url: string
+  videoCount?: number
+}> {
+  const playlistId = extractPlaylistId(input)
+  if (!playlistId) throw new Error('That does not look like a valid YouTube playlist URL or ID')
+
+  let feed: ParsedPlaylistFeed
+  try {
+    feed = await fetchPlaylistFeed(playlistId)
+  } catch (err: any) {
+    const it = await fetchPlaylistInnerTube(playlistId)
+    if (it && it.title) feed = it
+    else throw new Error(`Could not load playlist: ${err?.message || 'Not found'}`)
+  }
+
+  const url = `https://www.youtube.com/playlist?list=${playlistId}`
+  const title = feed.title || 'Untitled Playlist'
+  return {
+    playlistId,
+    title,
+    channelId: feed.channelId,
+    channelTitle: feed.channelTitle,
+    thumbnailUrl: feed.thumbnailUrl,
+    url,
+    videoCount: feed.entries.length,
+  }
+}
+
+export async function refreshPlaylistFeed(playlistId: string): Promise<{ playlistId: string; ok: boolean; added: number; error?: string }> {
+  const playlist = focusTube.getPlaylist(playlistId)
+  if (!playlist) return { playlistId, ok: false, added: 0, error: 'Playlist is no longer in Focus Tube.' }
+
+  try {
+    let feed: ParsedPlaylistFeed | null = null
+    // Attempt InnerTube fetch to get comprehensive playlist video list (up to 100+ videos)
+    try {
+      feed = await fetchPlaylistInnerTube(playlist.playlistId)
+    } catch {
+      // InnerTube failed; fallback to Atom feed
+    }
+
+    // Always fetch official Atom feed — it carries exact down-to-the-second upload dates (<published>)
+    let atomFeed: ParsedPlaylistFeed | null = null
+    try {
+      atomFeed = await fetchPlaylistFeed(playlist.playlistId)
+    } catch {
+      // Ignore if Atom feed fails
+    }
+
+    if (atomFeed && atomFeed.entries.length) {
+      if (!feed || !feed.entries.length) {
+        feed = atomFeed
+      } else {
+        // Overlay exact upload timestamps, views and channel metadata from Atom feed onto the matching InnerTube entries
+        const atomMap = new Map(atomFeed.entries.map((e) => [e.videoId, e]))
+        for (const entry of feed.entries) {
+          const exact = atomMap.get(entry.videoId)
+          if (exact) {
+            entry.publishedAt = exact.publishedAt
+            if (exact.views && !entry.views) entry.views = exact.views
+            if (exact.channelTitle && (!entry.channelTitle || entry.channelTitle === 'YouTube Creator')) {
+              entry.channelTitle = exact.channelTitle
+            }
+            if (exact.channelId && (!entry.channelId || entry.channelId === 'UCunknown')) {
+              entry.channelId = exact.channelId
+            }
+          }
+        }
+        // Append any Atom entries that InnerTube might not have indexed yet
+        const seen = new Set(feed.entries.map((e) => e.videoId))
+        for (const a of atomFeed.entries) {
+          if (!seen.has(a.videoId)) {
+            feed.entries.push(a)
+            seen.add(a.videoId)
+          }
+        }
+      }
+    }
+
+    if (!feed || !feed.entries.length) {
+      return { playlistId, ok: false, added: 0, error: 'No videos found in this playlist' }
+    }
+
+    // Resolve & organize timestamps chronologically so playlist videos sort antichronologically
+    // alongside other channel videos without clustering at "now".
+    resolvePlaylistTimestamps(feed.entries, atomFeed?.publishedAt || feed.publishedAt)
+
+    const canonicalChannelTitle = sanitizeChannelTitle(feed.channelTitle) || sanitizeChannelTitle(atomFeed?.channelTitle) || sanitizeChannelTitle(playlist.channelTitle) || null
+    const canonicalChannelId = (feed.channelId && feed.channelId !== 'UCunknown') ? feed.channelId : (atomFeed?.channelId || playlist.channelId || null)
+
+    for (const entry of feed.entries) {
+      if (!sanitizeChannelTitle(entry.channelTitle) && canonicalChannelTitle) {
+        entry.channelTitle = canonicalChannelTitle
+      }
+      if ((!entry.channelId || entry.channelId === 'UCunknown') && canonicalChannelId) {
+        entry.channelId = canonicalChannelId
+      }
+    }
+
+    const upsert = focusTube.upsertPlaylistVideos(playlist.playlistId, feed.entries)
+    focusTube.setPlaylistLastFetched(playlist.playlistId, null)
+
+    // Ensure all creator channel avatars and titles are resolved
+    for (const entry of feed.entries) {
+      if (entry.channelId && entry.channelId !== 'UCunknown') {
+        const cleanTitle = sanitizeChannelTitle(entry.channelTitle) || canonicalChannelTitle
+        focusTube.ensureChannelPlaceholder(entry.channelId, cleanTitle, entry.channelAvatarUrl)
+        if (entry.channelAvatarUrl) {
+          focusTube.updateChannelAvatar(entry.channelId, entry.channelAvatarUrl)
+        }
+        const existing = focusTube.getChannel(entry.channelId)
+        const isGarbage = !existing?.title || existing.title === 'YouTube Creator' || /\bviews?\b/i.test(existing.title)
+        if (isGarbage || !existing?.avatarUrl) {
+          void refreshChannelAvatar(entry.channelId)
+        }
+      }
+    }
+
+    if ((feed.title && feed.title !== playlist.title) || canonicalChannelTitle || canonicalChannelId) {
+      focusTube.upsertPlaylist({
+        playlistId: playlist.playlistId,
+        title: feed.title || playlist.title,
+        channelId: canonicalChannelId || playlist.channelId,
+        channelTitle: canonicalChannelTitle || playlist.channelTitle,
+        thumbnailUrl: feed.thumbnailUrl || playlist.thumbnailUrl,
+        url: playlist.url,
+      })
+    }
+
+    console.log(`[FocusTube] Playlist "${playlist.title}": +${upsert.inserted} new (${upsert.existing} existing)`)
+    return { playlistId, ok: true, added: upsert.inserted }
+  } catch (err: any) {
+    const message = err?.message || 'Unknown error'
+    focusTube.setPlaylistLastFetched(playlist.playlistId, message)
+    console.warn(`[FocusTube] Playlist feed failed for "${playlist.title}" (${playlistId}): ${message}`)
+    return { playlistId, ok: false, added: 0, error: message }
+  }
 }
 
 // ─── Channel resolution ───────────────────────────────────────────────────────
@@ -1259,30 +1793,37 @@ export async function refreshChannelAvatar(channelId: string): Promise<boolean> 
     const { text } = await fetchText(`https://www.youtube.com/channel/${encodeURIComponent(id)}`)
     const avatarUrl = pickAvatar(text)
     const handle = pickHandle(text)
-    if (!avatarUrl && !handle) return false
+    const scrapedTitle = sanitizeChannelTitle(pickChannelName(text, false))
+    const existing = focusTube.getChannel(id)
+    const currentTitle = sanitizeChannelTitle(existing?.title)
+    const finalTitle = scrapedTitle || currentTitle || id
+
+    if (!avatarUrl && !handle && !scrapedTitle) return false
     focusTube.upsertChannel({
       channelId: id,
-      title: focusTube.getChannel(id)?.title || id,
-      handle,
-      avatarUrl,
+      title: finalTitle,
+      handle: handle || existing?.handle || null,
+      avatarUrl: avatarUrl || existing?.avatarUrl || null,
     })
-    return avatarUrl !== null
+    return avatarUrl !== null || scrapedTitle !== null
   } catch (err: any) {
-    console.warn(`[FocusTube] Avatar refresh failed for ${id}: ${err?.message}`)
+    console.warn(`[FocusTube] Channel info refresh failed for ${id}: ${err?.message}`)
     return false
   }
 }
 
 /**
- * Backfills logos for every subscribed channel still missing one.
- * Failure-isolated per channel; only touches rows with no avatar stored.
+ * Backfills logos and clean titles for subscribed channels that are missing an avatar
+ * or stuck with placeholder names (e.g. "YouTube Creator" or view count strings).
  */
 export async function refreshMissingAvatars(): Promise<{ checked: number; updated: number }> {
-  const missing = focusTube.listChannels(null).filter((c) => !c.avatarUrl)
+  const isGarbage = (t: string | null | undefined) =>
+    !t || t === 'YouTube Creator' || /\b\d+[\d,.]*\s*[kmb]?\s*views?\b/i.test(t) || /\bviews?\b/i.test(t) || /\bago\b/i.test(t)
+  const missing = focusTube.listChannels(null).filter((c) => !c.avatarUrl || isGarbage(c.title))
   if (!missing.length) return { checked: 0, updated: 0 }
   const done = await withConcurrency(missing, 3, async (channel) => refreshChannelAvatar(channel.channelId))
   const updated = done.filter(Boolean).length
-  console.log(`[FocusTube] Avatar backfill: ${updated}/${missing.length} logos restored`)
+  console.log(`[FocusTube] Channel metadata backfill: ${updated}/${missing.length} channels updated`)
   return { checked: missing.length, updated }
 }
 
@@ -1292,6 +1833,7 @@ export interface PollResult {
   added: number
   channelIds: string[]
   failed: string[]
+  playlistIds?: string[]
 }
 
 export interface ChannelRefreshResult {
@@ -1382,16 +1924,26 @@ export async function refreshChannels(
  */
 export async function pollFeeds(options?: { force?: boolean }): Promise<PollResult> {
   const force = options?.force ?? false
-  const due = focusTube.getChannelsDueForFetch(FEED_MIN_POLL_MINUTES, force)
-  const result: PollResult = { added: 0, channelIds: [], failed: [] }
+  const dueChannels = focusTube.getChannelsDueForFetch(FEED_MIN_POLL_MINUTES, force)
+  const duePlaylists = focusTube.getPlaylistsDueForFetch(FEED_MIN_POLL_MINUTES, force)
+  const result: PollResult = { added: 0, channelIds: [], failed: [], playlistIds: [] }
 
-  await withConcurrency(due, POLL_CONCURRENCY, async (channel) => {
+  await withConcurrency(dueChannels, POLL_CONCURRENCY, async (channel) => {
     const refreshed = await refreshChannelFeed(channel.channelId)
     if (refreshed.added > 0) {
       result.added += refreshed.added
       result.channelIds.push(channel.channelId)
     }
     if (!refreshed.ok) result.failed.push(channel.channelId)
+  })
+
+  await withConcurrency(duePlaylists, POLL_CONCURRENCY, async (playlist) => {
+    const refreshed = await refreshPlaylistFeed(playlist.playlistId)
+    if (refreshed.added > 0) {
+      result.added += refreshed.added
+      result.playlistIds?.push(playlist.playlistId)
+    }
+    if (!refreshed.ok) result.failed.push(playlist.playlistId)
   })
 
   return result

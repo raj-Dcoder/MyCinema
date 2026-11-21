@@ -22,6 +22,7 @@ export interface FtCategory {
   color: string
   position: number
   channelCount?: number
+  playlistCount?: number
   unseenCount?: number
 }
 
@@ -37,6 +38,20 @@ export interface FtChannel {
   lastFetched: string | null
   lastError: string | null
   categoryIds: number[]
+}
+
+export interface FtPlaylist {
+  playlistId: string
+  channelId: string | null
+  channelTitle: string | null
+  title: string
+  thumbnailUrl: string | null
+  url: string
+  position: number
+  lastFetched: string | null
+  lastError: string | null
+  categoryIds: number[]
+  videoCount?: number
 }
 
 export interface FtVideo {
@@ -59,6 +74,8 @@ export interface FtVideo {
   seenAt: string | null
   saved: boolean
   position: number
+  playlistId?: string | null
+  playlistTitle?: string | null
 }
 
 export interface FtFeedOptions {
@@ -78,6 +95,7 @@ function toCategory(row: any): FtCategory {
     color: String(row.color || 'red'),
     position: Number(row.position ?? 0),
     channelCount: row.channel_count === undefined ? undefined : Number(row.channel_count || 0),
+    playlistCount: row.playlist_count === undefined ? undefined : Number(row.playlist_count || 0),
     unseenCount: row.unseen_count === undefined ? undefined : Number(row.unseen_count || 0),
   }
 }
@@ -97,11 +115,33 @@ function toChannel(row: any, categoryIds: number[]): FtChannel {
   }
 }
 
+function toPlaylist(row: any, categoryIds: number[]): FtPlaylist {
+  return {
+    playlistId: String(row.playlist_id),
+    channelId: row.channel_id ? String(row.channel_id) : null,
+    channelTitle: row.channel_title ? String(row.channel_title) : null,
+    title: String(row.title),
+    thumbnailUrl: row.thumbnail_url ? String(row.thumbnail_url) : null,
+    url: String(row.url || `https://www.youtube.com/playlist?list=${row.playlist_id}`),
+    position: Number(row.position ?? 0),
+    lastFetched: row.last_fetched ? String(row.last_fetched) : null,
+    lastError: row.last_error ? String(row.last_error) : null,
+    categoryIds,
+    videoCount: row.video_count !== undefined ? Number(row.video_count) : undefined,
+  }
+}
+
 function toVideo(row: any): FtVideo {
+  const isGarbage = (t: string | null | undefined) =>
+    !t || t === 'YouTube Creator' || /\b\d+[\d,.]*\s*[kmb]?\s*views?\b/i.test(t) || /\bviews?\b/i.test(t) || /\bago\b/i.test(t)
+  const channelTitle = isGarbage(row.channel_title)
+    ? (row.playlist_channel_title || 'YouTube Creator')
+    : String(row.channel_title || '')
+
   return {
     videoId: String(row.video_id),
     channelId: String(row.channel_id),
-    channelTitle: String(row.channel_title || ''),
+    channelTitle,
     channelAvatarUrl: row.channel_avatar_url ? String(row.channel_avatar_url) : (row.avatar_url ? String(row.avatar_url) : null),
     channelHandle: row.channel_handle ? String(row.channel_handle) : (row.handle ? String(row.handle) : null),
     title: String(row.title || ''),
@@ -117,6 +157,8 @@ function toVideo(row: any): FtVideo {
     seenAt: row.seen_at ? String(row.seen_at) : null,
     saved: Number(row.saved) ? true : false,
     position: Number(row.position ?? 0),
+    playlistId: row.playlist_id ? String(row.playlist_id) : null,
+    playlistTitle: row.playlist_title ? String(row.playlist_title) : null,
   }
 }
 
@@ -216,10 +258,46 @@ export function initFocusTube(): void {
       value TEXT
     );
 
+    -- Subscribed Playlists
+    CREATE TABLE IF NOT EXISTS ft_playlists (
+      playlist_id TEXT PRIMARY KEY,
+      channel_id TEXT,
+      channel_title TEXT,
+      title TEXT NOT NULL,
+      thumbnail_url TEXT,
+      url TEXT,
+      position INTEGER DEFAULT 0,
+      last_fetched DATETIME,
+      last_error TEXT
+    );
+
+    -- Many-to-many: a playlist can belong to multiple categories
+    CREATE TABLE IF NOT EXISTS ft_playlist_categories (
+      playlist_id TEXT NOT NULL,
+      category_id INTEGER NOT NULL,
+      PRIMARY KEY (playlist_id, category_id),
+      FOREIGN KEY (playlist_id) REFERENCES ft_playlists(playlist_id) ON DELETE CASCADE,
+      FOREIGN KEY (category_id) REFERENCES ft_categories(id) ON DELETE CASCADE
+    );
+
+    -- Videos belonging to a playlist
+    CREATE TABLE IF NOT EXISTS ft_playlist_videos (
+      playlist_id TEXT NOT NULL,
+      video_id TEXT NOT NULL,
+      position INTEGER DEFAULT 0,
+      added_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      PRIMARY KEY (playlist_id, video_id),
+      FOREIGN KEY (playlist_id) REFERENCES ft_playlists(playlist_id) ON DELETE CASCADE,
+      FOREIGN KEY (video_id) REFERENCES ft_videos(video_id) ON DELETE CASCADE
+    );
+
     CREATE INDEX IF NOT EXISTS idx_ft_videos_published ON ft_videos(published_at DESC);
     CREATE INDEX IF NOT EXISTS idx_ft_videos_channel ON ft_videos(channel_id);
     CREATE INDEX IF NOT EXISTS idx_ft_cc_category ON ft_channel_categories(category_id);
     CREATE INDEX IF NOT EXISTS idx_ft_state_seen ON ft_video_state(seen, saved);
+    CREATE INDEX IF NOT EXISTS idx_ft_pc_category ON ft_playlist_categories(category_id);
+    CREATE INDEX IF NOT EXISTS idx_ft_pv_playlist ON ft_playlist_videos(playlist_id);
+    CREATE INDEX IF NOT EXISTS idx_ft_pv_video ON ft_playlist_videos(video_id);
   `)
 
   // `is_short` arrived after the original schema. The codebase migrates with
@@ -227,6 +305,88 @@ export function initFocusTube(): void {
   const videoColumns = db.prepare('PRAGMA table_info(ft_videos)').all() as any[]
   if (!videoColumns.some((c) => c.name === 'is_short')) {
     db.exec('ALTER TABLE ft_videos ADD COLUMN is_short INTEGER DEFAULT 0')
+  }
+
+  // `is_subscribed` differentiates direct channel subscriptions from channels
+  // recorded as metadata holders for playlist videos.
+  const channelColumns = db.prepare('PRAGMA table_info(ft_channels)').all() as any[]
+  if (!channelColumns.some((c) => c.name === 'is_subscribed')) {
+    db.exec('ALTER TABLE ft_channels ADD COLUMN is_subscribed INTEGER DEFAULT 1')
+  }
+
+  // Self-heal: repair channel titles stuck with "YouTube Creator" or view count strings
+  try {
+    db.exec(`
+      UPDATE ft_channels
+      SET title = (
+        SELECT p.channel_title FROM ft_playlists p
+        WHERE p.channel_id = ft_channels.channel_id
+          AND p.channel_title IS NOT NULL
+          AND p.channel_title != 'YouTube Creator'
+          AND p.channel_title NOT LIKE '%views%'
+          AND p.channel_title NOT LIKE '%ago%'
+        LIMIT 1
+      )
+      WHERE (title = 'YouTube Creator' OR title LIKE '%views%' OR title LIKE '%ago%')
+        AND EXISTS (
+          SELECT 1 FROM ft_playlists p
+          WHERE p.channel_id = ft_channels.channel_id
+            AND p.channel_title IS NOT NULL
+            AND p.channel_title != 'YouTube Creator'
+            AND p.channel_title NOT LIKE '%views%'
+            AND p.channel_title NOT LIKE '%ago%'
+        );
+    `)
+  } catch (err) {
+    console.warn('[FocusTube] Channel title repair failed:', err)
+  }
+
+  // Self-heal: repair playlist videos whose timestamps jumped to import time (Date.now())
+  try {
+    const playlists = db.prepare('SELECT playlist_id FROM ft_playlists').all() as any[]
+    for (const pl of playlists) {
+      const pVideos = db.prepare(`
+        SELECT pv.video_id, pv.position, v.published_at
+        FROM ft_playlist_videos pv
+        JOIN ft_videos v ON v.video_id = pv.video_id
+        WHERE pv.playlist_id = ?
+        ORDER BY pv.position ASC
+      `).all(pl.playlist_id) as any[]
+
+      if (!pVideos || pVideos.length < 2) continue
+
+      const dates = pVideos.map((r) => ({
+        videoId: r.video_id,
+        position: Number(r.position),
+        ms: Date.parse(r.published_at),
+      })).filter((d) => Number.isFinite(d.ms) && d.ms > 0)
+
+      if (dates.length < 2) continue
+
+      const now = Date.now()
+      const oldDates = dates.filter((d) => (now - d.ms) > 180 * 86400 * 1000)
+      const freshDates = dates.filter((d) => (now - d.ms) < 2 * 86400 * 1000)
+
+      if (oldDates.length >= 3 && freshDates.length >= 3) {
+        const firstOld = oldDates[0]
+        const lastOld = oldDates[oldDates.length - 1]
+        const isAsc = firstOld.position !== lastOld.position ? firstOld.ms <= lastOld.ms : true
+        const avgStep = Math.max(60_000, Math.round(Math.abs(lastOld.ms - firstOld.ms) / Math.max(1, lastOld.position - firstOld.position)))
+
+        const updateStmt = db.prepare('UPDATE ft_videos SET published_at = ? WHERE video_id = ?')
+        const repairTx = db.transaction(() => {
+          for (const f of freshDates) {
+            if (f.position > lastOld.position) {
+              const newMs = Math.min(lastOld.ms + (f.position - lastOld.position) * (isAsc ? avgStep : -avgStep), now - 86400 * 1000)
+              updateStmt.run(new Date(newMs).toISOString(), f.videoId)
+            }
+          }
+        })
+        repairTx()
+      }
+    }
+  } catch (err) {
+    console.warn('[FocusTube] Playlist timestamps repair failed:', err)
   }
 
   seedDefaultContent()
@@ -280,10 +440,15 @@ export function listCategories(): FtCategory[] {
   const rows = db.prepare(`
     SELECT c.*,
       (SELECT COUNT(*) FROM ft_channel_categories cc WHERE cc.category_id = c.id) AS channel_count,
-      (SELECT COUNT(*) FROM ft_videos v
-         JOIN ft_channel_categories cc2 ON cc2.channel_id = v.channel_id
-        WHERE cc2.category_id = c.id
-          AND COALESCE((SELECT seen FROM ft_video_state s WHERE s.video_id = v.video_id), 0) = 0
+      (SELECT COUNT(*) FROM ft_playlist_categories pc WHERE pc.category_id = c.id) AS playlist_count,
+      (
+        SELECT COUNT(DISTINCT v.video_id) FROM ft_videos v
+        WHERE (
+          EXISTS (SELECT 1 FROM ft_channel_categories cc2 WHERE cc2.channel_id = v.channel_id AND cc2.category_id = c.id)
+          OR
+          EXISTS (SELECT 1 FROM ft_playlist_videos pv JOIN ft_playlist_categories pc2 ON pc2.playlist_id = pv.playlist_id WHERE pv.video_id = v.video_id AND pc2.category_id = c.id)
+        )
+        AND COALESCE((SELECT seen FROM ft_video_state s WHERE s.video_id = v.video_id), 0) = 0
       ) AS unseen_count
     FROM ft_categories c
     ORDER BY c.position ASC, c.id ASC
@@ -356,7 +521,7 @@ export function listChannels(categoryId?: number | null): FtChannel[] {
           WHERE cc.category_id = ?
           ORDER BY c.position ASC, c.title COLLATE NOCASE ASC
         `).all(categoryId)
-      : db.prepare('SELECT * FROM ft_channels ORDER BY position ASC, title COLLATE NOCASE ASC').all()
+      : db.prepare('SELECT * FROM ft_channels WHERE COALESCE(is_subscribed, 1) = 1 ORDER BY position ASC, title COLLATE NOCASE ASC').all()
   ) as any[]
   return rows.map((row) => toChannel(row, categoryIdsFor(String(row.channel_id))))
 }
@@ -365,6 +530,38 @@ export function getChannel(channelId: string): FtChannel | null {
   const db = getRawDb()
   const row = db.prepare('SELECT * FROM ft_channels WHERE channel_id = ?').get(channelId) as any
   return row ? toChannel(row, categoryIdsFor(String(row.channel_id))) : null
+}
+
+export function ensureChannelPlaceholder(channelId: string, title?: string | null, avatarUrl?: string | null): void {
+  const db = getRawDb()
+  const id = String(channelId || '').trim()
+  if (!id || id === 'UCunknown') return
+
+  const isGarbage = (t: string | null | undefined) =>
+    !t || t === 'YouTube Creator' || t === id || /\b\d+[\d,.]*\s*[kmb]?\s*views?\b/i.test(t) || /\bviews?\b/i.test(t) || /\bago\b/i.test(t)
+  const cleanTitle = isGarbage(title) ? null : String(title).trim()
+
+  db.prepare(`
+    INSERT INTO ft_channels (channel_id, title, avatar_url, url, is_subscribed, position)
+    VALUES (?, COALESCE(?, 'YouTube Creator'), ?, ?, 0, 0)
+    ON CONFLICT(channel_id) DO UPDATE SET
+      avatar_url = COALESCE(excluded.avatar_url, ft_channels.avatar_url),
+      title = CASE
+        WHEN excluded.title IS NOT NULL AND excluded.title != 'YouTube Creator' AND excluded.title NOT LIKE '%views%' AND excluded.title NOT LIKE '%ago%'
+          THEN excluded.title
+        WHEN ft_channels.title = 'YouTube Creator' OR ft_channels.title LIKE '%views%' OR ft_channels.title LIKE '%ago%'
+          THEN COALESCE(NULLIF(excluded.title, 'YouTube Creator'), ft_channels.title)
+        ELSE ft_channels.title
+      END
+  `).run(id, cleanTitle, avatarUrl ?? null, `https://www.youtube.com/channel/${id}`)
+}
+
+export function updateChannelAvatar(channelId: string, avatarUrl: string): void {
+  const db = getRawDb()
+  const id = String(channelId || '').trim()
+  const url = String(avatarUrl || '').trim()
+  if (!id || !url) return
+  db.prepare('UPDATE ft_channels SET avatar_url = ? WHERE channel_id = ?').run(url, id)
 }
 
 export function upsertChannel(input: {
@@ -382,13 +579,14 @@ export function upsertChannel(input: {
 
   const max = db.prepare('SELECT MAX(position) AS p FROM ft_channels').get() as any
   db.prepare(`
-    INSERT INTO ft_channels (channel_id, title, handle, avatar_url, url, position)
-    VALUES (?, ?, ?, ?, ?, ?)
+    INSERT INTO ft_channels (channel_id, title, handle, avatar_url, url, is_subscribed, position)
+    VALUES (?, ?, ?, ?, ?, 1, ?)
     ON CONFLICT(channel_id) DO UPDATE SET
       title = excluded.title,
       handle = COALESCE(excluded.handle, ft_channels.handle),
       avatar_url = COALESCE(excluded.avatar_url, ft_channels.avatar_url),
       url = COALESCE(excluded.url, ft_channels.url),
+      is_subscribed = 1,
       last_error = NULL
   `).run(
     channelId,
@@ -425,6 +623,188 @@ export function setChannelCategories(channelId: string, categoryIds: number[]): 
   })
   tx()
   return true
+}
+
+// ─── Playlists ────────────────────────────────────────────────────────────────
+
+function playlistCategoryIdsFor(playlistId: string): number[] {
+  const db = getRawDb()
+  const rows = db
+    .prepare('SELECT category_id FROM ft_playlist_categories WHERE playlist_id = ?')
+    .all(playlistId) as any[]
+  return rows.map((r) => Number(r.category_id))
+}
+
+export function listPlaylists(categoryId?: number | null): FtPlaylist[] {
+  const db = getRawDb()
+  const rows = (
+    categoryId
+      ? db.prepare(`
+          SELECT p.*,
+            (SELECT COUNT(*) FROM ft_playlist_videos pv WHERE pv.playlist_id = p.playlist_id) AS video_count
+          FROM ft_playlists p
+          JOIN ft_playlist_categories pc ON pc.playlist_id = p.playlist_id
+          WHERE pc.category_id = ?
+          ORDER BY p.position ASC, p.title COLLATE NOCASE ASC
+        `).all(categoryId)
+      : db.prepare(`
+          SELECT p.*,
+            (SELECT COUNT(*) FROM ft_playlist_videos pv WHERE pv.playlist_id = p.playlist_id) AS video_count
+          FROM ft_playlists p
+          ORDER BY p.position ASC, p.title COLLATE NOCASE ASC
+        `).all()
+  ) as any[]
+  return rows.map((row) => toPlaylist(row, playlistCategoryIdsFor(String(row.playlist_id))))
+}
+
+export function getPlaylist(playlistId: string): FtPlaylist | null {
+  const db = getRawDb()
+  const row = db.prepare(`
+    SELECT p.*,
+      (SELECT COUNT(*) FROM ft_playlist_videos pv WHERE pv.playlist_id = p.playlist_id) AS video_count
+    FROM ft_playlists p
+    WHERE p.playlist_id = ?
+  `).get(playlistId) as any
+  return row ? toPlaylist(row, playlistCategoryIdsFor(String(row.playlist_id))) : null
+}
+
+export function upsertPlaylist(input: {
+  playlistId: string
+  title: string
+  channelId?: string | null
+  channelTitle?: string | null
+  thumbnailUrl?: string | null
+  url?: string | null
+}): FtPlaylist {
+  const db = getRawDb()
+  const playlistId = String(input.playlistId || '').trim()
+  const title = String(input.title || '').trim()
+  if (!playlistId) throw new Error('playlistId is required')
+  if (!title) throw new Error('Playlist title is required')
+
+  if (input.channelId) {
+    ensureChannelPlaceholder(input.channelId, input.channelTitle, null)
+  }
+
+  const max = db.prepare('SELECT MAX(position) AS p FROM ft_playlists').get() as any
+  db.prepare(`
+    INSERT INTO ft_playlists (playlist_id, channel_id, channel_title, title, thumbnail_url, url, position)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(playlist_id) DO UPDATE SET
+      title = excluded.title,
+      channel_id = COALESCE(excluded.channel_id, ft_playlists.channel_id),
+      channel_title = COALESCE(excluded.channel_title, ft_playlists.channel_title),
+      thumbnail_url = COALESCE(excluded.thumbnail_url, ft_playlists.thumbnail_url),
+      url = COALESCE(excluded.url, ft_playlists.url),
+      last_error = NULL
+  `).run(
+    playlistId,
+    input.channelId ?? null,
+    input.channelTitle ?? null,
+    title,
+    input.thumbnailUrl ?? null,
+    input.url ?? `https://www.youtube.com/playlist?list=${playlistId}`,
+    Number(max?.p ?? -1) + 1,
+  )
+
+  return getPlaylist(playlistId)!
+}
+
+export function deletePlaylist(playlistId: string): boolean {
+  const db = getRawDb()
+  db.prepare('DELETE FROM ft_playlists WHERE playlist_id = ?').run(playlistId)
+  return true
+}
+
+export function setPlaylistCategories(playlistId: string, categoryIds: number[]): boolean {
+  const db = getRawDb()
+  const unique = [...new Set((categoryIds || []).map(Number).filter(Number.isFinite))]
+  const tx = db.transaction(() => {
+    db.prepare('DELETE FROM ft_playlist_categories WHERE playlist_id = ?').run(playlistId)
+    const insert = db.prepare('INSERT OR IGNORE INTO ft_playlist_categories (playlist_id, category_id) VALUES (?, ?)')
+    for (const categoryId of unique) insert.run(playlistId, categoryId)
+  })
+  tx()
+  return true
+}
+
+export function setPlaylistLastFetched(playlistId: string, error?: string | null): void {
+  const db = getRawDb()
+  db.prepare('UPDATE ft_playlists SET last_fetched = CURRENT_TIMESTAMP, last_error = ? WHERE playlist_id = ?')
+    .run(error ?? null, playlistId)
+}
+
+export function getPlaylistsDueForFetch(maxAgeMinutes: number, force: boolean): FtPlaylist[] {
+  const all = listPlaylists(null)
+  if (force) return all
+  const cutoff = Date.now() - maxAgeMinutes * 60_000
+  return all.filter((playlist) => {
+    if (!playlist.lastFetched) return true
+    const fetched = Date.parse(playlist.lastFetched.replace(' ', 'T') + 'Z')
+    return !Number.isFinite(fetched) || fetched < cutoff
+  })
+}
+
+export function upsertPlaylistVideos(
+  playlistId: string,
+  entries: FtFeedEntry[],
+): FtUpsertResult {
+  const db = getRawDb()
+  const result: FtUpsertResult = { inserted: 0, existing: 0, newVideoIds: [] }
+
+  const findVideo = db.prepare('SELECT video_id FROM ft_videos WHERE video_id = ?')
+  const insertVideo = db.prepare(`
+    INSERT INTO ft_videos (video_id, channel_id, title, published_at, views, description)
+    VALUES (?, ?, ?, ?, ?, ?)
+    ON CONFLICT(video_id) DO UPDATE SET
+      channel_id = CASE WHEN excluded.channel_id != 'UCunknown' THEN excluded.channel_id ELSE ft_videos.channel_id END,
+      title = excluded.title,
+      published_at = excluded.published_at,
+      views = COALESCE(excluded.views, ft_videos.views),
+      description = COALESCE(excluded.description, ft_videos.description)
+  `)
+  const insertLink = db.prepare(`
+    INSERT INTO ft_playlist_videos (playlist_id, video_id, position)
+    VALUES (?, ?, ?)
+    ON CONFLICT(playlist_id, video_id) DO UPDATE SET
+      position = excluded.position
+  `)
+
+  const tx = db.transaction(() => {
+    let pos = 0
+    for (const entry of entries) {
+      if (!entry.videoId) continue
+      const cleanTitle = (entry.channelTitle && entry.channelTitle !== 'YouTube Creator' && !/\bviews?\b/i.test(entry.channelTitle))
+        ? entry.channelTitle
+        : null
+      ensureChannelPlaceholder(entry.channelId, cleanTitle, entry.channelAvatarUrl || null)
+      if (entry.channelAvatarUrl) {
+        updateChannelAvatar(entry.channelId, entry.channelAvatarUrl)
+      }
+
+      if (findVideo.get(entry.videoId)) {
+        result.existing += 1
+      } else {
+        result.newVideoIds.push(entry.videoId)
+      }
+
+      insertVideo.run(
+        entry.videoId,
+        entry.channelId,
+        entry.title || 'Untitled',
+        entry.publishedAt,
+        entry.views ?? null,
+        entry.description ?? null,
+      )
+
+      insertLink.run(playlistId, entry.videoId, pos)
+      pos += 1
+    }
+  })
+  tx()
+
+  result.inserted = result.newVideoIds.length
+  return result
 }
 
 export interface FtImportedChannel {
@@ -575,8 +955,19 @@ export function getFeed(options: FtFeedOptions): FtVideo[] {
   const where: string[] = []
 
   if (options.categoryId !== null && options.categoryId !== undefined) {
-    where.push('EXISTS (SELECT 1 FROM ft_channel_categories cc WHERE cc.channel_id = v.channel_id AND cc.category_id = ?)')
-    params.push(options.categoryId)
+    where.push(`(
+      EXISTS (SELECT 1 FROM ft_channel_categories cc WHERE cc.channel_id = v.channel_id AND cc.category_id = ?)
+      OR
+      EXISTS (SELECT 1 FROM ft_playlist_videos pv JOIN ft_playlist_categories pc ON pc.playlist_id = pv.playlist_id WHERE pv.video_id = v.video_id AND pc.category_id = ?)
+    )`)
+    params.push(options.categoryId, options.categoryId)
+  } else {
+    // "All" feed: union of user's subscriptions (channels or playlists in any category)
+    where.push(`(
+      EXISTS (SELECT 1 FROM ft_channel_categories cc WHERE cc.channel_id = v.channel_id)
+      OR
+      EXISTS (SELECT 1 FROM ft_playlist_videos pv JOIN ft_playlist_categories pc ON pc.playlist_id = pv.playlist_id WHERE pv.video_id = v.video_id)
+    )`)
   }
 
   if (options.includeSavedOnly) {
@@ -586,13 +977,6 @@ export function getFeed(options: FtFeedOptions): FtVideo[] {
   }
 
   if (options.hideShorts) {
-    // The Atom feed carries no Shorts flag, so classification comes from the
-    // channel's Shorts tab (see focusTubeFeed.fetchChannelShorts) and lands in
-    // v.is_short. Anything unclassified (0) is shown — we hide only what we
-    // positively know is a Short. Duration is deliberately NOT used here:
-    // durations are unknown for almost every video (watch pages are bot-gated)
-    // and Shorts can now run up to 3 minutes, so <=60s would both miss and
-    // over-match.
     where.push('COALESCE(v.is_short, 0) = 0')
   }
 
@@ -607,15 +991,31 @@ export function getFeed(options: FtFeedOptions): FtVideo[] {
 
   const sortDir = options.sortOrder === 'oldest' ? 'ASC' : 'DESC'
 
+  const playlistTitleSelect = options.categoryId !== null && options.categoryId !== undefined
+    ? `(SELECT p.title FROM ft_playlist_videos pv JOIN ft_playlists p ON p.playlist_id = pv.playlist_id JOIN ft_playlist_categories pc ON pc.playlist_id = p.playlist_id WHERE pv.video_id = v.video_id AND pc.category_id = ${Number(options.categoryId)} LIMIT 1) AS playlist_title,
+       (SELECT pv.playlist_id FROM ft_playlist_videos pv JOIN ft_playlist_categories pc ON pc.playlist_id = pv.playlist_id WHERE pv.video_id = v.video_id AND pc.category_id = ${Number(options.categoryId)} LIMIT 1) AS playlist_id`
+    : `(SELECT p.title FROM ft_playlist_videos pv JOIN ft_playlists p ON p.playlist_id = pv.playlist_id LIMIT 1) AS playlist_title,
+       (SELECT pv.playlist_id FROM ft_playlist_videos pv LIMIT 1) AS playlist_id`
+
   const rows = db.prepare(`
-    SELECT v.*, c.title AS channel_title, c.avatar_url AS channel_avatar_url, c.handle AS channel_handle,
+    SELECT v.*,
+      CASE
+        WHEN c.title IS NOT NULL AND c.title != 'YouTube Creator' AND c.title NOT LIKE '%views%' AND c.title NOT LIKE '%ago%'
+          THEN c.title
+        WHEN (SELECT p.channel_title FROM ft_playlist_videos pv JOIN ft_playlists p ON p.playlist_id = pv.playlist_id WHERE pv.video_id = v.video_id AND p.channel_title IS NOT NULL AND p.channel_title != 'YouTube Creator' AND p.channel_title NOT LIKE '%views%' LIMIT 1) IS NOT NULL
+          THEN (SELECT p.channel_title FROM ft_playlist_videos pv JOIN ft_playlists p ON p.playlist_id = pv.playlist_id WHERE pv.video_id = v.video_id AND p.channel_title IS NOT NULL AND p.channel_title != 'YouTube Creator' AND p.channel_title NOT LIKE '%views%' LIMIT 1)
+        ELSE COALESCE(c.title, 'YouTube Creator')
+      END AS channel_title,
+      COALESCE(c.avatar_url, (SELECT p.thumbnail_url FROM ft_playlist_videos pv JOIN ft_playlists p ON p.playlist_id = pv.playlist_id WHERE pv.video_id = v.video_id LIMIT 1)) AS channel_avatar_url,
+      c.handle AS channel_handle,
       COALESCE(s.seen, 0) AS seen, s.seen_at, COALESCE(s.saved, 0) AS saved,
-      COALESCE(s.position, 0) AS position
+      COALESCE(s.position, 0) AS position,
+      ${playlistTitleSelect}
     FROM ft_videos v
-    JOIN ft_channels c ON c.channel_id = v.channel_id
+    LEFT JOIN ft_channels c ON c.channel_id = v.channel_id
     LEFT JOIN ft_video_state s ON s.video_id = v.video_id
     ${where.length ? `WHERE ${where.join(' AND ')}` : ''}
-    ORDER BY v.is_live DESC, v.published_at ${sortDir}
+    ORDER BY v.is_live DESC, v.published_at ${sortDir}, v.rowid ${sortDir}
     LIMIT ?
   `).all(...params) as any[]
 
@@ -625,11 +1025,22 @@ export function getFeed(options: FtFeedOptions): FtVideo[] {
 export function getVideo(videoId: string): FtVideo | null {
   const db = getRawDb()
   const row = db.prepare(`
-    SELECT v.*, c.title AS channel_title, c.avatar_url AS channel_avatar_url, c.handle AS channel_handle,
+    SELECT v.*,
+      CASE
+        WHEN c.title IS NOT NULL AND c.title != 'YouTube Creator' AND c.title NOT LIKE '%views%' AND c.title NOT LIKE '%ago%'
+          THEN c.title
+        WHEN (SELECT p.channel_title FROM ft_playlist_videos pv JOIN ft_playlists p ON p.playlist_id = pv.playlist_id WHERE pv.video_id = v.video_id AND p.channel_title IS NOT NULL AND p.channel_title != 'YouTube Creator' AND p.channel_title NOT LIKE '%views%' LIMIT 1) IS NOT NULL
+          THEN (SELECT p.channel_title FROM ft_playlist_videos pv JOIN ft_playlists p ON p.playlist_id = pv.playlist_id WHERE pv.video_id = v.video_id AND p.channel_title IS NOT NULL AND p.channel_title != 'YouTube Creator' AND p.channel_title NOT LIKE '%views%' LIMIT 1)
+        ELSE COALESCE(c.title, 'YouTube Creator')
+      END AS channel_title,
+      COALESCE(c.avatar_url, (SELECT p.thumbnail_url FROM ft_playlist_videos pv JOIN ft_playlists p ON p.playlist_id = pv.playlist_id WHERE pv.video_id = v.video_id LIMIT 1)) AS channel_avatar_url,
+      c.handle AS channel_handle,
       COALESCE(s.seen, 0) AS seen, s.seen_at, COALESCE(s.saved, 0) AS saved,
-      COALESCE(s.position, 0) AS position
+      COALESCE(s.position, 0) AS position,
+      (SELECT p.title FROM ft_playlist_videos pv JOIN ft_playlists p ON p.playlist_id = pv.playlist_id WHERE pv.video_id = v.video_id LIMIT 1) AS playlist_title,
+      (SELECT pv.playlist_id FROM ft_playlist_videos pv WHERE pv.video_id = v.video_id LIMIT 1) AS playlist_id
     FROM ft_videos v
-    JOIN ft_channels c ON c.channel_id = v.channel_id
+    LEFT JOIN ft_channels c ON c.channel_id = v.channel_id
     LEFT JOIN ft_video_state s ON s.video_id = v.video_id
     WHERE v.video_id = ?
   `).get(videoId) as any
@@ -654,8 +1065,12 @@ export function markAllSeen(categoryId: number | null): number {
   const params: any[] = []
   let scope = ''
   if (categoryId !== null && categoryId !== undefined) {
-    scope = 'AND v.channel_id IN (SELECT channel_id FROM ft_channel_categories WHERE category_id = ?)'
-    params.push(categoryId)
+    scope = `AND (
+      v.channel_id IN (SELECT channel_id FROM ft_channel_categories WHERE category_id = ?)
+      OR
+      v.video_id IN (SELECT pv.video_id FROM ft_playlist_videos pv JOIN ft_playlist_categories pc ON pc.playlist_id = pv.playlist_id WHERE pc.category_id = ?)
+    )`
+    params.push(categoryId, categoryId)
   }
   const result = db.prepare(`
     INSERT INTO ft_video_state (video_id, seen, seen_at, updated_at)
@@ -739,11 +1154,15 @@ export function getUnseenCount(categoryId: number | null): number {
   const params: any[] = []
   let scope = ''
   if (categoryId !== null && categoryId !== undefined) {
-    scope = 'AND v.channel_id IN (SELECT channel_id FROM ft_channel_categories WHERE category_id = ?)'
-    params.push(categoryId)
+    scope = `AND (
+      v.channel_id IN (SELECT channel_id FROM ft_channel_categories WHERE category_id = ?)
+      OR
+      v.video_id IN (SELECT pv.video_id FROM ft_playlist_videos pv JOIN ft_playlist_categories pc ON pc.playlist_id = pv.playlist_id WHERE pc.category_id = ?)
+    )`
+    params.push(categoryId, categoryId)
   }
   const row = db.prepare(`
-    SELECT COUNT(*) AS c FROM ft_videos v
+    SELECT COUNT(DISTINCT v.video_id) AS c FROM ft_videos v
     WHERE COALESCE((SELECT seen FROM ft_video_state s WHERE s.video_id = v.video_id), 0) = 0
     ${scope}
   `).get(...params) as any
@@ -756,8 +1175,12 @@ export function getLatestPublished(categoryId: number | null): string | null {
   const params: any[] = []
   let scope = ''
   if (categoryId !== null && categoryId !== undefined) {
-    scope = 'AND v.channel_id IN (SELECT channel_id FROM ft_channel_categories WHERE category_id = ?)'
-    params.push(categoryId)
+    scope = `AND (
+      v.channel_id IN (SELECT channel_id FROM ft_channel_categories WHERE category_id = ?)
+      OR
+      v.video_id IN (SELECT pv.video_id FROM ft_playlist_videos pv JOIN ft_playlist_categories pc ON pc.playlist_id = pv.playlist_id WHERE pc.category_id = ?)
+    )`
+    params.push(categoryId, categoryId)
   }
   const row = db.prepare(`SELECT MAX(v.published_at) AS latest FROM ft_videos v WHERE 1 = 1 ${scope}`).get(...params) as any
   return row?.latest ? String(row.latest) : null
@@ -768,6 +1191,8 @@ export function getLatestPublished(categoryId: number | null): string | null {
 export interface FtFeedEntry {
   videoId: string
   channelId: string
+  channelTitle?: string | null
+  channelAvatarUrl?: string | null
   title: string
   publishedAt: string
   views: number | null
@@ -895,6 +1320,9 @@ export function getBackupData() {
     categories: db.prepare('SELECT * FROM ft_categories ORDER BY position ASC').all() as any[],
     channels: db.prepare('SELECT * FROM ft_channels').all() as any[],
     channelCategories: db.prepare('SELECT * FROM ft_channel_categories').all() as any[],
+    playlists: db.prepare('SELECT * FROM ft_playlists ORDER BY position ASC').all() as any[],
+    playlistCategories: db.prepare('SELECT * FROM ft_playlist_categories').all() as any[],
+    playlistVideos: db.prepare('SELECT * FROM ft_playlist_videos').all() as any[],
     videos: db.prepare('SELECT * FROM ft_videos').all() as any[],
     videoState: db.prepare('SELECT * FROM ft_video_state').all() as any[],
     sessions: db.prepare('SELECT * FROM ft_sessions').all() as any[],
@@ -902,11 +1330,22 @@ export function getBackupData() {
   }
 }
 
-export function restoreBackupData(data: any): { categoriesRestored: number; channelsRestored: number } {
-  if (!data || typeof data !== 'object') return { categoriesRestored: 0, channelsRestored: 0 }
+export function restoreBackupData(data: any): { categoriesRestored: number; channelsRestored: number; playlistsRestored?: number } {
+  if (!data || typeof data !== 'object') return { categoriesRestored: 0, channelsRestored: 0, playlistsRestored: 0 }
   const db = getRawDb()
   const tx = db.transaction(() => {
-    for (const table of ['ft_sessions', 'ft_meta', 'ft_video_state', 'ft_videos', 'ft_channel_categories', 'ft_channels', 'ft_categories']) {
+    for (const table of [
+      'ft_sessions',
+      'ft_meta',
+      'ft_video_state',
+      'ft_playlist_videos',
+      'ft_videos',
+      'ft_playlist_categories',
+      'ft_playlists',
+      'ft_channel_categories',
+      'ft_channels',
+      'ft_categories',
+    ]) {
       db.prepare(`DELETE FROM ${table}`).run()
     }
     const insertAll = (table: string, rows: any[]) => {
@@ -921,7 +1360,10 @@ export function restoreBackupData(data: any): { categoriesRestored: number; chan
     insertAll('ft_categories', data.categories)
     insertAll('ft_channels', data.channels)
     insertAll('ft_channel_categories', data.channelCategories)
+    if (Array.isArray(data.playlists)) insertAll('ft_playlists', data.playlists)
+    if (Array.isArray(data.playlistCategories)) insertAll('ft_playlist_categories', data.playlistCategories)
     insertAll('ft_videos', data.videos)
+    if (Array.isArray(data.playlistVideos)) insertAll('ft_playlist_videos', data.playlistVideos)
     insertAll('ft_video_state', data.videoState)
     if (Array.isArray(data.sessions)) insertAll('ft_sessions', data.sessions)
     if (Array.isArray(data.meta)) insertAll('ft_meta', data.meta)
@@ -932,5 +1374,6 @@ export function restoreBackupData(data: any): { categoriesRestored: number; chan
   return {
     categoriesRestored: Array.isArray(data.categories) ? data.categories.length : 0,
     channelsRestored: Array.isArray(data.channels) ? data.channels.length : 0,
+    playlistsRestored: Array.isArray(data.playlists) ? data.playlists.length : 0,
   }
 }

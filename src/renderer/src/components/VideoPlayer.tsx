@@ -43,6 +43,24 @@ const hasSourceEpisodeMarker = (source: any) => (
   /\b(?:episode|ep)[\s._-]*\d{1,3}\b/i.test(source.title || '')
 )
 const isSourceSeasonPack = (source: any) => Boolean(source.isSeasonPack) && !hasSourceEpisodeMarker(source)
+const sortTorrentEpisodes = <T extends { season?: number | null; episode?: number | null; fileName?: string; name?: string; index: number }>(
+  a: T,
+  b: T
+) => {
+  const sa = a.season ?? 1
+  const sb = b.season ?? 1
+  if (sa !== sb) return sa - sb
+  if (a.episode != null && b.episode != null && a.episode !== b.episode) {
+    return a.episode - b.episode
+  }
+  if (a.episode != null && b.episode == null) return -1
+  if (a.episode == null && b.episode != null) return 1
+  const nameA = a.fileName || a.name || ''
+  const nameB = b.fileName || b.name || ''
+  const comp = nameA.localeCompare(nameB, undefined, { numeric: true, sensitivity: 'base' })
+  if (comp !== 0) return comp
+  return a.index - b.index
+}
 // ── Online stream resume identity (source-agnostic, TMDB-keyed) ─────────────
 const getStreamResumeIdentity = (video: Video) => {
   if (!video.tmdb_id || (video.type !== 'movie' && video.type !== 'series')) return null
@@ -3056,7 +3074,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
     if (packBingeRef.current?.sid === sid) return
     const base = currentVideo.file_path.split('?')[0]
     const files: PackBingeFile[] = [...torrentEpisodes]
-      .sort((a, b) => a.index - b.index)
+      .sort(sortTorrentEpisodes)
       .map(te => {
         const s = te.season ?? null
         const e = te.episode ?? null
@@ -3715,7 +3733,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
       // almost always is the next episode.
       const fileIdx = parsePackFileIndex(currentVideo.file_path)
       if (fileIdx != null && torrentEpisodes && torrentEpisodes.length > 1) {
-        const ordered = [...torrentEpisodes].sort((a, b) => a.index - b.index)
+        const ordered = [...torrentEpisodes].sort(sortTorrentEpisodes)
         const pos = ordered.findIndex(e => e.index === fileIdx)
         const nxt = pos >= 0 ? ordered[pos + 1] : undefined
         if (nxt) {
@@ -3761,6 +3779,29 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
         episodeTransitionGuardRef.current = false
         return
       }
+
+      // Check if continuous local queue / playlist is active
+      if (currentVideo.playlist && currentVideo.playlist.length > 0) {
+        const curIdx = currentVideo.playlistIndex ?? currentVideo.playlist.findIndex(p => p.id === currentVideo.id)
+        if (curIdx >= 0 && curIdx < currentVideo.playlist.length - 1) {
+          const nextIdx = curIdx + 1
+          const nextVideo = currentVideo.playlist[nextIdx]
+          const resolvedNext: Video = {
+            ...nextVideo,
+            playlist: currentVideo.playlist,
+            playlistIndex: nextIdx
+          }
+          setCrossFade(true)
+          setTimeout(() => {
+            forceRestartRef.current = true
+            setForceRestart(true)
+            setCurrentVideo(resolvedNext)
+          }, 200)
+          episodeTransitionGuardRef.current = false
+          return
+        }
+      }
+
       episodeTransitionGuardRef.current = false
       // Standalone video finished — stay in the player on an end screen
       // (Replay / Close) instead of dropping to Home. This is the path hit
@@ -5905,7 +5946,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
         </div>
 
         {/* Top Right Actions */}
-        <div className="flex items-center space-x-4">
+        <div className="flex items-center gap-8">
           <div className="relative">
               <button 
                 onClick={(e) => { 
@@ -5914,10 +5955,9 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
                   setShowAdvancedMenu(false)
                   setShowMediaMenu(!showMediaMenu)
                 }}
-                className={`flex items-center space-x-2 px-4 py-2 rounded-lg bg-black/50 transition-colors backdrop-blur-md border border-white/5 ${showMediaMenu ? 'text-white bg-black/80' : 'text-white hover:bg-black/80'}`}
+                className={`text-sm font-bold tracking-wide transition-all drop-shadow-md py-1.5 px-2 active:scale-95 ${showMediaMenu ? 'text-primary' : 'text-white/80 hover:text-white'}`}
               >
-                <MessageSquareText size={20} className={showMediaMenu ? "text-primary" : ""} />
-                <span className="text-sm font-bold tracking-wide">Audio & Subtitles</span>
+                Audio & Subtitles
               </button>
               <SubtitleAppearanceGuide />
               
@@ -6231,10 +6271,9 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
                 if (packBingeRef.current) { advancePack({ fresh: false }); return }
                 playNextEpisode();
               }}
-              className="flex items-center space-x-2 px-4 py-2 rounded-lg bg-black/50 transition-colors backdrop-blur-md border border-white/5 text-white hover:bg-black/80 group/next"
+              className="text-sm font-bold tracking-wide transition-all drop-shadow-md py-1.5 px-2 active:scale-95 text-white/80 hover:text-white"
             >
-              <span className="text-sm font-bold tracking-wide">Next Episode</span>
-              <SkipNext size={20} className="group-hover/next:text-primary transition-colors" />
+              Next Episode
             </button>
           )}
 
@@ -6358,7 +6397,9 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
           <div className="flex items-center justify-between px-5 py-4 border-b border-white/5 flex-shrink-0">
             <div className="flex items-center gap-2">
               <ListVideo size={16} className="text-primary" />
-              <h3 className="text-[14px] font-black text-white uppercase tracking-[0.18em]">Episodes</h3>
+              <h3 className="text-[14px] font-black text-white uppercase tracking-[0.18em]">
+                {currentVideo.playlist ? `Queue (${(currentVideo.playlistIndex ?? 0) + 1}/${currentVideo.playlist.length})` : 'Episodes'}
+              </h3>
             </div>
             <button
               onClick={(e) => { e.stopPropagation(); setShowEpisodesPanel(false) }}
@@ -6369,7 +6410,69 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
           </div>
 
           <div className="flex-1 overflow-y-auto px-4 py-4 space-y-2 custom-scrollbar">
-            {mergedEpisodeList.map((episode) => {
+            {currentVideo.playlist ? (
+              currentVideo.playlist.map((item, idx) => {
+                const isActive = (currentVideo.playlistIndex ?? 0) === idx || currentVideo.id === item.id
+                const posterUrl = item.poster_path
+                  ? (item.poster_path.startsWith('http')
+                      ? item.poster_path
+                      : `media://file/${encodeURIComponent(item.poster_path)}`)
+                  : null
+                return (
+                  <button
+                    key={`${item.id}-${idx}`}
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      if (isActive) return
+                      setShowEpisodesPanel(false)
+                      const nextItem: Video = {
+                        ...item,
+                        playlist: currentVideo.playlist,
+                        playlistIndex: idx
+                      }
+                      setCrossFade(true)
+                      setTimeout(() => {
+                        forceRestartRef.current = true
+                        setForceRestart(true)
+                        setCurrentVideo(nextItem)
+                      }, 200)
+                    }}
+                    className={`w-full text-left p-2.5 rounded-xl flex items-center gap-3 transition-all duration-200 ${
+                      isActive 
+                        ? 'bg-primary/20 border border-primary/30 shadow-sm' 
+                        : 'hover:bg-white/5 border border-transparent'
+                    }`}
+                  >
+                    <div className="w-16 aspect-video rounded-lg overflow-hidden bg-white/5 flex-shrink-0 relative">
+                      {posterUrl ? (
+                        <img src={posterUrl} alt="" className="w-full h-full object-cover" />
+                      ) : (
+                        <div className="w-full h-full flex items-center justify-center text-white/30 text-[9px]">Clip</div>
+                      )}
+                      {(item.duration ?? 0) > 0 && (
+                        <span className="absolute bottom-0.5 right-0.5 px-1 rounded bg-black/80 text-[8px] font-mono font-bold text-white">
+                          {Math.floor(item.duration! / 60)}:{Math.floor(item.duration! % 60).toString().padStart(2, '0')}
+                        </span>
+                      )}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className={`text-[13px] font-bold truncate ${isActive ? 'text-primary' : 'text-white'}`}>
+                        {item.title}
+                      </p>
+                      <p className={`text-[10px] mt-0.5 truncate ${isActive ? 'text-primary/70' : 'text-gray-400'}`}>
+                        {item.folder_name ? `📁 ${item.folder_name}` : (item.file_size ? `${(item.file_size / (1024 * 1024)).toFixed(0)} MB` : 'Local Video')}
+                      </p>
+                    </div>
+                    {isActive && (
+                      <div className="flex-shrink-0 w-6 h-6 rounded-full bg-primary flex items-center justify-center">
+                        <Play size={10} className="fill-white text-white ml-0.5" />
+                      </div>
+                    )}
+                  </button>
+                )
+              })
+            ) : (
+              mergedEpisodeList.map((episode) => {
               const identity = getMediaUnitIdentity({ ...currentVideo, season: episode.season, episode: episode.episode })
               const isActive = getMediaUnitIdentity(currentVideo) === identity
               const statusLabel = episode.source === 'torrent'
@@ -6407,7 +6510,8 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
                   )}
                 </button>
               )
-            })}
+            })
+          )}
           </div>
         </div>
       </div>

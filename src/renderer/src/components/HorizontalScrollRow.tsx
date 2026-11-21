@@ -5,13 +5,21 @@ interface HorizontalScrollRowProps {
   children: React.ReactNode
   contentClassName?: string
   compact?: boolean
+  className?: string
+  innerClassName?: string
 }
 
 export type HorizontalScrollRowHandle = {
   scrollToStart: () => void
 }
 
-const HorizontalScrollRow = forwardRef<HorizontalScrollRowHandle, HorizontalScrollRowProps>(({ children, contentClassName = 'gap-4', compact = false }, ref) => {
+const HorizontalScrollRow = forwardRef<HorizontalScrollRowHandle, HorizontalScrollRowProps>(({ 
+  children, 
+  contentClassName = 'gap-4', 
+  compact = false,
+  className = '',
+  innerClassName = ''
+}, ref) => {
   const scrollRef = useRef<HTMLDivElement>(null)
   const [showLeft, setShowLeft] = useState(false)
   const [showRight, setShowRight] = useState(false)
@@ -60,7 +68,7 @@ const HorizontalScrollRow = forwardRef<HorizontalScrollRowHandle, HorizontalScro
 
   return (
     <div
-      className={`relative -mx-8 ${compact ? '-mt-6' : '-mt-8'}`}
+      className={`relative -mx-8 ${compact ? '' : '-mt-8'} ${className}`}
       onMouseEnter={() => setIsHovered(true)}
       onMouseLeave={() => setIsHovered(false)}
     >
@@ -82,7 +90,9 @@ const HorizontalScrollRow = forwardRef<HorizontalScrollRowHandle, HorizontalScro
       {/* Scrollable row */}
       <div
         ref={scrollRef}
-        className={`flex overflow-x-auto px-8 scrollbar-hide scroll-smooth ${compact ? 'pt-8 pb-6' : 'pt-8 pb-8'} ${contentClassName}`}
+        className={`flex overflow-x-auto px-8 scrollbar-hide scroll-smooth ${
+          innerClassName || (compact ? 'pt-1.5 pb-2.5' : 'pt-8 pb-8')
+        } ${contentClassName}`}
       >
         {children}
       </div>

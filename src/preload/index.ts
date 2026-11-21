@@ -125,6 +125,8 @@ const api = {
     ipcRenderer.invoke('get-max-concurrent-downloads'),
   setMaxConcurrentDownloads: (value: number) =>
     ipcRenderer.invoke('set-max-concurrent-downloads', value),
+  setTaskbarProgress: (progress: number, mode?: 'normal' | 'paused' | 'error' | 'indeterminate' | 'none') =>
+    ipcRenderer.invoke('set-taskbar-progress', progress, mode),
   getActiveDownloads: () => 
     ipcRenderer.invoke('get-active-downloads'),
   getPlayableVideoForDownload: (downloadId: string) =>
@@ -154,6 +156,9 @@ const api = {
   openFolder: (filePath: string) => ipcRenderer.invoke('open-folder', filePath),
   getMediaInfo: (filePath: string) => ipcRenderer.invoke('get-media-info', filePath),
   getSeekPreviewThumbnail: (filePath: string, time: number) => ipcRenderer.invoke('get-seek-preview-thumbnail', filePath, time),
+  updateVideoTitle: (id: number, newTitle: string) => ipcRenderer.invoke('update-video-title', id, newTitle),
+  getLocalVideoStats: (videoIdsOrPaths: Array<number | string>) => ipcRenderer.invoke('get-local-video-stats', videoIdsOrPaths),
+  regenerateVideoThumbnail: (videoId: number, timestamp?: number) => ipcRenderer.invoke('regenerate-video-thumbnail', videoId, timestamp),
   openDownloadsFolder: () => ipcRenderer.invoke('open-downloads-folder'),
   getDownloadsStorage: () => ipcRenderer.invoke('get-downloads-storage'),
   getDownloadDir: () => ipcRenderer.invoke('get-download-dir'),
@@ -249,6 +254,16 @@ const api = {
     ipcRenderer.invoke('ft-set-channel-categories', { channelId, categoryIds }),
   ftSetChannelHideShorts: (channelId: string, hideShorts: boolean) =>
     ipcRenderer.invoke('ft-set-channel-hide-shorts', { channelId, hideShorts }),
+  ftListPlaylists: (categoryId?: number | null) => ipcRenderer.invoke('ft-list-playlists', categoryId ?? null),
+  ftUpsertPlaylist: (input: { playlistId: string; title: string; channelId?: string | null; channelTitle?: string | null; thumbnailUrl?: string | null; url?: string | null }) =>
+    ipcRenderer.invoke('ft-upsert-playlist', input),
+  ftDeletePlaylist: (playlistId: string) => ipcRenderer.invoke('ft-delete-playlist', playlistId),
+  ftSetPlaylistCategories: (playlistId: string, categoryIds: number[]) =>
+    ipcRenderer.invoke('ft-set-playlist-categories', { playlistId, categoryIds }),
+  ftResolvePlaylist: (query: string) => ipcRenderer.invoke('ft-resolve-playlist', query),
+  ftAddPlaylist: (query: string, categoryIds: number[]) =>
+    ipcRenderer.invoke('ft-add-playlist', { query, categoryIds }),
+  ftRefreshPlaylist: (playlistId: string) => ipcRenderer.invoke('ft-refresh-playlist', playlistId),
   ftGetFeed: (options?: {
     categoryId?: number | null
     includeSeen?: boolean

@@ -328,12 +328,12 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
         </div>
 
         <div className="flex items-center gap-5">
-          {/* Episodes */}
-          {currentVideo.type === 'series' && currentVideo.series_name && (
+          {/* Episodes or Queue */}
+          {((currentVideo.type === 'series' && currentVideo.series_name) || Boolean(currentVideo.playlist && currentVideo.playlist.length > 1)) && (
             <button
               onClick={(e) => { e.stopPropagation(); setShowEpisodesPanel(!showEpisodesPanel); }}
               className={`transition-colors flex items-center ${showEpisodesPanel ? 'text-primary' : 'text-white hover:text-primary'}`}
-              title="Episodes"
+              title={currentVideo.playlist ? "Queue" : "Episodes"}
             >
               <ListVideo size={22} className="opacity-90 hover:opacity-100" />
             </button>

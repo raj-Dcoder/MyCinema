@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react'
 import { FolderOpen, Trash2, Plus, HardDrive, AlertTriangle, Check, X as CloseIcon, Maximize2, Download, Upload, Image as ImageIcon, Wifi, Bell, Compass, RotateCcw, Layers, Sun, Moon, Sparkles, Palette, ChevronDown, ChevronUp, Play, Star, Film, Wind, Sliders, Waves } from 'lucide-react'
+import FocusTubeIcon from '../components/focus/FocusTubeIcon'
 import ProfilePictureModal from '../components/ProfilePictureModal'
 import { normalizeProfileImage, resolveProfileImageUrl } from '../utils/profileImage'
 import { useTheme, ACCENT_PALETTE, HALO_INTENSITY_PRESETS, ButtonAccentMode, PlayerAmbilightMode } from '../theme/ThemeContext'
@@ -64,8 +65,6 @@ const Settings: React.FC = () => {
     setPlayerAmbilightMode,
     haloBreathing,
     setHaloBreathing,
-    detailAmbientShade,
-    setDetailAmbientShade,
     fluidAmbient,
     setFluidAmbient,
     resetToDefaults,
@@ -1252,97 +1251,7 @@ const Settings: React.FC = () => {
                     </h4>
                   </div>
 
-                  {/* 3.1 Movie Details Ambient Shades */}
-                  <div className="space-y-2.5">
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-1.5">
-                        <span className="ambient-label-title text-[10px] font-black uppercase tracking-[0.18em] text-white/50">
-                          Movie Details Ambient Shades
-                        </span>
-                        <span className="ambient-label-sub text-[10px] font-medium text-white/30">
-                          (Detail Screen Backdrop Scrim)
-                        </span>
-                      </div>
-                      <button
-                        type="button"
-                        role="switch"
-                        aria-checked={detailAmbientShade}
-                        onClick={() => setDetailAmbientShade(!detailAmbientShade)}
-                        className={`settings-switch relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
-                          detailAmbientShade ? 'bg-primary' : 'bg-white/10'
-                        }`}
-                        title="Toggle between theme ambient shade and classic black shades for Movie Details"
-                      >
-                        <span
-                          className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
-                            detailAmbientShade ? 'translate-x-5' : 'translate-x-0'
-                          }`}
-                        />
-                      </button>
-                    </div>
-
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                      {/* Option 1: Theme Ambient */}
-                      <button
-                        type="button"
-                        onClick={() => setDetailAmbientShade(true)}
-                        className={`halo-preset-btn relative flex flex-col items-start rounded-2xl p-3.5 border text-left transition-all ${
-                          detailAmbientShade
-                            ? 'border-white/40 bg-white/[0.08] shadow-lg'
-                            : 'border-white/5 bg-white/[0.02] hover:bg-white/[0.05]'
-                        }`}
-                        style={
-                          detailAmbientShade
-                            ? {
-                                borderColor: currentAccent.hex,
-                                boxShadow: `0 4px 18px rgb(${currentAccent.rgb} / 0.25)`,
-                              }
-                            : undefined
-                        }
-                      >
-                        <div className="flex items-center justify-between w-full mb-1">
-                          <span className="text-xs font-black uppercase tracking-wider text-white">Theme Ambient (Default)</span>
-                          {detailAmbientShade && (
-                            <span className="text-[10px] font-black uppercase tracking-wider" style={{ color: contrastAccentHex }}>Active</span>
-                          )}
-                        </div>
-                        <span className="preset-sub text-[10px] font-medium text-white/40">
-                          Movie details backdrop adapts to your chosen ambient color and theme with a gentle atmospheric veil.
-                        </span>
-                      </button>
-
-                      {/* Option 2: Classic Black */}
-                      <button
-                        type="button"
-                        onClick={() => setDetailAmbientShade(false)}
-                        className={`halo-preset-btn relative flex flex-col items-start rounded-2xl p-3.5 border text-left transition-all ${
-                          !detailAmbientShade
-                            ? 'border-white/40 bg-white/[0.08] shadow-lg'
-                            : 'border-white/5 bg-white/[0.02] hover:bg-white/[0.05]'
-                        }`}
-                        style={
-                          !detailAmbientShade
-                            ? {
-                                borderColor: currentAccent.hex,
-                                boxShadow: `0 4px 18px rgb(${currentAccent.rgb} / 0.25)`,
-                              }
-                            : undefined
-                        }
-                      >
-                        <div className="flex items-center justify-between w-full mb-1">
-                          <span className="text-xs font-black uppercase tracking-wider text-white">Classic Black</span>
-                          {!detailAmbientShade && (
-                            <span className="text-[10px] font-black uppercase tracking-wider" style={{ color: contrastAccentHex }}>Active</span>
-                          )}
-                        </div>
-                        <span className="preset-sub text-[10px] font-medium text-white/40">
-                          Always displays movie details with traditional cinema blackout shades (#080d16) and pure dark scrims.
-                        </span>
-                      </button>
-                    </div>
-                  </div>
-
-                  {/* 3.2 Video Player Ambilight */}
+                  {/* Video Player Ambilight */}
                   <div className="space-y-2.5">
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-1.5">
@@ -1522,7 +1431,7 @@ const Settings: React.FC = () => {
             <div className="flex items-center justify-between gap-6 p-6">
               <div className="flex items-center gap-4 min-w-0">
                 <div className={iconBoxClass}>
-                  <Compass size={17} />
+                  <FocusTubeIcon size={17} />
                 </div>
                 <div className="min-w-0">
                   <h4 className="text-xs font-black text-white uppercase tracking-tight flex items-center gap-2">Focus Tube

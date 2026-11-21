@@ -492,7 +492,11 @@ const sortUpcomingChronological = (a: Video, b: Video) => {
   const timeA = parseDateMs(a.release_date) || Infinity
   const timeB = parseDateMs(b.release_date) || Infinity
   if (timeA !== timeB) return timeA - timeB
-  return (b.vote_average || 0) - (a.vote_average || 0)
+  const popDiff = (b.popularity || 0) - (a.popularity || 0)
+  if (popDiff !== 0) return popDiff
+  const voteDiff = (b.vote_average || 0) - (a.vote_average || 0)
+  if (voteDiff !== 0) return voteDiff
+  return Number(a.id || a.tmdb_id || 0) - Number(b.id || b.tmdb_id || 0)
 }
 
 
@@ -571,10 +575,14 @@ const Home: React.FC<HomeProps> = ({ onPlay, onShowDetail, onNavigate, refreshKe
   }, [recentlyReleasedSeries, recentSeriesFilter])
 
   const displayedUpcomingMovies = useMemo(() => {
-    const todayStr = new Date().toISOString().substring(0, 10)
+    const today = new Date()
+    const tomorrow = new Date(today)
+    tomorrow.setDate(tomorrow.getDate() + 1)
+    const tomorrowStr = tomorrow.toISOString().substring(0, 10)
+
     let list = upcomingMovies.filter(v => {
       const releaseDate = v.release_date ? String(v.release_date).trim().substring(0, 10) : ''
-      return Boolean(releaseDate && releaseDate >= todayStr)
+      return Boolean(releaseDate && releaseDate >= tomorrowStr)
     })
     if (upcomingMovieFilter === 'indian') {
       list = list.filter(isIndianContent)
@@ -585,10 +593,14 @@ const Home: React.FC<HomeProps> = ({ onPlay, onShowDetail, onNavigate, refreshKe
   }, [upcomingMovies, upcomingMovieFilter])
 
   const displayedUpcomingSeries = useMemo(() => {
-    const todayStr = new Date().toISOString().substring(0, 10)
+    const today = new Date()
+    const tomorrow = new Date(today)
+    tomorrow.setDate(tomorrow.getDate() + 1)
+    const tomorrowStr = tomorrow.toISOString().substring(0, 10)
+
     let list = upcomingSeries.filter(v => {
       const releaseDate = v.release_date ? String(v.release_date).trim().substring(0, 10) : ''
-      return Boolean(releaseDate && releaseDate >= todayStr)
+      return Boolean(releaseDate && releaseDate >= tomorrowStr)
     })
 
     // Strictly filter out any non-Hindi Indian regional series from upcoming series
@@ -852,11 +864,79 @@ const Home: React.FC<HomeProps> = ({ onPlay, onShowDetail, onNavigate, refreshKe
     discoveryTimersRef.current.forEach(clearTimeout)
     discoveryTimersRef.current = []
 
+    if (force) {
+      // When explicitly forced by user refresh button / shortcut, execute and await all discovery rails
+      try {
+        await Promise.allSettled([
+          (async () => {
+            const [trendingM, trendingS] = await Promise.all([
+              window.api.fetchTrending('movie', true).catch(() => []),
+              window.api.fetchTrending('series', true).catch(() => [])
+            ])
+            if (trendingM.length > 0) setTrendingMovies(trendingM)
+            if (trendingS.length > 0) setTrendingSeries(trendingS)
+          })(),
+          (async () => {
+            const [recentM, recentS, upM, upS] = await Promise.all([
+              window.api.fetchRecentlyReleased('movie', true).catch(() => []),
+              window.api.fetchRecentlyReleased('series', true).catch(() => []),
+              window.api.fetchUpcoming('movie', true).catch(() => []),
+              window.api.fetchUpcoming('series', true).catch(() => [])
+            ])
+            if (recentM.length > 0) setRecentlyReleasedMovies(recentM)
+            if (recentS.length > 0) setRecentlyReleasedSeries(recentS)
+            if (upM.length > 0) setUpcomingMovies(upM)
+            if (upS.length > 0) setUpcomingSeries(upS)
+          })(),
+          (async () => {
+            const [indiaMovies, indiaSeries, kdrama, anime] = await Promise.all([
+              window.api.fetchTrendingIndia('movie', true).catch(() => []),
+              window.api.fetchTrendingIndia('series', true).catch(() => []),
+              window.api.fetchTrendingKdrama(true).catch(() => []),
+              window.api.fetchTrendingAnime(true).catch(() => [])
+            ])
+            if (indiaMovies.length > 0) setTrendingIndiaMovies(indiaMovies)
+            if (indiaSeries.length > 0) setTrendingIndiaSeries(indiaSeries)
+            if (kdrama.length > 0) setTrendingKdrama(kdrama)
+            if (anime.length > 0) setTrendingAnime(anime)
+          })(),
+          (async () => {
+            const [
+              netflixM, netflixS,
+              jioM, jioS,
+              appleM, appleS,
+              primeM, primeS
+            ] = await Promise.all([
+              window.api.fetchTrendingNetflix('movie', true).catch(() => []),
+              window.api.fetchTrendingNetflix('series', true).catch(() => []),
+              window.api.fetchTrendingJioHotstar('movie', true).catch(() => []),
+              window.api.fetchTrendingJioHotstar('series', true).catch(() => []),
+              window.api.fetchTrendingAppleTv('movie', true).catch(() => []),
+              window.api.fetchTrendingAppleTv('series', true).catch(() => []),
+              window.api.fetchTrendingPrimeVideo('movie', true).catch(() => []),
+              window.api.fetchTrendingPrimeVideo('series', true).catch(() => [])
+            ])
+            if (netflixM.length > 0) setTrendingNetflixMovies(netflixM)
+            if (netflixS.length > 0) setTrendingNetflixSeries(netflixS)
+            if (jioM.length > 0) setTrendingJioHotstarMovies(jioM)
+            if (jioS.length > 0) setTrendingJioHotstarSeries(jioS)
+            if (appleM.length > 0) setTrendingAppleMovies(appleM)
+            if (appleS.length > 0) setTrendingAppleSeries(appleS)
+            if (primeM.length > 0) setTrendingPrimeMovies(primeM)
+            if (primeS.length > 0) setTrendingPrimeSeries(primeS)
+          })()
+        ])
+      } catch (err) {
+        console.error('Error during forced discovery refresh:', err)
+      }
+      return
+    }
+
     // If cold start / not forced, stagger gently so initial window mount is completely fluid
-    const delayTrending = force ? 0 : 800
-    const delayRecentAndUpcoming = force ? 40 : 2000
-    const delayRegional = force ? 80 : 3400
-    const delayOtt = force ? 120 : 4800
+    const delayTrending = 800
+    const delayRecentAndUpcoming = 2000
+    const delayRegional = 3400
+    const delayOtt = 4800
 
     const tTrending = window.setTimeout(async () => {
       const [trendingM, trendingS] = await Promise.all([
@@ -932,13 +1012,15 @@ const Home: React.FC<HomeProps> = ({ onPlay, onShowDetail, onNavigate, refreshKe
     setIsRefreshingDiscovery(true)
     setRefreshSuccess(false)
     try {
-      await fetchDiscoveryData(true)
-      await refreshLocalHomeData()
+      await Promise.all([
+        fetchDiscoveryData(true),
+        refreshLocalHomeData()
+      ])
       setRefreshSuccess(true)
+    } catch (err) {
+      console.error('Home refresh error:', err)
     } finally {
-      setTimeout(() => {
-        setIsRefreshingDiscovery(false)
-      }, 600)
+      setIsRefreshingDiscovery(false)
       setTimeout(() => {
         setRefreshSuccess(false)
       }, 2200)
@@ -1484,63 +1566,19 @@ const Home: React.FC<HomeProps> = ({ onPlay, onShowDetail, onNavigate, refreshKe
         <section className="-mt-2 mb-10">
           {/* Desktop App Header Above Floating Cinema Card */}
           <div className="relative z-40 mx-auto mb-4 flex max-w-[1600px] items-center justify-between px-6 md:px-10 lg:px-14">
-            <div>
-              <p className="hero-greeting-eyebrow text-[11px] sm:text-xs font-black uppercase tracking-[0.22em] text-primary">
+            <div className="flex flex-col gap-1">
+              <p className="hero-greeting-eyebrow text-xs sm:text-[13px] font-semibold tracking-wide text-primary leading-tight">
                 {getTimeGreeting()}, {userName}
               </p>
-              <h2 className="hero-greeting-title mt-0.5 text-2xl md:text-3xl font-black italic tracking-tighter text-white">
+              <h2 className="hero-greeting-title text-2xl font-black leading-tight tracking-tight text-white">
                 {showHero ? heroTitle : 'Ready to Watch'}
               </h2>
             </div>
 
-            <div className="relative z-40 flex items-center gap-2.5">
-              {/* Unified Ambient-Adaptive Sync / Refresh Button (Option A) */}
-              <div
-                className={`relative group transition-all duration-300 ease-out ${
-                  isSearchOpen ? 'translate-x-0' : 'translate-x-[58px]'
-                }`}
-              >
-                <button
-                  type="button"
-                  onClick={handleRefreshDiscovery}
-                  disabled={isRefreshingDiscovery}
-                  aria-label="Refresh discovery content"
-                  className={`hero-sync-btn flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl border backdrop-blur-xl transition-all duration-300 ${
-                    refreshSuccess
-                      ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-400 shadow-[0_0_20px_rgba(16,185,129,0.25)]'
-                      : isRefreshingDiscovery
-                        ? 'border-primary/40 bg-primary/10 text-primary shadow-[0_0_15px_rgba(229,9,20,0.2)]'
-                        : 'border-white/10 bg-black/35 text-white/70 hover:border-white/20 hover:bg-black/50 hover:text-white hover:scale-105 active:scale-95'
-                  }`}
-                >
-                  {refreshSuccess ? (
-                    <CheckCircle2 size={21} strokeWidth={2.4} className="animate-in zoom-in-75 duration-200" />
-                  ) : (
-                    <RefreshCw
-                      size={20}
-                      strokeWidth={2.2}
-                      className={`transition-all duration-500 ease-out ${
-                        isRefreshingDiscovery ? 'animate-spin' : 'group-hover:rotate-180'
-                      }`}
-                    />
-                  )}
-                </button>
-
-                {/* Ambient-friendly Floating Tooltip */}
-                <div className="pointer-events-none absolute right-0 top-full mt-2 z-50 whitespace-nowrap rounded-xl border border-white/15 bg-[#070a0f]/95 px-3 py-1.5 text-[11px] font-bold text-white opacity-0 shadow-[0_12px_30px_rgba(0,0,0,0.85)] backdrop-blur-xl transition-opacity duration-200 group-hover:opacity-100">
-                  {refreshSuccess
-                    ? 'Discovery up to date!'
-                    : isRefreshingDiscovery
-                      ? 'Refreshing discovery...'
-                      : 'Sync Discovery (F5)'}
-                </div>
-              </div>
-
+            <div className="relative z-40 flex items-center gap-4">
               {/* Search Box */}
               <div
-                className={`relative flex items-center transition-all duration-300 ease-out ${
-                  isSearchOpen ? 'translate-x-0' : '-translate-x-[58px]'
-                }`}
+                className="relative flex items-center"
                 ref={searchBoxRef}
               >
                 <div
@@ -1549,7 +1587,7 @@ const Home: React.FC<HomeProps> = ({ onPlay, onShowDetail, onNavigate, refreshKe
                   }`}
                 >
                 <div
-                  className={`hero-search-pill flex h-12 items-center overflow-hidden rounded-2xl border backdrop-blur-xl transition-all duration-300 ${
+                  className={`hero-search-pill flex h-12 w-full items-center overflow-hidden rounded-2xl border backdrop-blur-xl transition-all duration-300 ${
                     isSearchOpen
                       ? 'border-white/20 bg-black/60 shadow-[0_18px_55px_rgba(0,0,0,0.6)]'
                       : 'border-white/10 bg-black/35 hover:bg-black/50'
@@ -1570,8 +1608,8 @@ const Home: React.FC<HomeProps> = ({ onPlay, onShowDetail, onNavigate, refreshKe
                     value={searchQuery}
                     onChange={(event) => setSearchQuery(event.target.value)}
                     placeholder="Search movies or series"
-                    className={`hero-search-input min-w-0 flex-1 bg-transparent pr-2 text-sm font-bold text-white outline-none placeholder:text-white/35 ${
-                      isSearchOpen ? 'opacity-100' : 'pointer-events-none opacity-0'
+                    className={`hero-search-input min-w-0 flex-1 bg-transparent text-sm font-bold text-white outline-none placeholder:text-white/35 ${
+                      isSearchOpen ? 'opacity-100 pr-2' : 'pointer-events-none opacity-0 w-0 p-0'
                     }`}
                   />
 
@@ -1641,8 +1679,46 @@ const Home: React.FC<HomeProps> = ({ onPlay, onShowDetail, onNavigate, refreshKe
                     </div>
                   </div>
                 )}
+                </div>
               </div>
-            </div>
+
+              {/* Unified Ambient-Adaptive Sync / Refresh Button (Option A) */}
+              <div className="relative group">
+                <button
+                  type="button"
+                  onClick={handleRefreshDiscovery}
+                  disabled={isRefreshingDiscovery}
+                  aria-label="Refresh discovery content"
+                  className={`hero-sync-btn flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl border backdrop-blur-xl transition-all duration-300 ${
+                    refreshSuccess
+                      ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-400 shadow-[0_0_20px_rgba(16,185,129,0.25)]'
+                      : isRefreshingDiscovery
+                        ? 'border-primary/40 bg-primary/10 text-primary shadow-[0_0_15px_rgba(229,9,20,0.2)]'
+                        : 'border-white/10 bg-black/35 text-white/70 hover:border-white/20 hover:bg-black/50 hover:text-white hover:scale-105 active:scale-95'
+                  }`}
+                >
+                  {refreshSuccess ? (
+                    <CheckCircle2 size={21} strokeWidth={2.4} className="animate-in zoom-in-75 duration-200" />
+                  ) : (
+                    <RefreshCw
+                      size={20}
+                      strokeWidth={2.2}
+                      className={`transition-all duration-500 ease-out ${
+                        isRefreshingDiscovery ? 'animate-spin' : 'group-hover:rotate-180'
+                      }`}
+                    />
+                  )}
+                </button>
+
+                {/* Ambient-friendly Floating Tooltip */}
+                <div className="pointer-events-none absolute right-0 top-full mt-2 z-50 whitespace-nowrap rounded-xl border border-white/15 bg-[#070a0f]/95 px-3 py-1.5 text-[11px] font-bold text-white opacity-0 shadow-[0_12px_30px_rgba(0,0,0,0.85)] backdrop-blur-xl transition-opacity duration-200 group-hover:opacity-100">
+                  {refreshSuccess
+                    ? 'Discovery up to date!'
+                    : isRefreshingDiscovery
+                      ? 'Refreshing discovery...'
+                      : 'Sync Discovery (F5)'}
+                </div>
+              </div>
           </div>
         </div>
 

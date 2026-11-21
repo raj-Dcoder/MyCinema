@@ -184,17 +184,19 @@ function getCachedPosterTmdbId(posterPath?: string | null): number | null | unde
   }
 }
 
-export async function extractOfflineThumbnail(videoPath: string, videoId: number, duration: number = 0): Promise<string | null> {
+export async function extractOfflineThumbnail(videoPath: string, videoId: number, duration: number = 0, timestamp?: number): Promise<string | null> {
   const posterDir = path.join(app.getPath('userData'), 'posters')
   if (!fs.existsSync(posterDir)) {
     fs.mkdirSync(posterDir, { recursive: true })
   }
   return new Promise((resolve) => {
     const ext = '.jpg'
-    const fileName = `${videoId}-snap${ext}`
+    const fileName = typeof timestamp === 'number'
+      ? `${videoId}-snap-${Math.round(timestamp)}${ext}`
+      : `${videoId}-snap${ext}`
     const localPath = path.join(posterDir, fileName)
     
-    if (fs.existsSync(localPath)) {
+    if (typeof timestamp !== 'number' && fs.existsSync(localPath)) {
       const stats = fs.statSync(localPath)
       if (stats.size > 0) {
         console.log(`[FFMPEG] Cache Hit: Snapshot for ${videoId} already exists on disk.`)
@@ -206,7 +208,14 @@ export async function extractOfflineThumbnail(videoPath: string, videoId: number
       }
     }
 
-    const stamp = (duration > 0 && duration < 2) ? 0.1 : 1
+    let stamp = 1
+    if (typeof timestamp === 'number' && timestamp >= 0) {
+      stamp = timestamp
+    } else if (duration > 10) {
+      stamp = Math.min(10, Math.max(2, duration * 0.1))
+    } else if (duration > 0 && duration < 2) {
+      stamp = 0.1
+    }
 
     ffmpeg(videoPath)
       .screenshots({
@@ -351,6 +360,10 @@ export async function scanFolder(rootPath: string) {
       metadata.type = 'movie'
     }
 
+    const fileStat = await fs.promises.stat(filePath).catch(() => null)
+    const fileSize = fileStat?.size || 0
+    const fileMtime = fileStat ? Math.round(fileStat.mtimeMs) : 0
+
     const normalizedFilePath = normalizeVideoPath(filePath)
     const existingBeforeScan = videoByPath.get(normalizedFilePath)
     const addResult = addVideo({
@@ -358,7 +371,9 @@ export async function scanFolder(rootPath: string) {
       file_path: filePath,
       duration: duration,
       poster_path: localPoster,
-      tmdb_id: tmdbIdFromDownload
+      tmdb_id: tmdbIdFromDownload,
+      file_size: fileSize,
+      file_mtime: fileMtime
     })
 
     const resolvedVideoId = Number((addResult as any)?.id || existingBeforeScan?.id || (addResult as any)?.lastInsertRowid || 0)

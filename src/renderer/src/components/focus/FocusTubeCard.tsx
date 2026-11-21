@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react'
-import { Check, Copy, ExternalLink, Loader2, MoreVertical, Radio } from 'lucide-react'
+import { Check, Copy, ExternalLink, ListVideo, Loader2, MoreVertical, Radio } from 'lucide-react'
 import type { FtVideo } from '../../types'
-import { avatarHue, formatDuration, formatRelativeTime, formatViews, thumbnailUrl, watchUrl } from '../../utils/focusTube'
+import { avatarHue, formatDuration, formatPublishedExact, formatRelativeTime, formatViews, thumbnailUrl, watchUrl } from '../../utils/focusTube'
 
 interface FocusTubeCardProps {
   video: FtVideo
@@ -37,6 +37,7 @@ const FocusTubeCard: React.FC<FocusTubeCardProps> = ({ video, onPlay, onToggleSe
 
   const duration = formatDuration(video.duration)
   const relativeTime = formatRelativeTime(video.publishedAt)
+  const exactDate = formatPublishedExact(video.publishedAt)
 
   // Progress percentage (if partially watched or seen)
   const progressPct = video.position > 5 && video.duration
@@ -197,10 +198,16 @@ const FocusTubeCard: React.FC<FocusTubeCardProps> = ({ video, onPlay, onToggleSe
           >
             {video.title}
           </h3>
-          <p className="mt-1 truncate text-xs font-medium text-white/50">
+          {video.playlistTitle && (
+            <div className="mt-1 flex items-center gap-1 text-[11px] font-semibold text-primary/90 truncate" title={`Playlist: ${video.playlistTitle}`}>
+              <ListVideo size={12} className="shrink-0" />
+              <span className="truncate">{video.playlistTitle}</span>
+            </div>
+          )}
+          <p className="mt-0.5 truncate text-xs font-medium text-white/50" title={exactDate ? `Uploaded: ${exactDate}` : undefined}>
             {video.channelTitle}
             {video.views ? ` · ${formatViews(video.views)}` : ''}
-            {relativeTime ? ` · ${relativeTime}` : ''}
+            {exactDate ? ` · ${exactDate}` : relativeTime ? ` · ${relativeTime}` : ''}
           </p>
         </div>
 

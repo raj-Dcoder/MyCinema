@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom'
 import { ArrowDownWideNarrow, ArrowUpNarrowWide, Check, Gauge, Play, RotateCcw, Search, Settings, ShieldCheck, Sparkles, X, Zap } from 'lucide-react'
 import { useTheme } from '../../theme/ThemeContext'
 import { PIP_QUALITY_PREF_KEY, DEFAULT_PIP_QUALITY } from '../../utils/focusTube'
+import FocusTubeIcon from './FocusTubeIcon'
 
 const YouTubeIcon: React.FC<{ size?: number; className?: string }> = ({ size = 16, className = '' }) => (
   <svg
@@ -215,8 +216,8 @@ const FocusTubeSettingsModal: React.FC<FocusTubeSettingsModalProps> = ({
           {/* Section 1: YouTube Search Behavior */}
           <div className="space-y-4">
             <div className="flex items-center gap-2">
-              <div className="flex h-6 w-6 items-center justify-center rounded-lg bg-red-500/15 text-red-500">
-                <YouTubeIcon size={14} />
+              <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-red-500/15 text-red-500">
+                <FocusTubeIcon size={18} />
               </div>
               <h3 className={`text-xs font-bold uppercase tracking-wider ${
                 isLight ? 'text-slate-700' : 'text-white/70'

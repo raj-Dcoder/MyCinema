@@ -34,6 +34,7 @@ import FocusTubeCard from '../components/focus/FocusTubeCard'
 import FocusTubePlayer from '../components/focus/FocusTubePlayer'
 import ChannelManager from '../components/focus/ChannelManager'
 import FocusTubeSettingsModal from '../components/focus/FocusTubeSettingsModal'
+import FocusTubeIcon from '../components/focus/FocusTubeIcon'
 import { categoryDot, formatAgo, formatPublishedExact } from '../utils/focusTube'
 import { useTheme } from '../theme/ThemeContext'
 
@@ -114,6 +115,9 @@ const FocusTube: React.FC<FocusTubeProps> = ({ activeTab = 'focustube' }) => {
   const [activeSearchFilter, setActiveSearchFilter] = useState<'this_week' | 'today' | 'this_month' | 'relevance'>('this_week')
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [playingFromSearch, setPlayingFromSearch] = useState(false)
+  const [confirmMarkAll, setConfirmMarkAll] = useState(false)
+  const confirmMarkAllTimerRef = useRef<number | null>(null)
+  const lastMarkAllClickRef = useRef<number>(0)
   const [subscribeModalChannel, setSubscribeModalChannel] = useState<{
     channelId: string
     title: string
@@ -474,11 +478,46 @@ const FocusTube: React.FC<FocusTubeProps> = ({ activeTab = 'focustube' }) => {
     await loadCategories()
   }, [categories, loadCategories])
 
+  // Reset mark-all confirmation if user switches category
+  useEffect(() => {
+    setConfirmMarkAll(false)
+    lastMarkAllClickRef.current = 0
+    if (confirmMarkAllTimerRef.current) window.clearTimeout(confirmMarkAllTimerRef.current)
+  }, [activeCategoryId])
+
+  // Clear pending confirmation timer on unmount
+  useEffect(() => {
+    return () => {
+      if (confirmMarkAllTimerRef.current) window.clearTimeout(confirmMarkAllTimerRef.current)
+    }
+  }, [])
+
   const handleMarkAllSeen = useCallback(async () => {
+    if (confirmMarkAllTimerRef.current) window.clearTimeout(confirmMarkAllTimerRef.current)
+    setConfirmMarkAll(false)
+    lastMarkAllClickRef.current = 0
     await window.api.ftMarkAllSeen(activeCategoryId)
     await loadCategories()
     await loadFeed(activeCategoryId)
   }, [activeCategoryId, loadCategories, loadFeed])
+
+  const handleMarkAllSeenClick = useCallback(() => {
+    const now = Date.now()
+    // Second click (within 3 seconds) or double click -> confirm and mark all as seen
+    if (confirmMarkAll || (lastMarkAllClickRef.current > 0 && now - lastMarkAllClickRef.current < 3000)) {
+      void handleMarkAllSeen()
+      return
+    }
+
+    // First click: arm confirmation
+    lastMarkAllClickRef.current = now
+    setConfirmMarkAll(true)
+    if (confirmMarkAllTimerRef.current) window.clearTimeout(confirmMarkAllTimerRef.current)
+    confirmMarkAllTimerRef.current = window.setTimeout(() => {
+      setConfirmMarkAll(false)
+      lastMarkAllClickRef.current = 0
+    }, 3000)
+  }, [confirmMarkAll, handleMarkAllSeen])
 
   const getCategoryCustomSuffix = useCallback((categoryId?: number | null): string | null => {
     if (!categoryId) return null
@@ -674,19 +713,39 @@ const FocusTube: React.FC<FocusTubeProps> = ({ activeTab = 'focustube' }) => {
   return (
     <div className={`space-y-5 focustube-container ${ftBrandLock ? 'ft-brand-locked' : ''}`}>
       {/* ── TOP HEADER (Clean, single-tier 54px header) ── */}
-      <header className="sticky top-0 z-30 flex h-14 items-center justify-between gap-4 rounded-2xl border border-white/[0.08] bg-[#0c0d14]/90 px-4 shadow-[0_10px_30px_-10px_rgba(0,0,0,0.8)] backdrop-blur-md sm:px-5">
+      <header
+        className={`sticky top-0 z-30 flex h-14 items-center justify-between gap-4 rounded-2xl px-4 backdrop-blur-md sm:px-5 transition-colors ${
+          isLight
+            ? 'border border-slate-200/80 bg-white/95 shadow-sm shadow-slate-900/5'
+            : 'border border-white/[0.08] bg-[#0c0d14]/90 shadow-[0_10px_30px_-10px_rgba(0,0,0,0.8)]'
+        }`}
+      >
         {/* Left: Brand */}
         <div className="flex items-center gap-3">
-          <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-primary via-primary to-primary/80 text-white shadow-[0_0_20px_rgba(var(--c-accent),0.5)]">
-            <Play size={15} fill="currentColor" className="ml-0.5" />
+          <div
+            className={`flex h-10 w-10 items-center justify-center rounded-xl transition-all ${
+              isLight
+                ? 'border border-red-500/20 bg-gradient-to-br from-red-500/10 via-red-50/50 to-white text-slate-900 shadow-sm shadow-red-500/10 hover:border-red-500/35 hover:shadow-md hover:shadow-red-500/15'
+                : 'border border-red-500/30 bg-gradient-to-br from-red-600/20 via-[#181016] to-[#0d0f17] text-white shadow-[0_0_20px_rgba(255,26,64,0.25)] hover:border-red-500/50'
+            }`}
+          >
+            <FocusTubeIcon size={28} variant="wireframe" pulse />
           </div>
           <div className="flex items-center gap-2">
-            <h1 className="text-base font-black tracking-tight text-white sm:text-lg">
+            <h1
+              className={`text-base font-black tracking-tight sm:text-lg ${
+                isLight ? 'text-slate-900' : 'text-white'
+              }`}
+            >
               FocusTube
             </h1>
             <span
               title="Focus Tube — distraction-free subscriptions"
-              className="rounded-md border border-amber-300/20 bg-amber-400/10 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider text-amber-200/90"
+              className={`rounded-md px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider ${
+                isLight
+                  ? 'border border-amber-500/30 bg-amber-500/10 text-amber-800'
+                  : 'border border-amber-300/20 bg-amber-400/10 text-amber-200/90'
+              }`}
             >
               Beta
             </span>
@@ -751,7 +810,13 @@ const FocusTube: React.FC<FocusTubeProps> = ({ activeTab = 'focustube' }) => {
 
           {/* Hybrid Suggestions Dropdown */}
           {searchDropdownOpen && search.trim() && (
-            <div className="absolute left-0 right-0 top-full mt-1.5 z-50 overflow-hidden rounded-2xl border border-white/10 bg-[#0d0f17]/95 p-1.5 shadow-2xl backdrop-blur-xl animate-in fade-in zoom-in-95 duration-150">
+            <div
+              className={`absolute left-0 right-0 top-full mt-1.5 z-50 overflow-hidden rounded-2xl p-1.5 backdrop-blur-xl animate-in fade-in zoom-in-95 duration-150 ${
+                isLight
+                  ? 'border border-slate-200/90 bg-white/95 shadow-xl ring-1 ring-slate-900/5'
+                  : 'border border-white/10 bg-[#0d0f17]/95 shadow-2xl'
+              }`}
+            >
               {/* Option 1: YouTube Live Search */}
               <button
                 type="button"
@@ -759,7 +824,11 @@ const FocusTube: React.FC<FocusTubeProps> = ({ activeTab = 'focustube' }) => {
                   e.preventDefault()
                   void handleExecuteYouTubeSearch(search.trim())
                 }}
-                className="w-full flex items-center justify-between rounded-xl p-2.5 text-left transition-colors bg-primary/15 hover:bg-primary/25 border border-primary/30 text-white group"
+                className={`w-full flex items-center justify-between rounded-xl p-2.5 text-left transition-colors group ${
+                  isLight
+                    ? 'bg-red-50 hover:bg-red-100/70 border border-red-200/70 text-slate-800'
+                    : 'bg-primary/15 hover:bg-primary/25 border border-primary/30 text-white'
+                }`}
               >
                 <div className="flex items-center gap-2.5 min-w-0">
                   <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-primary text-white shadow-sm">
@@ -769,16 +838,28 @@ const FocusTube: React.FC<FocusTubeProps> = ({ activeTab = 'focustube' }) => {
                     <p className="text-xs font-bold truncate">
                       Search YouTube for <span className="text-primary font-black">&ldquo;{search.trim()}&rdquo;</span>
                     </p>
-                    <p className="text-[10px] text-white/40">Watch with side-panel queue & playlist</p>
+                    <p className={`text-[10px] ${isLight ? 'text-slate-500' : 'text-white/40'}`}>
+                      Watch with side-panel queue & playlist
+                    </p>
                   </div>
                 </div>
-                <span className="hidden sm:inline-flex items-center rounded border border-white/10 bg-white/5 px-1.5 py-0.5 text-[10px] font-semibold text-white/50 group-hover:text-white">
+                <span
+                  className={`hidden sm:inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-semibold ${
+                    isLight
+                      ? 'border border-slate-200 bg-white text-slate-600 group-hover:text-slate-900'
+                      : 'border border-white/10 bg-white/5 text-white/50 group-hover:text-white'
+                  }`}
+                >
                   ↵ Enter
                 </span>
               </button>
 
               {/* Option 2: Subscription Results count indicator */}
-              <div className="mt-1 flex items-center justify-between px-3 py-1.5 text-[11px] font-medium text-white/40">
+              <div
+                className={`mt-1 flex items-center justify-between px-3 py-1.5 text-[11px] font-medium ${
+                  isLight ? 'text-slate-500' : 'text-white/40'
+                }`}
+              >
                 <span>In your subscriptions</span>
                 <span>{videos.length} matching</span>
               </div>
@@ -1267,15 +1348,26 @@ const FocusTube: React.FC<FocusTubeProps> = ({ activeTab = 'focustube' }) => {
             <span>Watched</span>
           </button>
 
-          {/* 4. Mark All Seen Minimalist Icon Button */}
+          {/* 4. Mark All Seen Button (Double-click / 2-step confirmation to prevent accidental clicks) */}
           <button
             type="button"
-            onClick={() => void handleMarkAllSeen()}
-            title="Mark all videos in this category as seen"
-            className="inline-flex h-8 w-8 items-center justify-center rounded-xl border border-white/10 bg-white/5 text-white/70 transition-all hover:border-white/20 hover:bg-white/10 hover:text-white"
+            onClick={handleMarkAllSeenClick}
+            onDoubleClick={(e) => {
+              e.preventDefault()
+              void handleMarkAllSeen()
+            }}
+            title={confirmMarkAll ? 'Click again to confirm mark all as seen' : 'Mark all videos in this category as seen (Double click)'}
+            className={`inline-flex h-8 items-center justify-center gap-1.5 rounded-xl border transition-all ${
+              confirmMarkAll
+                ? 'border-amber-400/60 bg-amber-400/20 px-2.5 text-amber-300 shadow-[0_0_12px_rgba(251,191,36,0.3)] animate-pulse'
+                : 'w-8 border-white/10 bg-white/5 text-white/70 hover:border-white/20 hover:bg-white/10 hover:text-white'
+            }`}
             aria-label="Mark all as seen"
           >
-            <CheckCheck size={14} />
+            <CheckCheck size={14} className={confirmMarkAll ? 'text-amber-300' : ''} />
+            {confirmMarkAll && (
+              <span className="text-[11px] font-bold tracking-tight">Confirm?</span>
+            )}
           </button>
         </div>
       </div>
@@ -1395,24 +1487,24 @@ const FocusTube: React.FC<FocusTubeProps> = ({ activeTab = 'focustube' }) => {
             </button>
           </div>
         </div>
-      ) : activeCategory && (activeCategory.channelCount ?? 0) === 0 ? (
+      ) : activeCategory && (activeCategory.channelCount ?? 0) === 0 && (activeCategory.playlistCount ?? 0) === 0 ? (
         <div className="flex flex-col items-center justify-center gap-5 rounded-3xl border border-dashed border-white/10 py-24 text-center">
           <div className="flex h-20 w-20 items-center justify-center rounded-2xl border border-white/[0.07] bg-white/[0.03] text-white/25">
             <Users size={34} strokeWidth={1.5} />
           </div>
           <div className="space-y-2">
             <h3 className="text-2xl font-black uppercase italic tracking-tight text-white">
-              No channels in {activeCategory.name} yet
+              No channels or playlists in {activeCategory.name} yet
             </h3>
             <p className="mx-auto max-w-md text-xs font-bold uppercase tracking-widest text-white/40">
-              Subscribe to channels to fill this category
+              Subscribe to channels or playlists to fill this category
             </p>
             <button
               type="button"
               onClick={() => setManaging(true)}
               className="mt-2 inline-flex items-center gap-1.5 rounded-xl bg-primary px-5 py-2.5 text-xs font-black uppercase tracking-widest text-white shadow-[0_10px_30px_-12px_rgba(var(--c-accent),0.9)] transition-colors hover:bg-primary/85"
             >
-              <Plus size={14} /> Add channels to {activeCategory.name}
+              <Plus size={14} /> Add to {activeCategory.name}
             </button>
           </div>
         </div>

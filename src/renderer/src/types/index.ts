@@ -22,6 +22,9 @@ export interface Video {
   episode_count?: number
   version_count?: number
   is_preferred?: boolean
+  file_size?: number
+  file_mtime?: number
+  folder_name?: string
   vote_average?: number
   release_year?: number
   release_date?: string
@@ -65,6 +68,9 @@ export interface Video {
   // Original torrent file position (?file=) — pins resume to the exact file
   // for packs whose filenames carry no parseable S/E tags.
   fileIndex?: number
+  // Continuous local playlist / queue playback support
+  playlist?: Video[]
+  playlistIndex?: number
 }
 
 export interface TmdbProvider {
@@ -113,6 +119,7 @@ export interface FtCategory {
   color: string
   position: number
   channelCount?: number
+  playlistCount?: number
   unseenCount?: number
 }
 
@@ -127,6 +134,20 @@ export interface FtChannel {
   lastFetched: string | null
   lastError: string | null
   categoryIds: number[]
+}
+
+export interface FtPlaylist {
+  playlistId: string
+  channelId: string | null
+  channelTitle: string | null
+  title: string
+  thumbnailUrl: string | null
+  url: string
+  position: number
+  lastFetched: string | null
+  lastError: string | null
+  categoryIds: number[]
+  videoCount?: number
 }
 
 export interface FtYouTubeImportChannel {
@@ -182,6 +203,8 @@ export interface FtVideo {
   seenAt: string | null
   saved: boolean
   position: number
+  playlistId?: string | null
+  playlistTitle?: string | null
 }
 
 export interface FtFeedOptions {

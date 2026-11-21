@@ -14,7 +14,11 @@ import '@fontsource/poppins/800-italic.css'
 import '@fontsource/poppins/900.css'
 import '@fontsource/poppins/900-italic.css'
 import './index.css'
-import { ThemeProvider } from './theme/ThemeContext'
+import { ThemeProvider, applyEarlyTheme } from './theme/ThemeContext'
+
+// Apply the user's saved theme & accent synchronously before React renders
+// This ensures the first painted frame already has the user's desired theme (e.g. pink) with zero flicker
+applyEarlyTheme()
 
 const isFtPip = typeof window !== 'undefined' && (
   window.location.hash === '#ft-pip' ||

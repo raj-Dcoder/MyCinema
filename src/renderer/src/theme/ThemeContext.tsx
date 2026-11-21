@@ -1,4 +1,4 @@
-import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react'
+import React, { createContext, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useState } from 'react'
 
 export type AppTheme = 'dark' | 'light'
 
@@ -351,11 +351,7 @@ const getInitialHaloBreathing = (): boolean => {
 }
 
 const getInitialDetailAmbientShade = (): boolean => {
-  try {
-    const saved = localStorage.getItem(DETAIL_AMBIENT_SHADE_KEY)
-    if (saved !== null) return saved === 'true'
-  } catch {}
-  return true // Default: ON (Ambient / Theme Color)
+  return false // Always classic black shades for Detail Screen
 }
 
 const getInitialFluidAmbient = (): boolean => {
@@ -373,6 +369,93 @@ const getInitialAtmosphericStudioEnabled = (): boolean => {
   } catch {}
   return true // Default: ON
 }
+
+/**
+ * Synchronously applies the saved theme and accent variables to document.documentElement
+ * BEFORE React mounts or paints the first frame. This completely eliminates any FOUC or
+ * momentary flash of default colors on startup.
+ */
+export const applyEarlyTheme = (): void => {
+  if (typeof window === 'undefined' || typeof document === 'undefined') return
+  const root = document.documentElement
+
+  // 1. Base theme class & colorScheme
+  const theme = getInitialTheme()
+  root.classList.remove('light', 'dark', 'glass', 'glass-light')
+  if (theme === 'light') {
+    root.classList.add('light')
+    root.style.colorScheme = 'light'
+  } else {
+    root.classList.add('dark')
+    root.style.colorScheme = 'dark'
+  }
+
+  // 2. Atmospheric & Accent variables
+  const atmosphericStudioEnabled = getInitialAtmosphericStudioEnabled()
+  if (!atmosphericStudioEnabled) {
+    root.setAttribute('data-atmospheric-studio', 'disabled')
+    root.setAttribute('data-halo-intensity', 'stealth')
+    root.setAttribute('data-accent', 'crimson')
+    root.setAttribute('data-detail-shade', 'black')
+
+    root.style.setProperty('--c-accent', '229 9 20')
+    root.style.setProperty('--c-accent-hex', '#e50914')
+    root.style.setProperty('--c-accent-secondary', '185 28 28')
+
+    root.style.setProperty('--c-ambient', theme === 'light' ? '241 243 246' : '8 13 22')
+    root.style.setProperty('--c-ambient-hex', theme === 'light' ? '#f1f3f6' : '#080d16')
+    root.style.setProperty('--c-ambient-secondary', theme === 'light' ? '241 243 246' : '8 13 22')
+
+    root.style.setProperty('--halo-opacity', '0')
+    root.style.setProperty('--halo-diffusion', '1.00')
+    root.style.setProperty('--halo-chroma', '1.00')
+    return
+  }
+
+  const accent = getInitialAccent()
+  const currentAccent = ACCENT_PALETTE.find((a) => a.id === accent) || ACCENT_PALETTE[0]
+  const haloIntensity = getInitialHaloIntensity()
+  const currentHaloPreset =
+    HALO_INTENSITY_PRESETS.find((p) => p.id === haloIntensity) || HALO_INTENSITY_PRESETS[2]
+  const haloDiffusion = getInitialClampedNumber(HALO_DIFFUSION_STORAGE_KEY, 250)
+  const haloChroma = getInitialClampedNumber(HALO_CHROMA_STORAGE_KEY, 110)
+  const buttonAccentMode = getInitialButtonAccentMode()
+  const customButtonAccent = getInitialCustomButtonAccent()
+  const detailAmbientShade = getInitialDetailAmbientShade()
+  const fluidAmbient = getInitialFluidAmbient()
+
+  let activeButtonAccent = currentAccent
+  if (buttonAccentMode === 'signature') {
+    activeButtonAccent = ACCENT_PALETTE.find((a) => a.id === 'crimson') || ACCENT_PALETTE[0]
+  } else if (buttonAccentMode === 'custom') {
+    activeButtonAccent = ACCENT_PALETTE.find((a) => a.id === customButtonAccent) || ACCENT_PALETTE[0]
+  }
+
+  root.setAttribute('data-atmospheric-studio', 'enabled')
+  const baseOpacity = currentHaloPreset.baseOpacity
+  const chromaMultiplier = 0.4 + (haloChroma / 100) * 0.6
+  const computedOpacity = Math.min(1.2, baseOpacity * chromaMultiplier)
+
+  root.style.setProperty('--c-accent', activeButtonAccent.rgb)
+  root.style.setProperty('--c-accent-hex', activeButtonAccent.hex)
+  root.style.setProperty('--c-accent-secondary', activeButtonAccent.secondaryRgb)
+
+  root.style.setProperty('--c-ambient', currentAccent.rgb)
+  root.style.setProperty('--c-ambient-hex', currentAccent.hex)
+  root.style.setProperty('--c-ambient-secondary', currentAccent.secondaryRgb)
+
+  root.style.setProperty('--halo-opacity', computedOpacity.toFixed(3))
+  root.style.setProperty('--halo-diffusion', (haloDiffusion / 100).toFixed(2))
+  root.style.setProperty('--halo-chroma', (haloChroma / 100).toFixed(2))
+
+  root.setAttribute('data-halo-intensity', haloIntensity)
+  root.setAttribute('data-accent', accent)
+  root.setAttribute('data-detail-shade', 'black')
+  root.setAttribute('data-fluid-ambient', fluidAmbient ? 'enabled' : 'disabled')
+}
+
+// Immediate execution when module is evaluated
+applyEarlyTheme()
 
 export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [theme, setThemeState] = useState<AppTheme>(getInitialTheme)
@@ -411,7 +494,7 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   }, [atmosphericStudioEnabled, buttonAccentMode, customButtonAccent, currentAccent])
 
   // Synchronize Base Dark/Light Theme on document element
-  useEffect(() => {
+  useLayoutEffect(() => {
     const root = document.documentElement
     root.classList.remove('light', 'dark', 'glass', 'glass-light')
 
@@ -430,7 +513,7 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   }, [theme])
 
   // Synchronize Accent & Atmospheric Halo CSS variables on document element
-  useEffect(() => {
+  useLayoutEffect(() => {
     const root = document.documentElement
 
     if (!atmosphericStudioEnabled) {
@@ -501,7 +584,7 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
     root.setAttribute('data-halo-intensity', haloIntensity)
     root.setAttribute('data-accent', accent)
-    root.setAttribute('data-detail-shade', detailAmbientShade ? 'ambient' : 'black')
+    root.setAttribute('data-detail-shade', 'black')
     root.setAttribute('data-fluid-ambient', fluidAmbient ? 'enabled' : 'disabled')
 
     try {

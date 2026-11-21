@@ -17,6 +17,7 @@ import ProductTour, { TOURS, isTourSeen, markTourSeen } from './components/Produ
 import { WindowControlsGuide } from './components/FeatureGuides'
 import Download from './pages/Download'
 import FocusTube from './pages/FocusTube'
+import FocusTubeIcon from './components/focus/FocusTubeIcon'
 import Updates from './pages/Updates'
 import appLogo from './assets/mycinema-logo.png'
 import AmbientAtmosphere from './components/AmbientAtmosphere'
@@ -569,11 +570,70 @@ const App: React.FC = () => {
   // Top download for speed label
   const dlTopDownload = dlActiveDownloads[0] || activeDownloads.find(d => d.status === 'queued')
 
+  // ─── Taskbar Download Progress Bar ──────────────────────────────────────────
+  useEffect(() => {
+    if (!window.api?.setTaskbarProgress) return
+
+    // 1. In-app update downloading takes priority
+    if (updateState.status === 'downloading' && typeof updateState.percent === 'number') {
+      const progress = Math.max(0.01, Math.min(1, updateState.percent / 100))
+      window.api.setTaskbarProgress(progress, 'normal').catch(() => {})
+      return
+    }
+
+    // 2. Active media downloads (Torrents / Direct HTTP)
+    if (dlActiveCount > 0) {
+      const progress = Math.max(0.01, Math.min(1, dlAvgProgress / 100))
+      window.api.setTaskbarProgress(progress, 'normal').catch(() => {})
+      return
+    }
+
+    // 3. Queued or connecting with no downloading items yet
+    if (dlQueuedCount > 0) {
+      window.api.setTaskbarProgress(2, 'indeterminate').catch(() => {})
+      return
+    }
+
+    // 4. Paused downloads
+    const hasPaused = activeDownloads.some(d => d.status === 'paused')
+    const hasError = activeDownloads.some(d => d.status === 'error')
+    if (hasPaused && !hasError) {
+      const pausedItems = activeDownloads.filter(d => d.status === 'paused')
+      const pausedAvg = pausedItems.length > 0
+        ? pausedItems.reduce((s, d) => s + Math.max(0, Math.min(100, Number(d.progress || 0))), 0) / pausedItems.length
+        : 0
+      if (pausedAvg > 0) {
+        window.api.setTaskbarProgress(Math.max(0.01, Math.min(1, pausedAvg / 100)), 'paused').catch(() => {})
+        return
+      }
+    } else if (hasError) {
+      const errorItems = activeDownloads.filter(d => d.status === 'error')
+      const errorAvg = errorItems.reduce((s, d) => s + Math.max(0, Math.min(100, Number(d.progress || 0))), 0) / errorItems.length
+      window.api.setTaskbarProgress(Math.max(0.01, Math.min(1, errorAvg / 100)), 'error').catch(() => {})
+      return
+    }
+
+    // 5. Idle / Finished: clear taskbar progress bar
+    window.api.setTaskbarProgress(-1).catch(() => {})
+
+    return () => {
+      window.api?.setTaskbarProgress?.(-1).catch(() => {})
+    }
+  }, [
+    dlActiveCount,
+    dlQueuedCount,
+    Math.round(dlAvgProgress),
+    updateState.status,
+    updateState.percent,
+    activeDownloads.length,
+    activeDownloads.map(d => `${d.id}:${d.status}`).join(',')
+  ])
+
   const navItems = [
     { id: 'home' as const,     label: 'Home',         icon: <HomeIcon size={20} /> },
     // Hidden entirely while the feature is off in Settings.
     ...(focusTubeEnabled
-      ? [{ id: 'focustube' as const, label: 'Focus Tube', icon: <Compass size={20} />, badge: 'Beta' }]
+      ? [{ id: 'focustube' as const, label: 'Focus Tube', icon: <FocusTubeIcon size={22} />, badge: 'Beta' }]
       : []),
     { id: 'movies' as const,   label: 'Movies',       icon: <Film size={20} /> },
     { id: 'series' as const,   label: 'Web Series',   icon: <Tv size={20} /> },
@@ -834,7 +894,7 @@ const App: React.FC = () => {
                     data-tour={item.id === 'focustube' ? 'sidebar-focustube' : undefined}
                     onClick={() => navigateToTab(item.id)}
                     title={!isSidebarExpanded ? (showDlIndicator ? `${item.label} (${Math.round(dlAvgProgress)}% · ${dlTotalActive} active)` : item.label) : undefined}
-                    className={`relative flex items-center rounded-xl border outline-none focus:outline-none transition-all duration-150 ease-out group w-full h-12 overflow-hidden ${
+                    className={`relative flex items-center text-left rounded-xl border outline-none focus:outline-none transition-all duration-150 ease-out group w-full h-12 overflow-hidden ${
                       activeTab === item.id
                         ? 'nav-item-active font-bold border-transparent'
                         : showDlIndicator
@@ -843,7 +903,7 @@ const App: React.FC = () => {
                     }`}
                   >
                     {/* Left Icon: Fixed 48x48px (w-12 h-12) */}
-                    <div className="w-12 h-12 flex items-center justify-center text-current relative flex-shrink-0">
+                    <div className="w-12 h-12 flex items-center justify-center text-current relative z-10 flex-shrink-0">
                       {/* Collapsed Ambient Circular Progress Ring (Matches Image 2 with App's Ambient Accent Color) */}
                       {showDlIndicator && (
                         <svg
@@ -880,13 +940,15 @@ const App: React.FC = () => {
                         </svg>
                       )}
 
-                      <span className={`flex items-center justify-center leading-none relative z-10 ${showDlIndicator && activeTab !== item.id ? 'text-primary' : ''}`}>
+                      <span className={`flex items-center justify-center leading-none relative z-10 ${showDlIndicator && activeTab !== item.id && !isSidebarExpanded ? 'text-primary' : ''}`}>
                         {item.icon}
                       </span>
 
-                      {/* Active Download Count Badge (Minimalist ambient badge at top-right corner) */}
+                      {/* Active Download Count Badge (Minimalist ambient badge at top-right corner, collapsed mode only) */}
                       {showDlIndicator && (
-                        <span className="absolute top-1.5 right-1.5 z-20 flex h-3.5 min-w-3.5 items-center justify-center rounded-full bg-primary px-1 text-[8px] font-black text-white leading-none shadow-[0_0_6px_rgba(var(--c-accent),0.6)] ring-1.5 ring-[#0a0f1d]">
+                        <span className={`absolute top-1.5 right-1.5 z-20 flex h-3.5 min-w-3.5 items-center justify-center rounded-full bg-primary px-1 text-[8px] font-black text-white leading-none shadow-[0_0_6px_rgba(var(--c-accent),0.6)] ring-1.5 ring-[#0a0f1d] transition-opacity duration-200 ${
+                          !isSidebarExpanded ? 'opacity-100' : 'opacity-0 pointer-events-none'
+                        }`}>
                           {dlTotalActive}
                         </span>
                       )}
@@ -910,11 +972,11 @@ const App: React.FC = () => {
                       {showDlIndicator ? (
                         <div className="flex items-center w-full">
                           {/* Static Left Info: Downloads + Active count (Never shifts or wobbles) */}
-                          <div className="min-w-0 flex-1 pr-1.5 select-none">
-                            <span className="text-sm font-bold text-white tracking-tight truncate block leading-tight">
-                              Downloads
+                          <div className="min-w-0 flex-1 pr-1.5 text-left select-none">
+                            <span className="text-sm font-bold text-white text-left truncate block leading-tight">
+                              {item.label}
                             </span>
-                            <span className="text-[10px] font-medium text-white/45 truncate block leading-tight mt-0.5 tabular-nums">
+                            <span className="text-[10px] font-medium text-white/45 text-left truncate block leading-tight mt-0.5 tabular-nums">
                               {dlActiveCount} active{dlQueuedCount > 0 ? ` · ${dlQueuedCount} queued` : ''}
                             </span>
                           </div>
@@ -1088,14 +1150,14 @@ const App: React.FC = () => {
         <div className="px-4 pb-2 mt-auto">
           <button
             onClick={() => navigateToTab('updates')}
-            className={`relative w-full h-12 flex items-center rounded-xl border border-transparent outline-none focus:outline-none focus-visible:outline-none transition-[background-color,border-color,color,box-shadow] duration-150 ease-out group overflow-hidden ${
+            className={`relative w-full h-12 flex items-center text-left rounded-xl border border-transparent outline-none focus:outline-none focus-visible:outline-none transition-[background-color,border-color,color,box-shadow] duration-150 ease-out group overflow-hidden ${
               activeTab === 'updates'
                 ? 'nav-item-active font-bold'
                 : 'text-white/45 hover:bg-white/5 hover:text-white'
             }`}
             title={!isSidebarExpanded ? 'Updates & Changelog' : undefined}
           >
-            <div className="w-12 h-12 flex items-center justify-center text-current flex-shrink-0">
+            <div className="w-12 h-12 flex items-center justify-center text-current relative z-10 flex-shrink-0">
               <Megaphone size={19} strokeWidth={2.2} />
             </div>
             <div className={`w-[176px] flex-shrink-0 flex items-center justify-between whitespace-nowrap overflow-hidden transition-opacity duration-200 ${
@@ -1112,7 +1174,7 @@ const App: React.FC = () => {
         <div className="p-4 pt-0">
           <button
             onClick={() => navigateToTab('settings')}
-            className={`relative w-full h-12 flex items-center rounded-xl border transition-[background-color,border-color,box-shadow,transform] duration-150 ease-out outline-none focus:outline-none focus-visible:outline-none group overflow-hidden ${
+            className={`relative w-full h-12 flex items-center text-left rounded-xl border transition-[background-color,border-color,box-shadow,transform] duration-150 ease-out outline-none focus:outline-none focus-visible:outline-none group overflow-hidden ${
               activeTab === 'settings'
                 ? 'profile-card-active'
                 : 'bg-white/[0.04] border-white/10 hover:bg-white/[0.08] hover:border-white/20'
@@ -1120,7 +1182,7 @@ const App: React.FC = () => {
             title={!isSidebarExpanded ? `Settings & Profile (${userName})` : undefined}
           >
             {/* Avatar */}
-            <div className="w-12 h-12 flex items-center justify-center flex-shrink-0 pointer-events-none">
+            <div className="w-12 h-12 flex items-center justify-center relative z-10 flex-shrink-0 pointer-events-none">
               <div 
                 className={`relative w-8 h-8 rounded-xl ${profileImage && !profileImageFailed ? 'bg-transparent' : 'bg-red-600'} flex items-center justify-center text-white font-black text-sm shadow-md italic transition-transform overflow-hidden ${
                   activeTab === 'settings' ? 'ring-2 ring-white/30' : ''
@@ -1143,8 +1205,8 @@ const App: React.FC = () => {
             <div className={`w-[176px] flex-shrink-0 flex items-center justify-between overflow-hidden whitespace-nowrap transition-opacity duration-200 ${
               isSidebarExpanded ? 'opacity-100 pr-2' : 'opacity-0 pr-0 pointer-events-none'
             }`}>
-              <div className="flex-1 min-w-0 pr-2">
-                <h4 className="text-sm font-bold text-white truncate italic">{userName}</h4>
+              <div className="flex-1 min-w-0 pr-2 text-left">
+                <h4 className="text-sm font-bold text-white truncate italic text-left">{userName}</h4>
               </div>
               <div className={`p-1.5 rounded-lg transition-colors flex-shrink-0 ${
                 activeTab === 'settings' ? 'text-white' : 'text-white/40 group-hover:text-white'

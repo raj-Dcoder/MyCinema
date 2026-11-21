@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom'
 import hdHub4uLogo from '../assets/site-logos/hdhub4u.webp'
 import katMovieHdLogo from '../assets/site-logos/katmoviehd.jpg'
 import { cleanIpcError } from '../utils/ipcError'
-import { X, Play, Info, Calendar, CalendarDays, Clock, Star, FolderOpen, Film, Music, Subtitles, HardDrive, ChevronDown, ChevronUp, Bookmark, Share2, Search, Zap, Users, Download, AlertTriangle, Clapperboard, Loader2, ExternalLink, Languages, CheckCircle2, Copy, MessageCircle, Send, Trash2, Bell, BellRing, Hourglass, Layers, Plus, Tv, AlertCircle, BookOpen, MapPin, Compass, Sparkles } from 'lucide-react'
+import { ArrowLeft, X, Play, Info, Calendar, CalendarDays, Clock, Star, FolderOpen, Film, Music, Subtitles, HardDrive, ChevronDown, ChevronUp, Bookmark, Share2, Search, Zap, Users, Download, AlertTriangle, Clapperboard, Loader2, ExternalLink, Languages, CheckCircle2, Copy, MessageCircle, Send, Trash2, Bell, BellRing, Hourglass, Layers, Plus, Tv, AlertCircle, BookOpen, MapPin, Compass, Sparkles } from 'lucide-react'
 import { Video, WatchlistIntent, TmdbFranchise, TmdbFranchisePart, TmdbProvider } from '../types'
 import { useTheme } from '../theme/ThemeContext'
 import { getWatchlistIntent, normalizeWatchlistIntent, WATCHLIST_INTENT_META } from '../utils/watchlistIntent'
@@ -12,6 +12,7 @@ import { getTorrentSourceHealthScore, getTorrentSourceSpeedLabel, isHevcSource, 
 import { isOnlineProgressEnabled, isNewEpisodeNotifyEnabled, formatResumeTime, formatSeasonEpisode, formatEpisodeCode, resolveOnlineNextEpisode, getTorrentFileQueryIndex, safeGetStreamHistory, safeGetStreamProgress, safeDeleteStreamProgress, safeFollowSeries, safeUnfollowSeries, safeGetFollowedSeries, safeCheckSeriesUpdates, safeMarkFollowedSeen, safeFollowMovie, safeUnfollowMovie, safeGetFollowedMovies, safeMarkFollowedMovieSeen } from '../utils/streamResume'
 import { getMediaUnitIdentity, getVersionLabel, groupMediaVersions, pickPreferredVersion } from '../utils/mediaVersions'
 import { getStreamingDeepLink } from '../utils/streamingLinks'
+import FocusTubeIcon from './focus/FocusTubeIcon'
 
 interface DetailScreenProps {
   video: Video
@@ -125,16 +126,16 @@ const getVibeColor = (vibe: string) => {
 const getVibeIcon = (vibe: string) => {
   const lower = vibe.toLowerCase()
   if (lower.includes('novel') || lower.includes('book') || lower.includes('adaptation')) {
-    return <BookOpen size={11} className="text-white/45 shrink-0" />
+    return <BookOpen size={14} className="text-white/45 shrink-0" />
   }
   if (lower.includes(',') || lower.includes('city') || lower.includes('island') || lower.includes('york') || lower.includes('angeles') || lower.includes('chicago') || lower.includes('london') || lower.includes('paris') || lower.includes('tokyo') || lower.includes('portland')) {
-    return <MapPin size={11} className="text-white/45 shrink-0" />
+    return <MapPin size={14} className="text-white/45 shrink-0" />
   }
   if (lower.includes('survival') || lower.includes('mission') || lower.includes('quest') || lower.includes('adventure') || lower.includes('journey')) {
-    return <Compass size={11} className="text-white/45 shrink-0" />
+    return <Compass size={14} className="text-white/45 shrink-0" />
   }
   if (lower.includes('magic') || lower.includes('space') || lower.includes('supernatural') || lower.includes('sci-fi') || lower.includes('alien')) {
-    return <Sparkles size={11} className="text-white/45 shrink-0" />
+    return <Sparkles size={14} className="text-white/45 shrink-0" />
   }
   return null
 }
@@ -251,9 +252,10 @@ const MYCINEMA_SHARE_BASE_URL = (
 const seriesSeasonCountCache = new Map<number, number>()
 
 const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource, onClose, onPlay, onWatchlistChange, onShowDetail }) => {
-  const { theme, detailAmbientShade, atmosphericStudioEnabled } = useTheme()
-  const isLight = theme === 'light'
-  const isAmbientShadeActive = atmosphericStudioEnabled && detailAmbientShade
+  const { theme } = useTheme()
+  // Detail screen always stays in pure classic black cinema mode (#080d16) across all themes
+  const isLight = false
+  const isAmbientShadeActive = false
   const [episodes, setEpisodes] = useState<Video[]>([])
   const [localVersions, setLocalVersions] = useState<Video[]>([])
   const [seriesCatalog, setSeriesCatalog] = useState<SeriesCatalogEpisode[]>([])
@@ -2225,7 +2227,7 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
   }
 
   const posterUrl = getArtworkUrl(video.poster_path, 'w780')
-  const backdropUrl = getArtworkUrl(video.backdrop_path, 'w1280')
+  const backdropUrl = getArtworkUrl(video.backdrop_path, 'original')
   const logoPath = video.logo_path || resolvedLogoPath
   const logoUrl = !logoLoadFailed ? getArtworkUrl(logoPath || undefined, 'original') : null
 
@@ -2380,43 +2382,44 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
   return (
     <div
       style={{ left: 'var(--sidebar-width, 5rem)' }}
-      data-detail-shade={isAmbientShadeActive ? 'ambient' : 'black'}
-      className={`fixed right-0 top-0 bottom-0 z-50 animate-in fade-in duration-300 transition-[left] duration-300 ease-out will-change-[left] detail-screen-root ${
-        isAmbientShadeActive ? 'detail-ambient-active' : 'detail-ambient-disabled'
-      }`}
+      data-detail-shade="black"
+      className="fixed right-0 top-0 bottom-0 z-50 animate-in fade-in duration-300 transition-[left] duration-300 ease-out will-change-[left] detail-screen-root detail-ambient-disabled keep-dark dark"
     >
       <div className="relative w-full h-full bg-[#080d16] overflow-hidden flex flex-col detail-screen-canvas">
-        {/* Close Button */}
+        {/* Back Button */}
         <button 
           onClick={onClose}
-          className="absolute top-6 left-6 md:top-8 md:left-8 z-30 flex h-10 w-10 items-center justify-center rounded-full bg-black/40 text-white/80 transition-all hover:scale-105 hover:bg-white hover:text-black backdrop-blur-md detail-close-btn"
+          className="absolute top-6 left-6 md:top-8 md:left-8 z-30 p-2.5 rounded-xl text-white hover:text-white hover:bg-white/10 active:scale-95 transition-all detail-back-btn"
+          title="Back"
+          aria-label="Back"
         >
-          <X size={22} strokeWidth={2.5} />
+          <ArrowLeft size={28} className="text-white drop-shadow-md" />
         </button>
 
-        {/* Full Screen Background */}
-        <div className="absolute inset-y-0 right-0 -left-[24rem] z-0 bg-[#080d16] pointer-events-none detail-screen-bg">
+        {/* Full Screen Background & Full-Width Backdrop Canvas */}
+        <div className="absolute inset-0 z-0 bg-[#080d16] pointer-events-none overflow-hidden detail-screen-bg">
           {backdropUrl ? (
-            <img 
-              src={backdropUrl} 
-              alt={video.title} 
-              loading="eager"
-              decoding="async"
-              className="h-full w-full object-cover object-center opacity-85 md:opacity-95 scale-110 md:scale-[1.12] translate-x-[2%] md:translate-x-[3%] detail-screen-backdrop"
-            />
+            <div className="absolute inset-0 h-full w-full overflow-hidden detail-backdrop-container">
+              <img 
+                src={backdropUrl} 
+                alt={video.title} 
+                loading="eager"
+                decoding="async"
+                className="h-full w-full object-cover object-center opacity-95 md:opacity-100 detail-screen-backdrop"
+              />
+            </div>
           ) : posterUrl ? (
-            <img 
-              src={posterUrl} 
-              alt={video.title} 
-              loading="eager"
-              decoding="async"
-              className="h-full w-full object-cover object-top opacity-30 blur-3xl scale-110 detail-screen-backdrop"
-            />
+            <div className="absolute inset-0 overflow-hidden">
+              <img 
+                src={posterUrl} 
+                alt={video.title} 
+                loading="eager"
+                decoding="async"
+                className="h-full w-full object-cover object-top opacity-25 blur-3xl detail-screen-backdrop"
+              />
+              <div className="absolute inset-0 bg-[#080d16]/60" />
+            </div>
           ) : null}
-          
-          {/* Focused Content Scrim (Feather-soft left & bottom radial veil — Top & Right 100% open) */}
-          <div className="absolute inset-y-0 left-0 w-full md:w-[75%] lg:w-[68%] pointer-events-none detail-overlay-left" />
-          <div className="absolute inset-x-0 bottom-0 h-[38vh] pointer-events-none detail-overlay-bottom" />
         </div>
 
         {/* Content Section */}
@@ -2461,8 +2464,8 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
                 if (hasValidRating) {
                   return (
                     <div className="inline-flex items-stretch rounded-lg overflow-hidden border border-amber-500/40 shadow-sm shrink-0">
-                      <div className="bg-amber-500 text-black font-black text-xs flex items-center gap-1 px-2.5 py-1">
-                        <Star size={11} className="fill-black text-black" />
+                      <div className="bg-amber-500 text-black font-black text-xs flex items-center gap-1.5 px-2.5 py-1">
+                        <Star size={13} className="fill-black text-black" />
                         <span>{video.vote_average!.toFixed(1)}</span>
                       </div>
                       <div className="bg-black/80 px-2.5 py-1 text-[11px] font-bold text-amber-100 tracking-wider flex items-center border-l border-amber-500/30">
@@ -2480,7 +2483,7 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
                         ? 'border border-amber-300 bg-amber-50 text-amber-900 shadow-sm'
                         : 'border border-amber-500/30 bg-amber-500/15 text-amber-300 shadow-sm'
                     }`}>
-                      <Calendar size={11} className={isLight ? 'text-amber-700' : 'text-amber-400'} />
+                      <Calendar size={13} className={isLight ? 'text-amber-700' : 'text-amber-400'} />
                       <span>Upcoming</span>
                     </div>
                   )
@@ -2501,7 +2504,7 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
                         ? 'border border-emerald-300 bg-emerald-50 text-emerald-900 shadow-sm'
                         : 'border border-emerald-500/30 bg-emerald-500/15 text-emerald-300 shadow-sm'
                     }`}>
-                      <Sparkles size={11} className={isLight ? 'text-emerald-700' : 'text-emerald-400'} />
+                      <Sparkles size={13} className={isLight ? 'text-emerald-700' : 'text-emerald-400'} />
                       <span>New Release</span>
                     </div>
                   )
@@ -3535,9 +3538,9 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
                       <button
                         onClick={() => trailer?.watchUrl && window.open(trailer.watchUrl, '_blank')}
                         disabled={!trailer?.watchUrl}
-                        className="hidden sm:flex h-8 items-center gap-2 rounded-lg border border-white/10 bg-white/[0.04] px-3 text-[10px] font-black uppercase tracking-widest text-white/45 transition-all hover:text-white hover:bg-white/[0.08]"
+                        className="hidden sm:flex h-8 items-center gap-2 rounded-lg border border-white/10 bg-white/[0.04] px-3 text-[10px] font-black uppercase tracking-widest text-white/60 transition-all hover:text-white hover:bg-white/[0.08] hover:border-red-500/30"
                       >
-                        <ExternalLink size={13} />
+                        <FocusTubeIcon size={16} />
                         YouTube
                       </button>
                       <button onClick={() => setShowTrailerModal(false)} className="p-1.5 rounded-lg hover:bg-white/10 text-white/50 hover:text-white transition-all ml-1">

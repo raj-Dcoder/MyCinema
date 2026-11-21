@@ -1,3 +1,34 @@
+# MyCinema v2.0.0
+
+Complete local Videos library overhaul with folder browsing and continuous playback queues, full YouTube Playlist support in FocusTube, Windows taskbar download progress, rate-limited high-concurrency TMDB discovery, and zero-FOUC theme initialization.
+
+### Local Videos & Library Management
+- **Folder Grouping & Multiple View Modes**: Organize your local video collection by folder directory or switch seamlessly between sleek Grid and compact List layouts.
+- **Continuous Queue Playback**: Play individual videos or whole folders sequentially with an in-player Queue sidebar and smooth cross-fade auto-advancing to the next clip.
+- **Batch Video Operations**: Select multiple videos at once to perform bulk actions, including batch watch status toggles and disk deletion.
+- **Metadata Inspector & Custom Thumbnails**: Inspect comprehensive file details (resolution badges, file size, bitrate, codecs, exact paths), edit video titles inline, or extract fresh video thumbnail frames on demand.
+
+### FocusTube & Playlist Subscriptions
+- **YouTube Playlist Support**: Subscribe directly to YouTube playlists by link or ID with automatic InnerTube fallback fetching, category tagging, and dedicated management in Channel Manager.
+- **Custom Branded Icon**: Replaced generic icons with a custom futuristic vector wireframe icon featuring a glowing laser focus indicator.
+- **Live Categorized Playlist Counts**: Track your subscribed playlists and video counts dynamically across customized topic categories.
+
+### Playback & Stream Intelligence
+- **Natural Episode Sorting**: Multi-episode torrents and season packs now sort naturally with alphanumeric ordering (S01E01, S01E02... S01E10), eliminating index misalignments.
+- **Interactive In-Player Queue Drawer**: Browse and jump to any upcoming episode or local video clip directly from the player's side panel.
+
+### System & Discovery Performance
+- **Windows Taskbar Download Progress**: Monitor active media downloads and app updates directly from the Windows taskbar with color-coded states (green for downloading, yellow for paused, red for error).
+- **High-Concurrency TMDB Rate Limiter**: Implemented an in-flight request queue and deduplication engine for TMDB API calls, preventing 429 rate-limiting during heavy discovery refreshes.
+- **Zero-FOUC Instant Theme Hydration**: Theme colors and ambient variables apply synchronously to the DOM before the first paint, completely eliminating white flashes on startup.
+- **Classic Cinema Detail Screen**: The detail screen now stays locked in deep classic black (#080d16) across both light and dark themes for cinematic focus.
+
+### Security & Privacy
+- **Strict Media Frame Extraction Safeguards**: Video thumbnail regeneration and file metadata inspection validate file path containment to prevent arbitrary file execution.
+- **Safe InnerTube RSS Parsing**: Playlist feed resolution uses sandboxed XML parsing and sanitizes remote channel data before writing to local SQLite storage.
+
+***
+
 # MyCinema v1.53.0
 
 Smart one-click streaming with health-scored source picking, next-episode smart targeting, rich contextual download management, and independent FocusTube PiP quality control.

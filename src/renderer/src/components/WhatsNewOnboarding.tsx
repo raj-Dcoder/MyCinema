@@ -109,38 +109,28 @@ const UPDATE_ICONS: Record<UpdateIconKey, { icon: React.ReactNode; tile: string 
 }
 
 export const LATEST_RELEASE: ReleaseNotes = {
-  version: '2.1.0',
-  title: 'Instant search caching and new download portals.',
-  highlight: 'download portals.',
+  version: '2.1.1',
+  title: 'Seamless fullscreen playback and navigation.',
+  highlight: 'fullscreen playback',
   description:
-    'Enjoy instant search results, Movies4u download portal integration, auto-scrolling video chapters in FocusTube, and synchronized audio playback.',
+    'Exiting the video player now preserves your full-screen experience with streamlined keyboard navigation.',
   tourId: null,
   video: null,
   updates: [
     {
-      icon: 'download',
-      title: 'Movies4u download portal',
-      description: 'Find downloads from Movies4u with automated mirrors and quick access in media details.',
-    },
-    {
       icon: 'sparkles',
-      title: 'Instant search caching',
-      description: 'Cached TMDB searches deliver zero-lag results across Home and Download screens.',
+      title: 'Persistent app fullscreen',
+      description: 'Exiting playback via the back button keeps your app in full screen.',
     },
     {
-      icon: 'play',
-      title: 'Auto-scrolling chapters',
-      description: 'FocusTube chapter lists now track and auto-scroll to the playing segment in real time.',
+      icon: 'fix',
+      title: 'Streamlined Escape key',
+      description: 'Pressing Escape closes playback cleanly without altering window dimensions.',
     },
     {
-      icon: 'audio',
-      title: 'Audio & subtitle resync',
-      description: 'Sleep timer pauses external audio tracks and subtitle parsing handles comma time codes.',
-    },
-    {
-      icon: 'shield',
-      title: 'Protected startup scan',
-      description: 'System directory safeguards prevent accidental root scans on app startup.',
+      icon: 'download',
+      title: 'Series download matching',
+      description: 'Improved episode detection and resolution for active series downloads.',
     },
   ],
 }

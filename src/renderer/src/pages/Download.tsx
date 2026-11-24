@@ -51,6 +51,8 @@ interface ActiveDownload {
   size: string
   downloaded: string
   tmdbId?: number
+  season?: number
+  episode?: number
   downloadPath?: string
   errorMessage?: string
   addedAt?: string

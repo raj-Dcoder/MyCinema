@@ -71,6 +71,9 @@ export interface Video {
   // Continuous local playlist / queue playback support
   playlist?: Video[]
   playlistIndex?: number
+  season_number?: number
+  episode_number?: number
+  progress_percent?: number
 }
 
 export interface TmdbProvider {

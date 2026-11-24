@@ -975,12 +975,9 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
       if (doc.pictureInPictureElement === videoRef.current && doc.exitPictureInPicture) {
         doc.exitPictureInPicture().catch(() => {})
       }
-      if (document.fullscreenElement) {
+      if (document.fullscreenElement === playerShellRef.current) {
         document.exitFullscreen().catch(() => {})
       }
-      window.api.isFullscreen().then((fs) => {
-        if (fs) window.api.toggleFullscreen().catch(() => {})
-      }).catch(() => {})
       releaseMediaElement(audioRef.current)
       releaseMediaElement(videoRef.current)
     }
@@ -2468,14 +2465,6 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
           }
           break
         case 'Escape':
-          if (document.fullscreenElement) {
-            document.exitFullscreen().catch(() => {})
-            break
-          }
-          if (isWindowFullscreen) {
-            window.api.toggleFullscreen().catch(() => {})
-            break
-          }
           if (isMinimized) {
             setIsMinimized(false)
             setShowControls(true)

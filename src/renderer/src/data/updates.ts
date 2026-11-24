@@ -56,6 +56,27 @@ export function normalizeUpdate(item: UpdateInput, defaultCategory = 'General'):
 
 export const APP_UPDATES: AppRelease[] = [
   {
+    "version": "v2.1.1",
+    "summary": "Player fullscreen persistence on exit, streamlined Escape key navigation, and download queue series metadata refinements.",
+    "updates": [
+      {
+        "title": "Persistent App Fullscreen on Player Exit",
+        "description": "Exiting the video player via the top-left back button or Escape key now preserves the application's full-screen state instead of reverting to windowed mode.",
+        "category": "Playback & Fullscreen Experience"
+      },
+      {
+        "title": "Streamlined Escape Shortcut",
+        "description": "Pressing Escape inside the player now cleanly closes playback or restores minimized playback without unintended window resizing or fullscreen toggling.",
+        "category": "Playback & Fullscreen Experience"
+      },
+      {
+        "title": "Series Download Episode Matching",
+        "description": "Enhanced type definitions and episode number lookups across the download queue for seamless series file resolution and playback handoffs.",
+        "category": "Downloads & Library Stability"
+      }
+    ]
+  },
+  {
     "version": "v2.1.0",
     "summary": "Movies4u download portal integration, instant TMDB search caching and DoH pre-warming, chapter auto-scroll and channel handle enrichment in FocusTube, and synchronized audio and subtitle player refinements.",
     "updates": [

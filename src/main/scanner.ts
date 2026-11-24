@@ -121,7 +121,51 @@ function classifyNonSeriesFile(filePath: string, duration: number, year?: number
   return 'video'
 }
 
-async function getAllFiles(dirPath: string, fileList: string[] = []): Promise<string[]> {
+const IGNORED_SCAN_FOLDERS = new Set([
+  'windows',
+  'system32',
+  'syswow64',
+  'program files',
+  'program files (x86)',
+  'programdata',
+  '$recycle.bin',
+  'system volume information',
+  'recovery',
+  'appdata',
+  '$windows.~bt',
+  '$windows.~ws',
+  'node_modules',
+  '.git',
+  '.cache'
+])
+
+export function isRootOrSystemDirectory(targetPath: string): boolean {
+  if (!targetPath || typeof targetPath !== 'string') return true
+  const resolved = path.resolve(targetPath)
+  const parsed = path.parse(resolved)
+
+  // Check if target is a drive root (e.g. "C:\", "D:\", "/", "\" )
+  if (resolved === parsed.root || /^[a-zA-Z]:[\\/]?$/.test(targetPath.trim())) {
+    return true
+  }
+
+  // Check for critical system directories
+  const baseName = parsed.base.toLowerCase()
+  if (IGNORED_SCAN_FOLDERS.has(baseName)) {
+    return true
+  }
+
+  // Prevent scanning anything inside Windows OS directory
+  const winDir = process.env.WINDIR || process.env.SYSTEMROOT || 'C:\\Windows'
+  if (winDir && resolved.toLowerCase().startsWith(path.resolve(winDir).toLowerCase())) {
+    return true
+  }
+
+  return false
+}
+
+async function getAllFiles(dirPath: string, fileList: string[] = [], currentDepth: number = 0): Promise<string[]> {
+  if (currentDepth > 8) return fileList
   let files: string[]
   try {
     files = await fs.promises.readdir(dirPath)
@@ -131,6 +175,7 @@ async function getAllFiles(dirPath: string, fileList: string[] = []): Promise<st
   }
 
   for (const file of files) {
+    if (IGNORED_SCAN_FOLDERS.has(file.toLowerCase())) continue
     const filePath = path.join(dirPath, file)
     let stat: fs.Stats
     try {
@@ -141,7 +186,7 @@ async function getAllFiles(dirPath: string, fileList: string[] = []): Promise<st
     }
 
     if (stat.isDirectory()) {
-      await getAllFiles(filePath, fileList)
+      await getAllFiles(filePath, fileList, currentDepth + 1)
     } else if (VIDEO_EXTENSIONS.includes(path.extname(file).toLowerCase())) {
       fileList.push(filePath)
     }
@@ -727,7 +772,7 @@ function parseFilename(filePath: string): VideoMetadata {
     /\b\d{3,4}p\b/gi, /\bWEBRip\b/gi, /\bBluRay\b/gi, /\bx264\b/gi, /\bx265\b/gi, /\bh264\b/gi, /\bh265\b/gi,
     /\bHDR\b/gi, /\bDVDRip\b/gi, /\bBDRip\b/gi, /\bHDRip\b/gi, /\bAAC\b/gi, /\bDTS\b/gi, /\bDD5\.1\b/gi, /\b10bit\b/gi, /\bWEB-DL\b/gi,
     /\bDirectors?\.Cut\b/gi, /\bRemastered\b/gi, /\bExtended\b/gi, /\bUncut\b/gi, /\bRepack\b/gi, /\bProper\b/gi,
-    /\[.*?\]/g, /\(.*?\)/g, /www\..*?\.[a-z]{2,3}/gi, /\bHDHub4u\b/gi, /\bHindi\b/gi, /\bEnglish\b/gi, /\bDual Audio\b/gi, /\bESub\b/gi, /\bHD\b/gi
+    /\[.*?\]/g, /\(.*?\)/g, /www\..*?\.[a-z]{2,3}/gi, /\bHDHub4u\b/gi, /\bKatMovieHD\b/gi, /\bMovies4u\b/gi, /\bHindi\b/gi, /\bEnglish\b/gi, /\bDual Audio\b/gi, /\bESub\b/gi, /\bHD\b/gi
   ]
   movieNoise.forEach(pattern => { cleanName = cleanName.replace(pattern, '') })
   cleanName = cleanName.replace(/[._-]/g, ' ').replace(/\s+/g, ' ').trim()

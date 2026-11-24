@@ -50,7 +50,12 @@ const Series: React.FC<SeriesProps> = ({ onPlay, onShowDetail }) => {
 
   useEffect(() => {
     fetchSeries()
-    return window.api.onLibraryUpdated(fetchSeries)
+    loadFollowed()
+    const unsub = window.api.onLibraryUpdated(() => {
+      fetchSeries()
+      loadFollowed()
+    })
+    return unsub
   }, [])
 
   const seriesStats = useMemo(() => {
@@ -112,8 +117,8 @@ const Series: React.FC<SeriesProps> = ({ onPlay, onShowDetail }) => {
 
     return [...result].sort((a, b) => {
       if (sortBy === 'name') {
-        const aTitle = a.series_name || a.title
-        const bTitle = b.series_name || b.title
+        const aTitle = a.series_name || a.title || ''
+        const bTitle = b.series_name || b.title || ''
         return aTitle.localeCompare(bTitle, undefined, { numeric: true, sensitivity: 'base' })
       }
       if (sortBy === 'episodes') return getSeriesStats(b).total - getSeriesStats(a).total

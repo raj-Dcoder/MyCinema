@@ -511,7 +511,7 @@ function categoryIdsFor(channelId: string): number[] {
   return rows.map((r) => Number(r.category_id))
 }
 
-export function listChannels(categoryId?: number | null): FtChannel[] {
+export function listChannels(categoryId?: number | null, includeUnsubscribed = false): FtChannel[] {
   const db = getRawDb()
   const rows = (
     categoryId
@@ -521,7 +521,9 @@ export function listChannels(categoryId?: number | null): FtChannel[] {
           WHERE cc.category_id = ?
           ORDER BY c.position ASC, c.title COLLATE NOCASE ASC
         `).all(categoryId)
-      : db.prepare('SELECT * FROM ft_channels WHERE COALESCE(is_subscribed, 1) = 1 ORDER BY position ASC, title COLLATE NOCASE ASC').all()
+      : includeUnsubscribed
+        ? db.prepare('SELECT * FROM ft_channels ORDER BY position ASC, title COLLATE NOCASE ASC').all()
+        : db.prepare('SELECT * FROM ft_channels WHERE COALESCE(is_subscribed, 1) = 1 ORDER BY position ASC, title COLLATE NOCASE ASC').all()
   ) as any[]
   return rows.map((row) => toChannel(row, categoryIdsFor(String(row.channel_id))))
 }
@@ -532,7 +534,12 @@ export function getChannel(channelId: string): FtChannel | null {
   return row ? toChannel(row, categoryIdsFor(String(row.channel_id))) : null
 }
 
-export function ensureChannelPlaceholder(channelId: string, title?: string | null, avatarUrl?: string | null): void {
+export function ensureChannelPlaceholder(
+  channelId: string,
+  title?: string | null,
+  avatarUrl?: string | null,
+  handle?: string | null,
+): void {
   const db = getRawDb()
   const id = String(channelId || '').trim()
   if (!id || id === 'UCunknown') return
@@ -540,12 +547,15 @@ export function ensureChannelPlaceholder(channelId: string, title?: string | nul
   const isGarbage = (t: string | null | undefined) =>
     !t || t === 'YouTube Creator' || t === id || /\b\d+[\d,.]*\s*[kmb]?\s*views?\b/i.test(t) || /\bviews?\b/i.test(t) || /\bago\b/i.test(t)
   const cleanTitle = isGarbage(title) ? null : String(title).trim()
+  const rawHandle = (handle || '').trim().replace(/^@/, '')
+  const cleanHandle = rawHandle && !/^UC[\w-]{21,24}$/i.test(rawHandle) ? `@${rawHandle}` : null
 
   db.prepare(`
-    INSERT INTO ft_channels (channel_id, title, avatar_url, url, is_subscribed, position)
-    VALUES (?, COALESCE(?, 'YouTube Creator'), ?, ?, 0, 0)
+    INSERT INTO ft_channels (channel_id, title, handle, avatar_url, url, is_subscribed, position)
+    VALUES (?, COALESCE(?, 'YouTube Creator'), ?, ?, ?, 0, 0)
     ON CONFLICT(channel_id) DO UPDATE SET
       avatar_url = COALESCE(excluded.avatar_url, ft_channels.avatar_url),
+      handle = COALESCE(excluded.handle, ft_channels.handle),
       title = CASE
         WHEN excluded.title IS NOT NULL AND excluded.title != 'YouTube Creator' AND excluded.title NOT LIKE '%views%' AND excluded.title NOT LIKE '%ago%'
           THEN excluded.title
@@ -553,7 +563,7 @@ export function ensureChannelPlaceholder(channelId: string, title?: string | nul
           THEN COALESCE(NULLIF(excluded.title, 'YouTube Creator'), ft_channels.title)
         ELSE ft_channels.title
       END
-  `).run(id, cleanTitle, avatarUrl ?? null, `https://www.youtube.com/channel/${id}`)
+  `).run(id, cleanTitle, cleanHandle, avatarUrl ?? null, `https://www.youtube.com/channel/${id}`)
 }
 
 export function updateChannelAvatar(channelId: string, avatarUrl: string): void {
@@ -562,6 +572,39 @@ export function updateChannelAvatar(channelId: string, avatarUrl: string): void 
   const url = String(avatarUrl || '').trim()
   if (!id || !url) return
   db.prepare('UPDATE ft_channels SET avatar_url = ? WHERE channel_id = ?').run(url, id)
+}
+
+export function updateChannelHandle(channelId: string, handle: string): void {
+  const db = getRawDb()
+  const id = String(channelId || '').trim()
+  const raw = String(handle || '').trim().replace(/^@/, '')
+  if (!id || !raw || /^UC[\w-]{21,24}$/i.test(raw)) return
+  db.prepare('UPDATE ft_channels SET handle = ? WHERE channel_id = ?').run(`@${raw}`, id)
+}
+
+export function updateChannelMetadata(
+  channelId: string,
+  data: { title?: string | null; handle?: string | null; avatarUrl?: string | null },
+): void {
+  const db = getRawDb()
+  const id = String(channelId || '').trim()
+  if (!id) return
+
+  const isGarbage = (t: string | null | undefined) =>
+    !t || t === 'YouTube Creator' || t === id || /\b\d+[\d,.]*\s*[kmb]?\s*views?\b/i.test(t) || /\bviews?\b/i.test(t) || /\bago\b/i.test(t)
+  const cleanTitle = isGarbage(data.title) ? null : String(data.title).trim()
+  const rawHandle = (data.handle || '').trim().replace(/^@/, '')
+  const cleanHandle = rawHandle && !/^UC[\w-]{21,24}$/i.test(rawHandle) ? `@${rawHandle}` : null
+  const avatar = data.avatarUrl ? String(data.avatarUrl).trim() : null
+
+  db.prepare(`
+    UPDATE ft_channels
+    SET
+      title = COALESCE(?, title),
+      handle = COALESCE(?, handle),
+      avatar_url = COALESCE(?, avatar_url)
+    WHERE channel_id = ?
+  `).run(cleanTitle, cleanHandle, avatar, id)
 }
 
 export function upsertChannel(input: {
@@ -954,20 +997,38 @@ export function getFeed(options: FtFeedOptions): FtVideo[] {
   const params: any[] = []
   const where: string[] = []
 
+  let categoryParam: number | null = null
   if (options.categoryId !== null && options.categoryId !== undefined) {
+    const num = Number(options.categoryId)
+    if (Number.isFinite(num)) {
+      categoryParam = num
+    }
+  }
+
+  const selectParams: any[] = []
+  let playlistTitleSelect: string
+
+  if (categoryParam !== null) {
     where.push(`(
       EXISTS (SELECT 1 FROM ft_channel_categories cc WHERE cc.channel_id = v.channel_id AND cc.category_id = ?)
       OR
       EXISTS (SELECT 1 FROM ft_playlist_videos pv JOIN ft_playlist_categories pc ON pc.playlist_id = pv.playlist_id WHERE pv.video_id = v.video_id AND pc.category_id = ?)
     )`)
-    params.push(options.categoryId, options.categoryId)
+    params.push(categoryParam, categoryParam)
+
+    playlistTitleSelect = `(SELECT p.title FROM ft_playlist_videos pv JOIN ft_playlists p ON p.playlist_id = pv.playlist_id JOIN ft_playlist_categories pc ON pc.playlist_id = p.playlist_id WHERE pv.video_id = v.video_id AND pc.category_id = ? LIMIT 1) AS playlist_title,
+       (SELECT pv.playlist_id FROM ft_playlist_videos pv JOIN ft_playlist_categories pc ON pc.playlist_id = pv.playlist_id WHERE pv.video_id = v.video_id AND pc.category_id = ? LIMIT 1) AS playlist_id`
+    selectParams.push(categoryParam, categoryParam)
   } else {
-    // "All" feed: union of user's subscriptions (channels or playlists in any category)
+    // "All" feed: union of user's subscriptions (channels with is_subscribed = 1, or playlists in ft_playlists)
     where.push(`(
-      EXISTS (SELECT 1 FROM ft_channel_categories cc WHERE cc.channel_id = v.channel_id)
+      v.channel_id IN (SELECT channel_id FROM ft_channels WHERE COALESCE(is_subscribed, 1) = 1)
       OR
-      EXISTS (SELECT 1 FROM ft_playlist_videos pv JOIN ft_playlist_categories pc ON pc.playlist_id = pv.playlist_id WHERE pv.video_id = v.video_id)
+      EXISTS (SELECT 1 FROM ft_playlist_videos pv JOIN ft_playlists p ON p.playlist_id = pv.playlist_id WHERE pv.video_id = v.video_id)
     )`)
+
+    playlistTitleSelect = `(SELECT p.title FROM ft_playlist_videos pv JOIN ft_playlists p ON p.playlist_id = pv.playlist_id LIMIT 1) AS playlist_title,
+       (SELECT pv.playlist_id FROM ft_playlist_videos pv LIMIT 1) AS playlist_id`
   }
 
   if (options.includeSavedOnly) {
@@ -991,12 +1052,6 @@ export function getFeed(options: FtFeedOptions): FtVideo[] {
 
   const sortDir = options.sortOrder === 'oldest' ? 'ASC' : 'DESC'
 
-  const playlistTitleSelect = options.categoryId !== null && options.categoryId !== undefined
-    ? `(SELECT p.title FROM ft_playlist_videos pv JOIN ft_playlists p ON p.playlist_id = pv.playlist_id JOIN ft_playlist_categories pc ON pc.playlist_id = p.playlist_id WHERE pv.video_id = v.video_id AND pc.category_id = ${Number(options.categoryId)} LIMIT 1) AS playlist_title,
-       (SELECT pv.playlist_id FROM ft_playlist_videos pv JOIN ft_playlist_categories pc ON pc.playlist_id = pv.playlist_id WHERE pv.video_id = v.video_id AND pc.category_id = ${Number(options.categoryId)} LIMIT 1) AS playlist_id`
-    : `(SELECT p.title FROM ft_playlist_videos pv JOIN ft_playlists p ON p.playlist_id = pv.playlist_id LIMIT 1) AS playlist_title,
-       (SELECT pv.playlist_id FROM ft_playlist_videos pv LIMIT 1) AS playlist_id`
-
   const rows = db.prepare(`
     SELECT v.*,
       CASE
@@ -1017,7 +1072,7 @@ export function getFeed(options: FtFeedOptions): FtVideo[] {
     ${where.length ? `WHERE ${where.join(' AND ')}` : ''}
     ORDER BY v.is_live DESC, v.published_at ${sortDir}, v.rowid ${sortDir}
     LIMIT ?
-  `).all(...params) as any[]
+  `).all(...selectParams, ...params) as any[]
 
   return rows.map(toVideo)
 }
@@ -1071,6 +1126,12 @@ export function markAllSeen(categoryId: number | null): number {
       v.video_id IN (SELECT pv.video_id FROM ft_playlist_videos pv JOIN ft_playlist_categories pc ON pc.playlist_id = pv.playlist_id WHERE pc.category_id = ?)
     )`
     params.push(categoryId, categoryId)
+  } else {
+    scope = `AND (
+      v.channel_id IN (SELECT channel_id FROM ft_channels WHERE COALESCE(is_subscribed, 1) = 1)
+      OR
+      EXISTS (SELECT 1 FROM ft_playlist_videos pv JOIN ft_playlists p ON p.playlist_id = pv.playlist_id WHERE pv.video_id = v.video_id)
+    )`
   }
   const result = db.prepare(`
     INSERT INTO ft_video_state (video_id, seen, seen_at, updated_at)
@@ -1160,6 +1221,12 @@ export function getUnseenCount(categoryId: number | null): number {
       v.video_id IN (SELECT pv.video_id FROM ft_playlist_videos pv JOIN ft_playlist_categories pc ON pc.playlist_id = pv.playlist_id WHERE pc.category_id = ?)
     )`
     params.push(categoryId, categoryId)
+  } else {
+    scope = `AND (
+      v.channel_id IN (SELECT channel_id FROM ft_channels WHERE COALESCE(is_subscribed, 1) = 1)
+      OR
+      EXISTS (SELECT 1 FROM ft_playlist_videos pv JOIN ft_playlists p ON p.playlist_id = pv.playlist_id WHERE pv.video_id = v.video_id)
+    )`
   }
   const row = db.prepare(`
     SELECT COUNT(DISTINCT v.video_id) AS c FROM ft_videos v
@@ -1181,6 +1248,12 @@ export function getLatestPublished(categoryId: number | null): string | null {
       v.video_id IN (SELECT pv.video_id FROM ft_playlist_videos pv JOIN ft_playlist_categories pc ON pc.playlist_id = pv.playlist_id WHERE pc.category_id = ?)
     )`
     params.push(categoryId, categoryId)
+  } else {
+    scope = `AND (
+      v.channel_id IN (SELECT channel_id FROM ft_channels WHERE COALESCE(is_subscribed, 1) = 1)
+      OR
+      EXISTS (SELECT 1 FROM ft_playlist_videos pv JOIN ft_playlists p ON p.playlist_id = pv.playlist_id WHERE pv.video_id = v.video_id)
+    )`
   }
   const row = db.prepare(`SELECT MAX(v.published_at) AS latest FROM ft_videos v WHERE 1 = 1 ${scope}`).get(...params) as any
   return row?.latest ? String(row.latest) : null
@@ -1349,12 +1422,23 @@ export function restoreBackupData(data: any): { categoriesRestored: number; chan
       db.prepare(`DELETE FROM ${table}`).run()
     }
     const insertAll = (table: string, rows: any[]) => {
-      for (const row of rows || []) {
-        const keys = Object.keys(row)
+      if (!Array.isArray(rows) || !rows.length) return
+      const colInfo = db.prepare(`PRAGMA table_info("${table}")`).all() as Array<{ name: string }>
+      const validCols = new Set(colInfo.map((c) => c.name))
+      const stmtCache = new Map<string, any>()
+
+      for (const row of rows) {
+        if (!row || typeof row !== 'object') continue
+        const keys = Object.keys(row).filter((k) => validCols.has(k))
         if (!keys.length) continue
-        const placeholders = keys.map(() => '?').join(', ')
-        db.prepare(`INSERT OR REPLACE INTO ${table} (${keys.map((k) => `"${k}"`).join(', ')}) VALUES (${placeholders})`)
-          .run(...keys.map((k) => row[k]))
+        const keyHash = keys.sort().join(',')
+        let stmt = stmtCache.get(keyHash)
+        if (!stmt) {
+          const placeholders = keys.map(() => '?').join(', ')
+          stmt = db.prepare(`INSERT OR REPLACE INTO "${table}" (${keys.map((k) => `"${k}"`).join(', ')}) VALUES (${placeholders})`)
+          stmtCache.set(keyHash, stmt)
+        }
+        stmt.run(...keys.map((k) => row[k]))
       }
     }
     insertAll('ft_categories', data.categories)

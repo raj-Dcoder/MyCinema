@@ -518,6 +518,14 @@ const Download: React.FC<DownloadProps> = ({ onPlay, onShowDetail }) => {
   const handleSearch = async () => {
     const trimmed = query.trim()
     if (!trimmed) return
+    const cacheKey = trimmed.toLowerCase()
+    const cached = searchCacheRef.current.get(cacheKey)
+    if (cached) {
+      setResults(cached)
+      setSearching(false)
+      return
+    }
+
     setSearching(true)
     setSelectedItem(null)
     setSources([])
@@ -525,7 +533,11 @@ const Download: React.FC<DownloadProps> = ({ onPlay, onShowDetail }) => {
 
     try {
       const filtered = await window.api.searchTMDB(trimmed)
-      setResults((filtered || []).slice(0, 12))
+      const list = (filtered || [])
+        .filter((item: TMDBResult) => item.media_type === 'movie' || item.media_type === 'tv')
+        .slice(0, 12)
+      searchCacheRef.current.set(cacheKey, list)
+      setResults(list)
     } catch (err) {
       console.error('[Download] TMDB search error:', err)
       setResults([])
@@ -575,7 +587,7 @@ const Download: React.FC<DownloadProps> = ({ onPlay, onShowDetail }) => {
       } finally {
         if (!cancelled) setSearching(false)
       }
-    }, 180)
+    }, 150)
 
     return () => {
       cancelled = true
@@ -798,13 +810,16 @@ const Download: React.FC<DownloadProps> = ({ onPlay, onShowDetail }) => {
     try {
       const success = await window.api.removeDownload(targetId, deleteFile)
       if (!success) {
-        // If it failed, we might want to re-add it or just log
-        // For now, just log and allow the user to try again if it reappears on refresh
         console.error('[Download] Remove failed in main process')
         removedIdsRef.current.delete(targetId)
-      } else if (deleteFile) {
-        fetchVideos()
-        refreshDownloadsStorage()
+      } else {
+        setTimeout(() => {
+          removedIdsRef.current.delete(targetId)
+        }, 5000)
+        if (deleteFile) {
+          fetchVideos()
+          refreshDownloadsStorage()
+        }
       }
     } catch (err) {
       console.error('[Download] Remove error:', err)
@@ -1006,7 +1021,11 @@ const Download: React.FC<DownloadProps> = ({ onPlay, onShowDetail }) => {
                     return (a.episode || 1) - (b.episode || 1)
                   })
                 if (seriesEpisodes.length > 0) {
-                  onPlay?.(seriesEpisodes[0])
+                  const targetEp = seriesEpisodes.find(v => 
+                    (v.season === dlItem.season || v.season_number === dlItem.season) &&
+                    (v.episode === dlItem.episode || v.episode_number === dlItem.episode)
+                  ) || seriesEpisodes.find(v => v.file_path === playable.file_path) || playable
+                  onPlay?.(targetEp)
                   return
                 }
               }
@@ -1028,7 +1047,11 @@ const Download: React.FC<DownloadProps> = ({ onPlay, onShowDetail }) => {
                   return (a.episode || 1) - (b.episode || 1)
                 })
               if (seriesEpisodes.length > 0) {
-                onPlay?.(seriesEpisodes[0])
+                const targetEp = seriesEpisodes.find(v => 
+                  (v.season === dlItem.season || v.season_number === dlItem.season) &&
+                  (v.episode === dlItem.episode || v.episode_number === dlItem.episode)
+                ) || seriesEpisodes.find(v => v.file_path === matchingVideo.file_path) || matchingVideo
+                onPlay?.(targetEp)
                 return
               }
             }
@@ -1298,7 +1321,7 @@ const Download: React.FC<DownloadProps> = ({ onPlay, onShowDetail }) => {
       })()}
 
       {/* Main Content Area */}
-      <div className={`transition-all duration-300 ${panelOpen ? 'mr-[580px]' : ''}`}>
+      <div className={`transition-all duration-300 ${panelOpen ? 'lg:mr-[420px] xl:mr-[520px] 2xl:mr-[580px] mr-0' : ''}`}>
         {/* Unified Header */}
         <div className="mb-8 flex flex-col md:flex-row md:items-center justify-between gap-6">
           <div className="flex flex-1 items-center gap-6">
@@ -1458,7 +1481,7 @@ const Download: React.FC<DownloadProps> = ({ onPlay, onShowDetail }) => {
 
       {/* ─── Right Side Panel ───────────────────────────────────────────────── */}
       <div
-        className={`download-sources-panel fixed inset-y-0 right-0 z-50 flex w-full max-w-[580px] flex-col border-l border-white/10 bg-[#0C1017] shadow-[-32px_0_80px_rgba(0,0,0,0.65)] transform transition-transform duration-300 ease-out ${
+        className={`download-sources-panel fixed inset-y-0 right-0 z-50 flex w-full max-w-[92vw] lg:max-w-[420px] xl:max-w-[520px] 2xl:max-w-[580px] flex-col border-l border-white/10 bg-[#0C1017] shadow-[-32px_0_80px_rgba(0,0,0,0.65)] transform transition-transform duration-300 ease-out ${
           panelOpen ? 'translate-x-0' : 'translate-x-full'
         }`}
       >

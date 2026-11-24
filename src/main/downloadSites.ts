@@ -19,7 +19,7 @@ import https from 'https'
 //   5. GitHub-hosted links — `download-sites/sites.json`
 //   6. Stale cache / verified fallback mirror (click never dead-ends)
 export interface DownloadSiteConfig {
-  id: 'hdmovies' | 'catmovies'
+  id: 'hdmovies' | 'catmovies' | 'movies4u'
   name: string
   shortLabel: string
   portalUrl: string
@@ -54,12 +54,23 @@ export const DOWNLOAD_SITES: DownloadSiteConfig[] = [
     accent: '#22d3ee',
     domainHints: ['katmovie'],
     portalButtonMatch: 'katmoviehd'
+  },
+  {
+    id: 'movies4u',
+    name: 'Movies4u',
+    shortLabel: 'M4U',
+    portalUrl: 'https://movies4u.ws/',
+    searchTemplate: '/search.html?q={query}',
+    accent: '#10b981',
+    domainHints: ['movies4u', 'movies4'],
+    portalButtonMatch: 'movies4u'
   }
 ]
 
 export const DEFAULT_FALLBACK_MIRRORS: Record<string, string> = {
   hdmovies: 'https://new8.hdhub4u.cl',
-  catmovies: 'https://new.katmoviehd.top'
+  catmovies: 'https://new.katmoviehd.top',
+  movies4u: 'https://new8.movies4u.garden'
 }
 
 // Promo/app links some portals carry (e.g. an APK download button) — never a
@@ -283,6 +294,25 @@ function extractObfuscatedMirrorUrls(html: string, requiredHints: string[]): str
         } catch {
           /* not a usable URL */
         }
+      }
+    } catch {
+      /* not a decodable blob */
+    }
+  }
+  return [...new Set(found)]
+}
+
+function extractAllAtobUrls(html: string): string[] {
+  const found: string[] = []
+  const blobRe = /atob\(\s*["']([^"']+)["']\s*\)/gi
+  let blob: RegExpExecArray | null
+  while ((blob = blobRe.exec(html)) !== null) {
+    try {
+      const decoded = Buffer.from(blob[1], 'base64').toString('utf8')
+      const urlRe = /https?:\/\/[a-z0-9.-]+\.[a-z]{2,}(?::\d+)?(?:\/[^\s"'<>]*)?/gi
+      let u: RegExpExecArray | null
+      while ((u = urlRe.exec(decoded)) !== null) {
+        found.push(u[0])
       }
     } catch {
       /* not a decodable blob */
@@ -659,6 +689,19 @@ async function scrapePortal(config: DownloadSiteConfig): Promise<{ domain: strin
     redirectLinks.map(link => fetchRedirectTarget(link, 3000))
   )
   rawCandidates.push(...targets)
+
+  const atobUrls = extractAllAtobUrls(html)
+  const atobTargets = await Promise.all(
+    atobUrls.map(async u => {
+      try {
+        const target = await fetchRedirectTarget(u, 3000)
+        return target || normalizeDomain(u)
+      } catch {
+        return null
+      }
+    })
+  )
+  rawCandidates.push(...atobTargets)
 
   const seen = new Set<string>()
   const candidates = rankMirrorCandidates(

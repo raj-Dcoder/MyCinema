@@ -250,8 +250,9 @@ const Settings: React.FC = () => {
       setDownloadSiteDrafts(prev => ({ ...prev, [siteId]: '' }))
       setDownloadSiteMessage('Reset. App will auto-find the latest link again.')
       await fetchDownloadSites()
-    } catch (err) {
+    } catch (err: any) {
       console.error('Failed to reset download site:', err)
+      setDownloadSiteMessage(cleanIpcError(err, 'Failed to reset download site domain.'))
     } finally {
       setDownloadSiteBusyId(null)
     }
@@ -1550,7 +1551,7 @@ const Settings: React.FC = () => {
                       )}
                     </div>
                     <p className="mt-1 text-[11px] font-medium leading-4 text-white/40 max-w-xl">
-                      Unified download destination for all movies and episodes — whether downloaded via Magnets/Torrents or Direct Download websites (such as HDHub4u, KatmovieHD, etc.).
+                      Unified download destination for all movies and episodes — whether downloaded via Magnets/Torrents or Direct Download websites (such as HDHub4u, KatmovieHD, Movies4u, etc.).
                     </p>
                   </div>
                 </div>

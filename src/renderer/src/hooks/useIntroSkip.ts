@@ -94,7 +94,6 @@ export function useIntroSkip({
     }
 
     if (
-      isTorrentStreamPath(currentVideo.file_path) ||
       currentVideo.type !== 'series' ||
       currentVideo.season == null ||
       currentVideo.episode == null ||

@@ -13,6 +13,13 @@ const { fetch, Agent, setGlobalDispatcher } = require('undici')
 const TMDB_FETCH_TIMEOUT_MS = 12000
 let cachedTmdbIp: string | null = null
 
+export function getCachedTmdbIp(): string | null {
+  return cachedTmdbIp
+}
+
+// Pre-warm TMDB DNS-over-HTTPS resolution in the background on startup
+void resolveDnsDoH('api.themoviedb.org').catch(() => {})
+
 /**
  * Resolves a hostname using Cloudflare's or Google's DNS-over-HTTPS API.
  * This bypasses poisoned/blocked local ISP DNS servers.
@@ -591,6 +598,95 @@ async function fetchTitleLogo(
 }
 
 // ─── Public API ──────────────────────────────────────────────────────────────
+
+// In-memory cache for fast TMDB search results across all screens (Home, Download, Watchlist, Collections)
+const tmdbSearchMemoryCache = new Map<string, { data: any[]; timestamp: number }>()
+const TMDB_SEARCH_CACHE_TTL = 15 * 60 * 1000 // 15 minutes
+const inFlightSearchMap = new Map<string, Promise<any[]>>()
+
+export async function searchTMDB(query: string): Promise<any[]> {
+  const trimmed = (query || '').trim()
+  if (!trimmed) return []
+
+  const cacheKey = trimmed.toLowerCase()
+  const cached = tmdbSearchMemoryCache.get(cacheKey)
+  if (cached && (Date.now() - cached.timestamp) < TMDB_SEARCH_CACHE_TTL) {
+    return cached.data
+  }
+
+  // Deduplicate concurrent in-flight searches for identical queries
+  const existingInFlight = inFlightSearchMap.get(cacheKey)
+  if (existingInFlight) {
+    return existingInFlight
+  }
+
+  const searchPromise = (async () => {
+    try {
+      const apiKey = getTmdbApiKey()
+      if (!apiKey) {
+        console.warn('[TMDB] searchTMDB: API key missing')
+        return []
+      }
+
+      // Ensure DoH IP is resolved for instant bypass of ISP DNS poisoning/throttling
+      if (!cachedTmdbIp) {
+        await resolveDnsDoH('api.themoviedb.org')
+      }
+
+      const url = `${TMDB_BASE}/search/multi?api_key=${apiKey}&query=${encodeURIComponent(trimmed)}&include_adult=false&page=1`
+      
+      let response: any
+      try {
+        response = await fetch(url, {
+          dispatcher: tmdbDispatcher,
+          signal: AbortSignal.timeout(5000), // Strict 5s timeout to guarantee instant responsiveness
+          headers: {
+            'User-Agent': 'MyCinema/2.0 (Electron/Windows)',
+            'Accept': 'application/json'
+          }
+        })
+      } catch (firstErr: any) {
+        // If connection failed/timed out, invalidate cached IP and re-resolve via DoH once
+        console.warn(`[TMDB] Direct DoH fetch failed for search "${trimmed}", re-resolving DoH IP and retrying:`, firstErr?.message)
+        cachedTmdbIp = null
+        await resolveDnsDoH('api.themoviedb.org')
+        response = await fetch(url, {
+          dispatcher: tmdbDispatcher,
+          signal: AbortSignal.timeout(5000),
+          headers: {
+            'User-Agent': 'MyCinema/2.0 (Electron/Windows)',
+            'Accept': 'application/json'
+          }
+        })
+      }
+
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status} searching TMDB`)
+      }
+
+      const data = await response.json() as any
+      const results = (data?.results || [])
+        .filter((r: any) => r.media_type === 'movie' || r.media_type === 'tv')
+        .slice(0, 20)
+
+      // Keep cache size bounded
+      if (tmdbSearchMemoryCache.size > 500) {
+        const oldestKey = tmdbSearchMemoryCache.keys().next().value
+        if (oldestKey) tmdbSearchMemoryCache.delete(oldestKey)
+      }
+      tmdbSearchMemoryCache.set(cacheKey, { data: results, timestamp: Date.now() })
+      return results
+    } catch (err: any) {
+      console.error('[TMDB] Search error for', trimmed, err?.message || err)
+      return []
+    } finally {
+      inFlightSearchMap.delete(cacheKey)
+    }
+  })()
+
+  inFlightSearchMap.set(cacheKey, searchPromise)
+  return searchPromise
+}
 
 export async function fetchTmdbTitleLogo(type: 'movie' | 'series', tmdbId: number): Promise<string | null> {
   const normalizedTmdbId = Number(tmdbId)

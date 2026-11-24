@@ -553,9 +553,11 @@ const ChannelManager: React.FC<ChannelManagerProps> = ({ categories, initialCate
                         <ChannelAvatar title={channel.title} avatarUrl={channel.avatarUrl} sizeClass="h-8 w-8" />
                         <div className="min-w-0 flex-1">
                           <p className="truncate text-xs font-semibold text-white">{channel.title}</p>
-                          <p className="truncate text-[11px] text-white/40">
-                            {channel.handle || channel.channelId}
-                          </p>
+                          {channel.handle && !/^UC[\w-]{21,24}$/i.test(channel.handle.replace(/^@/, '')) && (
+                            <p className="truncate text-[11px] text-white/40">
+                              {channel.handle.startsWith('@') ? channel.handle : `@${channel.handle}`}
+                            </p>
+                          )}
                         </div>
                         <span className="inline-flex shrink-0 items-center gap-1 rounded-full border border-emerald-400/20 bg-emerald-400/10 px-2 py-0.5 text-[10px] font-medium text-emerald-300">
                           <Check size={11} /> Subscribed
@@ -1005,7 +1007,9 @@ const ChannelManager: React.FC<ChannelManagerProps> = ({ categories, initialCate
                       <div className="min-w-0 flex-1">
                         <p className="truncate text-sm font-semibold text-white">{channel.title}</p>
                         <p className="truncate text-xs text-white/40 mt-0.5">
-                          {channel.handle || channel.channelId}
+                          {channel.handle && !/^UC[\w-]{21,24}$/i.test(channel.handle.replace(/^@/, '')) && (
+                            <span>{channel.handle.startsWith('@') ? channel.handle : `@${channel.handle}`}</span>
+                          )}
                           {channel.lastFetched && ` · ${formatRelativeTime(channel.lastFetched)}`}
                           {channel.lastError && ' · feed error'}
                         </p>

@@ -1,3 +1,32 @@
+# MyCinema v2.1.0
+
+Movies4u download portal integration, instant TMDB search caching and DoH pre-warming, chapter auto-scroll and channel handle enrichment in FocusTube, and synchronized audio and subtitle player refinements.
+
+### Download Sites & Portals
+- **Movies4u Integration**: Added Movies4u alongside HDHub4u and KatMovieHD with automated portal mirror resolution, obfuscated script link decoding, and one-click quick access in media details.
+- **Dynamic Portal Mirror Fallbacks**: Upgraded download site mirror scraping with base64 script decoding and live domain health checks to guarantee active fallback links.
+
+### FocusTube & Channel Experience
+- **Active Chapter Auto-Scroll**: Player and sidebar chapter lists now automatically scroll to and highlight the currently playing chapter as playback progresses.
+- **Channel Handle Enrichment & Display**: Video details and channel views now detect, persist, and display verified channel handles (@handle) with dedicated subscription badges.
+- **Expanded RSS & Duration Parsing**: Enhanced video metadata resolution with ISO-8601 duration support and robust video description extraction across YouTube and Invidious sources.
+
+### Playback & Stream Intelligence
+- **Audio & Sleep Timer Resync**: Sleep timer now synchronously pauses external audio tracks alongside video playback, with hardened loading timeouts and volume synchronization.
+- **Robust Subtitle Parsing & Extraction**: Subtitle parser now handles comma decimal time codes and sorts cues chronologically, while torrent streams probe embedded subtitle tracks automatically.
+- **Series Episode Navigation**: Next episode previews and series playback accurately match episode rosters from local files and download queues.
+
+### Discovery & Networking Performance
+- **TMDB In-Memory Search Caching**: Search queries across Home and Download screens are cached with a 15-minute TTL and concurrent in-flight deduplication for instant results.
+- **DNS Host Caching & DoH Pre-Warming**: Pre-warms TMDB DNS-over-HTTPS on startup and caches resolved hosts in the main process to eliminate 15-20 second OS DNS lookup freezes.
+- **Hardware Decoding by Default**: Hardware-accelerated video decoding is now enabled by default for smoother playback and lower CPU consumption.
+
+### Security & Privacy
+- **Startup Scanner Directory Protection**: Library startup scan automatically detects and skips legacy root and system directory paths to protect system files.
+- **Safe Protocol Stream Lifecycle**: Custom media streaming protocols abort and destroy active read streams immediately when navigation or requests are cancelled.
+
+***
+
 # MyCinema v2.0.0
 
 Complete local Videos library overhaul with folder browsing and continuous playback queues, full YouTube Playlist support in FocusTube, Windows taskbar download progress, rate-limited high-concurrency TMDB discovery, and zero-FOUC theme initialization.

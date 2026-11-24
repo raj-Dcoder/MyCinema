@@ -335,8 +335,8 @@ const api = {
     ipcRenderer.invoke('ft-get-ambient-frame', bounds),
   ftRequestImportAccess: (input: { name: string; email: string }) =>
     ipcRenderer.invoke('ft-request-import-access', input),
-  onFeedUpdated: (callback: (payload: { added: number; channelIds: string[] }) => void) => {
-    const handler = (_event: any, payload: { added: number; channelIds: string[] }) => callback(payload)
+  onFeedUpdated: (callback: (payload: { added: number; channelIds: string[]; playlistIds?: string[] }) => void) => {
+    const handler = (_event: any, payload: { added: number; channelIds: string[]; playlistIds?: string[] }) => callback(payload)
     ipcRenderer.on('ft-feed-updated', handler)
     return () => ipcRenderer.removeListener('ft-feed-updated', handler)
   },

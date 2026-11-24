@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import hdHub4uLogo from '../assets/site-logos/hdhub4u.webp'
 import katMovieHdLogo from '../assets/site-logos/katmoviehd.jpg'
+import movies4uLogo from '../assets/site-logos/movies4u.webp'
 import { cleanIpcError } from '../utils/ipcError'
 import { ArrowLeft, X, Play, Info, Calendar, CalendarDays, Clock, Star, FolderOpen, Film, Music, Subtitles, HardDrive, ChevronDown, ChevronUp, Bookmark, Share2, Search, Zap, Users, Download, AlertTriangle, Clapperboard, Loader2, ExternalLink, Languages, CheckCircle2, Copy, MessageCircle, Send, Trash2, Bell, BellRing, Hourglass, Layers, Plus, Tv, AlertCircle, BookOpen, MapPin, Compass, Sparkles } from 'lucide-react'
 import { Video, WatchlistIntent, TmdbFranchise, TmdbFranchisePart, TmdbProvider } from '../types'
@@ -1629,7 +1630,7 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
     window.api.openWebPopup(getMoctaleUrl(video), `${title} — Moctale`)
   }
 
-  const handleOpenDownloadSite = async (siteId: 'hdmovies' | 'catmovies', siteName: string) => {
+  const handleOpenDownloadSite = async (siteId: 'hdmovies' | 'catmovies' | 'movies4u', siteName: string) => {
     if (resolvingSiteId) return
     const searchTitle = video.type === 'series' && video.series_name ? video.series_name : video.title
     setResolvingSiteId(siteId)
@@ -2764,39 +2765,6 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
                 </div>
               )}
 
-              {streamResume && !isLocalMedia && (
-                <div className="flex basis-full flex-wrap items-center gap-2 rounded-xl border border-sky-400/20 bg-sky-400/[0.07] px-4 py-3">
-                  <Play size={14} className="shrink-0 text-sky-300" fill="currentColor" />
-                  <p className="text-[11px] font-bold text-sky-100/90">
-                    Online resume available — continue from {formatResumeTime(streamResume.position)}
-                    {streamResume.duration > 0 ? ` of ${formatResumeTime(streamResume.duration)}` : ''}
-                  </p>
-                  <div className="ml-auto flex items-center gap-2">
-                    <button
-                      onClick={handlePlayOnline}
-                      disabled={startingAutoPlay}
-                      className="rounded-lg bg-sky-500 px-3 py-1.5 text-[10px] font-black uppercase tracking-widest text-white transition-all hover:bg-sky-400 active:scale-95 disabled:opacity-60"
-                    >
-                      {startingAutoPlay ? 'Connecting...' : 'Resume'}
-                    </button>
-                    <button
-                      onClick={async () => {
-                        if (!primaryStreamIdentity) return
-                        await safeDeleteStreamProgress(
-                          primaryStreamIdentity.tmdb_id,
-                          primaryStreamIdentity.media_type,
-                          primaryStreamIdentity.season,
-                          primaryStreamIdentity.episode
-                        )
-                        setStreamResume(null)
-                      }}
-                      className="rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-[10px] font-black uppercase tracking-widest text-white/60 transition-all hover:bg-white/10 hover:text-white active:scale-95"
-                    >
-                      Restart
-                    </button>
-                  </div>
-                </div>
-              )}
               
               <div className="flex flex-col gap-4 basis-full pt-1">
                 <div>
@@ -3163,6 +3131,51 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
                     )}
                   </div>
                 </div>
+                <div>
+                  <p className="text-[10px] font-black uppercase tracking-[0.18em] text-white/35 mb-2">Download Websites</p>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <button
+                      onClick={() => void handleOpenDownloadSite('hdmovies', 'HDHub4u')}
+                      disabled={resolvingSiteId !== null}
+                      className="flex h-12 items-center justify-center px-4 bg-white/5 border border-white/10 rounded-xl hover:border-rose-500/30 hover:bg-rose-600/10 transition-all hover:-translate-y-0.5 active:scale-95 glass-effect disabled:opacity-60 disabled:cursor-wait"
+                      title="Search this title on HDHub4u (latest working link)"
+                    >
+                      {resolvingSiteId === 'hdmovies'
+                        ? <Loader2 size={18} className="animate-spin text-white/45" />
+                        : <img src={hdHub4uLogo} alt="HDHub4u" className="h-7 w-auto max-w-[130px] object-contain" />}
+                    </button>
+                    <button
+                      onClick={() => void handleOpenDownloadSite('catmovies', 'KatMovieHD')}
+                      disabled={resolvingSiteId !== null}
+                      className="flex h-12 items-center justify-center px-4 bg-white/5 border border-white/10 rounded-xl hover:border-cyan-500/30 hover:bg-cyan-600/10 transition-all hover:-translate-y-0.5 active:scale-95 glass-effect disabled:opacity-60 disabled:cursor-wait"
+                      title="Search this title on KatMovieHD (latest working link)"
+                    >
+                      {resolvingSiteId === 'catmovies'
+                        ? <Loader2 size={18} className="animate-spin text-white/45" />
+                        : <img src={katMovieHdLogo} alt="KatMovieHD" className="h-7 w-auto max-w-[130px] object-contain" />}
+                    </button>
+                    <button
+                      onClick={() => void handleOpenDownloadSite('movies4u', 'Movies4u')}
+                      disabled={resolvingSiteId !== null}
+                      className="flex h-12 items-center justify-center px-4 bg-white/5 border border-white/10 rounded-xl hover:border-emerald-500/30 hover:bg-emerald-600/10 transition-all hover:-translate-y-0.5 active:scale-95 glass-effect disabled:opacity-60 disabled:cursor-wait"
+                      title="Search this title on Movies4u (latest working link)"
+                    >
+                      {resolvingSiteId === 'movies4u'
+                        ? <Loader2 size={18} className="animate-spin text-white/45" />
+                        : <img src={movies4uLogo} alt="Movies4u" className="h-7 w-auto max-w-[130px] object-contain" />}
+                    </button>
+                  </div>
+                  {(downloadSiteError || downloadSiteNotice) && (
+                    <div className="mt-2">
+                      {downloadSiteError && (
+                        <p className="text-[11px] font-semibold text-red-400">{downloadSiteError}</p>
+                      )}
+                      {downloadSiteNotice && (
+                        <p className="text-[11px] font-semibold text-amber-400">{downloadSiteNotice}</p>
+                      )}
+                    </div>
+                  )}
+                </div>
                 {/* Official Streaming Sources (Option A) */}
                 {isTmdbBacked && (releaseInfoLoading || (releaseInfo?.providers && releaseInfo.providers.length > 0) || releaseInfo?.justWatchLink) && (
                   <div ref={officialSourcesRef}>
@@ -3266,41 +3279,6 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ video, initialSharedSource,
                     </div>
                   </div>
                 )}
-                <div>
-                  <p className="text-[10px] font-black uppercase tracking-[0.18em] text-white/35 mb-2">Download Websites</p>
-                  <div className="flex flex-wrap items-center gap-2">
-                    <button
-                      onClick={() => void handleOpenDownloadSite('hdmovies', 'HDHub4u')}
-                      disabled={resolvingSiteId !== null}
-                      className="flex h-12 items-center justify-center px-4 bg-white/5 border border-white/10 rounded-xl hover:border-rose-500/30 hover:bg-rose-600/10 transition-all hover:-translate-y-0.5 active:scale-95 glass-effect disabled:opacity-60 disabled:cursor-wait"
-                      title="Search this title on HDHub4u (latest working link)"
-                    >
-                      {resolvingSiteId === 'hdmovies'
-                        ? <Loader2 size={18} className="animate-spin text-white/45" />
-                        : <img src={hdHub4uLogo} alt="HDHub4u" className="h-7 w-auto max-w-[130px] object-contain" />}
-                    </button>
-                    <button
-                      onClick={() => void handleOpenDownloadSite('catmovies', 'KatMovieHD')}
-                      disabled={resolvingSiteId !== null}
-                      className="flex h-12 items-center justify-center px-4 bg-white/5 border border-white/10 rounded-xl hover:border-cyan-500/30 hover:bg-cyan-600/10 transition-all hover:-translate-y-0.5 active:scale-95 glass-effect disabled:opacity-60 disabled:cursor-wait"
-                      title="Search this title on KatMovieHD (latest working link)"
-                    >
-                      {resolvingSiteId === 'catmovies'
-                        ? <Loader2 size={18} className="animate-spin text-white/45" />
-                        : <img src={katMovieHdLogo} alt="KatMovieHD" className="h-7 w-auto max-w-[130px] object-contain" />}
-                    </button>
-                  </div>
-                  {(downloadSiteError || downloadSiteNotice) && (
-                    <div className="mt-2">
-                      {downloadSiteError && (
-                        <p className="text-[11px] font-semibold text-red-400">{downloadSiteError}</p>
-                      )}
-                      {downloadSiteNotice && (
-                        <p className="text-[11px] font-semibold text-amber-400">{downloadSiteNotice}</p>
-                      )}
-                    </div>
-                  )}
-                </div>
               </div>
             </div>
 

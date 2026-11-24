@@ -70,7 +70,9 @@ const Movies: React.FC<MoviesProps> = ({ onPlay, onShowDetail }) => {
     result = result.filter(movie => {
       const progress = movie.last_watched_time || 0
       const duration = movie.duration || 0
-      const watched = Boolean(movie.completed) || (duration > 0 && progress >= duration * 0.9)
+      const watched = Boolean(movie.completed) || 
+        (duration > 0 && progress >= duration * 0.9) ||
+        (Boolean(movie.isExternal) && (movie.progress_percent ?? 0) >= 90)
 
       if (activeFilter === 'Unwatched') return !watched && progress <= 0
       if (activeFilter === 'In Progress') return !watched && progress > 0
@@ -80,7 +82,7 @@ const Movies: React.FC<MoviesProps> = ({ onPlay, onShowDetail }) => {
     })
 
     return [...result].sort((a, b) => {
-      if (sortBy === 'name') return a.title.localeCompare(b.title, undefined, { numeric: true, sensitivity: 'base' })
+      if (sortBy === 'name') return (a.title || '').localeCompare(b.title || '', undefined, { numeric: true, sensitivity: 'base' })
       if (sortBy === 'year') return (b.release_year || 0) - (a.release_year || 0)
       if (sortBy === 'rating') return (b.vote_average || 0) - (a.vote_average || 0)
       if (sortBy === 'progress') return (b.last_watched_time || 0) - (a.last_watched_time || 0)

@@ -3,6 +3,7 @@ import {
   ArrowDownWideNarrow,
   ArrowUpNarrowWide,
   Calendar,
+  CalendarDays,
   Check,
   CheckCheck,
   ChevronDown,
@@ -41,7 +42,10 @@ import { useTheme } from '../theme/ThemeContext'
 const HIDE_SHORTS_KEY = 'mycinema_ft_hide_shorts'
 const AUTOPLAY_NEXT_KEY = 'mycinema_ft_autoplay_next'
 const SORT_ORDER_KEY = 'mycinema_ft_sort_order'
+const DATE_FILTER_KEY = 'mycinema_ft_date_filter'
 const SEARCH_SUFFIX_KEY = 'mycinema_ft_search_suffix'
+
+export type FtDateFilter = 'all' | 'today' | 'week'
 
 interface FocusTubeProps {
   activeTab?: string
@@ -54,6 +58,16 @@ const FocusTube: React.FC<FocusTubeProps> = ({ activeTab = 'focustube' }) => {
   const [latestPublished, setLatestPublished] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
+
+  const [dateFilter, setDateFilter] = useState<FtDateFilter>(() => {
+    try {
+      const saved = localStorage.getItem(DATE_FILTER_KEY)
+      if (saved === 'today' || saved === 'week') return saved
+      return 'all'
+    } catch {
+      return 'all'
+    }
+  })
 
   const [sortOrder, setSortOrder] = useState<'newest' | 'oldest'>(() => {
     try {
@@ -149,17 +163,23 @@ const FocusTube: React.FC<FocusTubeProps> = ({ activeTab = 'focustube' }) => {
   const [canScrollRight, setCanScrollRight] = useState(false)
   const [sortMenuOpen, setSortMenuOpen] = useState(false)
   const sortDropdownRef = useRef<HTMLDivElement>(null)
+  const [dateFilterMenuOpen, setDateFilterMenuOpen] = useState(false)
+  const dateFilterDropdownRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
-    if (!sortMenuOpen) return
+    if (!sortMenuOpen && !dateFilterMenuOpen) return
     const handlePointerDown = (e: MouseEvent) => {
-      if (sortDropdownRef.current && !sortDropdownRef.current.contains(e.target as Node)) {
+      const target = e.target as Node
+      if (sortMenuOpen && sortDropdownRef.current && !sortDropdownRef.current.contains(target)) {
         setSortMenuOpen(false)
+      }
+      if (dateFilterMenuOpen && dateFilterDropdownRef.current && !dateFilterDropdownRef.current.contains(target)) {
+        setDateFilterMenuOpen(false)
       }
     }
     window.addEventListener('pointerdown', handlePointerDown)
     return () => window.removeEventListener('pointerdown', handlePointerDown)
-  }, [sortMenuOpen])
+  }, [sortMenuOpen, dateFilterMenuOpen])
 
   const carouselMaskStyle = useMemo(() => {
     if (canScrollLeft && canScrollRight) {
@@ -201,7 +221,16 @@ const FocusTube: React.FC<FocusTubeProps> = ({ activeTab = 'focustube' }) => {
   const handleCarouselWheel = useCallback((e: React.WheelEvent<HTMLDivElement>) => {
     const el = carouselRef.current
     if (!el) return
-    if (Math.abs(e.deltaY) > Math.abs(e.deltaX)) {
+    // Allow native horizontal scrolling or Shift+wheel without intervention
+    if (e.shiftKey || Math.abs(e.deltaX) > Math.abs(e.deltaY)) {
+      checkCarouselScroll()
+      return
+    }
+    // Only convert vertical wheel to horizontal if the carousel actually has room to scroll in that direction
+    const maxScroll = el.scrollWidth - el.clientWidth
+    if (maxScroll <= 0) return
+    const canScrollFurther = (e.deltaY > 0 && el.scrollLeft < maxScroll - 1) || (e.deltaY < 0 && el.scrollLeft > 1)
+    if (canScrollFurther) {
       el.scrollLeft += e.deltaY
       checkCarouselScroll()
     }
@@ -280,6 +309,52 @@ const FocusTube: React.FC<FocusTubeProps> = ({ activeTab = 'focustube' }) => {
     } catch {}
     void loadFeed(activeCategoryId, { sortOrder: next })
   }, [sortOrder, activeCategoryId, loadFeed])
+
+  const handleDateFilterChange = useCallback((next: FtDateFilter) => {
+    setDateFilter(next)
+    try {
+      localStorage.setItem(DATE_FILTER_KEY, next)
+    } catch {}
+  }, [])
+
+  const dateFilterLabel = useMemo(() => {
+    switch (dateFilter) {
+      case 'today':
+        return 'Today'
+      case 'week':
+        return 'This Week'
+      default:
+        return 'All'
+    }
+  }, [dateFilter])
+
+  const isVideoInDateRange = useCallback((video: FtVideo, filter: FtDateFilter): boolean => {
+    if (filter === 'all') return true
+    if (!video.publishedAt) return false
+    const pubTime = new Date(video.publishedAt).getTime()
+    if (isNaN(pubTime)) return false
+    const now = Date.now()
+    const diffMs = now - pubTime
+
+    if (filter === 'today') {
+      const pubDate = new Date(pubTime)
+      const nowDate = new Date(now)
+      const isSameCalendarDay =
+        pubDate.getFullYear() === nowDate.getFullYear() &&
+        pubDate.getMonth() === nowDate.getMonth() &&
+        pubDate.getDate() === nowDate.getDate()
+
+      // Allow same calendar day OR within 24 hours (with 1 hour buffer for future timezone publishing)
+      return isSameCalendarDay || (diffMs <= 24 * 60 * 60 * 1000 && diffMs >= -3600000)
+    }
+
+    if (filter === 'week') {
+      // Within past 7 days (7 * 24h)
+      return diffMs <= 7 * 24 * 60 * 60 * 1000 && diffMs >= -3600000
+    }
+
+    return true
+  }, [])
 
   const loadCategories = useCallback(async () => {
     const list = (await window.api.ftListCategories()) || []
@@ -376,10 +451,10 @@ const FocusTube: React.FC<FocusTubeProps> = ({ activeTab = 'focustube' }) => {
     [categories],
   )
 
-  // Filter out shorts when hideShorts is enabled so queues and grids strictly honor the preference.
+  // Filter out shorts when hideShorts is enabled and apply active dateFilter.
   const eligibleVideos = useMemo(() => {
-    return videos.filter((video) => (!hideShorts || !video.isShort))
-  }, [videos, hideShorts])
+    return videos.filter((video) => (!hideShorts || !video.isShort) && isVideoInDateRange(video, dateFilter))
+  }, [videos, hideShorts, dateFilter, isVideoInDateRange])
 
   // Split out so a live stream is never buried in the middle of the stack.
   const liveVideos = useMemo(() => eligibleVideos.filter((video) => video.isLive), [eligibleVideos])
@@ -414,14 +489,7 @@ const FocusTube: React.FC<FocusTubeProps> = ({ activeTab = 'focustube' }) => {
       }
       return null
     }
-    const source = videosRef.current.length ? videosRef.current : videos
-    const eligible = source.filter((v) => (!hideShorts || !v.isShort))
-    const live = eligible.filter((v) => v.isLive)
-    const rest = eligible.filter((v) => !v.isLive).sort((a, b) => {
-      const diff = new Date(a.publishedAt).getTime() - new Date(b.publishedAt).getTime()
-      return sortOrder === 'oldest' ? diff : -diff
-    })
-    const queue = [...live, ...rest]
+    const queue = playQueue
     const currentIndex = queue.findIndex((video) => video.videoId === currentVideoId)
     if (currentIndex !== -1) {
       for (let i = currentIndex + 1; i < queue.length; i++) {
@@ -433,7 +501,7 @@ const FocusTube: React.FC<FocusTubeProps> = ({ activeTab = 'focustube' }) => {
       return null
     }
     return queue.find((v) => (!v.seen || includeSeen) && v.videoId !== currentVideoId) ?? queue[0] ?? null
-  }, [videos, hideShorts, includeSeen, sortOrder])
+  }, [playingFromSearch, youtubeSearchResults, hideShorts, playQueue, includeSeen])
 
   const resolveStartSeconds = useCallback(async (video: FtVideo): Promise<number> => {
     const cached = progressCacheRef.current.get(video.videoId)
@@ -616,9 +684,13 @@ const FocusTube: React.FC<FocusTubeProps> = ({ activeTab = 'focustube' }) => {
     window.dispatchEvent(new CustomEvent('focustube-tab-changed', { detail: { activeTab: 'focustube' } }))
     let startSeconds = progressCacheRef.current.get(video.videoId) ?? 0
     if (startSeconds === 0) {
-      const progress = await window.api.ftGetProgress(video.videoId)
-      startSeconds = Number(progress?.position || 0)
-      progressCacheRef.current.set(video.videoId, startSeconds)
+      try {
+        const progress = await window.api.ftGetProgress(video.videoId)
+        startSeconds = Number(progress?.position || 0)
+        progressCacheRef.current.set(video.videoId, startSeconds)
+      } catch {
+        // Ignore
+      }
     }
     setPlaying({ video, startSeconds })
   }, [hideShorts])
@@ -650,12 +722,14 @@ const FocusTube: React.FC<FocusTubeProps> = ({ activeTab = 'focustube' }) => {
     // Persist seen status and refresh categories/feed in the background
     try {
       await window.api.ftSetVideoSeen(finishedVideoId, true)
-      await loadCategories()
-      await loadFeed(activeCategoryId)
+      if (!playingFromSearch) {
+        await loadCategories()
+        await loadFeed(activeCategoryId)
+      }
     } catch (err) {
       console.error('[FocusTube] Auto-advance refresh failed:', err)
     }
-  }, [activeCategoryId, getNextInQueue, hideShorts, loadCategories, loadFeed, resolveStartSeconds])
+  }, [activeCategoryId, getNextInQueue, hideShorts, loadCategories, loadFeed, playingFromSearch, resolveStartSeconds])
 
   // Manual "Next" path: skip without marking the current video seen.
   // The player saves the current position before calling this.
@@ -1249,6 +1323,52 @@ const FocusTube: React.FC<FocusTubeProps> = ({ activeTab = 'focustube' }) => {
 
         {/* Right side: Modern Unified Compact Toolbar Controls (Option A) */}
         <div data-tour="focustube-feed" className="flex shrink-0 items-center gap-2">
+          {/* 0. Date Filter Chip with Popover Dropdown */}
+          <div className="relative" ref={dateFilterDropdownRef}>
+            <button
+              type="button"
+              onClick={() => setDateFilterMenuOpen((prev) => !prev)}
+              title={`Filtered by upload date: ${dateFilterLabel} (click to change)`}
+              className={`inline-flex items-center gap-1.5 rounded-xl px-2.5 py-1.5 text-xs font-semibold transition-all ${
+                dateFilter !== 'all'
+                  ? 'border border-primary/60 bg-primary/20 text-white shadow-[0_0_12px_rgba(var(--c-accent),0.35)]'
+                  : 'border border-white/10 bg-white/5 text-white/80 hover:border-white/20 hover:bg-white/10 hover:text-white'
+              }`}
+            >
+              <Calendar size={13} className={dateFilter !== 'all' ? 'text-primary' : 'text-white/70'} />
+              <span>{dateFilterLabel}</span>
+              <ChevronDown size={11} className={`text-white/50 transition-transform ${dateFilterMenuOpen ? 'rotate-180' : ''}`} />
+            </button>
+
+            {dateFilterMenuOpen && (
+              <div className="absolute right-0 top-full mt-1.5 z-40 w-36 overflow-hidden rounded-xl border border-white/10 bg-[#0d0f17]/95 p-1 shadow-2xl backdrop-blur-xl animate-in fade-in zoom-in-95 duration-100">
+                {(['all', 'today', 'week'] as const).map((filterOpt) => (
+                  <button
+                    key={filterOpt}
+                    type="button"
+                    onClick={() => {
+                      handleDateFilterChange(filterOpt)
+                      setDateFilterMenuOpen(false)
+                    }}
+                    className={`flex w-full items-center justify-between rounded-lg px-2.5 py-1.5 text-left text-xs font-semibold transition-colors ${
+                      dateFilter === filterOpt
+                        ? 'bg-primary/20 text-white font-bold'
+                        : 'text-white/70 hover:bg-white/10 hover:text-white'
+                    }`}
+                  >
+                    <div className="flex items-center gap-2">
+                      {filterOpt === 'all' && <Clock size={12} />}
+                      {filterOpt === 'today' && <Calendar size={12} />}
+                      {filterOpt === 'week' && <CalendarDays size={12} />}
+                      <span>{filterOpt === 'all' ? 'All' : filterOpt === 'today' ? 'Today' : 'This Week'}</span>
+                    </div>
+                    {dateFilter === filterOpt && <Check size={12} className="text-primary" />}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+
           {/* 1. Sort Order Chip with Popover Dropdown */}
           <div className="relative" ref={sortDropdownRef}>
             <button
@@ -1410,6 +1530,7 @@ const FocusTube: React.FC<FocusTubeProps> = ({ activeTab = 'focustube' }) => {
                   video={video}
                   onPlay={(item) => void handlePlayFromSearch(item)}
                   onToggleSeen={(item) => void handleToggleSeen(item)}
+                  onOpenSubscribeModal={(ch) => setSubscribeModalChannel(ch)}
                 />
               ))}
             </div>
@@ -1425,7 +1546,7 @@ const FocusTube: React.FC<FocusTubeProps> = ({ activeTab = 'focustube' }) => {
             </div>
           ))}
         </div>
-      ) : videos.length > 0 ? (
+      ) : playQueue.length > 0 ? (
         <div className="space-y-10">
           {liveVideos.length > 0 && (
             <section className="space-y-5">
@@ -1446,7 +1567,8 @@ const FocusTube: React.FC<FocusTubeProps> = ({ activeTab = 'focustube' }) => {
                     video={video}
                     onPlay={(item) => void handlePlay(item)}
                     onToggleSeen={(item) => void handleToggleSeen(item)}
-                />
+                    onOpenSubscribeModal={(ch) => setSubscribeModalChannel(ch)}
+                  />
                 ))}
               </div>
             </section>
@@ -1459,9 +1581,27 @@ const FocusTube: React.FC<FocusTubeProps> = ({ activeTab = 'focustube' }) => {
                 video={video}
                 onPlay={(item) => void handlePlay(item)}
                 onToggleSeen={(item) => void handleToggleSeen(item)}
-                />
+                onOpenSubscribeModal={(ch) => setSubscribeModalChannel(ch)}
+              />
             ))}
           </div>
+        </div>
+      ) : videos.length > 0 && dateFilter !== 'all' ? (
+        <div className="flex flex-col items-center justify-center gap-4 rounded-3xl border border-dashed border-white/10 py-24 text-center">
+          <Calendar size={52} strokeWidth={1} className="text-white/20" />
+          <h3 className="text-xl font-black uppercase italic text-white">
+            No videos uploaded {dateFilter === 'today' ? 'today' : 'this week'}
+          </h3>
+          <p className="max-w-md text-xs font-bold uppercase tracking-widest text-white/35">
+            None of the videos in this category match the &ldquo;{dateFilterLabel}&rdquo; date filter
+          </p>
+          <button
+            type="button"
+            onClick={() => handleDateFilterChange('all')}
+            className="mt-2 inline-flex items-center gap-1.5 rounded-xl border border-white/10 bg-white/5 px-4 py-2 text-xs font-bold text-white hover:bg-white/10 transition-colors"
+          >
+            Show All Videos
+          </button>
         </div>
       ) : search.trim() ? (
         <div className="flex flex-col items-center justify-center gap-4 rounded-3xl border border-dashed border-white/10 py-24 text-center">

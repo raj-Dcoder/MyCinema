@@ -264,7 +264,9 @@ export const POPUP_COSMETIC_CSS = `
   #banner-container, .banner-container,
   [class*="code-block"], [class*="ai-viewport"],
   iframe[src*="agl002"], iframe[src*="ads"], iframe[src*="doubleclick"], iframe[src*="popads"],
-  a[href*="bonuscaf"], a[href*="adsboosters"] { display: none !important; pointer-events: none !important; }
+  a[href*="bonuscaf"], a[href*="adsboosters"],
+  .warn-box, .warn-box-inner, .open-chrome { display: none !important; pointer-events: none !important; }
+  .warn-box ~ .download-links-div, .download-links-div, .watch-links-div { display: block !important; visibility: visible !important; opacity: 1 !important; }
 `
 
 // ─── Full filter-list engine (EasyList + EasyPrivacy grade) ──────────────────

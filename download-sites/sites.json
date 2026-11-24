@@ -1,13 +1,17 @@
 {
-  "updatedAt": "2026-10-16T20:20:15.421Z",
+  "updatedAt": "2026-11-22T09:28:14.872Z",
   "sites": {
     "hdmovies": {
-      "domain": "https://new8.hdhub4u.cl",
-      "checkedAt": "2026-10-16T20:20:15.421Z"
+      "domain": "https://new15.hdhub4u.cl",
+      "checkedAt": "2026-11-22T09:28:14.872Z"
     },
     "catmovies": {
-      "domain": "https://new.katmoviehd.top",
-      "checkedAt": "2026-10-16T20:20:15.421Z"
+      "domain": "https://new3.katmoviehd.top",
+      "checkedAt": "2026-11-22T09:28:14.872Z"
+    },
+    "movies4u": {
+      "domain": "https://new8.movies4u.garden",
+      "checkedAt": "2026-11-22T09:28:14.872Z"
     }
   }
 }

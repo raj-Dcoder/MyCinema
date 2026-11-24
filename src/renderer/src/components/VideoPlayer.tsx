@@ -121,7 +121,7 @@ const SEEK_BAR_WHEEL_RESET_MS = 300
 
 // ── VTT Parser (runs once per track selection, no React state) ──────────────
 function parseVTTTime(s: string): number {
-  const clean = s.split(' ')[0]
+  const clean = s.split(' ')[0].replace(',', '.')
   const parts = clean.split(':').map(Number)
   if (parts.length === 3) return parts[0] * 3600 + parts[1] * 60 + parts[2]
   return parts[0] * 60 + (parts[1] || 0)
@@ -164,6 +164,7 @@ function parseVTT(content: string): SubCue[] {
       .trim()
     if (text) cues.push({ start, end, text })
   }
+  cues.sort((a, b) => a.start - b.start)
   return cues
 }
 
@@ -206,6 +207,10 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
         if (videoRef.current && !videoRef.current.paused) {
           videoRef.current.pause()
         }
+        if (audioRef.current && !audioRef.current.paused) {
+          audioRef.current.pause()
+        }
+        setIsPlaying(false)
         setSleepTimerEnd(null)
       }
     }, 5000)
@@ -970,9 +975,12 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
       if (doc.pictureInPictureElement === videoRef.current && doc.exitPictureInPicture) {
         doc.exitPictureInPicture().catch(() => {})
       }
-      if (document.fullscreenElement === playerShellRef.current) {
+      if (document.fullscreenElement) {
         document.exitFullscreen().catch(() => {})
       }
+      window.api.isFullscreen().then((fs) => {
+        if (fs) window.api.toggleFullscreen().catch(() => {})
+      }).catch(() => {})
       releaseMediaElement(audioRef.current)
       releaseMediaElement(videoRef.current)
     }
@@ -1425,6 +1433,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
         const finish = (ready: boolean) => {
           if (settled) return
           settled = true
+          clearTimeout(loadTimeout)
           audioEl.removeEventListener('canplay', handleReady)
           audioEl.removeEventListener('loadeddata', handleReady)
           audioEl.removeEventListener('error', handleError)
@@ -1440,6 +1449,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
         }
         const handleReady = () => finish(true)
         const handleError = () => finish(false)
+        const loadTimeout = setTimeout(() => finish(false), 10000)
 
         audioEl.addEventListener('canplay', handleReady, { once: true })
         audioEl.addEventListener('loadeddata', handleReady, { once: true })
@@ -1667,7 +1677,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
         
         if (!target.native) {
           if (videoRef.current) videoRef.current.muted = true
-          if (audioRef.current && videoRef.current) {
+          if (!startupPlaybackPendingRef.current && audioRef.current && videoRef.current) {
             const time = videoRef.current.currentTime
             startExternalAudioTrack(target.index, time, !videoRef.current.paused, undefined, target.embedded)
           }
@@ -1841,6 +1851,14 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
         console.log('[Audio] Torrent probe result for', currentVideo.file_path, JSON.stringify(torrentAudio))
         if (torrentAudio.length === 0) {
           forceTorrentNativeAudio()
+        }
+        try {
+          const embeddedS = await window.api.getEmbeddedSubtitles(currentVideo.file_path)
+          if (!isCancelled && !isPlayerClosingRef.current && sessionToken === playerSessionTokenRef.current) {
+            setEmbeddedSubs(embeddedS || [])
+          }
+        } catch (err) {
+          console.error('Torrent subtitle probe failed:', err)
         }
         return
       }
@@ -2048,6 +2066,26 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
     setTimeout(() => {
       setVolumePopup(prev => prev.id === Date.now() ? { ...prev, show: false } : prev)
     }, 1000)
+  }
+
+  const applyVolume = (v: number) => {
+    const clamped = Math.max(0, Math.min(1, v))
+    setVolume(clamped)
+    const trackObj = availableAudio.find(a => a.id === selectedAudioId)
+    const isExternalAudio = Boolean(trackObj && !trackObj.native)
+    if (videoRef.current) {
+      videoRef.current.volume = clamped
+      if (isExternalAudio) {
+        videoRef.current.muted = true
+      } else {
+        videoRef.current.muted = clamped === 0
+      }
+    }
+    if (audioRef.current) {
+      audioRef.current.volume = clamped
+      audioRef.current.muted = clamped === 0
+    }
+    return clamped
   }
 
   const showSpeedToast = (rate: number) => {
@@ -2369,23 +2407,17 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
           }
           break
         case 'ArrowUp': {
-          const nextUp = Math.min(1, volume + 0.05)
-          setVolume(nextUp)
-          if (videoRef.current) { videoRef.current.volume = nextUp; videoRef.current.muted = nextUp === 0; }
+          const nextUp = applyVolume(volume + 0.05)
           showVolumeToast(nextUp, nextUp === 0)
           break
         }
         case 'ArrowDown': {
-          const nextDown = Math.max(0, volume - 0.05)
-          setVolume(nextDown)
-          if (videoRef.current) { videoRef.current.volume = nextDown; videoRef.current.muted = nextDown === 0; }
+          const nextDown = applyVolume(volume - 0.05)
           showVolumeToast(nextDown, nextDown === 0)
           break
         }
         case 'KeyM': {
-          const nextM = volume === 0 ? 1 : 0
-          setVolume(nextM)
-          if (videoRef.current) { videoRef.current.volume = nextM; videoRef.current.muted = nextM === 0; }
+          const nextM = applyVolume(volume === 0 ? 1 : 0)
           showVolumeToast(nextM, nextM === 0)
           break
         }
@@ -2435,7 +2467,22 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
             resetSubtitleOffset()
           }
           break
-        case 'Escape': if (isMinimized) { setIsMinimized(false); setShowControls(true) } else { onClose() } break
+        case 'Escape':
+          if (document.fullscreenElement) {
+            document.exitFullscreen().catch(() => {})
+            break
+          }
+          if (isWindowFullscreen) {
+            window.api.toggleFullscreen().catch(() => {})
+            break
+          }
+          if (isMinimized) {
+            setIsMinimized(false)
+            setShowControls(true)
+            break
+          }
+          onClose()
+          break
         case 'KeyI': handleToggleInfoPanel(); break
         case 'Equal':
         case 'NumpadAdd': {
@@ -3370,6 +3417,16 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
     return items.sort((a, b) => a.season - b.season || a.episode - b.episode)
   }, [torrentEpisodes, seriesEpisodes, seriesCatalog, currentVideo.streamSourceId, currentVideo.file_path])
 
+  useEffect(() => {
+    if (currentVideo.type !== 'series') return
+    const curSeason = Number(currentVideo.season || 1)
+    const curEpisode = Number(currentVideo.episode || 0)
+    const idx = mergedEpisodeList.findIndex(e => e.season === curSeason && e.episode === curEpisode)
+    if (idx !== -1) {
+      setHasNextEpisode(idx < mergedEpisodeList.length - 1)
+    }
+  }, [currentVideo.type, currentVideo.season, currentVideo.episode, mergedEpisodeList])
+
   // ─── Magnets panel: filter options + filtered list ────────────────────
   const magnetsSeasons = React.useMemo(() => {
     const values = new Set<number>()
@@ -3671,22 +3728,15 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
       const currentEpisode = Number(currentVideo.episode || 0)
       let target: { season: number; episode: number } | null = null
 
-      if (currentEpisode > 0) {
+      // Check mergedEpisodeList first so season boundaries (e.g. S1E10 -> S2E01) transition correctly
+      const rosterIndex = mergedEpisodeList.findIndex(entry => 
+        entry.season === currentSeason && entry.episode === currentEpisode
+      )
+      if (rosterIndex !== -1 && rosterIndex < mergedEpisodeList.length - 1) {
+        const next = mergedEpisodeList[rosterIndex + 1]
+        target = { season: next.season, episode: next.episode }
+      } else if (currentEpisode > 0) {
         target = { season: currentSeason, episode: currentEpisode + 1 }
-      } else {
-        // No episode info — fall back to roster order
-        const rosterIndex = mergedEpisodeList.findIndex(entry => {
-          const epVideo: Video = {
-            ...currentVideo,
-            season: entry.season,
-            episode: entry.episode
-          }
-          return getMediaUnitIdentity(epVideo) === getMediaUnitIdentity(currentVideo)
-        })
-        if (rosterIndex !== -1 && rosterIndex < mergedEpisodeList.length - 1) {
-          const next = mergedEpisodeList[rosterIndex + 1]
-          target = { season: next.season, episode: next.episode }
-        }
       }
 
       if (target && target.episode > 0) {
@@ -4768,21 +4818,23 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
     setIsSeeking(true)
   }
 
+  useEffect(() => {
+    if (!isSeeking) return
+    const handleGlobalPointerUp = () => {
+      setIsSeeking(false)
+    }
+    window.addEventListener('pointerup', handleGlobalPointerUp)
+    window.addEventListener('mouseup', handleGlobalPointerUp)
+    window.addEventListener('touchend', handleGlobalPointerUp)
+    return () => {
+      window.removeEventListener('pointerup', handleGlobalPointerUp)
+      window.removeEventListener('mouseup', handleGlobalPointerUp)
+      window.removeEventListener('touchend', handleGlobalPointerUp)
+    }
+  }, [isSeeking])
+
   const handleVolumeChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const v = parseFloat(e.target.value)
-    setVolume(v)
-    if (videoRef.current) {
-      videoRef.current.volume = v
-      const trackObj = availableAudio.find(a => a.id === selectedAudioId)
-      if (trackObj && !trackObj.native) {
-        videoRef.current.muted = true
-      } else {
-        videoRef.current.muted = v === 0
-      }
-    }
-    if (audioRef.current) {
-      audioRef.current.volume = v
-    }
+    applyVolume(parseFloat(e.target.value))
   }
 
   const requestSeekPreviewThumbnail = (time: number) => {
@@ -5068,15 +5120,24 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
   seekToTimeRef.current = seekToTime
 
   const nextEpisodeStillUrl = useMemo(() => {
-    if (currentVideo.type !== 'series' || !hasNextEpisode || seriesEpisodes.length === 0) return null
-    const episodes = groupMediaVersions(seriesEpisodes).map(g => g.representative)
-    const idx = episodes.findIndex(e => getMediaUnitIdentity(e) === getMediaUnitIdentity(currentVideo))
-    if (idx !== -1 && idx < episodes.length - 1) {
-      const cardEp = episodes[idx + 1]
-      return episodeStillMapRef.current[`${cardEp.season}-${cardEp.episode}`] || getArtworkUrl(cardEp.backdrop_path, 'w342')
+    if (currentVideo.type !== 'series' || !hasNextEpisode) return null
+    if (seriesEpisodes.length > 0) {
+      const episodes = groupMediaVersions(seriesEpisodes).map(g => g.representative)
+      const idx = episodes.findIndex(e => getMediaUnitIdentity(e) === getMediaUnitIdentity(currentVideo))
+      if (idx !== -1 && idx < episodes.length - 1) {
+        const cardEp = episodes[idx + 1]
+        return episodeStillMapRef.current[`${cardEp.season}-${cardEp.episode}`] || getArtworkUrl(cardEp.backdrop_path, 'w342')
+      }
+    }
+    const curSeason = Number(currentVideo.season || 1)
+    const curEpisode = Number(currentVideo.episode || 0)
+    const idx = mergedEpisodeList.findIndex(e => e.season === curSeason && e.episode === curEpisode)
+    if (idx !== -1 && idx < mergedEpisodeList.length - 1) {
+      const next = mergedEpisodeList[idx + 1]
+      return episodeStillMapRef.current[`${next.season}-${next.episode}`] || null
     }
     return null
-  }, [currentVideo, hasNextEpisode, seriesEpisodes])
+  }, [currentVideo, hasNextEpisode, seriesEpisodes, mergedEpisodeList])
 
   const miniTitle = currentVideo.type === 'series' && (currentVideo as any).series_name
     ? `${(currentVideo as any).series_name} · S${currentVideo.season} E${currentVideo.episode}`
@@ -5381,7 +5442,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
                     max={duration || 0}
                     step={0.1}
                     value={currentTime}
-                    onChange={(e) => { const t = Number(e.target.value); if (videoRef.current) { videoRef.current.currentTime = t; setCurrentTime(t) } }}
+                    onChange={(e) => { const t = Number(e.target.value); seekToTime(t) }}
                     onClick={(e) => e.stopPropagation()}
                     className="h-1 w-full accent-primary cursor-pointer"
                     aria-label="Seek"
@@ -5408,7 +5469,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onControlsVis
                 max={duration || 0}
                 step={0.1}
                 value={currentTime}
-                onChange={(e) => { const t = Number(e.target.value); if (videoRef.current) { videoRef.current.currentTime = t; setCurrentTime(t) } }}
+                onChange={(e) => { const t = Number(e.target.value); seekToTime(t) }}
                 onClick={(e) => e.stopPropagation()}
                 onPointerDown={(e) => e.stopPropagation()}
                 className="absolute inset-0 h-full w-full cursor-pointer opacity-0"

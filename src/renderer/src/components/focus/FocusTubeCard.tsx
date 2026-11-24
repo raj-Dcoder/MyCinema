@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react'
-import { Check, Copy, ExternalLink, ListVideo, Loader2, MoreVertical, Radio } from 'lucide-react'
+import { Check, Copy, ExternalLink, ListVideo, Loader2, MoreVertical, Radio, UserPlus } from 'lucide-react'
 import type { FtVideo } from '../../types'
 import { avatarHue, formatDuration, formatPublishedExact, formatRelativeTime, formatViews, thumbnailUrl, watchUrl } from '../../utils/focusTube'
 
@@ -7,11 +7,12 @@ interface FocusTubeCardProps {
   video: FtVideo
   onPlay: (video: FtVideo) => void
   onToggleSeen: (video: FtVideo) => void
+  onOpenSubscribeModal?: (channel: { channelId: string; title: string; handle?: string | null; avatarUrl?: string | null }) => void
 }
 
 // 16:9 card. The RSS feed only publishes 4:3 hqdefault thumbnails, so we try
 // maxresdefault first and step down through the fallbacks on load failure.
-const FocusTubeCard: React.FC<FocusTubeCardProps> = ({ video, onPlay, onToggleSeen }) => {
+const FocusTubeCard: React.FC<FocusTubeCardProps> = ({ video, onPlay, onToggleSeen, onOpenSubscribeModal }) => {
   const [variant, setVariant] = useState(0)
   const [thumbBroken, setThumbBroken] = useState(false)
   const [marking, setMarking] = useState(false)
@@ -63,10 +64,25 @@ const FocusTubeCard: React.FC<FocusTubeCardProps> = ({ video, onPlay, onToggleSe
   const handleOpenExternal = (e: React.MouseEvent) => {
     e.stopPropagation()
     setMenuOpen(false)
-    if (window.api?.openWebPopup) {
-      void window.api.openWebPopup(watchUrl(video.videoId))
+    const targetUrl = watchUrl(video.videoId)
+    if (window.api?.openExternal) {
+      void window.api.openExternal(targetUrl)
+    } else if (window.api?.openExternalUrl) {
+      void window.api.openExternalUrl(targetUrl)
     } else {
-      window.open(watchUrl(video.videoId), '_blank')
+      window.open(targetUrl, '_blank')
+    }
+  }
+
+  const handleSubscribeChannel = (e: React.MouseEvent) => {
+    e.stopPropagation()
+    setMenuOpen(false)
+    if (onOpenSubscribeModal && video.channelId) {
+      onOpenSubscribeModal({
+        channelId: video.channelId,
+        title: video.channelTitle,
+        avatarUrl: video.channelAvatarUrl
+      })
     }
   }
 
@@ -246,6 +262,16 @@ const FocusTubeCard: React.FC<FocusTubeCardProps> = ({ video, onPlay, onToggleSe
                 <Copy size={14} className="text-white/70" />
                 Copy video link
               </button>
+              {onOpenSubscribeModal && video.channelId && (
+                <button
+                  type="button"
+                  onClick={handleSubscribeChannel}
+                  className="flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-left font-medium text-white/90 hover:bg-white/10 hover:text-white"
+                >
+                  <UserPlus size={14} className="text-white/70" />
+                  Subscribe to channel
+                </button>
+              )}
               <button
                 type="button"
                 onClick={handleOpenExternal}

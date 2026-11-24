@@ -756,6 +756,10 @@ export async function refreshPlaylistFeed(playlistId: string): Promise<{ playlis
     const upsert = focusTube.upsertPlaylistVideos(playlist.playlistId, feed.entries)
     focusTube.setPlaylistLastFetched(playlist.playlistId, null)
 
+    if (upsert.newVideoIds.length > 0) {
+      queueDurationEnrichment(upsert.newVideoIds)
+    }
+
     // Ensure all creator channel avatars and titles are resolved
     for (const entry of feed.entries) {
       if (entry.channelId && entry.channelId !== 'UCunknown') {
@@ -766,7 +770,8 @@ export async function refreshPlaylistFeed(playlistId: string): Promise<{ playlis
         }
         const existing = focusTube.getChannel(entry.channelId)
         const isGarbage = !existing?.title || existing.title === 'YouTube Creator' || /\bviews?\b/i.test(existing.title)
-        if (isGarbage || !existing?.avatarUrl) {
+        const isBadHandle = !existing?.handle || /^UC[\w-]{21,24}$/i.test(existing.handle.replace(/^@/, ''))
+        if (isGarbage || !existing?.avatarUrl || isBadHandle) {
           void refreshChannelAvatar(entry.channelId)
         }
       }
@@ -925,10 +930,17 @@ export function normalizeAvatarUrl(url: string | null | undefined): string | nul
 }
 
 function pickHandle(html: string): string | null {
+  const isBad = (h: string) => !h || /^UC[\w-]{21,24}$/i.test(h)
   const canonical = html.match(/"canonicalBaseUrl":"\/@([^"]+)"/)
-  if (canonical) return `@${canonical[1]}`
+  if (canonical && !isBad(canonical[1])) return `@${canonical[1]}`
   const link = html.match(/<link[^>]+rel="canonical"[^>]+href="https:\/\/www\.youtube\.com\/@([^"]+)"/)
-  if (link) return `@${link[1]}`
+  if (link && !isBad(link[1])) return `@${link[1]}`
+  const owner = html.match(/"ownerProfileUrl":"https?:\/\/[^\/]+\/@([^"]+)"/)
+  if (owner && !isBad(owner[1])) return `@${owner[1]}`
+  const vanity = html.match(/"vanityChannelUrl":"https?:\/\/[^\/]+\/@([^"]+)"/)
+  if (vanity && !isBad(vanity[1])) return `@${vanity[1]}`
+  const urlHandle = html.match(/"url":"\/@([^"]+)"/)
+  if (urlHandle && !isBad(urlHandle[1])) return `@${urlHandle[1]}`
   return null
 }
 
@@ -1779,6 +1791,82 @@ export function markNotEmbeddable(videoId: string): void {
   console.warn(`[FocusTube] ${videoId} refused embedding (YouTube error 101/150)`)
 }
 
+// ─── Video Duration Enrichment Backfill ─────────────────────────────────────
+
+const durationEnrichQueue = new Set<string>()
+let isEnrichingDurations = false
+let durationEnrichBroadcastTimer: NodeJS.Timeout | null = null
+let onDurationEnrichedCallback: (() => void) | null = null
+
+export function setOnDurationEnrichedCallback(cb: () => void): void {
+  onDurationEnrichedCallback = cb
+}
+
+export function queueDurationEnrichment(videoIds: string[]): void {
+  let added = 0
+  for (const id of videoIds) {
+    if (typeof id === 'string' && /^[A-Za-z0-9_-]{11}$/.test(id.trim())) {
+      durationEnrichQueue.add(id.trim())
+      added++
+    }
+  }
+  if (added > 0) {
+    void processDurationEnrichmentQueue()
+  }
+}
+
+async function processDurationEnrichmentQueue(): Promise<void> {
+  if (isEnrichingDurations || durationEnrichQueue.size === 0) return
+  isEnrichingDurations = true
+
+  let updatedCount = 0
+
+  try {
+    while (durationEnrichQueue.size > 0) {
+      // Process in small batches of 6 videos
+      const batch: string[] = []
+      for (const id of durationEnrichQueue) {
+        batch.push(id)
+        durationEnrichQueue.delete(id)
+        if (batch.length >= 6) break
+      }
+
+      let batchUpdated = 0
+      await withConcurrency(batch, 3, async (id) => {
+        try {
+          const video = focusTube.getVideo(id)
+          if (video && typeof video.duration === 'number' && video.duration > 0) {
+            return
+          }
+          const details = await fetchVideoDetails(id)
+          if (details?.duration && details.duration > 0) {
+            batchUpdated++
+            updatedCount++
+          }
+        } catch {
+          // Ignore individual fetch errors
+        }
+      })
+
+      if (batchUpdated > 0 && onDurationEnrichedCallback) {
+        if (durationEnrichBroadcastTimer) clearTimeout(durationEnrichBroadcastTimer)
+        durationEnrichBroadcastTimer = setTimeout(() => {
+          onDurationEnrichedCallback?.()
+        }, 300)
+      }
+
+      if (durationEnrichQueue.size > 0) {
+        await sleep(150)
+      }
+    }
+  } finally {
+    isEnrichingDurations = false
+    if (updatedCount > 0 && onDurationEnrichedCallback) {
+      onDurationEnrichedCallback()
+    }
+  }
+}
+
 // ─── Avatar backfill ────────────────────────────────────────────────────────
 
 /**
@@ -1799,13 +1887,17 @@ export async function refreshChannelAvatar(channelId: string): Promise<boolean> 
     const finalTitle = scrapedTitle || currentTitle || id
 
     if (!avatarUrl && !handle && !scrapedTitle) return false
-    focusTube.upsertChannel({
-      channelId: id,
-      title: finalTitle,
-      handle: handle || existing?.handle || null,
-      avatarUrl: avatarUrl || existing?.avatarUrl || null,
-    })
-    return avatarUrl !== null || scrapedTitle !== null
+
+    if (existing) {
+      focusTube.updateChannelMetadata(id, {
+        title: scrapedTitle || null,
+        handle: handle || null,
+        avatarUrl: avatarUrl || null,
+      })
+    } else {
+      focusTube.ensureChannelPlaceholder(id, finalTitle, avatarUrl, handle)
+    }
+    return avatarUrl !== null || scrapedTitle !== null || handle !== null
   } catch (err: any) {
     console.warn(`[FocusTube] Channel info refresh failed for ${id}: ${err?.message}`)
     return false
@@ -1819,7 +1911,9 @@ export async function refreshChannelAvatar(channelId: string): Promise<boolean> 
 export async function refreshMissingAvatars(): Promise<{ checked: number; updated: number }> {
   const isGarbage = (t: string | null | undefined) =>
     !t || t === 'YouTube Creator' || /\b\d+[\d,.]*\s*[kmb]?\s*views?\b/i.test(t) || /\bviews?\b/i.test(t) || /\bago\b/i.test(t)
-  const missing = focusTube.listChannels(null).filter((c) => !c.avatarUrl || isGarbage(c.title))
+  const isBadHandle = (h: string | null | undefined) =>
+    !h || /^UC[\w-]{21,24}$/i.test(h.replace(/^@/, ''))
+  const missing = focusTube.listChannels(null, true).filter((c) => !c.avatarUrl || isGarbage(c.title) || isBadHandle(c.handle))
   if (!missing.length) return { checked: 0, updated: 0 }
   const done = await withConcurrency(missing, 3, async (channel) => refreshChannelAvatar(channel.channelId))
   const updated = done.filter(Boolean).length
@@ -1871,6 +1965,10 @@ export async function refreshChannelFeed(channelId: string): Promise<ChannelRefr
     const feed = await fetchChannelFeed(channel.channelId)
     const upsert = focusTube.upsertFeedEntries(channel.channelId, feed.entries)
     focusTube.setChannelLastFetched(channel.channelId, null)
+
+    if (upsert.newVideoIds.length > 0) {
+      queueDurationEnrichment(upsert.newVideoIds)
+    }
 
     // The feed is authoritative for a channel's name; this path only runs for
     // newly imported channels or normal refreshes, never review metadata.
@@ -1983,17 +2081,23 @@ function parseDurationText(text: string | null | undefined): number | null {
 }
 
 function parseRelativeTimeToIso(text: string | null | undefined): string {
-  if (!text || typeof text !== 'string') return new Date().toISOString()
+  if (!text || typeof text !== 'string') return ''
   const lower = text.toLowerCase().trim()
   const now = Date.now()
 
+  if (lower === 'yesterday' || lower.includes('yesterday')) {
+    return new Date(now - 86400 * 1000).toISOString()
+  }
+  if (lower === 'today' || lower === 'just now') {
+    return new Date(now - 3600 * 1000).toISOString()
+  }
+
   // Match: (\d+)\s*(seconds?|sec|s|minutes?|min|m|hours?|hr|h|days?|d|weeks?|w|months?|mo|years?|yr|y)
   const match = lower.match(/(\d+)\s*(seconds?|sec|s|minutes?|min|m|hours?|hr|h|days?|d|weeks?|w|months?|mo|years?|yr|y)(?:\s|$|ago)/i)
-    || lower.match(/(\d+)\s*([a-z]+)/i)
 
-  if (!match) return new Date().toISOString()
+  if (!match) return ''
   const num = parseInt(match[1], 10)
-  if (Number.isNaN(num)) return new Date().toISOString()
+  if (Number.isNaN(num) || num <= 0) return ''
   const unit = match[2].toLowerCase()
 
   let ms = 0
@@ -2012,7 +2116,7 @@ function parseRelativeTimeToIso(text: string | null | undefined): string {
   } else if (unit.startsWith('year') || unit.startsWith('yr') || unit === 'y') {
     ms = num * 365 * 86400 * 1000
   } else {
-    return new Date().toISOString()
+    return ''
   }
 
   return new Date(Math.max(0, now - ms)).toISOString()
@@ -2060,7 +2164,7 @@ function parseVideoRenderer(renderer: any): focusTube.FtVideo | null {
   const views = parseViewsText(viewsStr)
 
   const publishedStr = textFromTextContainer(renderer.publishedTimeText)
-  const publishedAt = parseRelativeTimeToIso(publishedStr)
+  const publishedAt = parseRelativeTimeToIso(publishedStr) || new Date(Date.now() - 86400 * 1000).toISOString()
 
   const isLive = Array.isArray(renderer.badges) && renderer.badges.some((b: any) => {
     const label = b?.metadataBadgeRenderer?.label || b?.metadataBadgeRenderer?.style
@@ -2188,6 +2292,16 @@ export async function searchYouTubeVideos(query: string, limit = 30, spFilter?: 
   return []
 }
 
+function parseIsoDuration(iso: string): number | null {
+  const match = iso.match(/(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?/i)
+  if (!match) return null
+  const hours = parseInt(match[1] || '0', 10)
+  const minutes = parseInt(match[2] || '0', 10)
+  const seconds = parseInt(match[3] || '0', 10)
+  const total = hours * 3600 + minutes * 60 + seconds
+  return total > 0 ? total : null
+}
+
 export interface FtVideoDetails {
   videoId: string
   description: string | null
@@ -2225,13 +2339,46 @@ export async function fetchVideoDetails(videoId: string): Promise<FtVideoDetails
         } catch {}
       }
 
+      // Fallback regex for lengthSeconds / approxDurationMs
+      if (!duration) {
+        const lenMatch = text.match(/"lengthSeconds":"(\d+)"/) || text.match(/"approxDurationMs":"(\d+)"/)
+        if (lenMatch) {
+          const val = Number(lenMatch[1])
+          duration = val > 10000 ? Math.round(val / 1000) : val
+        }
+      }
+
+      // Fallback regex for ISO duration: itemprop="duration" content="PT3M34S"
+      if (!duration) {
+        const isoMatch = text.match(/itemprop="duration"\s+content="PT([^"]+)"/i)
+        if (isoMatch) {
+          duration = parseIsoDuration(isoMatch[1])
+        }
+      }
+
+      // Fallback regex for lengthText: {"simpleText":"12:34"}
+      if (!duration) {
+        const simpleTextMatch = text.match(/"lengthText":\{"accessibility":\{"accessibilityData":\{"label":"[^"]*"\}\},"simpleText":"([^"]*)"\}/)
+        if (simpleTextMatch) {
+          duration = parseDurationText(simpleTextMatch[1])
+        }
+      }
+
       // Fallback regex for shortDescription
       if (!description) {
         const rawMatch = text.match(/"shortDescription":"(.*?)(?<!\\)"/s)
         if (rawMatch) {
           try {
-            description = JSON.parse(`"${rawMatch[1]}"`)
-          } catch {}
+            const jsonSafe = rawMatch[1].replace(/\r?\n/g, '\\n')
+            description = JSON.parse(`"${jsonSafe}"`)
+          } catch {
+            description = rawMatch[1]
+              .replace(/\\n/g, '\n')
+              .replace(/\\r/g, '\r')
+              .replace(/\\"/g, '"')
+              .replace(/\\\\/g, '\\')
+              .trim() || null
+          }
         }
       }
 
@@ -2250,7 +2397,16 @@ export async function fetchVideoDetails(videoId: string): Promise<FtVideoDetails
         chapters.sort((a, b) => a.start - b.start)
       }
 
-      if (description || chapters.length > 0) {
+      // Channel handle & channelId backfill if present
+      const channelIdMatch = text.match(/"channelId":"(UC[\w-]{21,24})"/) || text.match(/"externalChannelId":"(UC[\w-]{21,24})"/)
+      const handleMatch = pickHandle(text)
+      if (channelIdMatch && handleMatch) {
+        try {
+          focusTube.updateChannelHandle(channelIdMatch[1], handleMatch)
+        } catch {}
+      }
+
+      if (duration !== null || description || chapters.length > 0) {
         // Cache into local SQLite if this video exists in ft_videos
         try {
           focusTube.setVideoEnrichment(id, { description, duration })
@@ -2272,9 +2428,9 @@ export async function fetchVideoDetails(videoId: string): Promise<FtVideoDetails
   for (const base of INVIDIOUS_INSTANCES) {
     try {
       const data = await fetchJson(`${base}/api/v1/videos/${encodeURIComponent(id)}`, INVIDIOUS_TIMEOUT_MS) as any
-      if (data && typeof data.description === 'string') {
-        const desc = data.description
-        const dur = typeof data.lengthSeconds === 'number' ? data.lengthSeconds : null
+      if (data && (typeof data.description === 'string' || typeof data.lengthSeconds === 'number')) {
+        const desc = typeof data.description === 'string' ? data.description : null
+        const dur = typeof data.lengthSeconds === 'number' && data.lengthSeconds > 0 ? data.lengthSeconds : null
 
         try {
           focusTube.setVideoEnrichment(id, { description: desc, duration: dur })

@@ -56,6 +56,77 @@ export function normalizeUpdate(item: UpdateInput, defaultCategory = 'General'):
 
 export const APP_UPDATES: AppRelease[] = [
   {
+    "version": "v2.1.0",
+    "summary": "Movies4u download portal integration, instant TMDB search caching and DoH pre-warming, chapter auto-scroll and channel handle enrichment in FocusTube, and synchronized audio and subtitle player refinements.",
+    "updates": [
+      {
+        "title": "Movies4u Integration",
+        "description": "Added Movies4u alongside HDHub4u and KatMovieHD with automated portal mirror resolution, obfuscated script link decoding, and one-click quick access in media details.",
+        "category": "Download Sites & Portals"
+      },
+      {
+        "title": "Dynamic Portal Mirror Fallbacks",
+        "description": "Upgraded download site mirror scraping with base64 script decoding and live domain health checks to guarantee active fallback links.",
+        "category": "Download Sites & Portals"
+      },
+      {
+        "title": "Active Chapter Auto-Scroll",
+        "description": "Player and sidebar chapter lists now automatically scroll to and highlight the currently playing chapter as playback progresses.",
+        "category": "FocusTube & Channel Experience"
+      },
+      {
+        "title": "Channel Handle Enrichment & Display",
+        "description": "Video details and channel views now detect, persist, and display verified channel handles (@handle) with dedicated subscription badges.",
+        "category": "FocusTube & Channel Experience"
+      },
+      {
+        "title": "Expanded RSS & Duration Parsing",
+        "description": "Enhanced video metadata resolution with ISO-8601 duration support and robust video description extraction across YouTube and Invidious sources.",
+        "category": "FocusTube & Channel Experience"
+      },
+      {
+        "title": "Audio & Sleep Timer Resync",
+        "description": "Sleep timer now synchronously pauses external audio tracks alongside video playback, with hardened loading timeouts and volume synchronization.",
+        "category": "Playback & Stream Intelligence"
+      },
+      {
+        "title": "Robust Subtitle Parsing & Extraction",
+        "description": "Subtitle parser now handles comma decimal time codes and sorts cues chronologically, while torrent streams probe embedded subtitle tracks automatically.",
+        "category": "Playback & Stream Intelligence"
+      },
+      {
+        "title": "Series Episode Navigation",
+        "description": "Next episode previews and series playback accurately match episode rosters from local files and download queues.",
+        "category": "Playback & Stream Intelligence"
+      },
+      {
+        "title": "TMDB In-Memory Search Caching",
+        "description": "Search queries across Home and Download screens are cached with a 15-minute TTL and concurrent in-flight deduplication for instant results.",
+        "category": "Discovery & Networking Performance"
+      },
+      {
+        "title": "DNS Host Caching & DoH Pre-Warming",
+        "description": "Pre-warms TMDB DNS-over-HTTPS on startup and caches resolved hosts in the main process to eliminate 15-20 second OS DNS lookup freezes.",
+        "category": "Discovery & Networking Performance"
+      },
+      {
+        "title": "Hardware Decoding by Default",
+        "description": "Hardware-accelerated video decoding is now enabled by default for smoother playback and lower CPU consumption.",
+        "category": "Discovery & Networking Performance"
+      },
+      {
+        "title": "Startup Scanner Directory Protection",
+        "description": "Library startup scan automatically detects and skips legacy root and system directory paths to protect system files.",
+        "category": "Security & Privacy"
+      },
+      {
+        "title": "Safe Protocol Stream Lifecycle",
+        "description": "Custom media streaming protocols abort and destroy active read streams immediately when navigation or requests are cancelled.",
+        "category": "Security & Privacy"
+      }
+    ]
+  },
+  {
     "version": "v2.0.0",
     "summary": "Complete local Videos library overhaul with folder browsing and continuous playback queues, full YouTube Playlist support in FocusTube, Windows taskbar download progress, rate-limited high-concurrency TMDB discovery, and zero-FOUC theme initialization.",
     "updates": [

@@ -25,6 +25,11 @@ const PORTALS = {
     url: 'https://katworld.net/',
     domainHints: ['katmovie'],
     portalButtonMatch: 'katmoviehd'
+  },
+  movies4u: {
+    url: 'https://movies4u.ws/',
+    domainHints: ['movies4u', 'movies4'],
+    portalButtonMatch: 'movies4u'
   }
 }
 
@@ -196,6 +201,23 @@ function extractObfuscatedMirrorUrls(html, requiredHints) {
   return [...new Set(found)]
 }
 
+function extractAllAtobUrls(html) {
+  const found = []
+  const blobRe = /atob\(\s*["']([^"']+)["']\s*\)/gi
+  let blob
+  while ((blob = blobRe.exec(html)) !== null) {
+    try {
+      const decoded = Buffer.from(blob[1], 'base64').toString('utf8')
+      const urlRe = /https?:\/\/[a-z0-9.-]+\.[a-z]{2,}(?::\d+)?(?:\/[^\s"'<>]*)?/gi
+      let u
+      while ((u = urlRe.exec(decoded)) !== null) {
+        found.push(u[0])
+      }
+    } catch { /* not decodable */ }
+  }
+  return [...new Set(found)]
+}
+
 async function verifyMirrorAlive(domain, timeoutMs = FETCH_TIMEOUT_MS) {
   try {
     const controller = new AbortController()
@@ -308,6 +330,20 @@ async function resolveSite(siteId, site) {
   const redirectLinks = extractPortalRedirectLinks(html, site.url, site)
   const targets = await Promise.all(redirectLinks.map(fetchRedirectTarget))
   raw.push(...targets)
+
+  // Phase B2: links extracted from obfuscated base64 scripts (e.g. shortlinks/redirects)
+  const atobUrls = extractAllAtobUrls(html)
+  const atobTargets = await Promise.all(
+    atobUrls.map(async (u) => {
+      try {
+        const target = await fetchRedirectTarget(u)
+        return target || normalizeDomain(u)
+      } catch {
+        return null
+      }
+    })
+  )
+  raw.push(...atobTargets)
 
   // Sanitize: dedupe, drop portal/trackers/promo (APK buttons are never mirrors).
   const seen = new Set()

@@ -109,38 +109,38 @@ const UPDATE_ICONS: Record<UpdateIconKey, { icon: React.ReactNode; tile: string 
 }
 
 export const LATEST_RELEASE: ReleaseNotes = {
-  version: '2.0.0',
-  title: 'Next-level local library and playlist power.',
-  highlight: 'playlist power.',
+  version: '2.1.0',
+  title: 'Instant search caching and new download portals.',
+  highlight: 'download portals.',
   description:
-    'Experience an upgraded Videos library with folder browsing and continuous playback, YouTube playlist subscriptions, and Windows taskbar progress.',
+    'Enjoy instant search results, Movies4u download portal integration, auto-scrolling video chapters in FocusTube, and synchronized audio playback.',
   tourId: null,
   video: null,
   updates: [
     {
-      icon: 'layers',
-      title: 'Folder views & layouts',
-      description: 'Group local clips by folder or switch between grid and list views in the Videos tab.',
-    },
-    {
-      icon: 'play',
-      title: 'Continuous queue playback',
-      description: 'Queue local video files with auto-advancing playback and an in-player sidebar.',
+      icon: 'download',
+      title: 'Movies4u download portal',
+      description: 'Find downloads from Movies4u with automated mirrors and quick access in media details.',
     },
     {
       icon: 'sparkles',
-      title: 'YouTube playlist subscriptions',
-      description: 'Follow and organize entire YouTube playlists inside FocusTube categories.',
+      title: 'Instant search caching',
+      description: 'Cached TMDB searches deliver zero-lag results across Home and Download screens.',
     },
     {
-      icon: 'download',
-      title: 'Taskbar download progress',
-      description: 'Track download speed and progress directly on your Windows taskbar icon.',
+      icon: 'play',
+      title: 'Auto-scrolling chapters',
+      description: 'FocusTube chapter lists now track and auto-scroll to the playing segment in real time.',
     },
     {
-      icon: 'fix',
-      title: 'Batch tools & video details',
-      description: 'Select multiple videos for bulk actions, rename titles, and inspect file stats.',
+      icon: 'audio',
+      title: 'Audio & subtitle resync',
+      description: 'Sleep timer pauses external audio tracks and subtitle parsing handles comma time codes.',
+    },
+    {
+      icon: 'shield',
+      title: 'Protected startup scan',
+      description: 'System directory safeguards prevent accidental root scans on app startup.',
     },
   ],
 }

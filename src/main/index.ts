@@ -9,7 +9,7 @@ import * as focusTubeYouTubeImport from './focusTubeYouTubeImport'
 import * as sponsorBlock from './sponsorBlock'
 import * as downloadSites from './downloadSites'
 import { POPUP_PARTITION, POPUP_COSMETIC_CSS, isBlockedAdUrl, registerPopupAdblock } from './popupAdblock'
-import { scanFolder, getEmbeddedSubtitles, getEmbeddedAudio, extractOfflineThumbnail } from './scanner'
+import { scanFolder, getEmbeddedSubtitles, getEmbeddedAudio, extractOfflineThumbnail, isRootOrSystemDirectory } from './scanner'
 import * as tmdb from './tmdb'
 import * as httpDownloader from './httpDownloader'
 import fs from 'fs'
@@ -230,6 +230,9 @@ function nodeHttpGet(url: string, timeoutMs: number = 30000): Promise<any> {
   })
 }
 
+// Cache resolved hostnames to eliminate repetitive 15s-20s OS DNS timeouts
+const hostDnsCache = new Map<string, string>()
+
 // Generic HTTPS request helper — supports GET/POST + custom headers (needed for OpenSubtitles API)
 async function nodeHttpRequest(
   url: string,
@@ -237,14 +240,29 @@ async function nodeHttpRequest(
 ): Promise<any> {
   const signal = opts.signal || getActiveTorrentSourceSignal()
   if (signal?.aborted) throw new DOMException('Aborted', 'AbortError')
+
+  const parsed = new URL(url)
+  const isTmdb = parsed.hostname.includes('themoviedb.org') || parsed.hostname.includes('tmdb.org')
+  const tmdbIp = isTmdb ? tmdb.getCachedTmdbIp() : null
+  const cachedHost = tmdbIp || hostDnsCache.get(parsed.hostname)
+
+  if (cachedHost) {
+    try {
+      return parseHttpResponse(await nodeHttpsRequestOnce(url, { ...opts, resolvedHost: cachedHost, signal }))
+    } catch (cachedErr) {
+      if (signal?.aborted || isAbortError(cachedErr)) throw cachedErr
+      hostDnsCache.delete(parsed.hostname)
+    }
+  }
+
   try {
     return parseHttpResponse(await nodeHttpsRequestOnce(url, { ...opts, signal }))
   } catch (directErr) {
     if (signal?.aborted || isAbortError(directErr)) throw directErr
-    const parsed = new URL(url)
     const resolvedHost = await resolveHostname(parsed.hostname, 1500, signal)
     if (signal?.aborted) throw new DOMException('Aborted', 'AbortError')
     if (resolvedHost === parsed.hostname) throw directErr
+    hostDnsCache.set(parsed.hostname, resolvedHost)
     if (process.env.MYCINEMA_DEBUG_DNS === '1') {
       console.log(`[DNS fallback] ${parsed.hostname} -> ${resolvedHost}`)
     }
@@ -377,6 +395,10 @@ async function runStartupScan(): Promise<void> {
   if (folders.length === 0) return
   console.log(`[Startup] Auto-scanning ${folders.length} saved folder(s)…`)
   for (const folder of folders) {
+    if (isRootOrSystemDirectory(folder.path)) {
+      console.warn(`[Startup] Skipping legacy unsafe root folder from scan: "${folder.path}"`)
+      continue
+    }
     try {
       await scanFolder(folder.path)
     } catch (err) {
@@ -613,7 +635,7 @@ const defaultAppSettings: AppSettings = {
   notifyNewEpisodes: true,
   maxConcurrentDownloads: 0,
   focusTubeEnabled: true,
-  hardwareVideoDecoding: false,
+  hardwareVideoDecoding: true,
   downloadPath: '',
   showDownloadTray: true,
   userName: 'User',
@@ -1262,6 +1284,9 @@ function registerMediaProtocol(): void {
         const { start, end } = parsedRange
         const chunksize = (end - start) + 1
         const stream = file.createReadStream({ start, end })
+        request.signal?.addEventListener('abort', () => {
+          try { stream.destroy() } catch {}
+        })
         return new Response(stream as any, {
           status: 206,
           statusText: 'Partial Content',
@@ -1276,6 +1301,9 @@ function registerMediaProtocol(): void {
       }
 
       const stream = file.createReadStream()
+      request.signal?.addEventListener('abort', () => {
+        try { stream.destroy() } catch {}
+      })
       return new Response(stream as any, {
         headers: {
           'Content-Length': fileSize.toString(),
@@ -1294,7 +1322,7 @@ function registerMediaProtocol(): void {
 }
 
 function registerSubtitleProtocol(): void {
-  protocol.handle('subtitle', (request) => {
+  protocol.handle('subtitle', async (request) => {
     try {
       const url = new URL(request.url)
       const prefix = 'subtitle://file/'
@@ -1304,23 +1332,45 @@ function registerSubtitleProtocol(): void {
         normalizedPath = normalizedPath.slice(1)
       }
 
-      // Security: block path traversal
-      if (!isSafeFilePath(normalizedPath)) {
-        console.error(`[Protocol] 403 Forbidden subtitle path: ${normalizedPath}`)
-        return new Response('Forbidden', { status: 403 })
+      let targetPath = normalizedPath
+      const torrentId = getTorrentStreamIdFromPath(normalizedPath)
+      if (torrentId) {
+        const local = await resolveTorrentLocalVideoPath(normalizedPath)
+        if (!local) return new Response('Not Found', { status: 404 })
+        targetPath = local
+      } else {
+        // Security: block path traversal
+        if (!isSafeFilePath(normalizedPath)) {
+          console.error(`[Protocol] 403 Forbidden subtitle path: ${normalizedPath}`)
+          return new Response('Forbidden', { status: 403 })
+        }
       }
 
-      if (!fs.existsSync(normalizedPath)) {
+      if (!fs.existsSync(targetPath)) {
         return new Response('Not Found', { status: 404 })
       }
 
       const trackIndex = url.searchParams.get('track') || '0'
       const pass = new PassThrough()
 
-      ffmpeg(normalizedPath)
+      const cmd = ffmpeg(targetPath)
         .outputOptions([`-map 0:${trackIndex}`, '-c:s webvtt', '-f webvtt'])
-        .on('error', (err) => console.error('FFmpeg subtitle extr error:', err.message))
-        .pipe(pass)
+        .on('error', (err) => {
+          if (!request.signal?.aborted) {
+            console.error('FFmpeg subtitle extr error:', err.message)
+          }
+        })
+
+      cmd.pipe(pass)
+
+      request.signal?.addEventListener('abort', () => {
+        try {
+          (cmd as any).kill('SIGKILL')
+        } catch {}
+        try {
+          pass.destroy()
+        } catch {}
+      })
 
       return new Response(pass as any, {
         headers: {
@@ -1491,11 +1541,9 @@ async function resolveTorrentAudioSource(filePath: string, trackIndex: string): 
   return { localPath }
 }
 
-async function resolveTorrentEmbeddedAudioSource(filePath: string, streamIndex: string): Promise<{ localPath: string; streamIndex: number } | null> {
+async function resolveTorrentLocalVideoPath(filePath: string): Promise<string | null> {
   const torrentId = getTorrentStreamIdFromPath(filePath)
   if (!torrentId) return null
-  const index = parseInt(streamIndex, 10)
-  if (!Number.isFinite(index)) return null
   const entry = tempStreams.get(torrentId)
   const torrent = entry?.torrent || activeTorrents.get(torrentId)
   if (!torrent || torrent.destroyed) {
@@ -1506,7 +1554,7 @@ async function resolveTorrentEmbeddedAudioSource(filePath: string, streamIndex: 
     const videoName = videos[0]
     if (!videoName) return null
     const localPath = path.join(completed.folder, videoName)
-    return fs.existsSync(localPath) ? { localPath, streamIndex: index } : null
+    return fs.existsSync(localPath) ? localPath : null
   }
   try {
     await waitForTorrentReady(torrent)
@@ -1529,9 +1577,17 @@ async function resolveTorrentEmbeddedAudioSource(filePath: string, streamIndex: 
   }
   const localPath = path.join(torrent.path, selected.file.path || selected.file.name || '')
   if (!fs.existsSync(localPath)) {
-    console.error(`[Audio] Embedded stream source video "${selected.file.name || selected.file.path}" for "${torrentId}" missing on disk`)
+    console.error(`[Torrent] Local video "${selected.file.name || selected.file.path}" for "${torrentId}" missing on disk`)
     return null
   }
+  return localPath
+}
+
+async function resolveTorrentEmbeddedAudioSource(filePath: string, streamIndex: string): Promise<{ localPath: string; streamIndex: number } | null> {
+  const index = parseInt(streamIndex, 10)
+  if (!Number.isFinite(index)) return null
+  const localPath = await resolveTorrentLocalVideoPath(filePath)
+  if (!localPath) return null
   return { localPath, streamIndex: index }
 }
 
@@ -1659,8 +1715,8 @@ app.commandLine.appendSwitch('enable-blink-features', 'AudioVideoTracks')
 
 // Hardware video decoding preference (configured by user in FocusTube / Settings)
 const currentAppSettings = loadAppSettings()
-if (currentAppSettings.hardwareVideoDecoding === true) {
-  // User explicitly enabled GPU hardware video decoding
+if (currentAppSettings.hardwareVideoDecoding !== false) {
+  // Enabled by default: GPU hardware video decoding for smooth 4K/8K & HEVC (x265) playback
   app.commandLine.appendSwitch('ignore-gpu-blocklist')
   app.commandLine.appendSwitch('enable-gpu-rasterization')
   app.commandLine.appendSwitch('enable-zero-copy')
@@ -1668,12 +1724,11 @@ if (currentAppSettings.hardwareVideoDecoding === true) {
   app.commandLine.appendSwitch('enable-features', 'D3D11VideoDecoder,PlatformHEVCDecoderSupport')
   app.commandLine.appendSwitch('disable-features', 'CalculateNativeWinOcclusion')
 } else {
-  // Default: Buffer-safe software video decoding (VpxVideoDecoder for VP9, dav1d for AV1)
-  // Completely eliminates D3D11 texture binding stalls and excessive buffering on Windows
+  // Safe fallback when user explicitly disables hardware acceleration
   app.commandLine.appendSwitch('disable-accelerated-video-decode')
   app.commandLine.appendSwitch('disable-accelerated-video-encode')
   app.commandLine.appendSwitch('disable-gpu-memory-buffer-video-frames')
-  app.commandLine.appendSwitch('disable-features', 'D3D11VideoDecoder,MediaFoundationVideoDecoder,VaapiVideoDecoder,CalculateNativeWinOcclusion')
+  app.commandLine.appendSwitch('disable-features', 'CalculateNativeWinOcclusion')
 }
 // Prevent UDP/QUIC packet loss and ISP throttling from stalling YouTube (googlevideo.com) DASH streams
 app.commandLine.appendSwitch('disable-quic')
@@ -2388,7 +2443,7 @@ function openFtPip(payload: any): boolean {
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
       sandbox: false,
-      webSecurity: false,
+      webSecurity: true,
       backgroundThrottling: false
     }
   })
@@ -2594,7 +2649,7 @@ const POPUP_ANTI_AD_SCRIPT = `(() => {
           return null;
         }
         // Block if host looks like an ad / tracker rotator domain, but allow trusted download & mediator domains
-        const isTrustedHost = /hub|drive|cloud|stream|movie|kat|greenmotors|hblinks|gamerxyt|cryptonewz|fast|storage|drain|file/i.test(host);
+        const isTrustedHost = /hub|drive|cloud|stream|movie|kat|movies4u|m4u|rockybhai|greenmotors|hblinks|gamerxyt|cryptonewz|fast|storage|drain|file/i.test(host);
         if (!isTrustedHost && /\b(ad|ads|pop|bet|affiliate|promo|banner|bonus)\b/i.test(host)) {
           console.warn('[MyCinema AdBlock] Blocked window.open ad domain:', host);
           return null;
@@ -2614,6 +2669,33 @@ const POPUP_ANTI_AD_SCRIPT = `(() => {
         get: () => null,
         set: () => {
           console.warn('[MyCinema AdBlock] Prevented onpopstate back-button hijack attempt');
+        },
+        configurable: true
+      });
+    } catch (e) {}
+
+    // 2b. Neutralize anti-adblock bait probes (e.g. movies4u bait.offsetWidth check)
+    try {
+      const _origGetComputedStyle = window.getComputedStyle;
+      window.getComputedStyle = function(el, pseudo) {
+        if (el && el.className && typeof el.className === 'string' && el.className.includes('adsbox')) {
+          return { display: 'block', visibility: 'visible', opacity: '1', width: '300px', height: '250px' };
+        }
+        return _origGetComputedStyle.call(window, el, pseudo);
+      };
+      const origOffsetW = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'offsetWidth');
+      const origOffsetH = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'offsetHeight');
+      Object.defineProperty(HTMLDivElement.prototype, 'offsetWidth', {
+        get() {
+          if (this.className && typeof this.className === 'string' && this.className.includes('adsbox')) return 300;
+          return origOffsetW ? origOffsetW.get.call(this) : (this.clientWidth || 300);
+        },
+        configurable: true
+      });
+      Object.defineProperty(HTMLDivElement.prototype, 'offsetHeight', {
+        get() {
+          if (this.className && typeof this.className === 'string' && this.className.includes('adsbox')) return 250;
+          return origOffsetH ? origOffsetH.get.call(this) : (this.clientHeight || 250);
         },
         configurable: true
       });
@@ -2649,6 +2731,21 @@ const POPUP_ANTI_AD_SCRIPT = `(() => {
         ];
         document.querySelectorAll(adSelectors.join(',')).forEach(el => {
           try { el.remove(); } catch (e) {}
+        });
+
+        // Defuse anti-adblock warnings and unhide download links (e.g. Movies4u .warn-box)
+        document.querySelectorAll('.warn-box, .warn-box-inner, .open-chrome').forEach(el => {
+          try {
+            el.classList.add('hide-popup');
+            el.style.setProperty('display', 'none', 'important');
+          } catch (e) {}
+        });
+        document.querySelectorAll('.download-links-div, .watch-links-div').forEach(el => {
+          try {
+            el.style.setProperty('display', 'block', 'important');
+            el.style.setProperty('visibility', 'visible', 'important');
+            el.style.setProperty('opacity', '1', 'important');
+          } catch (e) {}
         });
 
         // Scan for invisible full-page click interceptor layers (top-level elements only)
@@ -2704,6 +2801,13 @@ const TRUSTED_DOWNLOAD_DOMAINS = [
   'katdrive',
   'kmhd',
   'katlinks',
+
+  // Movies4u ecosystem
+  'movies4u',
+  'movies4',
+  'm4uplay',
+  'm4ulinks',
+  'rockybhai',
 
   // Vegamovies / Dotmovies / Bolly4u / Moviesflix ecosystem
   'vegamovies',
@@ -4073,8 +4177,21 @@ ipcMain.handle('select-folder', async () => {
   const result = await showAppOpenDialog({
     properties: ['openDirectory']
   })
-  if (result.canceled) return null
-  return result.filePaths[0]
+  if (result.canceled || !result.filePaths?.[0]) return null
+  const selectedPath = result.filePaths[0]
+
+  if (isRootOrSystemDirectory(selectedPath)) {
+    const parentWin = getDialogParentWindow()
+    dialog.showMessageBoxSync(parentWin || (BrowserWindow.getFocusedWindow() as any), {
+      type: 'warning',
+      title: 'Invalid Media Folder',
+      message: 'Scanning an entire drive root (like C:\\) or system directories is not allowed.',
+      detail: 'Please select a specific folder where your movies or videos are located (such as Downloads, Movies, or Videos) to ensure fast and smooth app performance.'
+    })
+    return null
+  }
+
+  return selectedPath
 })
 
 ipcMain.handle('get-videos', () => {
@@ -4090,10 +4207,14 @@ ipcMain.handle('get-video-progress', (_, videoId) => {
 })
 
 ipcMain.on('update-video-progress', (_, videoId, time, completed, isClosing) => {
-  if (videoId === -1) return; // Don't save progress for ad-hoc external files (crashes DB FK constraint)
-  db.updateVideoProgress(videoId, time, completed, Boolean(isClosing))
-  if (isClosing) {
-    broadcastLibraryUpdated()
+  if (typeof videoId !== 'number' || !Number.isFinite(videoId) || videoId <= 0) return; // Don't save progress for non-positive or invalid IDs (crashes DB FK constraint)
+  try {
+    db.updateVideoProgress(videoId, time, completed, Boolean(isClosing))
+    if (isClosing) {
+      broadcastLibraryUpdated()
+    }
+  } catch (err) {
+    console.error('Failed to update video progress:', err)
   }
 })
 
@@ -4457,12 +4578,24 @@ ipcMain.handle('delete-video-file', async (_, video: any) => {
 })
 
 ipcMain.handle('scan-folder', async (_, folderPath) => {
+  if (!folderPath || isRootOrSystemDirectory(folderPath)) {
+    console.warn(`[Scanner] Blocked attempt to scan root/system directory: "${folderPath}"`)
+    return
+  }
   db.addFolder(folderPath)
   attachFolderWatcher(folderPath) // start watching immediately after adding
   return await scanFolder(folderPath)
 })
 
 ipcMain.handle('get-embedded-subtitles', async (_, filePath: string) => {
+  const torrentId = getTorrentStreamIdFromPath(filePath)
+  if (torrentId) {
+    const local = await resolveTorrentLocalVideoPath(filePath)
+    if (local) {
+      return await getEmbeddedSubtitles(local)
+    }
+    return []
+  }
   if (!isSafeFilePath(filePath)) {
     console.error(`[IPC] 403 Forbidden path in get-embedded-subtitles: ${filePath}`)
     return []
@@ -4680,7 +4813,13 @@ ipcMain.handle('get-subtitles', async (_, filePath: string) => {
 
 // Pre-convert subtitle track to static WebVTT file to avoid live FFmpeg streaming glitches during playback
 ipcMain.handle('pre-convert-subtitle', async (_, filePath: string, trackIndex: number, isExternal: boolean) => {
-  if (!isSafeFilePath(filePath)) {
+  let targetPath = filePath
+  const torrentId = getTorrentStreamIdFromPath(filePath)
+  if (torrentId) {
+    const local = await resolveTorrentLocalVideoPath(filePath)
+    if (!local) return null
+    targetPath = local
+  } else if (!isSafeFilePath(filePath)) {
     console.error(`[IPC] 403 Forbidden path in pre-convert-subtitle: ${filePath}`)
     return null
   }
@@ -4690,8 +4829,8 @@ ipcMain.handle('pre-convert-subtitle', async (_, filePath: string, trackIndex: n
     
     // Include file metadata so a replaced/updated subtitle does not reuse an
     // older converted VTT with stale timings.
-    const stat = fs.statSync(filePath)
-    const cacheKey = `${filePath}-${trackIndex}-${stat.size}-${Math.floor(stat.mtimeMs)}`
+    const stat = fs.statSync(targetPath)
+    const cacheKey = `${targetPath}-${trackIndex}-${stat.size}-${Math.floor(stat.mtimeMs)}`
     const hash = crypto.createHash('sha1').update(cacheKey).digest('hex').slice(0, 16)
     const outPath = path.join(subsDir, `${hash}.vtt`)
     
@@ -4701,12 +4840,12 @@ ipcMain.handle('pre-convert-subtitle', async (_, filePath: string, trackIndex: n
       return outPath
     }
     
-    console.log(`[Subtitle] Pre-converting track ${trackIndex} from "${filePath}" to WebVTT...`)
+    console.log(`[Subtitle] Pre-converting track ${trackIndex} from "${targetPath}" to WebVTT...`)
     
     return new Promise<string | null>((resolve) => {
       const inputArgs = isExternal 
-        ? [filePath]           // external SRT: just input the SRT file directly
-        : [filePath]           // embedded: input the video file
+        ? [targetPath]           // external SRT: just input the SRT file directly
+        : [targetPath]           // embedded: input the video file
       
       const mapTrack = isExternal ? '0:0' : `0:${trackIndex}`
       
@@ -5591,12 +5730,7 @@ function scoreSubtitleReleaseMatch(videoFilePath: string | undefined, releaseNam
 
 ipcMain.handle('search-tmdb', async (_, query: string) => {
   try {
-    const url = `https://api.themoviedb.org/3/search/multi?api_key=${TMDB_API_KEY}&query=${encodeURIComponent(query)}&include_adult=false&page=1`
-    const data: any = await nodeHttpGet(url)
-    const filtered = (data.results || []).filter(
-      (r: any) => r.media_type === 'movie' || r.media_type === 'tv'
-    )
-    return filtered.slice(0, 12)
+    return await tmdb.searchTMDB(query)
   } catch (err) {
     console.error('[TMDB] Search error:', err)
     return []
@@ -5964,6 +6098,7 @@ function isHindiContent(title: string): boolean {
     lower.includes('moviesnation') ||
     lower.includes('hdmovies24') ||
     lower.includes('hdmovies4u') ||
+    lower.includes('movies4u') ||
     lower.includes('filmyzilla') ||
     lower.includes('downloadhub') ||
     lower.includes('khatrimaza') ||
@@ -6004,7 +6139,7 @@ function getHindiScore(title: string): number {
   // High quality sites / Indian release groups — consistently provide Hindi dubbed content
   const premiumSites = [
     'katmoviehd', 'katmovieshd', 'vegamovies', 'dotmovies', 'hdhub4u', 'uhdmovies', 
-    'luxmovies', 'darksiderg', 'bolly4u', 'hdmovies4u', 
+    'luxmovies', 'darksiderg', 'bolly4u', 'hdmovies4u', 'movies4u', 
     'bollyshare', 'desiremovies', 'moviespapa', 'moviesnation', 'hdmovies24',
     'filmyzilla', 'downloadhub', 'tamilblasters', '7starhd', 'skymovies', 'skymovieshd',
     'mkvcinemas', 'mkvmoviespoint', 'mkvmad', 'extramovies', '9xmovies', 'world4ufree',
@@ -6960,7 +7095,7 @@ async function fetchSolidSources(title: string, year: string, mediaType: string)
 }
 
 async function fetchBitsearchSources(title: string, year: string, mediaType: string): Promise<any[]> {
-  const siteKeywords = ['Hindi', 'KatmovieHD', 'HDhub4u', 'Vegamovies', 'UHDmovies', 'Dotmovies', 'Bolly4u', 'Hdmovies4u', '1TamilMV', 'TamilMV', 'Moviesflix', 'Filmyzilla', 'Downloadhub', 'TamilBlasters', '7starhd']
+  const siteKeywords = ['Hindi', 'KatmovieHD', 'HDhub4u', 'Movies4u', 'Vegamovies', 'UHDmovies', 'Dotmovies', 'Bolly4u', 'Hdmovies4u', '1TamilMV', 'TamilMV', 'Moviesflix', 'Filmyzilla', 'Downloadhub', 'TamilBlasters', '7starhd']
   const queryYear = (mediaType === 'movie' && year) ? ` ${year}` : ''
   const queries = Array.from(new Set([
     `${title}${queryYear}`,
@@ -7369,7 +7504,7 @@ async function fetch1337xHindiSources(title: string, year: string, mediaType: st
   
   // Indian release group branded searches — these groups consistently tag Hindi dubbed releases
   const hindiGroupKeywords = [
-    'KatmovieHD', 'HDhub4u', 'Vegamovies', 'UHDmovies', 'Dotmovies',
+    'KatmovieHD', 'HDhub4u', 'Movies4u', 'Vegamovies', 'UHDmovies', 'Dotmovies',
     'Bolly4u', 'Filmyzilla', 'Moviesflix', 'DesireMovies', 'MoviesPapa',
     'MoviesNation', '7StarHD', 'SkymoviesHD', 'MKVCinemas', 'Downloadhub',
     'Hdmovies4u', 'ExtraMovies', 'Luxmovies', 'BollyShare', 'MKVMoviesPoint',
@@ -8590,10 +8725,8 @@ ipcMain.handle('get-detail-media-for-download', async (_, downloadId: string) =>
     const year = yearMatch ? yearMatch[1] : undefined
     const isTv = /\b(s\d{1,2}|e\d{1,2}|season|episode)\b/i.test(rawTitle) || dl.mediaType === 'series'
 
-    if (cleanTitle && TMDB_API_KEY) {
-      const url = `https://api.themoviedb.org/3/search/multi?api_key=${TMDB_API_KEY}&query=${encodeURIComponent(cleanTitle)}&include_adult=false&page=1`
-      const data: any = await nodeHttpGet(url)
-      const results = (data?.results || []).filter((r: any) => r.media_type === 'movie' || r.media_type === 'tv')
+    if (cleanTitle) {
+      const results = await tmdb.searchTMDB(cleanTitle)
       if (results.length > 0) {
         let best = results.find((r: any) => {
           if (year) {
@@ -9582,15 +9715,25 @@ ipcMain.handle('ft-get-feed', (_e, options?: Partial<{
   limit: number
   search: string | null
   sortOrder: 'newest' | 'oldest'
-}>) => ftGuard('getFeed', () => focusTube.getFeed({
-  categoryId: options?.categoryId ?? null,
-  includeSeen: options?.includeSeen ?? false,
-  includeSavedOnly: options?.includeSavedOnly ?? false,
-  hideShorts: options?.hideShorts ?? false,
-  limit: options?.limit ?? 60,
-  search: options?.search ?? null,
-  sortOrder: options?.sortOrder ?? 'newest',
-})))
+}>) => ftGuard('getFeed', () => {
+  const feed = focusTube.getFeed({
+    categoryId: options?.categoryId ?? null,
+    includeSeen: options?.includeSeen ?? false,
+    includeSavedOnly: options?.includeSavedOnly ?? false,
+    hideShorts: options?.hideShorts ?? false,
+    limit: options?.limit ?? 60,
+    search: options?.search ?? null,
+    sortOrder: options?.sortOrder ?? 'newest',
+  })
+  // Automatically queue background duration enrichment for videos in active feed missing duration
+  const missing = feed
+    .filter((v) => v.duration === null || v.duration === undefined || v.duration <= 0)
+    .map((v) => v.videoId)
+  if (missing.length > 0) {
+    focusTubeFeed.queueDurationEnrichment(missing.slice(0, 30))
+  }
+  return feed
+}))
 
 ipcMain.handle('ft-get-video', (_e, videoId: string) =>
   ftGuard('getVideo', () => focusTube.getVideo(videoId)))
@@ -9618,12 +9761,17 @@ ipcMain.handle('ft-get-category-summary', (_e, categoryId: number | null) =>
 
 // ─── Focus Tube: network ──────────────────────────────────────────────────────
 
-function broadcastFeedUpdated(payload: { added: number; channelIds: string[] }): void {
+function broadcastFeedUpdated(payload: { added: number; channelIds: string[]; playlistIds?: string[] }): void {
   for (const window of BrowserWindow.getAllWindows()) {
     if (window.isDestroyed()) continue
     window.webContents.send('ft-feed-updated', payload)
   }
 }
+
+// Connect duration enrichment listener to broadcast feed update when video durations are learned
+focusTubeFeed.setOnDurationEnrichedCallback(() => {
+  broadcastFeedUpdated({ added: 0, channelIds: [], playlistIds: [] })
+})
 
 let ftPollInFlight = false
 let ftPollStartTimer: NodeJS.Timeout | null = null
@@ -9632,16 +9780,23 @@ function isFocusTubeEnabled(): boolean {
   return loadAppSettings().focusTubeEnabled !== false
 }
 
-async function runFocusTubePoll(force: boolean): Promise<{ added: number; channelIds: string[]; failed: string[] }> {
+async function runFocusTubePoll(force: boolean): Promise<{ added: number; channelIds: string[]; playlistIds?: string[]; failed: string[] }> {
   // Defence in depth: the tab cannot be opened while the feature is off, but
   // this also guarantees no network request can escape while it is disabled,
   // whatever calls it.
-  if (!isFocusTubeEnabled()) return { added: 0, channelIds: [], failed: [] }
-  if (ftPollInFlight) return { added: 0, channelIds: [], failed: [] }
+  if (!isFocusTubeEnabled()) return { added: 0, channelIds: [], playlistIds: [], failed: [] }
+  if (ftPollInFlight) return { added: 0, channelIds: [], playlistIds: [], failed: [] }
   ftPollInFlight = true
   try {
     const result = await focusTubeFeed.pollFeeds({ force })
-    if (result.added > 0) broadcastFeedUpdated({ added: result.added, channelIds: result.channelIds })
+    if (result.added > 0) broadcastFeedUpdated({ added: result.added, channelIds: result.channelIds, playlistIds: result.playlistIds || [] })
+
+    // Also queue duration enrichment backfill for any videos in database still missing duration
+    const missingInDb = focusTube.getVideosMissingDuration(25)
+    if (missingInDb.length > 0) {
+      focusTubeFeed.queueDurationEnrichment(missingInDb)
+    }
+
     return result
   } finally {
     ftPollInFlight = false
@@ -9657,7 +9812,9 @@ function startFocusTubePolling(): void {
   // to reject once, which would leave the stack empty until the next cycle.
   ftPollStartTimer = setTimeout(() => {
     ftPollStartTimer = null
-    runFocusTubePoll(false).catch((err) => console.warn('[FocusTube] Startup poll failed:', err))
+    runFocusTubePoll(false)
+      .then(() => focusTubeFeed.refreshMissingAvatars())
+      .catch((err) => console.warn('[FocusTube] Startup poll failed:', err))
   }, 9000)
   focusTubePollTimer = setInterval(() => {
     runFocusTubePoll(false).catch((err) => console.warn('[FocusTube] Scheduled poll failed:', err))
@@ -10136,43 +10293,9 @@ ipcMain.handle('ft-seek-frame', async (e, input: { seconds: number; play?: boole
   }
 })
 
-let ambientSamplingInFlight = false
-
-ipcMain.handle('ft-get-ambient-frame', async (_e, bounds?: { x: number; y: number; width: number; height: number }) => {
-  if (ambientSamplingInFlight) return { dataUrl: null }
-  ambientSamplingInFlight = true
-  try {
-    const win = BrowserWindow.getFocusedWindow() || BrowserWindow.getAllWindows().find((w) => !w.isDestroyed() && w.isVisible())
-    if (!win || win.isDestroyed()) return { dataUrl: null }
-
-    let image: Electron.NativeImage
-    if (bounds && bounds.width > 20 && bounds.height > 20) {
-      const [winW, winH] = win.getContentSize()
-      const rect = {
-        x: Math.max(0, Math.min(winW - 10, Math.round(bounds.x))),
-        y: Math.max(0, Math.min(winH - 10, Math.round(bounds.y))),
-        width: Math.max(10, Math.min(winW - Math.round(bounds.x), Math.round(bounds.width))),
-        height: Math.max(10, Math.min(winH - Math.round(bounds.y), Math.round(bounds.height)))
-      }
-      image = await Promise.race([
-        win.webContents.capturePage(rect),
-        new Promise<Electron.NativeImage>((_, reject) => setTimeout(() => reject(new Error('capture timeout')), 800))
-      ])
-    } else {
-      image = await Promise.race([
-        win.webContents.capturePage(),
-        new Promise<Electron.NativeImage>((_, reject) => setTimeout(() => reject(new Error('capture timeout')), 800))
-      ])
-    }
-    if (!image || image.isEmpty()) return { dataUrl: null }
-    const resized = image.resize({ width: 16, height: 9, quality: 'good' })
-    const jpegBuffer = resized.toJPEG(35)
-    return { dataUrl: `data:image/jpeg;base64,${jpegBuffer.toString('base64')}` }
-  } catch {
-    return { dataUrl: null }
-  } finally {
-    ambientSamplingInFlight = false
-  }
+// Ambient sampling: deprecated capturePage to completely avoid compositor GPU pipeline stalls
+ipcMain.handle('ft-get-ambient-frame', async () => {
+  return { dataUrl: null }
 })
 
 const FT_DEVELOPER_NOTIFICATION_EMAIL = process.env.FOCUS_TUBE_NOTIFICATION_EMAIL || 'rajveersinghranaofficial@gmail.com'

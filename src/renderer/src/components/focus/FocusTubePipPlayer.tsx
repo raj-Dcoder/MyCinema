@@ -150,7 +150,7 @@ export const FocusTubePipPlayer: React.FC<FocusTubePipPlayerProps> = ({ initialP
     try {
       target.postMessage(
         JSON.stringify({ event: 'command', func, args, id: idRef.current, channel: 'widget' }),
-        '*'
+        YT_ORIGIN
       )
     } catch {}
   }, [])
@@ -160,11 +160,11 @@ export const FocusTubePipPlayer: React.FC<FocusTubePipPlayerProps> = ({ initialP
     if (!target) return
     const id = idRef.current
     try {
-      target.postMessage(JSON.stringify({ event: 'listening', id, channel: 'widget' }), '*')
+      target.postMessage(JSON.stringify({ event: 'listening', id, channel: 'widget' }), YT_ORIGIN)
       for (const event of ['onReady', 'onStateChange', 'onError']) {
         target.postMessage(
           JSON.stringify({ event: 'command', func: 'addEventListener', args: [event], id, channel: 'widget' }),
-          '*'
+          YT_ORIGIN
         )
       }
     } catch {}

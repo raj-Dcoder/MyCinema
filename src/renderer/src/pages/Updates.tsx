@@ -15,10 +15,15 @@ const Updates: React.FC = () => {
   })
 
   const toggleExpand = (version: string) => {
-    setExpandedVersions((prev) => ({
-      ...prev,
-      [version]: !prev[version]
-    }))
+    setExpandedVersions((prev) => {
+      const current = prev[version] !== undefined
+        ? prev[version]
+        : (searchQuery.trim().length > 0 || selectedVersion !== 'all' || false)
+      return {
+        ...prev,
+        [version]: !current
+      }
+    })
   }
 
   const expandAll = () => {
@@ -30,7 +35,11 @@ const Updates: React.FC = () => {
   }
 
   const collapseAll = () => {
-    setExpandedVersions({})
+    const next: Record<string, boolean> = {}
+    APP_UPDATES.forEach((rel) => {
+      next[rel.version] = false
+    })
+    setExpandedVersions(next)
   }
 
   // Filtered releases based on search query and version filter
@@ -153,7 +162,7 @@ const Updates: React.FC = () => {
             className="updates-version-select w-full sm:w-44 h-11 rounded-xl border border-white/10 bg-[#0e131d] px-3 text-xs font-semibold text-white/80 outline-none focus:border-primary/50 transition-all cursor-pointer"
           >
             <option value="all">All Releases ({APP_UPDATES.length})</option>
-            {APP_UPDATES.slice(0, 20).map((r) => (
+            {APP_UPDATES.map((r) => (
               <option key={r.version} value={r.version}>
                 {r.version} {r.version === latestVersion ? '(Latest)' : ''}
               </option>
@@ -186,7 +195,9 @@ const Updates: React.FC = () => {
         <div className="space-y-6">
           {filteredReleases.map((release, index) => {
             const isLatest = release.version === latestVersion
-            const isExpanded = searchQuery.trim().length > 0 || selectedVersion !== 'all' || Boolean(expandedVersions[release.version])
+            const isExpanded = expandedVersions[release.version] !== undefined
+              ? expandedVersions[release.version]
+              : (searchQuery.trim().length > 0 || selectedVersion !== 'all')
             const normalizedUpdates = release.updates.map((u) => normalizeUpdate(u))
             const updateCount = normalizedUpdates.length
 

@@ -363,11 +363,15 @@ const Collections: React.FC<CollectionsProps> = ({ onPlay, onShowDetail, focusCo
   if (selected) {
     const onlineCount = members.filter((m) => m.isExternal).length
     const localCount = members.length - onlineCount
-    const handleRemoveExternal = async (video: Video) => {
-      const externalId = (video as any).collection_external_id
-      if (externalId == null) return
+    const handleRemoveMember = async (video: Video) => {
       try {
-        await window.api.removeCollectionExternal(externalId)
+        if (video.isExternal) {
+          const externalId = (video as any).collection_external_id
+          if (externalId == null) return
+          await window.api.removeCollectionExternal(externalId)
+        } else {
+          await window.api.unpinCollectionVideo(selected.id, video.id)
+        }
         fetchMembers(selected.id)
         fetchCollections(false)
       } catch (err) {
@@ -441,8 +445,8 @@ const Collections: React.FC<CollectionsProps> = ({ onPlay, onShowDetail, focusCo
                   video={video}
                   onPlay={onPlay}
                   onShowDetail={onShowDetail}
-                  compactTopBar={video.isExternal}
-                  onRemove={video.isExternal ? () => handleRemoveExternal(video) : undefined}
+                  compactTopBar={true}
+                  onRemove={() => handleRemoveMember(video)}
                 />
               ))}
             </div>
@@ -562,6 +566,7 @@ const Collections: React.FC<CollectionsProps> = ({ onPlay, onShowDetail, focusCo
                 <div className="absolute right-3 top-3 z-20 flex gap-1.5 opacity-0 transition-opacity duration-200 group-hover:opacity-100">
                   <button
                     onClick={(e) => { e.stopPropagation(); openEdit(collection) }}
+                    onPointerDown={(e) => e.stopPropagation()}
                     title={`Edit "${collection.name}"`}
                     className="flex h-8 w-8 items-center justify-center rounded-full bg-black/70 text-white/70 ring-1 ring-white/15 transition-colors hover:bg-primary hover:text-white collection-card-action-btn"
                   >
@@ -569,6 +574,7 @@ const Collections: React.FC<CollectionsProps> = ({ onPlay, onShowDetail, focusCo
                   </button>
                   <button
                     onClick={(e) => { e.stopPropagation(); handleDelete(collection) }}
+                    onPointerDown={(e) => e.stopPropagation()}
                     title={`Delete "${collection.name}"`}
                     className="flex h-8 w-8 items-center justify-center rounded-full bg-black/70 text-white/70 ring-1 ring-white/15 transition-colors hover:bg-red-500/80 hover:text-white collection-card-action-btn"
                   >
@@ -1013,6 +1019,7 @@ const TitlePicker: React.FC<{
   const [busyTmdbId, setBusyTmdbId] = useState<number | null>(null)
   const tmdbTimer = useRef<number | null>(null)
   const tmdbInputRef = useRef<HTMLInputElement | null>(null)
+  const tmdbCacheRef = useRef<Map<string, any[]>>(new Map())
 
   useEffect(() => {
     if (tab !== 'tmdb') return
@@ -1054,20 +1061,31 @@ const TitlePicker: React.FC<{
       setTmdbSearching(false)
       return
     }
+
+    const cacheKey = trimmed.toLowerCase()
+    const cached = tmdbCacheRef.current.get(cacheKey)
+    if (cached) {
+      setTmdbResults(cached)
+      setTmdbSearching(false)
+      return
+    }
+
     setTmdbSearching(true)
     tmdbTimer.current = window.setTimeout(async () => {
       try {
         const data = await window.api.searchTMDB(trimmed)
-        setTmdbResults(((Array.isArray(data) ? data : []) as any[])
+        const list = ((Array.isArray(data) ? data : []) as any[])
           .filter((item) => item.media_type === 'movie' || item.media_type === 'tv')
-          .slice(0, 20))
+          .slice(0, 20)
+        tmdbCacheRef.current.set(cacheKey, list)
+        setTmdbResults(list)
       } catch (err) {
         console.error('[Collections] TMDB search error:', err)
         setTmdbResults([])
       } finally {
         setTmdbSearching(false)
       }
-    }, 500)
+    }, 150)
     return () => {
       if (tmdbTimer.current) window.clearTimeout(tmdbTimer.current)
     }

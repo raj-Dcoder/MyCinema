@@ -464,7 +464,7 @@ const FocusTubeSettingsModal: React.FC<FocusTubeSettingsModalProps> = ({
                       Theater Target Video Quality
                     </h4>
                     <p className={`text-[11px] mt-0.5 ${isLight ? 'text-slate-500' : 'text-white/40'}`}>
-                      Select your preferred resolution for theater mode. Auto adapts to your network for jitter-free 60 FPS playback.
+                      Requested target resolution for theater mode. Note: YouTube dynamically picks stream quality based on viewport size and network bandwidth.
                     </p>
                   </div>
                 </div>
@@ -579,16 +579,16 @@ const FocusTubeSettingsModal: React.FC<FocusTubeSettingsModalProps> = ({
                     </h4>
                     <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
                       hwDecode
-                        ? (isLight ? 'bg-amber-100 text-amber-800' : 'bg-amber-500/20 text-amber-300')
-                        : (isLight ? 'bg-emerald-100 text-emerald-800' : 'bg-emerald-500/20 text-emerald-300')
+                        ? (isLight ? 'bg-emerald-100 text-emerald-800' : 'bg-emerald-500/20 text-emerald-300')
+                        : (isLight ? 'bg-amber-100 text-amber-800' : 'bg-amber-500/20 text-amber-300')
                     }`}>
-                      {hwDecode ? 'GPU D3D11 Active' : 'Buffer-Safe (Recommended)'}
+                      {hwDecode ? 'GPU Active (Recommended)' : 'Software Decoding'}
                     </span>
                   </div>
                   <p className={`text-[11px] mt-0.5 ${isLight ? 'text-slate-500' : 'text-white/40'}`}>
                     {hwDecode
-                      ? 'ON: Uses GPU hardware decoder. If you experience buffering on Windows, turn this OFF.'
-                      : 'OFF (Recommended): Uses software VP9/AV1 decoding to completely eliminate playback buffering and D3D11 stalls.'}
+                      ? 'ON (Recommended): Uses GPU hardware decoder for smooth 4K/8K & HEVC (x265) movie playback.'
+                      : 'OFF: Uses software decoding. Note: HEVC (x265) videos require GPU hardware decoding.'}
                   </p>
                 </div>
                 <button

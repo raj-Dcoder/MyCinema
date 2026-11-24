@@ -819,7 +819,18 @@ const Home: React.FC<HomeProps> = ({ onPlay, onShowDetail, onNavigate, refreshKe
           updated_at: m.last_checked || new Date().toISOString()
         }))
 
-      const merged = [...freshFollowedMovieCards, ...localCw, ...onlineMovies, ...onlineSeriesCards, ...resurfacedCards, ...freshFollowedDropCards]
+      const mergedRaw = [...freshFollowedMovieCards, ...localCw, ...onlineMovies, ...onlineSeriesCards, ...resurfacedCards, ...freshFollowedDropCards]
+      const seenHeroIds = new Set<string>()
+      const deduplicatedMerged: Video[] = []
+      for (const item of mergedRaw) {
+        const key = item.tmdb_id ? `tmdb:${item.type}:${item.tmdb_id}` : `id:${item.id}`
+        if (!seenHeroIds.has(key)) {
+          seenHeroIds.add(key)
+          deduplicatedMerged.push(item)
+        }
+      }
+
+      const merged = deduplicatedMerged
         .sort((a, b) => {
           // Priority 1: Brand new episode drops & fresh OTT movie drops (unseen releases)
           const aDrop = (a.onlineNewEpisode || a.onlineOttRelease) ? 1 : 0
@@ -1338,46 +1349,52 @@ const Home: React.FC<HomeProps> = ({ onPlay, onShowDetail, onNavigate, refreshKe
       return
     }
 
+    // 1. Immediately compute instant local & watchlist matches (0ms response time)
+    const groupedSeries = groupSeriesCards(allLibraryVideos)
+    const groupedMovies = groupMovieCards(allLibraryVideos)
+    const localSearchInventory = [
+      ...groupedMovies,
+      ...groupedSeries,
+      ...allLibraryVideos.filter(video => video.type === 'video')
+    ]
+    const localMatches: SearchResultVideo[] = localSearchInventory
+      .filter(video => videoMatchesQuery(video, query))
+      .slice(0, 5)
+      .map(video => ({
+        ...video,
+        searchAvailability: 'local',
+        searchLabel: video.type === 'series'
+          ? `${video.episode_count || 1} ${(video.episode_count || 1) === 1 ? 'episode' : 'episodes'} in library`
+          : (video.version_count || 1) > 1
+            ? `${video.version_count} versions in library`
+            : video.is_watchlist ? 'Library + Watchlist' : 'In Library'
+      }))
+
+    const watchlistMatches: SearchResultVideo[] = watchlistItems
+      .filter(video => videoMatchesQuery(video, query))
+      .slice(0, 5)
+      .map(video => ({
+        ...video,
+        searchAvailability: video.isExternal ? 'watchlist' : 'local',
+        searchLabel: video.isExternal ? 'In Watchlist' : 'Library + Watchlist',
+        is_watchlist: true
+      }))
+
+    const instantMatches = [...localMatches, ...watchlistMatches]
+    if (instantMatches.length > 0) {
+      setSearchResults(instantMatches)
+    }
+
     let cancelled = false
     setIsSearching(true)
     setSearchError(null)
 
     const timer = window.setTimeout(async () => {
       try {
-        const groupedSeries = groupSeriesCards(allLibraryVideos)
-        const groupedMovies = groupMovieCards(allLibraryVideos)
-        const localSearchInventory = [
-          ...groupedMovies,
-          ...groupedSeries,
-          ...allLibraryVideos.filter(video => video.type === 'video')
-        ]
-        const localMatches: SearchResultVideo[] = localSearchInventory
-          .filter(video => videoMatchesQuery(video, query))
-          .slice(0, 5)
-          .map(video => ({
-            ...video,
-            searchAvailability: 'local',
-            searchLabel: video.type === 'series'
-              ? `${video.episode_count || 1} ${(video.episode_count || 1) === 1 ? 'episode' : 'episodes'} in library`
-              : (video.version_count || 1) > 1
-                ? `${video.version_count} versions in library`
-                : video.is_watchlist ? 'Library + Watchlist' : 'In Library'
-          }))
-
-        const watchlistMatches: SearchResultVideo[] = watchlistItems
-          .filter(video => videoMatchesQuery(video, query))
-          .slice(0, 5)
-          .map(video => ({
-            ...video,
-            searchAvailability: video.isExternal ? 'watchlist' : 'local',
-            searchLabel: video.isExternal ? 'In Watchlist' : 'Library + Watchlist',
-            is_watchlist: true
-          }))
-
         const rawResults = await window.api.searchTMDB(query)
         if (cancelled) return
 
-        const onlineMatches: SearchResultVideo[] = rawResults
+        const onlineMatches: SearchResultVideo[] = (rawResults || [])
           .filter((item: any) => item.media_type === 'movie' || item.media_type === 'tv')
           .map(mapTmdbSearchResult)
           .filter((video: Video) => Boolean(video.title && video.tmdb_id))
@@ -1427,14 +1444,14 @@ const Home: React.FC<HomeProps> = ({ onPlay, onShowDetail, onNavigate, refreshKe
         setSearchResults(mapped)
       } catch (err) {
         console.error('Home search error:', err)
-        if (!cancelled) {
+        if (!cancelled && instantMatches.length === 0) {
           setSearchError('Search is unavailable right now.')
           setSearchResults([])
         }
       } finally {
         if (!cancelled) setIsSearching(false)
       }
-    }, 180)
+    }, 150)
 
     return () => {
       cancelled = true
@@ -1629,15 +1646,15 @@ const Home: React.FC<HomeProps> = ({ onPlay, onShowDetail, onNavigate, refreshKe
                 </div>
 
                 {isSearchOpen && searchQuery.trim().length > 0 && (
-                  <div className="hero-search-dropdown absolute right-0 top-14 z-50 w-[min(420px,calc(100vw-4rem))] overflow-hidden rounded-3xl border border-white/10 bg-[#070a0f]/95 shadow-[0_28px_90px_rgba(0,0,0,0.75)] backdrop-blur-2xl animate-in fade-in slide-in-from-top-2 duration-200">
-                    <div className="border-b border-white/10 px-4 py-3">
+                  <div className="hero-search-dropdown absolute right-0 top-14 z-50 flex max-h-[min(540px,calc(100vh-110px))] w-[min(420px,calc(100vw-4rem))] flex-col overflow-hidden rounded-3xl border border-white/10 bg-[#070a0f]/95 shadow-[0_28px_90px_rgba(0,0,0,0.75)] backdrop-blur-2xl animate-in fade-in slide-in-from-top-2 duration-200">
+                    <div className="shrink-0 border-b border-white/10 px-4 py-3">
                       <div className="flex items-center justify-between gap-3">
                         <p className="text-[10px] font-black uppercase tracking-[0.22em] text-white/40">Search</p>
                         {isSearching && <Loader2 size={15} className="animate-spin text-red-500" />}
                       </div>
                     </div>
 
-                    <div className="max-h-[520px] overflow-y-auto p-2.5 scrollbar-thin">
+                    <div className="flex-1 min-h-0 overflow-y-auto p-2.5 pb-8 scrollbar-thin overscroll-contain">
                       {searchQuery.trim().length < 2 ? (
                         <div className="flex min-h-[150px] items-center justify-center px-6 text-center">
                           <p className="text-xs font-black uppercase tracking-[0.18em] text-white/30">
@@ -1645,7 +1662,7 @@ const Home: React.FC<HomeProps> = ({ onPlay, onShowDetail, onNavigate, refreshKe
                           </p>
                         </div>
                       ) : searchResults.length > 0 ? (
-                        <div className="space-y-2">
+                        <div className="space-y-2 pb-2">
                           {searchResults.map(result => (
                             <SearchResultCard
                               key={getSearchResultKey(result)}
@@ -1657,7 +1674,7 @@ const Home: React.FC<HomeProps> = ({ onPlay, onShowDetail, onNavigate, refreshKe
                           ))}
                         </div>
                       ) : isSearching ? (
-                        <div className="space-y-2">
+                        <div className="space-y-2 pb-2">
                           {[1, 2, 3].map(item => (
                             <div key={item} className="flex items-center gap-3 rounded-2xl border border-white/5 bg-white/[0.03] p-2.5">
                               <div className="h-[92px] w-[62px] rounded-xl skeleton" />

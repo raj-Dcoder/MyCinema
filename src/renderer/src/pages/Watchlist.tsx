@@ -159,7 +159,7 @@ const Watchlist: React.FC<WatchlistProps> = ({ onPlay, onShowDetail, refreshKey 
       } finally {
         if (!cancelled) setSearching(false)
       }
-    }, 180)
+    }, 150)
 
     return () => {
       cancelled = true
@@ -294,12 +294,25 @@ const Watchlist: React.FC<WatchlistProps> = ({ onPlay, onShowDetail, refreshKey 
   const pickerHasExisting = picker?.kind === 'search' ? Boolean(picker.existing) : true
 
   const renderCard = (video: Video) => (
-    <VideoCard
-      key={`${video.isExternal ? 'external' : 'local'}-${video.tmdb_id || video.id}`}
-      video={video}
-      onPlay={onPlay}
-      onShowDetail={onShowDetail}
-    />
+    <div key={`${video.isExternal ? 'external' : 'local'}-${video.tmdb_id || video.id}`} className="group relative">
+      <VideoCard
+        video={video}
+        onPlay={onPlay}
+        onShowDetail={onShowDetail}
+      />
+      <button
+        type="button"
+        onClick={(e) => {
+          e.stopPropagation()
+          setPicker({ kind: 'manage', video })
+        }}
+        className="absolute top-2 right-2 z-20 flex h-7 items-center gap-1 rounded-lg border border-white/20 bg-black/75 px-2 text-[10px] font-bold text-white/80 opacity-0 backdrop-blur-md transition-all group-hover:opacity-100 hover:border-primary hover:text-white hover:bg-black/90 shadow-md"
+        title="Change watchlist lane"
+      >
+        <Bookmark size={12} className="text-primary" />
+        <span>Lane</span>
+      </button>
+    </div>
   )
 
   const renderSection = (intent: WatchlistIntent, list: Video[]) => {

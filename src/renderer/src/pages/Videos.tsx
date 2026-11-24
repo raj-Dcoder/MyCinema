@@ -151,6 +151,15 @@ const VideoGridCard: React.FC<{
     }, 350) // 350ms debounce prevents decoder thrashing on rapid mouse movement
   }
 
+  useEffect(() => {
+    return () => {
+      if (hoverTimerRef.current) {
+        clearTimeout(hoverTimerRef.current)
+        hoverTimerRef.current = null
+      }
+    }
+  }, [])
+
   const handleMouseLeave = () => {
     setIsHovered(false)
     setCanPlayPreview(false)
@@ -236,12 +245,6 @@ const VideoGridCard: React.FC<{
           </span>
         </div>
 
-        {/* Hover Center Play Button */}
-        <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center z-10">
-          <div className="w-12 h-12 rounded-full bg-primary flex items-center justify-center text-white shadow-xl shadow-primary/30 transform scale-90 group-hover:scale-100 transition-transform">
-            <Play fill="white" size={22} className="ml-1" />
-          </div>
-        </div>
 
         {/* 3-Dots Action Trigger Button (Bottom-Left on Hover) */}
         <button
@@ -480,7 +483,7 @@ const Videos: React.FC<VideosProps> = ({ onPlay }) => {
 
     // Sort
     result.sort((a, b) => {
-      if (sortBy === 'name') return a.title.localeCompare(b.title)
+      if (sortBy === 'name') return (a.title || '').localeCompare(b.title || '', undefined, { numeric: true, sensitivity: 'base' })
       if (sortBy === 'newest') return (b.file_mtime || b.id || 0) - (a.file_mtime || a.id || 0)
       if (sortBy === 'oldest') return (a.file_mtime || a.id || 0) - (b.file_mtime || b.id || 0)
       if (sortBy === 'size_desc') return (b.file_size || 0) - (a.file_size || 0)
@@ -561,6 +564,7 @@ const Videos: React.FC<VideosProps> = ({ onPlay }) => {
         await window.api.updateVideoTitle(renameTarget.id, clean)
       }
       setVideos(prev => prev.map(v => v.id === renameTarget.id ? { ...v, title: clean } : v))
+      setContinueWatching(prev => prev.map(v => v.id === renameTarget.id ? { ...v, title: clean } : v))
     } catch (e) {
       console.error('[Videos] Rename error:', e)
     } finally {
@@ -576,6 +580,7 @@ const Videos: React.FC<VideosProps> = ({ onPlay }) => {
         const res = await window.api.regenerateVideoThumbnail(video.id)
         if (res?.success && res.posterPath) {
           setVideos(prev => prev.map(v => v.id === video.id ? { ...v, poster_path: res.posterPath } : v))
+          setContinueWatching(prev => prev.map(v => v.id === video.id ? { ...v, poster_path: res.posterPath } : v))
         }
       }
     } catch (e) {
@@ -592,6 +597,11 @@ const Videos: React.FC<VideosProps> = ({ onPlay }) => {
     const newTime = newCompleted ? (video.duration || 1) : 0
     window.api.updateVideoProgress(video.id, newTime, newCompleted)
     setVideos(prev => prev.map(v => v.id === video.id ? { ...v, completed: newCompleted, last_watched_time: newTime } : v))
+    if (newCompleted) {
+      setContinueWatching(prev => prev.filter(v => v.id !== video.id))
+    } else {
+      setContinueWatching(prev => prev.map(v => v.id === video.id ? { ...v, completed: newCompleted, last_watched_time: newTime } : v))
+    }
   }
 
   const handleConfirmDelete = async () => {
@@ -603,6 +613,7 @@ const Videos: React.FC<VideosProps> = ({ onPlay }) => {
       }
       const targetIds = new Set(targets.map(t => t.id))
       setVideos(prev => prev.filter(v => !targetIds.has(v.id)))
+      setContinueWatching(prev => prev.filter(v => !targetIds.has(v.id)))
       setSelectedIds(new Set())
     } catch (e) {
       console.error('[Videos] Delete error:', e)
